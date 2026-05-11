@@ -1,0 +1,41 @@
+{
+  "name": "dashboard-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "telegram:setup": "node scripts/telegram-setup.mjs",
+    "telegram:login": "node scripts/telegram-login.mjs",
+    "telegram:send-code": "node scripts/telegram-send-code.mjs",
+    "telegram:complete-login": "node scripts/telegram-complete-login.mjs",
+    "telegram:pipeline": "node --experimental-strip-types --experimental-transform-types scripts/telegram-pipeline-worker.mjs",
+    "telegram:pipeline:once": "node --experimental-strip-types --experimental-transform-types scripts/telegram-pipeline-worker.mjs --once",
+    "telegram:pipeline:import-cache": "node --experimental-strip-types --experimental-transform-types scripts/telegram-pipeline-import-cache.mjs",
+    "x:pipeline": "node --experimental-strip-types --experimental-transform-types scripts/x-pipeline-worker.mjs",
+    "x:pipeline:once": "node --experimental-strip-types --experimental-transform-types scripts/x-pipeline-worker.mjs --once",
+    "x:pipeline:import-cache": "node --experimental-strip-types --experimental-transform-types scripts/x-pipeline-import-cache.mjs",
+    "x:hybrid": "node --experimental-strip-types --experimental-transform-types scripts/x-hybrid-worker.mjs",
+    "x:hybrid:once": "node --experimental-strip-types --experimental-transform-types scripts/x-hybrid-worker.mjs --once",
+    "x:monitor985": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs",
+    "x:monitor985:once": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs --once"
+  },
+  "dependencies": {
+    "next": "16.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
