@@ -136,7 +136,9 @@ export function StocksPerformanceChart({
     range: FULL_ZOOM_RANGE,
   });
   const dragState = useRef<DragState | null>(null);
-  const stockNames = new Map(stocks.map((stock) => [stock.ticker, stock.companyName]));
+  const stockNames = new Map(
+    stocks.map((stock) => [stock.ticker, stock.companyNameZh]),
+  );
   const series = (snapshot?.series ?? []).filter((item) =>
     tickers.includes(item.ticker),
   );

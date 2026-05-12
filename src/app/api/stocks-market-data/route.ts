@@ -15,6 +15,7 @@ export async function GET() {
     configuredProvider === "massive" ||
     configuredProvider === "yahoo" ||
     configuredProvider === "alpha-vantage" ||
+    configuredProvider === "naver" ||
     configuredProvider === "fmp"
       ? configuredProvider
       : undefined;

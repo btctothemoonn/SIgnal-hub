@@ -129,8 +129,11 @@ export function AlphaSectorList({
                       {stock.ticker}
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-xs font-medium text-foreground">
-                        {stock.companyName}
+                      <span
+                        className="block truncate text-xs font-medium text-foreground"
+                        title={`${stock.companyNameZh} · ${stock.companyName}`}
+                      >
+                        {stock.companyNameZh} · {stock.companyName}
                       </span>
                       <span className="mt-1 flex min-w-0 flex-wrap gap-1">
                         {stock.businessTags.slice(0, 2).map((tag) => (

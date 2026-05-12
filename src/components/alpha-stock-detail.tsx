@@ -196,6 +196,9 @@ export function AlphaStockDetail({
             </span>
           </div>
           <p className="mt-1 text-sm font-medium text-foreground">
+            {stock.companyNameZh}
+          </p>
+          <p className="mt-0.5 text-xs font-medium text-muted">
             {stock.companyName}
           </p>
           <p className="mt-2 max-w-5xl text-sm leading-6 text-muted">

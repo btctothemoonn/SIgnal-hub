@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 const DEFAULT_BACKFILL_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_MESSAGES_PER_CHANNEL = 80;
@@ -108,10 +108,10 @@ export function getTelegramPipelineConfig(
   return {
     dbPath:
       env.TELEGRAM_PIPELINE_DB?.trim() ||
-      join(process.cwd(), ".signal-hub", "telegram-pipeline.sqlite"),
+      getRuntimeDataPath(env, "telegram-pipeline.sqlite"),
     mediaDir:
       env.TELEGRAM_PIPELINE_MEDIA_DIR?.trim() ||
-      join(process.cwd(), ".signal-hub", "telegram-media"),
+      getRuntimeDataPath(env, "telegram-media"),
     mediaRouteBase: env.TELEGRAM_PIPELINE_MEDIA_ROUTE?.trim() || "/api/telegram/media",
     backfillIntervalMs: positiveInt(
       env.TELEGRAM_PIPELINE_BACKFILL_INTERVAL_MS,

@@ -21,7 +21,7 @@ assert.equal(config.maxReconnectAttempts, 4);
 assert.equal(config.baseUrl, "https://example.test");
 
 const fallback = getXPipelineConfig({});
-assert.equal(fallback.maxFeedItems, 100);
+assert.equal(fallback.maxFeedItems, 200);
 assert.equal(fallback.eventPollMs, 3000);
 assert.equal(fallback.maxReconnectAttempts, 8);
 assert.match(fallback.dbPath, /x-pipeline\.sqlite$/);

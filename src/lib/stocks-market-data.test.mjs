@@ -12,6 +12,7 @@ import {
   fetchFmpStocksMarketSnapshot,
   fetchFinnhubStocksMarketSnapshot,
   fetchMassiveStocksMarketSnapshot,
+  fetchNaverStocksMarketSnapshot,
   getStocksMarketSnapshot,
   mergeStocksMarketSnapshot,
   parseAlphaVantageGlobalQuote,
@@ -20,6 +21,7 @@ import {
   parseFmpHistoricalCandles,
   parseFmpQuoteRows,
   parseMassiveSnapshotRows,
+  parseNaverRealtimeDomesticStock,
   parseYahooChartCandles,
   parseYahooQuoteRows,
 } from "./stocks-market-data.ts";
@@ -124,6 +126,32 @@ assert.equal(finnhubQuote?.lastPrice, 126.5);
 assert.equal(finnhubQuote?.dayChangePct, 5.42);
 assert.equal(finnhubQuote?.source, "live");
 assert.equal(finnhubQuote?.prePostAvailable, false);
+
+const naverHynixQuote = parseNaverRealtimeDomesticStock("000660.KS", {
+  datas: [
+    {
+      itemCode: "000660",
+      closePrice: "1,835,000",
+      closePriceRaw: "1835000",
+      fluctuationsRatio: "-2.39",
+      fluctuationsRatioRaw: "-2.39",
+      marketStatus: "CLOSE",
+      localTradedAt: "2026-05-12T15:30:00+09:00",
+      overMarketPriceInfo: {
+        tradingSessionType: "AFTER_MARKET",
+        overPrice: "1,813,000",
+        fluctuationsRatio: "-3.56",
+        localTradedAt: "2026-05-12T20:00:00.000000+09:00",
+      },
+    },
+  ],
+});
+assert.equal(naverHynixQuote?.ticker, "000660.KS");
+assert.equal(naverHynixQuote?.lastPrice, 1813000);
+assert.equal(naverHynixQuote?.dayChangePct, -3.56);
+assert.equal(naverHynixQuote?.prePostChangePct, -1.2);
+assert.equal(naverHynixQuote?.marketSession, "after-hours");
+assert.equal(naverHynixQuote?.source, "live");
 
 const candles = parseYahooChartCandles("NVDA", chartPayload);
 assert.equal(candles.length, 3);
@@ -237,6 +265,37 @@ assert.equal(
   false,
 );
 
+const naverFetchUrls = [];
+const naverSnapshot = await fetchNaverStocksMarketSnapshot({
+  tickers: ["000660.KS", "005930.KS"],
+  fetchImpl: async (url) => {
+    naverFetchUrls.push(String(url));
+    const code = String(url).split("/").at(-1);
+    return Response.json({
+      datas: [
+        {
+          itemCode: code,
+          closePriceRaw: code === "005930" ? "279000" : "1835000",
+          fluctuationsRatioRaw: code === "005930" ? "-2.28" : "-2.39",
+          marketStatus: "CLOSE",
+          localTradedAt: "2026-05-12T15:30:00+09:00",
+          overMarketPriceInfo: {
+            overPrice: code === "005930" ? "272,500" : "1,813,000",
+            fluctuationsRatio: code === "005930" ? "-4.55" : "-3.56",
+            localTradedAt: "2026-05-12T20:00:00.000000+09:00",
+          },
+        },
+      ],
+    });
+  },
+});
+assert.equal(naverSnapshot.provider, "naver");
+assert.equal(naverSnapshot.quotes["000660.KS"].lastPrice, 1813000);
+assert.equal(naverSnapshot.quotes["005930.KS"].dayChangePct, -4.55);
+assert.equal(naverSnapshot.quotes["005930.KS"].prePostAvailable, true);
+assert.equal(naverFetchUrls.length, 2);
+assert.ok(naverFetchUrls[0].includes("/api/realtime/domestic/stock/000660"));
+
 const completeFinnhubQuoteUrls = [];
 const completeFinnhubSnapshot = await getStocksMarketSnapshot({
   stocks: ["NVDA", "AMD"]
@@ -335,6 +394,62 @@ assert.equal(partialFinnhubSnapshot.quotes.NVDA.candles3d.length, 3);
 assert.equal(partialFinnhubSnapshot.quotes.AMD.provider, "yahoo");
 assert.equal(partialFinnhubSnapshot.quotes.AMD.fallbackUsed, true);
 assert.equal(partialFinnhubSnapshot.quotes.AMD.dataQualityLabel, "回落到 Yahoo / 实时");
+
+const krxFallbackSnapshot = await getStocksMarketSnapshot({
+  stocks: ["NVDA", "000660.KS", "005930.KS"]
+    .map((ticker) => getAlphaResearchStockByTicker(ticker))
+    .filter(Boolean),
+  provider: "finnhub",
+  env: {
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+    STOCKS_FINNHUB_MARKET_REQUEST_DELAY_MS: "0",
+  },
+  fetchImpl: async (url) => {
+    const requestUrl = String(url);
+    if (requestUrl.includes("finnhub.io") && requestUrl.includes("/quote")) {
+      const symbol = new URL(requestUrl).searchParams.get("symbol");
+      if (symbol?.endsWith(".KS")) {
+        return new Response("forbidden", { status: 403 });
+      }
+      return Response.json({
+        c: 126.5,
+        pc: 120,
+        dp: 5.4167,
+        t: 1778146200,
+      });
+    }
+    if (requestUrl.includes("polling.finance.naver.com")) {
+      const code = requestUrl.split("/").at(-1);
+      return Response.json({
+        datas: [
+          {
+            itemCode: code,
+            closePriceRaw: code === "005930" ? "279000" : "1835000",
+            fluctuationsRatioRaw: code === "005930" ? "-2.28" : "-2.39",
+            marketStatus: "CLOSE",
+            localTradedAt: "2026-05-12T15:30:00+09:00",
+            overMarketPriceInfo: {
+              overPrice: code === "005930" ? "272,500" : "1,813,000",
+              fluctuationsRatio: code === "005930" ? "-4.55" : "-3.56",
+              localTradedAt: "2026-05-12T20:00:00.000000+09:00",
+            },
+          },
+        ],
+      });
+    }
+    throw new Error(`unexpected request ${requestUrl}`);
+  },
+});
+assert.equal(krxFallbackSnapshot.provider, "finnhub");
+assert.equal(krxFallbackSnapshot.fallbackUsed, true);
+assert.equal(krxFallbackSnapshot.quotes.NVDA.provider, "finnhub");
+assert.equal(krxFallbackSnapshot.quotes["000660.KS"].provider, "naver");
+assert.equal(krxFallbackSnapshot.quotes["005930.KS"].provider, "naver");
+assert.equal(krxFallbackSnapshot.quotes["000660.KS"].dayChangePct, -3.56);
+assert.deepEqual(
+  krxFallbackSnapshot.trace.map((item) => `${item.provider}:${item.status}`),
+  ["finnhub:success", "naver:success"],
+);
 
 const fmpFetchUrls = [];
 const fmpSnapshot = await fetchFmpStocksMarketSnapshot({

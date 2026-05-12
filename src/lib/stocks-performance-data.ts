@@ -1,10 +1,11 @@
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   StocksMarketFreshness,
   StocksMarketSnapshot,
 } from "./stocks-market-data.ts";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -98,7 +99,7 @@ export function marketDateInNewYork(value = new Date().toISOString()) {
 export function stocksPerformanceDbPath(env: EnvLike = process.env) {
   return (
     env.STOCKS_PERFORMANCE_DB?.trim() ||
-    join(process.cwd(), ".signal-hub", "stocks-data.sqlite")
+    getRuntimeDataPath(env, "stocks-data.sqlite")
   );
 }
 

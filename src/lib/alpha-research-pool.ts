@@ -22,6 +22,7 @@ export type AlphaResearchMarketProvider =
   | "massive"
   | "fmp"
   | "alpha-vantage"
+  | "naver"
   | "yahoo"
   | "mock";
 export type AlphaResearchMarketFreshness = "realtime" | "delayed" | "mock";
@@ -106,6 +107,7 @@ export type AlphaResearchCandle = {
 export type AlphaResearchStock = {
   ticker: string;
   companyName: string;
+  companyNameZh: string;
   sectorId: AlphaResearchSectorId;
   businessTags: string[];
   priority: AlphaResearchPriority;
@@ -165,6 +167,7 @@ export const ALPHA_RESEARCH_STOCK_UNIVERSE = ALPHA_RESEARCH_SECTORS.flatMap(
 type StockProfile = {
   ticker: string;
   companyName: string;
+  companyNameZh: string;
   sectorId: AlphaResearchSectorId;
   businessTags: string[];
   priority: AlphaResearchPriority;
@@ -193,6 +196,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "NVDA",
     companyName: "NVIDIA",
+    companyNameZh: "英伟达",
     sectorId: "semiconductors",
     businessTags: ["AI GPU", "CUDA", "数据中心"],
     priority: "A",
@@ -219,6 +223,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "TSM",
     companyName: "Taiwan Semiconductor",
+    companyNameZh: "台积电",
     sectorId: "semiconductors",
     businessTags: ["先进制程", "CoWoS", "晶圆代工"],
     priority: "A",
@@ -245,6 +250,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "ASML",
     companyName: "ASML Holding",
+    companyNameZh: "阿斯麦",
     sectorId: "semiconductors",
     businessTags: ["EUV", "半导体设备", "先进制程"],
     priority: "A",
@@ -271,6 +277,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "AMD",
     companyName: "Advanced Micro Devices",
+    companyNameZh: "超威半导体",
     sectorId: "semiconductors",
     businessTags: ["GPU", "CPU", "MI 系列"],
     priority: "A",
@@ -297,6 +304,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "INTC",
     companyName: "Intel",
+    companyNameZh: "英特尔",
     sectorId: "semiconductors",
     businessTags: ["CPU", "Foundry", "先进封装"],
     priority: "B",
@@ -324,6 +332,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "AVGO",
     companyName: "Broadcom",
+    companyNameZh: "博通",
     sectorId: "semiconductors",
     businessTags: ["ASIC", "网络芯片", "软件"],
     priority: "A",
@@ -350,6 +359,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "LRCX",
     companyName: "Lam Research",
+    companyNameZh: "泛林集团",
     sectorId: "semiconductors",
     businessTags: ["刻蚀", "沉积", "存储设备"],
     priority: "B",
@@ -376,6 +386,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "COHR",
     companyName: "Coherent",
+    companyNameZh: "相干公司",
     sectorId: "optical",
     businessTags: ["光模块", "光材料", "800G/1.6T"],
     priority: "A",
@@ -402,6 +413,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "LITE",
     companyName: "Lumentum",
+    companyNameZh: "卢门特姆",
     sectorId: "optical",
     businessTags: ["光器件", "激光器", "云互联"],
     priority: "B",
@@ -428,6 +440,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "IPGP",
     companyName: "IPG Photonics",
+    companyNameZh: "IPG 光电",
     sectorId: "optical",
     businessTags: ["光纤激光器", "工业激光", "光学"],
     priority: "C",
@@ -454,6 +467,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "FN",
     companyName: "Fabrinet",
+    companyNameZh: "法布里奈特",
     sectorId: "optical",
     businessTags: ["光模块代工", "数据中心", "制造"],
     priority: "A",
@@ -480,6 +494,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "CIEN",
     companyName: "Ciena",
+    companyNameZh: "锡耶纳",
     sectorId: "optical",
     businessTags: ["网络设备", "光传输", "运营商"],
     priority: "B",
@@ -506,6 +521,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "GLW",
     companyName: "Corning",
+    companyNameZh: "康宁",
     sectorId: "optical",
     businessTags: ["光纤", "材料", "连接器"],
     priority: "B",
@@ -532,6 +548,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "MSFT",
     companyName: "Microsoft",
+    companyNameZh: "微软",
     sectorId: "cloud-software",
     businessTags: ["Azure", "Copilot", "企业软件"],
     priority: "A",
@@ -558,6 +575,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "AMZN",
     companyName: "Amazon",
+    companyNameZh: "亚马逊",
     sectorId: "cloud-software",
     businessTags: ["AWS", "自研芯片", "电商现金流"],
     priority: "A",
@@ -584,6 +602,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "GOOG",
     companyName: "Alphabet",
+    companyNameZh: "谷歌母公司",
     sectorId: "cloud-software",
     businessTags: ["Google Cloud", "TPU", "搜索 AI"],
     priority: "A",
@@ -610,6 +629,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "ORCL",
     companyName: "Oracle",
+    companyNameZh: "甲骨文",
     sectorId: "cloud-software",
     businessTags: ["OCI", "数据库", "AI 云合同"],
     priority: "A",
@@ -636,6 +656,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "NOW",
     companyName: "ServiceNow",
+    companyNameZh: "服务管理云",
     sectorId: "cloud-software",
     businessTags: ["工作流", "企业 AI", "SaaS"],
     priority: "B",
@@ -662,6 +683,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "SNOW",
     companyName: "Snowflake",
+    companyNameZh: "雪花公司",
     sectorId: "cloud-software",
     businessTags: ["数据云", "AI 数据层", "消费型 SaaS"],
     priority: "B",
@@ -688,6 +710,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "PLTR",
     companyName: "Palantir",
+    companyNameZh: "帕兰提尔",
     sectorId: "cloud-software",
     businessTags: ["AI 平台", "政府", "企业数据"],
     priority: "B",
@@ -714,6 +737,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "DELL",
     companyName: "Dell Technologies",
+    companyNameZh: "戴尔科技",
     sectorId: "data-center",
     businessTags: ["AI 服务器", "企业硬件", "存储"],
     priority: "A",
@@ -740,6 +764,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "VRT",
     companyName: "Vertiv",
+    companyNameZh: "维谛技术",
     sectorId: "data-center",
     businessTags: ["电力", "散热", "数据中心"],
     priority: "A",
@@ -766,6 +791,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "CLS",
     companyName: "Celestica",
+    companyNameZh: "天弘科技",
     sectorId: "data-center",
     businessTags: ["服务器代工", "网络硬件", "EMS"],
     priority: "B",
@@ -792,6 +818,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "CRWV",
     companyName: "CoreWeave",
+    companyNameZh: "科尔维夫",
     sectorId: "data-center",
     businessTags: ["GPU 云", "AI 基础设施", "租赁"],
     priority: "B",
@@ -818,6 +845,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "NBIS",
     companyName: "Nebius",
+    companyNameZh: "内比乌斯",
     sectorId: "data-center",
     businessTags: ["AI 云", "欧洲算力", "GPU 集群"],
     priority: "C",
@@ -844,6 +872,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "DRAM",
     companyName: "Roundhill Memory ETF",
+    companyNameZh: "Roundhill 存储 ETF",
     sectorId: "storage",
     businessTags: ["DRAM", "HBM", "Memory ETF"],
     priority: "A",
@@ -870,6 +899,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "MU",
     companyName: "Micron",
+    companyNameZh: "美光科技",
     sectorId: "storage",
     businessTags: ["HBM", "DRAM", "NAND"],
     priority: "A",
@@ -896,6 +926,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "WDC",
     companyName: "Western Digital",
+    companyNameZh: "西部数据",
     sectorId: "storage",
     businessTags: ["HDD", "NAND", "数据中心存储"],
     priority: "B",
@@ -922,6 +953,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "SNDK",
     companyName: "SanDisk",
+    companyNameZh: "闪迪",
     sectorId: "storage",
     businessTags: ["NAND", "SSD", "消费存储"],
     priority: "C",
@@ -948,6 +980,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "STX",
     companyName: "Seagate",
+    companyNameZh: "希捷科技",
     sectorId: "storage",
     businessTags: ["HDD", "Nearline", "数据中心"],
     priority: "B",
@@ -974,6 +1007,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "000660.KS",
     companyName: "SK hynix",
+    companyNameZh: "SK 海力士",
     sectorId: "storage",
     businessTags: ["HBM", "DRAM", "NAND"],
     priority: "A",
@@ -1000,6 +1034,7 @@ const profiles: StockProfile[] = [
   {
     ticker: "005930.KS",
     companyName: "Samsung Electronics",
+    companyNameZh: "三星电子",
     sectorId: "storage",
     businessTags: ["HBM", "DRAM", "NAND", "Foundry"],
     priority: "A",
@@ -1029,6 +1064,7 @@ function buildStock(profile: StockProfile): AlphaResearchStock {
   return {
     ticker: profile.ticker,
     companyName: profile.companyName,
+    companyNameZh: profile.companyNameZh,
     sectorId: profile.sectorId,
     businessTags: profile.businessTags,
     priority: profile.priority,

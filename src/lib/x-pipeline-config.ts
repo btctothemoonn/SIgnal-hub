@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 const DEFAULT_FEED_ITEMS = 200;
 const DEFAULT_EVENT_POLL_MS = 3000;
@@ -24,7 +24,7 @@ export function getXPipelineConfig(
   return {
     dbPath:
       env.X_PIPELINE_DB?.trim() ||
-      join(process.cwd(), ".signal-hub", "x-pipeline.sqlite"),
+      getRuntimeDataPath(env, "x-pipeline.sqlite"),
     maxFeedItems: positiveInt(env.X_PIPELINE_FEED_ITEMS, DEFAULT_FEED_ITEMS),
     eventPollMs: positiveInt(
       env.X_PIPELINE_EVENT_POLL_MS,

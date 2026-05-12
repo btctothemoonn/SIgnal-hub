@@ -17,6 +17,7 @@ export type StocksMarketDataProvider =
   | "massive"
   | "fmp"
   | "alpha-vantage"
+  | "naver"
   | "yahoo"
   | "mock";
 export type StocksMarketFreshness = AlphaResearchMarketFreshness;
@@ -79,6 +80,12 @@ function asArray(value: unknown): unknown[] {
 function numberValue(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formattedNumberValue(value: unknown): number | null {
+  return numberValue(
+    typeof value === "string" ? value.replace(/,/g, "") : value,
+  );
 }
 
 function stringValue(value: unknown) {
@@ -161,6 +168,7 @@ function providerLabel(provider: StocksMarketDataProvider) {
     massive: "Massive",
     fmp: "FMP",
     "alpha-vantage": "Alpha Vantage",
+    naver: "Naver",
     yahoo: "Yahoo",
     mock: "Mock",
   };
@@ -389,6 +397,16 @@ function secondsToIso(value: unknown) {
   return new Date(raw * 1000).toISOString();
 }
 
+function timestampStringToIso(value: unknown) {
+  const raw = stringValue(value);
+  if (!raw) return new Date().toISOString();
+  const normalized = raw.replace(/(\.\d{3})\d+/, "$1");
+  const parsed = new Date(normalized);
+  return Number.isFinite(parsed.getTime())
+    ? parsed.toISOString()
+    : new Date().toISOString();
+}
+
 export function parseYahooQuoteRows(payload: unknown) {
   const quoteResponse = asRecord(asRecord(payload).quoteResponse);
   return asArray(quoteResponse.result)
@@ -525,6 +543,58 @@ export function parseFinnhubQuote(
     candles3d: [],
     source: "live",
     updatedAt: secondsToIso(row.t),
+  };
+}
+
+export function parseNaverRealtimeDomesticStock(
+  ticker: string,
+  payload: unknown,
+): StocksMarketQuoteCore | null {
+  const row = asRecord(asArray(asRecord(payload).datas)[0] ?? payload);
+  const normalizedTicker = ticker.trim().toUpperCase();
+  const closePrice =
+    formattedNumberValue(row.closePriceRaw) ??
+    formattedNumberValue(row.closePrice);
+  if (!normalizedTicker || closePrice === null || closePrice <= 0) return null;
+
+  const closeChangePct =
+    formattedNumberValue(row.fluctuationsRatioRaw) ??
+    formattedNumberValue(row.fluctuationsRatio) ??
+    0;
+  const overMarketPriceInfo = asRecord(row.overMarketPriceInfo);
+  const overPrice = formattedNumberValue(overMarketPriceInfo.overPrice);
+  const overChangePct = formattedNumberValue(
+    overMarketPriceInfo.fluctuationsRatio,
+  );
+  const hasOverMarketPrice = overPrice !== null && overPrice > 0;
+  const lastPrice = hasOverMarketPrice ? overPrice : closePrice;
+  const dayChangePct =
+    hasOverMarketPrice && overChangePct !== null
+      ? overChangePct
+      : closeChangePct;
+  const overTimestamp = stringValue(overMarketPriceInfo.localTradedAt);
+  const marketStatus = stringValue(row.marketStatus).toUpperCase();
+
+  return {
+    ticker: normalizedTicker,
+    lastPrice: roundPrice(lastPrice),
+    dayChangePct: roundPercent(dayChangePct),
+    prePostChangePct: hasOverMarketPrice
+      ? percentChange(overPrice, closePrice)
+      : 0,
+    prePostAvailable: hasOverMarketPrice,
+    sevenDayChangePct: 0,
+    relativeStrengthLabel: relativeStrengthLabel(0),
+    marketSession: hasOverMarketPrice
+      ? "after-hours"
+      : marketStatus === "OPEN"
+        ? "regular"
+        : "regular",
+    candles3d: [],
+    source: "live",
+    updatedAt: timestampStringToIso(
+      overTimestamp || stringValue(row.localTradedAt),
+    ),
   };
 }
 
@@ -829,6 +899,17 @@ function alphaVantageGlobalQuoteUrl(ticker: string, apiKey: string) {
     apikey: apiKey,
   });
   return `https://www.alphavantage.co/query?${params.toString()}`;
+}
+
+function naverDomesticCode(ticker: string) {
+  const match = ticker.trim().toUpperCase().match(/^(\d{6})\.KS$/);
+  return match?.[1] ?? "";
+}
+
+function naverRealtimeDomesticStockUrl(ticker: string) {
+  return `https://polling.finance.naver.com/api/realtime/domestic/stock/${naverDomesticCode(
+    ticker,
+  )}`;
 }
 
 function marketCacheMs(env: EnvLike) {
@@ -1391,6 +1472,69 @@ export async function fetchAlphaVantageStocksMarketSnapshot({
   return snapshot;
 }
 
+export async function fetchNaverStocksMarketSnapshot({
+  tickers,
+  fetchImpl = fetch,
+}: {
+  tickers: string[];
+  fetchImpl?: FetchLike;
+}): Promise<StocksMarketSnapshot> {
+  const normalizedTickers = Array.from(
+    new Set(tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)),
+  );
+  const naverTickers = normalizedTickers.filter((ticker) =>
+    Boolean(naverDomesticCode(ticker)),
+  );
+  if (naverTickers.length === 0) {
+    throw new Error("Naver market data supports only KRX .KS tickers");
+  }
+
+  const generatedAt = new Date().toISOString();
+  const errors: string[] = [];
+  const entries: Array<readonly [string, StocksMarketQuoteCore]> = [];
+
+  for (const ticker of naverTickers) {
+    try {
+      const response = await fetchImpl(naverRealtimeDomesticStockUrl(ticker), {
+        cache: "no-store",
+        headers: {
+          accept: "application/json,text/plain,*/*",
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Naver quote HTTP ${response.status}`);
+      }
+      const quote = parseNaverRealtimeDomesticStock(ticker, await response.json());
+      if (!quote) throw new Error("Naver returned no usable quote");
+      entries.push([ticker, quote]);
+    } catch (error) {
+      errors.push(
+        `${ticker}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const quotes = Object.fromEntries(entries);
+  if (Object.keys(quotes).length === 0) {
+    throw new Error(
+      errors.length > 0
+        ? `Naver market data returned no usable quotes (${errors.join("; ")})`
+        : "Naver market data returned no usable quotes",
+    );
+  }
+
+  return withMarketMetadata({
+    generatedAt,
+    source: "live",
+    provider: "naver",
+    freshness: "realtime",
+    errors,
+    quotes,
+  });
+}
+
 export async function getStocksMarketSnapshot({
   stocks,
   fetchImpl = fetch,
@@ -1406,25 +1550,34 @@ export async function getStocksMarketSnapshot({
   const tickers = stocks.map((stock) => stock.ticker);
   const errors: string[] = [];
   const trace: StocksMarketProviderTraceItem[] = [];
+  const naverFallbackProviders = tickers.some((ticker) =>
+    Boolean(naverDomesticCode(ticker)),
+  )
+    ? (["naver"] as const)
+    : ([] as const);
 
   const providerChain =
     provider === "finnhub"
-      ? (["finnhub", "yahoo"] as const)
+      ? (["finnhub", ...naverFallbackProviders, "yahoo"] as const)
       : provider === "massive"
         ? ([
             "massive",
             ...(fmpApiKey(env) ? ["fmp" as const] : []),
             ...(alphaVantageApiKey(env) ? ["alpha-vantage" as const] : []),
+            ...naverFallbackProviders,
             "yahoo",
           ] as const)
         : provider === "fmp"
           ? ([
               "fmp",
               ...(alphaVantageApiKey(env) ? ["alpha-vantage" as const] : []),
+              ...naverFallbackProviders,
               "yahoo",
             ] as const)
           : provider === "alpha-vantage"
-            ? (["alpha-vantage", "yahoo"] as const)
+            ? (["alpha-vantage", ...naverFallbackProviders, "yahoo"] as const)
+            : provider === "naver"
+              ? (["naver", "yahoo"] as const)
             : (["yahoo"] as const);
 
   const fetchProviderSnapshot = (activeProvider: (typeof providerChain)[number]) =>
@@ -1452,6 +1605,11 @@ export async function getStocksMarketSnapshot({
                 fetchImpl,
                 env,
               })
+            : activeProvider === "naver"
+              ? fetchNaverStocksMarketSnapshot({
+                  tickers,
+                  fetchImpl,
+                })
             : fetchYahooStocksMarketSnapshot({
                 tickers,
                 fetchImpl,

@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   ALPHA_RESEARCH_STOCKS,
@@ -20,6 +20,7 @@ import { getTelegramPipelineConfig } from "./telegram-pipeline-config.ts";
 import { cleanTranslationText } from "./translate.ts";
 import { getXPipelineConfig } from "./x-pipeline-config.ts";
 import { getTelegramXSourceChannelKeys, isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -249,6 +250,7 @@ const STOCK_COMPANY_TERMS = Array.from(
   new Set(
     ALPHA_RESEARCH_STOCKS.flatMap((stock) => [
       stock.companyName,
+      stock.companyNameZh,
       ...stock.businessTags,
     ])
       .map((term) => term.trim().toLowerCase())
@@ -486,13 +488,13 @@ export function getAlphaSummaryDbPath(
   if (audience === "stocks") {
     return (
       env.STOCKS_SUMMARY_DB?.trim() ||
-      join(process.cwd(), ".signal-hub", "stocks-summary.sqlite")
+      getRuntimeDataPath(env, "stocks-summary.sqlite")
     );
   }
   return (
     env.SIGNAL_SUMMARY_DB?.trim() ||
     env.ALPHA_SUMMARY_DB?.trim() ||
-    join(process.cwd(), ".signal-hub", "signal-summary.sqlite")
+    getRuntimeDataPath(env, "signal-summary.sqlite")
   );
 }
 
@@ -889,7 +891,7 @@ async function readStocksExternalSummaryItems(
       )
       .join("\n");
     const text = [
-      `${stock.ticker} ${stock.companyName}`,
+      `${stock.ticker} ${stock.companyNameZh} / ${stock.companyName}`,
       `market source=${marketSnapshot.provider}/${marketSnapshot.source}; last=${stock.market.lastPrice}; day=${signedPercent(stock.market.dayChangePct)}; prepost=${signedPercent(stock.market.prePostChangePct)}; sevenDay=${signedPercent(stock.market.sevenDayChangePct)}; session=${stock.market.marketSession}`,
       `financial source=${financialSnapshot.provider}/${financialSnapshot.source}; revenue=${stock.financialSnapshot.revenue}; revenueYoY=${stock.financialSnapshot.revenueYoY}; eps=${stock.financialSnapshot.eps}; grossMargin=${stock.financialSnapshot.grossMargin}; fcf=${stock.financialSnapshot.freeCashFlow}; nextEarnings=${stock.financialSnapshot.nextEarningsDate}; guidance=${stock.financialSnapshot.guidance}`,
       `catalyst source=${catalystSnapshot.provider}/${catalystSnapshot.source}`,
@@ -957,7 +959,7 @@ function alphaSummaryScopeInstruction(scope: AlphaSummaryScope) {
 function stockResearchUniverseText() {
   return ALPHA_RESEARCH_STOCKS.map((stock) => {
     const tags = stock.businessTags.slice(0, 3).join("/");
-    return `${stock.ticker} ${stock.companyName} (${tags})`;
+    return `${stock.ticker} ${stock.companyNameZh} / ${stock.companyName} (${tags})`;
   }).join("; ");
 }
 

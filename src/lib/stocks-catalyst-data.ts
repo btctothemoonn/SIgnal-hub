@@ -293,6 +293,7 @@ function matchedTickersForItem(
       if (tickerSet.has(stock.ticker)) return true;
       if (tickerMatches(text, stock.ticker)) return true;
       if (termMatches(text, stock.companyName)) return true;
+      if (termMatches(text, stock.companyNameZh)) return true;
       return stock.businessTags.some((tag) => termMatches(text, tag));
     })
     .map((stock) => stock.ticker);

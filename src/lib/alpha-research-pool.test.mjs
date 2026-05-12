@@ -73,6 +73,10 @@ for (const stock of ALPHA_RESEARCH_STOCKS) {
     `${stock.ticker} sector missing`,
   );
   assert.ok(stock.companyName.length > 0, `${stock.ticker} companyName missing`);
+  assert.ok(
+    stock.companyNameZh.length > 0,
+    `${stock.ticker} companyNameZh missing`,
+  );
   assert.ok(stock.businessTags.length > 0, `${stock.ticker} tags missing`);
   assert.ok(stock.summary.length > 0, `${stock.ticker} summary missing`);
   assert.ok(stock.catalysts.length > 0, `${stock.ticker} catalysts missing`);
@@ -109,6 +113,9 @@ assert.deepEqual(
   ["semiconductors", "storage", "optical", "cloud-software", "data-center"],
 );
 assert.equal(getAlphaResearchStockByTicker("000660.ks")?.companyName, "SK hynix");
+assert.equal(getAlphaResearchStockByTicker("NVDA")?.companyNameZh, "英伟达");
+assert.equal(getAlphaResearchStockByTicker("INTC")?.companyNameZh, "英特尔");
+assert.equal(getAlphaResearchStockByTicker("000660.ks")?.companyNameZh, "SK 海力士");
 assert.equal(
   getAlphaResearchStockByTicker("dram")?.companyName,
   "Roundhill Memory ETF",

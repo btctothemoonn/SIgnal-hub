@@ -8,6 +8,7 @@ const source = readFileSync(
 
 assert.match(source, /dataQualityLabel/);
 assert.match(source, /providerTrace/);
+assert.match(source, /stock\.companyNameZh/);
 assert.match(source, /数据链路/);
 assert.match(source, /marketDataLoading/);
 assert.match(source, /行情加载中/);

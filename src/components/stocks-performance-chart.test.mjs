@@ -28,6 +28,7 @@ assert.match(source, /hasMultipleMarketDates/);
 assert.doesNotMatch(source, /segmentPointsByTradingSession/);
 assert.match(source, /createTradingTimeAxis/);
 assert.match(source, /timeIndexByMs/);
+assert.match(source, /stock\.companyNameZh/);
 assert.match(source, /visibleStartIndex/);
 assert.match(source, /visibleEndIndex/);
 assert.match(source, /axisIndexForCapturedAt/);
