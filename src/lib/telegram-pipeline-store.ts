@@ -618,7 +618,7 @@ function toFeedItem(row: DbRow): TelegramFeedItem {
 }
 
 export function getTelegramPipelineSnapshot(
-  limit = 100,
+  limit = 300,
   db = getTelegramPipelineDb(),
 ): TelegramDashboardSnapshot {
   const channels = db
@@ -637,10 +637,9 @@ export function getTelegramPipelineSnapshot(
       left join telegram_channels
         on telegram_channels.channel_id = telegram_messages.channel_id
       order by telegram_messages.created_at desc, telegram_messages.message_id desc
-      limit ?
     `,
     )
-    .all(limit)
+    .all()
     .map(toFeedItem)
     .filter(
       (item) =>
@@ -650,7 +649,8 @@ export function getTelegramPipelineSnapshot(
           channelId: item.channelId,
           title: item.channelTitle,
         }),
-    );
+    )
+    .slice(0, limit);
 
   const health = db
     .prepare("select * from telegram_health where scope = 'collector'")

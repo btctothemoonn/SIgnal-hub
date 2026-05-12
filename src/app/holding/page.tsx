@@ -1,5 +1,5 @@
 import { AppShell } from "@/components/app-shell";
-import { HoldingPanel } from "@/components/holding-panel";
+import { HoldingPanelLoader } from "@/components/holding-panel-loader";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default function HoldingPage() {
         },
       ]}
     >
-      <HoldingPanel />
+      <HoldingPanelLoader />
     </AppShell>
   );
 }

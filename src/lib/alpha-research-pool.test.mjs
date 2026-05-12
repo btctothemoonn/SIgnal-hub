@@ -18,6 +18,7 @@ const expectedTickers = [
   "INTC",
   "AVGO",
   "LRCX",
+  "DRAM",
   "MU",
   "WDC",
   "SNDK",
@@ -101,13 +102,17 @@ assert.equal(getAlphaResearchSectorById("optical")?.name, "光通信");
 assert.equal(getAlphaResearchSectorById("missing"), null);
 assert.deepEqual(
   getAlphaResearchStocksForSector("storage").map((stock) => stock.ticker),
-  ["MU", "WDC", "SNDK", "STX", "000660.KS", "005930.KS"],
+  ["DRAM", "MU", "WDC", "SNDK", "STX", "000660.KS", "005930.KS"],
 );
 assert.deepEqual(
   ALPHA_RESEARCH_SECTORS.map((sector) => sector.id),
   ["semiconductors", "storage", "optical", "cloud-software", "data-center"],
 );
 assert.equal(getAlphaResearchStockByTicker("000660.ks")?.companyName, "SK hynix");
+assert.equal(
+  getAlphaResearchStockByTicker("dram")?.companyName,
+  "Roundhill Memory ETF",
+);
 assert.equal(
   getAlphaResearchStockByTicker("005930.ks")?.companyName,
   "Samsung Electronics",

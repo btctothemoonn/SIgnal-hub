@@ -198,6 +198,16 @@ try {
     Write-Host "signal-hub-monitor985 disabled (MONITOR985_ENABLED=false)"
   }
 
+  $alphaSummaryPrewarmEnabled = Get-ProjectEnvValue "AI_SUMMARY_PREWARM_ENABLED"
+  if (-not $alphaSummaryPrewarmEnabled -or (Test-EnvEnabled $alphaSummaryPrewarmEnabled)) {
+    Start-ManagedNodeProcess `
+      -Name "signal-hub-alpha-summary" `
+      -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\alpha-summary-worker.mjs") `
+      -RestartExisting
+  } else {
+    Write-Host "signal-hub-alpha-summary disabled (AI_SUMMARY_PREWARM_ENABLED=false)"
+  }
+
   $ready = Wait-ForWeb
   if ($ready) {
     Write-Host "Signal Hub is ready: $Url"

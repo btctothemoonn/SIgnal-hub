@@ -1,6 +1,6 @@
 import type { TelegramDashboardSnapshot } from "@/lib/telegram-channels";
 
-const DEFAULT_CLIENT_FEED_LIMIT = 100;
+const DEFAULT_CLIENT_FEED_LIMIT = 300;
 const DEFAULT_CLIENT_MEDIA_LIMIT = 24;
 
 type PrepareOptions = {

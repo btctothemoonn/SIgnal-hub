@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -104,10 +105,12 @@ function ShellNavItem({
   item,
   active,
   onActivate,
+  onWarm,
 }: {
   item: (typeof shellNavItems)[number];
   active: boolean;
   onActivate: (key: AppShellNavKey) => void;
+  onWarm?: (item: (typeof shellNavItems)[number]) => void;
 }) {
   return (
     <Link
@@ -115,8 +118,15 @@ function ShellNavItem({
       title={item.label}
       aria-label={item.label}
       onClick={() => onActivate(item.key)}
-      onFocus={() => onActivate(item.key)}
-      onPointerDown={() => onActivate(item.key)}
+      onFocus={() => {
+        onActivate(item.key);
+        onWarm?.(item);
+      }}
+      onPointerDown={() => {
+        onActivate(item.key);
+        onWarm?.(item);
+      }}
+      onPointerEnter={() => onWarm?.(item)}
       className={[
         "flex h-[4.25rem] w-full flex-col items-center justify-center gap-1.5 rounded-lg border text-[11px] font-semibold transition-all duration-75 active:scale-[0.98] active:border-accent/55 active:bg-accent-soft active:text-accent",
         active
@@ -159,8 +169,39 @@ export function AppShell({
   subtitle?: string;
   mainClassName?: string;
 }) {
+  const router = useRouter();
   const [optimisticActiveNav, setOptimisticActiveNav] =
     useState<AppShellNavKey>(activeNav);
+
+  const warmRoute = (item: (typeof shellNavItems)[number]) => {
+    router.prefetch(item.href);
+    if (item.key === "holding") {
+      void import("@/components/holding-panel");
+    }
+  };
+
+  useEffect(() => {
+    const warmHolding = () => {
+      router.prefetch("/holding");
+      void import("@/components/holding-panel");
+    };
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    if (
+      typeof idleWindow.requestIdleCallback === "function" &&
+      typeof idleWindow.cancelIdleCallback === "function"
+    ) {
+      const idleId = idleWindow.requestIdleCallback(warmHolding);
+      return () => idleWindow.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(warmHolding, 500);
+    return () => window.clearTimeout(timeoutId);
+  }, [router]);
 
   useEffect(() => {
     setOptimisticActiveNav(activeNav);
@@ -183,6 +224,7 @@ export function AppShell({
                 item={item}
                 active={item.key === optimisticActiveNav}
                 onActivate={setOptimisticActiveNav}
+                onWarm={warmRoute}
               />
             ))}
           </nav>
@@ -192,6 +234,7 @@ export function AppShell({
                 item={settingsShellNavItem}
                 active={optimisticActiveNav === "settings"}
                 onActivate={setOptimisticActiveNav}
+                onWarm={warmRoute}
               />
             </div>
           ) : null}
@@ -254,6 +297,9 @@ export function AppShell({
                 title={item.label}
                 aria-label={item.label}
                 onClick={() => setOptimisticActiveNav(item.key)}
+                onFocus={() => warmRoute(item)}
+                onPointerDown={() => warmRoute(item)}
+                onPointerEnter={() => warmRoute(item)}
                 className={[
                   "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg border text-[10px] font-semibold transition-colors",
                   active

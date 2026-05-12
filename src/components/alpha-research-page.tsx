@@ -38,22 +38,75 @@ const tabs: { id: AlphaTab; label: string; description: string }[] = [
   },
 ];
 
+const STOCKS_MARKET_SNAPSHOT_CACHE_KEY =
+  "signal-hub:stocks:market-snapshot:v1";
+const STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY =
+  "signal-hub:stocks:financial-snapshot:v1";
+const STOCKS_CATALYST_SNAPSHOT_CACHE_KEY =
+  "signal-hub:stocks:catalyst-snapshot:v1";
+const DEFAULT_PERFORMANCE_TICKERS_KEY =
+  ALPHA_RESEARCH_SECTORS[0]?.tickers.join(",") ?? "";
+
+function performanceSnapshotCacheKey(tickersKey: string) {
+  return `signal-hub:stocks:performance-snapshot:v1:${encodeURIComponent(
+    tickersKey,
+  )}`;
+}
+
+function readCachedSnapshot<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSnapshot<T>(key: string, snapshot: T) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    // Ignore storage quota/private-mode failures; live state still updates.
+  }
+}
+
+function hasPerformanceSeries(snapshot: StocksPerformanceSnapshot | null) {
+  return (snapshot?.series ?? []).some((series) => series.points.length > 0);
+}
+
 export function AlphaResearchPage() {
   const [activeTab, setActiveTab] = useState<AlphaTab>("research");
   const [selectedTicker, setSelectedTicker] = useState(
     ALPHA_RESEARCH_DEFAULT_TICKER,
   );
   const [marketSnapshot, setMarketSnapshot] =
-    useState<StocksMarketSnapshot | null>(null);
+    useState<StocksMarketSnapshot | null>(() =>
+      readCachedSnapshot<StocksMarketSnapshot>(STOCKS_MARKET_SNAPSHOT_CACHE_KEY),
+    );
   const [marketError, setMarketError] = useState<string | null>(null);
   const [financialSnapshot, setFinancialSnapshot] =
-    useState<StocksFinancialSnapshot | null>(null);
+    useState<StocksFinancialSnapshot | null>(() =>
+      readCachedSnapshot<StocksFinancialSnapshot>(
+        STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
+      ),
+    );
   const [financialError, setFinancialError] = useState<string | null>(null);
   const [catalystSnapshot, setCatalystSnapshot] =
-    useState<StocksCatalystSnapshot | null>(null);
+    useState<StocksCatalystSnapshot | null>(() =>
+      readCachedSnapshot<StocksCatalystSnapshot>(
+        STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
+      ),
+    );
   const [catalystError, setCatalystError] = useState<string | null>(null);
   const [performanceSnapshot, setPerformanceSnapshot] =
-    useState<StocksPerformanceSnapshot | null>(null);
+    useState<StocksPerformanceSnapshot | null>(() => {
+      const snapshot = readCachedSnapshot<StocksPerformanceSnapshot>(
+        performanceSnapshotCacheKey(DEFAULT_PERFORMANCE_TICKERS_KEY),
+      );
+      return hasPerformanceSeries(snapshot) ? snapshot : null;
+    });
   const [performanceError, setPerformanceError] = useState<string | null>(null);
   const stocks = useMemo(() => {
     const withMarket = mergeStocksMarketSnapshot(
@@ -82,6 +135,7 @@ export function AlphaResearchPage() {
   );
   const performanceTickers = selectedSector?.tickers ?? [];
   const performanceTickersKey = performanceTickers.join(",");
+  const performanceCacheKey = performanceSnapshotCacheKey(performanceTickersKey);
   const marketStatus =
     marketSnapshot?.source === "live"
       ? "Live 行情"
@@ -118,6 +172,13 @@ export function AlphaResearchPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setMarketSnapshot(
+      (current) =>
+        current ??
+        readCachedSnapshot<StocksMarketSnapshot>(
+          STOCKS_MARKET_SNAPSHOT_CACHE_KEY,
+        ),
+    );
     async function loadMarketData() {
       try {
         setMarketError(null);
@@ -130,6 +191,7 @@ export function AlphaResearchPage() {
         const snapshot = (await response.json()) as StocksMarketSnapshot;
         if (!cancelled) {
           setMarketSnapshot(snapshot);
+          writeCachedSnapshot(STOCKS_MARKET_SNAPSHOT_CACHE_KEY, snapshot);
           setMarketError(snapshot.errors[0] ?? null);
         }
       } catch (error) {
@@ -148,13 +210,16 @@ export function AlphaResearchPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = performanceCacheKey;
+    const cached = readCachedSnapshot<StocksPerformanceSnapshot>(cacheKey);
+    setPerformanceSnapshot(hasPerformanceSeries(cached) ? cached : null);
     async function loadPerformanceData() {
       try {
         setPerformanceError(null);
         const response = await fetch(
           `/api/stocks-performance?tickers=${encodeURIComponent(
             performanceTickersKey,
-          )}`,
+          )}&lookbackDays=7`,
           { cache: "no-store" },
         );
         if (!response.ok) {
@@ -162,7 +227,10 @@ export function AlphaResearchPage() {
         }
         const snapshot = (await response.json()) as StocksPerformanceSnapshot;
         if (!cancelled) {
-          setPerformanceSnapshot(snapshot);
+          if (hasPerformanceSeries(snapshot)) {
+            setPerformanceSnapshot(snapshot);
+            writeCachedSnapshot(cacheKey, snapshot);
+          }
           setPerformanceError(snapshot.errors[0] ?? null);
         }
       } catch (error) {
@@ -179,10 +247,17 @@ export function AlphaResearchPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [marketSnapshot?.generatedAt, performanceTickersKey]);
+  }, [marketSnapshot?.generatedAt, performanceCacheKey, performanceTickersKey]);
 
   useEffect(() => {
     let cancelled = false;
+    setFinancialSnapshot(
+      (current) =>
+        current ??
+        readCachedSnapshot<StocksFinancialSnapshot>(
+          STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
+        ),
+    );
     async function loadFinancialData() {
       try {
         setFinancialError(null);
@@ -195,6 +270,7 @@ export function AlphaResearchPage() {
         const snapshot = (await response.json()) as StocksFinancialSnapshot;
         if (!cancelled) {
           setFinancialSnapshot(snapshot);
+          writeCachedSnapshot(STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY, snapshot);
           setFinancialError(snapshot.errors[0] ?? null);
         }
       } catch (error) {
@@ -215,6 +291,13 @@ export function AlphaResearchPage() {
 
   useEffect(() => {
     let cancelled = false;
+    setCatalystSnapshot(
+      (current) =>
+        current ??
+        readCachedSnapshot<StocksCatalystSnapshot>(
+          STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
+        ),
+    );
     async function loadCatalystData() {
       try {
         setCatalystError(null);
@@ -227,6 +310,7 @@ export function AlphaResearchPage() {
         const snapshot = (await response.json()) as StocksCatalystSnapshot;
         if (!cancelled) {
           setCatalystSnapshot(snapshot);
+          writeCachedSnapshot(STOCKS_CATALYST_SNAPSHOT_CACHE_KEY, snapshot);
           setCatalystError(snapshot.errors.slice(0, 2).join(" | ") || null);
         }
       } catch (error) {

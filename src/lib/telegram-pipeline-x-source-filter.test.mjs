@@ -8,6 +8,7 @@ async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "telegram-pipeline-x-filter-test-"));
   const files = [
     "telegram-pipeline-config.ts",
+    "telegram-translation-policy.ts",
     "telegram-x-source-channels.ts",
     "telegram-pipeline-store.ts",
   ];
@@ -21,6 +22,7 @@ async function transpileToTemp() {
     let source = await readFile(new URL(`./${file}`, import.meta.url), "utf8");
     source = source
       .replace('from "./telegram-pipeline-config.ts"', 'from "./telegram-pipeline-config.mjs"')
+      .replace('from "./telegram-translation-policy.ts"', 'from "./telegram-translation-policy.mjs"')
       .replace('from "./telegram-x-source-channels.ts"', 'from "./telegram-x-source-channels.mjs"');
     await writeFile(
       join(dir, file.replace(/\.ts$/, ".mjs")),
@@ -118,6 +120,29 @@ upsertTelegramPipelineMessage(
   db,
 );
 
+for (let index = 0; index < 120; index += 1) {
+  upsertTelegramPipelineMessage(
+    {
+      channelRef: "xxxx6551monitor",
+      channelTitle: "XXXX Monitor",
+      channelUsername: "xxxx6551monitor",
+      channelId: "65510001",
+      channelLink: "https://t.me/xxxx6551monitor",
+      channelAvatar: null,
+      messageId: 1000 + index,
+      messageUrl: `https://t.me/xxxx6551monitor/${1000 + index}`,
+      text: "🌟 监控到新推文",
+      createdAt: new Date(Date.UTC(2026, 3, 28, 1, index, 0)).toISOString(),
+      views: 0,
+      forwards: 0,
+      origin: "history",
+      media: null,
+      raw: { id: 1000 + index },
+    },
+    db,
+  );
+}
+
 const snapshot = getTelegramPipelineSnapshot(100, db);
 assert.deepEqual(
   snapshot.channels.map((channel) => channel.username),
@@ -128,4 +153,10 @@ assert.deepEqual(
   ["au_call"],
 );
 
-console.log("ok - telegram pipeline hides X source channels from display snapshots");
+const oneVisibleMessage = getTelegramPipelineSnapshot(1, db);
+assert.deepEqual(
+  oneVisibleMessage.feed.map((message) => message.channelUsername),
+  ["au_call"],
+);
+
+console.log("ok - telegram pipeline hides X source channels before limiting display snapshots");

@@ -82,3 +82,26 @@ await test("prepareTelegramSnapshotForClient limits feed and strips older media"
   assert.equal(prepared.feed[1].media, null);
   assert.equal(prepared.feed[2].media, null);
 });
+
+await test("prepareTelegramSnapshotForClient keeps 300 telegram history items by default", async () => {
+  const { prepareTelegramSnapshotForClient } = await importTs(
+    "./telegram-client-snapshot.ts",
+  );
+
+  const snapshot = {
+    provider: "telegram",
+    mode: "mtproto",
+    isConfigured: true,
+    isConnected: true,
+    status: "live",
+    channels: [],
+    feed: Array.from({ length: 305 }, (_, index) => feedItem(index)),
+    note: "",
+    errors: [],
+  };
+
+  const prepared = prepareTelegramSnapshotForClient(snapshot);
+
+  assert.equal(prepared.feed.length, 300);
+  assert.equal(prepared.feed[299].id, "message:299");
+});

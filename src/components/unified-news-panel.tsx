@@ -37,7 +37,9 @@ import {
   type SignalFeedTab,
 } from "@/lib/signal-feed-tabs";
 
-const MAX_NEWS_ITEMS = 200;
+const MAX_ALL_NEWS_ITEMS = 200;
+const MAX_TELEGRAM_NEWS_ITEMS = 300;
+const MAX_X_NEWS_ITEMS = 200;
 const SNAPSHOT_REFRESH_MS = 120000;
 
 type UnifiedTranslation = {
@@ -156,8 +158,11 @@ function sortByCreatedAt<T extends { createdAt: string }>(items: T[]) {
   );
 }
 
-function limitNewsItems<T extends { createdAt: string }>(items: T[]) {
-  return sortByCreatedAt(items).slice(0, MAX_NEWS_ITEMS);
+function limitNewsItems<T extends { createdAt: string }>(
+  items: T[],
+  limit = MAX_ALL_NEWS_ITEMS,
+) {
+  return sortByCreatedAt(items).slice(0, limit);
 }
 
 function mergeTelegramChannels(
@@ -189,6 +194,7 @@ function mergeTwitterWatchAccounts(
 function mergeFeeds<T extends { id: string; createdAt: string }>(
   current: T[],
   incoming: T[],
+  limit = MAX_ALL_NEWS_ITEMS,
 ) {
   const feedMap = new Map<string, T>();
 
@@ -196,14 +202,18 @@ function mergeFeeds<T extends { id: string; createdAt: string }>(
     feedMap.set(item.id, item);
   }
 
-  return limitNewsItems([...feedMap.values()]);
+  return limitNewsItems([...feedMap.values()], limit);
 }
 
 function mergeTelegramSnapshot(
   current: TelegramDashboardSnapshot,
   incoming: TelegramDashboardSnapshot,
 ): TelegramDashboardSnapshot {
-  const mergedFeed = mergeFeeds(current.feed, incoming.feed);
+  const mergedFeed = mergeFeeds(
+    current.feed,
+    incoming.feed,
+    MAX_TELEGRAM_NEWS_ITEMS,
+  );
 
   return {
     ...current,
@@ -220,7 +230,7 @@ function mergeTwitterSnapshot(
   current: TwitterDashboardSnapshot,
   incoming: TwitterDashboardSnapshot,
 ): TwitterDashboardSnapshot {
-  const mergedFeed = mergeFeeds(current.feed, incoming.feed);
+  const mergedFeed = mergeFeeds(current.feed, incoming.feed, MAX_X_NEWS_ITEMS);
 
   return {
     ...current,
@@ -379,10 +389,16 @@ function buildUnifiedFeed(
   telegramSnapshot: TelegramDashboardSnapshot,
   xSnapshot: TwitterDashboardSnapshot,
 ) {
-  return limitNewsItems([
+  return sortByCreatedAt([
     ...toUnifiedTelegramItems(telegramSnapshot),
     ...toUnifiedTwitterItems(xSnapshot),
   ]);
+}
+
+function feedLimitForTab(tab: FeedTab) {
+  if (tab === "telegram") return MAX_TELEGRAM_NEWS_ITEMS;
+  if (tab === "x" || tab === "truth") return MAX_X_NEWS_ITEMS;
+  return MAX_ALL_NEWS_ITEMS;
 }
 
 function getMediaViewport(media: TelegramMediaPreview | null) {
@@ -651,7 +667,7 @@ export function UnifiedNewsPanel({
 
   const filteredFeed = useMemo(() => {
     const needle = deferredSearchQuery.trim().toLowerCase();
-    return unifiedFeed.filter((item) => {
+    const matching = unifiedFeed.filter((item) => {
       const matchesTab =
         matchesSignalFeedTab(item, activeTab);
 
@@ -669,6 +685,7 @@ export function UnifiedNewsPanel({
         item.quotedTweet?.text.toLowerCase().includes(needle) === true
       );
     });
+    return limitNewsItems(matching, feedLimitForTab(activeTab));
   }, [unifiedFeed, activeTab, deferredSearchQuery]);
 
   const deferredFeed = filteredFeed;

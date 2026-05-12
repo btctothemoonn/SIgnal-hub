@@ -16,11 +16,17 @@ function requestedTickers(url: URL) {
   return tickers.length > 0 ? Array.from(new Set(tickers)) : ALPHA_RESEARCH_STOCK_UNIVERSE;
 }
 
+function requestedLookbackDays(url: URL) {
+  const parsed = Number(url.searchParams.get("lookbackDays"));
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 30) : 7;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const marketDate = url.searchParams.get("marketDate")?.trim() || undefined;
   const snapshot = getStocksPerformanceSnapshot({
     tickers: requestedTickers(url),
+    lookbackDays: requestedLookbackDays(url),
     ...(marketDate ? { marketDate } : {}),
   });
   return NextResponse.json(snapshot);

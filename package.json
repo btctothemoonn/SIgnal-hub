@@ -20,7 +20,9 @@
     "x:hybrid": "node --experimental-strip-types --experimental-transform-types scripts/x-hybrid-worker.mjs",
     "x:hybrid:once": "node --experimental-strip-types --experimental-transform-types scripts/x-hybrid-worker.mjs --once",
     "x:monitor985": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs",
-    "x:monitor985:once": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs --once"
+    "x:monitor985:once": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs --once",
+    "alpha-summary:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs",
+    "alpha-summary:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs --once"
   },
   "dependencies": {
     "next": "16.2.1",

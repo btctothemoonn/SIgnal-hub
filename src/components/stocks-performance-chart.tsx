@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  useRef,
+  useState,
+  type PointerEvent,
+  type WheelEvent,
+} from "react";
 import type {
   AlphaResearchSector,
   AlphaResearchStock,
@@ -16,6 +22,24 @@ type StocksPerformanceChartProps = {
   loading: boolean;
 };
 
+type ZoomRange = {
+  start: number;
+  end: number;
+};
+
+type ZoomState = {
+  key: string;
+  range: ZoomRange;
+};
+
+type DragState = {
+  pointerId: number;
+  startClientX: number;
+  range: ZoomRange;
+};
+
+type PerformancePoint = StocksPerformanceSnapshot["series"][number]["points"][number];
+
 const palette = [
   "#d8e36f",
   "#b7d8f3",
@@ -25,6 +49,32 @@ const palette = [
   "#b7b8da",
   "#8fd6c2",
 ];
+
+const FULL_ZOOM_RANGE: ZoomRange = { start: 0, end: 1 };
+const MIN_ZOOM_SPAN = 0.08;
+const SVG_WIDTH = 720;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampZoomRange(start: number, end: number): ZoomRange {
+  const span = clamp(end - start, MIN_ZOOM_SPAN, 1);
+  const nextStart = clamp(start, 0, 1 - span);
+  return { start: nextStart, end: nextStart + span };
+}
+
+function zoomRangeAround(
+  range: ZoomRange,
+  focusRatio: number,
+  scale: number,
+): ZoomRange {
+  const span = range.end - range.start;
+  const nextSpan = clamp(span * scale, MIN_ZOOM_SPAN, 1);
+  const focus = range.start + span * clamp(focusRatio, 0, 1);
+  const start = focus - nextSpan * focusRatio;
+  return clampZoomRange(start, start + nextSpan);
+}
 
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
@@ -38,10 +88,38 @@ function formatTime(value: string) {
   });
 }
 
+function formatAxisTime(value: string, includeDate: boolean) {
+  const date = new Date(value);
+  return includeDate
+    ? date.toLocaleString("zh-CN", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : date.toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+}
+
 function linePath(points: Array<{ x: number; y: number }>) {
   return points
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
     .join(" ");
+}
+
+function createTradingTimeAxis(points: PerformancePoint[]) {
+  const times = Array.from(
+    new Set(
+      points
+        .map((point) => Date.parse(point.capturedAt))
+        .filter((time) => Number.isFinite(time)),
+    ),
+  ).sort((a, b) => a - b);
+  const timeIndexByMs = new Map(times.map((time, index) => [time, index]));
+
+  return { times, timeIndexByMs };
 }
 
 export function StocksPerformanceChart({
@@ -53,35 +131,121 @@ export function StocksPerformanceChart({
   onSelectSector,
   loading,
 }: StocksPerformanceChartProps) {
+  const [zoomState, setZoomState] = useState<ZoomState>({
+    key: "",
+    range: FULL_ZOOM_RANGE,
+  });
+  const dragState = useRef<DragState | null>(null);
   const stockNames = new Map(stocks.map((stock) => [stock.ticker, stock.companyName]));
   const series = (snapshot?.series ?? []).filter((item) =>
     tickers.includes(item.ticker),
   );
   const allPoints = series.flatMap((item) => item.points);
-  const minTime = Math.min(
-    ...allPoints.map((point) => Date.parse(point.capturedAt)),
-  );
-  const maxTime = Math.max(
-    ...allPoints.map((point) => Date.parse(point.capturedAt)),
-  );
-  const minChange = Math.min(0, ...allPoints.map((point) => point.changePct));
-  const maxChange = Math.max(0, ...allPoints.map((point) => point.changePct));
+  const { times: axisTimes, timeIndexByMs } = createTradingTimeAxis(allPoints);
+  const minTime = axisTimes[0] ?? Number.NaN;
+  const maxTime = axisTimes.at(-1) ?? Number.NaN;
+  const visibleRangeKey = [
+    activeSectorId,
+    tickers.join(","),
+    snapshot?.marketDate ?? "",
+    axisTimes.length,
+    Number.isFinite(minTime) ? minTime : "empty",
+    Number.isFinite(maxTime) ? maxTime : "empty",
+  ].join("|");
+  const zoomRange =
+    zoomState.key === visibleRangeKey ? zoomState.range : FULL_ZOOM_RANGE;
+  const axisMaxIndex = Math.max(0, axisTimes.length - 1);
+  const visibleStartIndex = axisMaxIndex * zoomRange.start;
+  const visibleEndIndex = axisMaxIndex * zoomRange.end;
+  const axisIndexForCapturedAt = (capturedAt: string) =>
+    timeIndexByMs.get(Date.parse(capturedAt)) ?? 0;
+  const visiblePoints = allPoints.filter((point) => {
+    const index = axisIndexForCapturedAt(point.capturedAt);
+    return index >= visibleStartIndex && index <= visibleEndIndex;
+  });
+  const yPoints = visiblePoints.length > 0 ? visiblePoints : allPoints;
+  const minChange = Math.min(0, ...yPoints.map((point) => point.changePct));
+  const maxChange = Math.max(0, ...yPoints.map((point) => point.changePct));
   const yPad = Math.max(2, (maxChange - minChange) * 0.18);
   const yMin = minChange - yPad;
   const yMax = maxChange + yPad;
   const plot = { left: 42, right: 604, top: 28, bottom: 222 };
   const width = plot.right - plot.left;
   const height = plot.bottom - plot.top;
-  const timeSpan = maxTime - minTime || 1;
+  const axisSpan = visibleEndIndex - visibleStartIndex || 1;
   const valueSpan = yMax - yMin || 1;
   const hasData = series.length > 0 && allPoints.length > 0;
   const newestAt =
     hasData && Number.isFinite(maxTime) ? new Date(maxTime).toISOString() : "";
+  const hasMultipleMarketDates = new Set(
+    allPoints.map((point) => point.marketDate),
+  ).size > 1;
 
   const toX = (capturedAt: string) =>
-    plot.left + ((Date.parse(capturedAt) - minTime) / timeSpan) * width;
+    plot.left +
+    ((axisIndexForCapturedAt(capturedAt) - visibleStartIndex) / axisSpan) *
+      width;
   const toY = (changePct: number) =>
     plot.bottom - ((changePct - yMin) / valueSpan) * height;
+  const setCurrentZoomRange = (
+    nextRange: ZoomRange | ((range: ZoomRange) => ZoomRange),
+  ) => {
+    setZoomState((state) => {
+      const currentRange =
+        state.key === visibleRangeKey ? state.range : FULL_ZOOM_RANGE;
+      const range =
+        typeof nextRange === "function" ? nextRange(currentRange) : nextRange;
+
+      if (
+        state.key === visibleRangeKey &&
+        state.range.start === range.start &&
+        state.range.end === range.end
+      ) {
+        return state;
+      }
+
+      return { key: visibleRangeKey, range };
+    });
+  };
+  const resetZoom = () => setCurrentZoomRange(FULL_ZOOM_RANGE);
+  const zoomFromCenter = (scale: number) => {
+    setCurrentZoomRange((range) => zoomRangeAround(range, 0.5, scale));
+  };
+  const handleWheelZoom = (event: WheelEvent<SVGSVGElement>) => {
+    if (!hasData) return;
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const viewBoxX = ((event.clientX - bounds.left) / bounds.width) * SVG_WIDTH;
+    const focusRatio = clamp((viewBoxX - plot.left) / width, 0, 1);
+    setCurrentZoomRange((range) =>
+      zoomRangeAround(range, focusRatio, event.deltaY > 0 ? 1.18 : 0.82),
+    );
+  };
+  const handlePointerDown = (event: PointerEvent<SVGSVGElement>) => {
+    if (!hasData) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragState.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      range: zoomRange,
+    };
+  };
+  const handlePointerMove = (event: PointerEvent<SVGSVGElement>) => {
+    const drag = dragState.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const viewBoxDelta = ((event.clientX - drag.startClientX) / bounds.width) * SVG_WIDTH;
+    const span = drag.range.end - drag.range.start;
+    const rangeDelta = -(viewBoxDelta / width) * span;
+    setCurrentZoomRange(
+      clampZoomRange(drag.range.start + rangeDelta, drag.range.end + rangeDelta),
+    );
+  };
+  const handlePointerUp = (event: PointerEvent<SVGSVGElement>) => {
+    if (dragState.current?.pointerId === event.pointerId) {
+      dragState.current = null;
+    }
+  };
 
   return (
     <section className="overflow-hidden rounded-lg border border-line/70 bg-[#10141f] shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
@@ -117,6 +281,38 @@ export function StocksPerformanceChart({
           </div>
         </div>
         <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+          <div className="flex overflow-hidden rounded-md border border-white/10 bg-white/5 text-slate-200">
+            <button
+              type="button"
+              aria-label="Zoom out chart"
+              title="Zoom out"
+              disabled={!hasData}
+              onClick={() => zoomFromCenter(1.25)}
+              className="min-h-8 min-w-8 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom in chart"
+              title="Zoom in"
+              disabled={!hasData}
+              onClick={() => zoomFromCenter(0.8)}
+              className="min-h-8 min-w-8 border-l border-white/10 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              aria-label="Reset chart zoom"
+              title="Reset zoom"
+              disabled={!hasData}
+              onClick={resetZoom}
+              className="min-h-8 min-w-9 border-l border-white/10 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              1x
+            </button>
+          </div>
           <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
             {snapshot?.marketDate ?? "等待缓存"}
           </span>
@@ -138,9 +334,25 @@ export function StocksPerformanceChart({
             viewBox="0 0 720 260"
             role="img"
             aria-label="今日股票相对涨跌幅对比图"
-            className="h-auto w-full"
+            onWheel={handleWheelZoom}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onDoubleClick={resetZoom}
+            className="h-auto w-full touch-none select-none cursor-grab active:cursor-grabbing"
           >
             <rect x="0" y="0" width="720" height="260" fill="#10141f" />
+            <defs>
+              <clipPath id="stocks-performance-chart-plot">
+                <rect
+                  x={plot.left}
+                  y={plot.top}
+                  width={width}
+                  height={height}
+                />
+              </clipPath>
+            </defs>
             {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
               const y = plot.top + ratio * height;
               const value = yMax - ratio * valueSpan;
@@ -190,9 +402,12 @@ export function StocksPerformanceChart({
                 x: toX(point.capturedAt),
                 y: toY(point.changePct),
               }));
-              const latest = item.points[item.points.length - 1];
-              const latestX = latest ? toX(latest.capturedAt) : plot.left;
-              const latestY = latest ? toY(latest.changePct) : plot.bottom;
+              const labelPoint = [...item.points].reverse().find((point) => {
+                const index = axisIndexForCapturedAt(point.capturedAt);
+                return index >= visibleStartIndex && index <= visibleEndIndex;
+              });
+              const latestX = labelPoint ? toX(labelPoint.capturedAt) : plot.left;
+              const latestY = labelPoint ? toY(labelPoint.changePct) : plot.bottom;
               const labelY = Math.max(plot.top + 10, Math.min(plot.bottom - 10, latestY));
               return (
                 <g key={item.ticker}>
@@ -203,42 +418,73 @@ export function StocksPerformanceChart({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth="1.8"
+                    clipPath="url(#stocks-performance-chart-plot)"
                   />
-                  <circle cx={latestX} cy={latestY} r="2.4" fill={color} />
-                  <line
-                    x1={latestX + 4}
-                    x2={plot.right + 24}
-                    y1={latestY}
-                    y2={labelY}
-                    stroke={color}
-                    strokeOpacity="0.45"
-                  />
-                  <rect
-                    x={plot.right + 24}
-                    y={labelY - 10}
-                    width="92"
-                    height="20"
-                    rx="2"
-                    fill={color}
-                    opacity="0.95"
-                  />
-                  <text
-                    x={plot.right + 30}
-                    y={labelY + 4}
-                    fill="#111827"
-                    fontSize="10"
-                    fontWeight="700"
-                  >
-                    {item.ticker} {formatSignedPercent(item.latestChangePct)}
-                  </text>
+                  {labelPoint ? (
+                    <>
+                      <circle
+                        cx={latestX}
+                        cy={latestY}
+                        r="2.4"
+                        fill={color}
+                        clipPath="url(#stocks-performance-chart-plot)"
+                      />
+                      <line
+                        x1={latestX + 4}
+                        x2={plot.right + 24}
+                        y1={latestY}
+                        y2={labelY}
+                        stroke={color}
+                        strokeOpacity="0.45"
+                      />
+                      <rect
+                        x={plot.right + 24}
+                        y={labelY - 10}
+                        width="92"
+                        height="20"
+                        rx="2"
+                        fill={color}
+                        opacity="0.95"
+                      />
+                      <text
+                        x={plot.right + 30}
+                        y={labelY + 4}
+                        fill="#111827"
+                        fontSize="10"
+                        fontWeight="700"
+                      >
+                        {item.ticker} {formatSignedPercent(labelPoint.changePct)}
+                      </text>
+                    </>
+                  ) : null}
                 </g>
               );
             })}
             <text x={plot.left} y={244} fill="#cbd5e1" fontSize="10">
-              {formatTime(new Date(minTime).toISOString())}
+              {formatAxisTime(
+                new Date(
+                  axisTimes[
+                    Math.max(
+                      0,
+                      Math.min(axisTimes.length - 1, Math.floor(visibleStartIndex)),
+                    )
+                  ],
+                ).toISOString(),
+                hasMultipleMarketDates,
+              )}
             </text>
-            <text x={plot.right - 38} y={244} fill="#cbd5e1" fontSize="10">
-              {formatTime(new Date(maxTime).toISOString())}
+            <text x={plot.right - 70} y={244} fill="#cbd5e1" fontSize="10">
+              {formatAxisTime(
+                new Date(
+                  axisTimes[
+                    Math.max(
+                      0,
+                      Math.min(axisTimes.length - 1, Math.ceil(visibleEndIndex)),
+                    )
+                  ],
+                ).toISOString(),
+                hasMultipleMarketDates,
+              )}
             </text>
           </svg>
         )}

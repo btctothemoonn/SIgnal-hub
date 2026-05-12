@@ -12,5 +12,7 @@ assert.match(source, /数据链路/);
 assert.match(source, /marketDataLoading/);
 assert.match(source, /行情加载中/);
 assert.match(source, /stockPriceLabel/);
+assert.doesNotMatch(source, /CandlestickChart/);
+assert.doesNotMatch(source, /candles3d/);
 
 console.log("ok - alpha stock detail market quality UI");

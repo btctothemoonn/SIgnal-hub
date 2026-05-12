@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import {
   getAlphaResearchSectorById,
   type AlphaCatalystType,
-  type AlphaResearchCandle,
   type AlphaResearchEarningsStatus,
   type AlphaResearchSession,
   type AlphaResearchStock,
@@ -119,104 +118,6 @@ function BulletList({ items }: { items: string[] }) {
         </p>
       ))}
     </div>
-  );
-}
-
-function CandlestickChart({
-  candles,
-  marketDataIsLive,
-  marketDataLabel,
-}: {
-  candles: AlphaResearchCandle[];
-  marketDataIsLive: boolean;
-  marketDataLabel: string;
-}) {
-  const highs = candles.map((candle) => candle.high);
-  const lows = candles.map((candle) => candle.low);
-  const maxPrice = Math.max(...highs);
-  const minPrice = Math.min(...lows);
-  const range = Math.max(0.01, maxPrice - minPrice);
-
-  const yFor = (price: number) => 24 + ((maxPrice - price) / range) * 84;
-  const xFor = (index: number) => 58 + index * 122;
-
-  return (
-    <Section title="近 3 日 K 线">
-      <div className="rounded-md border border-line/60 bg-background/35 px-3 py-4">
-        {!marketDataIsLive ? (
-          <p className="mb-2 rounded-md bg-warning-soft px-2 py-1 text-xs font-medium text-warning">
-            K 线为本地基线，未获取实时行情。{marketDataLabel}
-          </p>
-        ) : null}
-        <svg
-          viewBox="0 0 360 150"
-          className="h-[13rem] w-full"
-          role="img"
-          aria-label="近 3 日 K 线图"
-        >
-          <line x1="24" x2="338" y1="24" y2="24" className="stroke-line" />
-          <line x1="24" x2="338" y1="66" y2="66" className="stroke-line" />
-          <line x1="24" x2="338" y1="108" y2="108" className="stroke-line" />
-          <text x="28" y="18" className="fill-muted text-[10px]">
-            {maxPrice.toFixed(2)}
-          </text>
-          <text x="28" y="124" className="fill-muted text-[10px]">
-            {minPrice.toFixed(2)}
-          </text>
-          {candles.map((candle, index) => {
-            const x = xFor(index);
-            const openY = yFor(candle.open);
-            const closeY = yFor(candle.close);
-            const highY = yFor(candle.high);
-            const lowY = yFor(candle.low);
-            const rising = candle.close >= candle.open;
-            const color = rising ? "var(--success)" : "var(--danger)";
-            const bodyY = Math.min(openY, closeY);
-            const bodyHeight = Math.max(3, Math.abs(closeY - openY));
-
-            return (
-              <g key={candle.date}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={highY}
-                  y2={lowY}
-                  stroke={color}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <rect
-                  x={x - 14}
-                  y={bodyY}
-                  width="28"
-                  height={bodyHeight}
-                  rx="3"
-                  fill={rising ? "var(--success-soft)" : "var(--danger-soft)"}
-                  stroke={color}
-                  strokeWidth="2"
-                />
-                <text
-                  x={x}
-                  y="134"
-                  textAnchor="middle"
-                  className="fill-muted text-[11px]"
-                >
-                  {candle.date}
-                </text>
-                <text
-                  x={x}
-                  y="148"
-                  textAnchor="middle"
-                  className="fill-muted text-[10px]"
-                >
-                  {candle.volumeLabel}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-    </Section>
   );
 }
 
@@ -382,14 +283,6 @@ export function AlphaStockDetail({
             {stock.financialSnapshot.nextEarningsDate}
           </p>
         </div>
-      </div>
-
-      <div className="mt-5">
-        <CandlestickChart
-          candles={stock.candles3d}
-          marketDataIsLive={stockCandlesAreLive}
-          marketDataLabel={stockMarketLabel}
-        />
       </div>
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(26rem,0.88fr)]">

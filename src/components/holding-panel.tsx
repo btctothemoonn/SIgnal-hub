@@ -147,6 +147,8 @@ function isBinanceHoldingSnapshot(value: unknown): value is BinanceHoldingSnapsh
 }
 
 function readBrowserCachedSnapshot(): BinanceHoldingSnapshot | null {
+  if (typeof window === "undefined") return null;
+
   try {
     const raw = window.localStorage.getItem(HOLDING_SNAPSHOT_STORAGE_KEY);
     if (!raw) return null;
@@ -158,6 +160,8 @@ function readBrowserCachedSnapshot(): BinanceHoldingSnapshot | null {
 }
 
 function writeBrowserCachedSnapshot(snapshot: BinanceHoldingSnapshot) {
+  if (typeof window === "undefined") return;
+
   try {
     window.localStorage.setItem(
       HOLDING_SNAPSHOT_STORAGE_KEY,
@@ -169,6 +173,8 @@ function writeBrowserCachedSnapshot(snapshot: BinanceHoldingSnapshot) {
 }
 
 function clearBrowserCachedSnapshot() {
+  if (typeof window === "undefined") return;
+
   try {
     window.localStorage.removeItem(HOLDING_SNAPSHOT_STORAGE_KEY);
   } catch {
@@ -707,8 +713,12 @@ function SpotAllocationPanel({ balances }: { balances: BinanceSpotBalance[] }) {
 }
 
 export function HoldingPanel() {
-  const [snapshot, setSnapshot] = useState<BinanceHoldingSnapshot | null>(null);
-  const [state, setState] = useState<LoadState>("idle");
+  const [snapshot, setSnapshot] = useState<BinanceHoldingSnapshot | null>(() =>
+    readBrowserCachedSnapshot(),
+  );
+  const [state, setState] = useState<LoadState>(() =>
+    readBrowserCachedSnapshot() ? "ready" : "idle",
+  );
   const [error, setError] = useState<string | null>(null);
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -785,11 +795,6 @@ export function HoldingPanel() {
   );
 
   useEffect(() => {
-    const cachedSnapshot = readBrowserCachedSnapshot();
-    if (cachedSnapshot) {
-      setSnapshot(cachedSnapshot);
-      setState("ready");
-    }
     void load();
     return () => {
       abortRef.current?.abort();

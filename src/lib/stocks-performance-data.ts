@@ -37,6 +37,7 @@ export type StocksPerformanceSeries = {
 export type StocksPerformanceSnapshot = {
   generatedAt: string;
   marketDate: string;
+  marketDates: string[];
   source: "local-cache" | "empty";
   provider: "local-cache";
   series: StocksPerformanceSeries[];
@@ -52,6 +53,10 @@ type StockQuoteSnapshotRow = {
   provider: string;
   freshness: StocksMarketFreshness;
   confidence: StocksPerformanceConfidence;
+};
+
+type MarketDateRow = {
+  market_date: string;
 };
 
 function numberValue(value: unknown): number | null {
@@ -132,6 +137,106 @@ function quoteConfidence({
   return "high";
 }
 
+function queryPlaceholders(count: number) {
+  return Array.from({ length: count }, () => "?").join(", ");
+}
+
+function latestCachedMarketDate({
+  db,
+  tickers,
+  marketDate,
+}: {
+  db: DatabaseSync;
+  tickers: string[];
+  marketDate: string;
+}) {
+  if (tickers.length === 0) return null;
+  const placeholders = queryPlaceholders(tickers.length);
+  const current = db
+    .prepare(
+      `SELECT market_date
+       FROM stock_quote_snapshots
+       WHERE ticker IN (${placeholders}) AND market_date = ?
+       LIMIT 1`,
+    )
+    .get(...tickers, marketDate) as MarketDateRow | undefined;
+  if (current?.market_date) return current.market_date;
+
+  const latestBeforeOrSame = db
+    .prepare(
+      `SELECT market_date
+       FROM stock_quote_snapshots
+       WHERE ticker IN (${placeholders}) AND market_date <= ?
+       GROUP BY market_date
+       ORDER BY market_date DESC
+       LIMIT 1`,
+    )
+    .get(...tickers, marketDate) as MarketDateRow | undefined;
+  if (latestBeforeOrSame?.market_date) return latestBeforeOrSame.market_date;
+
+  const latestAny = db
+    .prepare(
+      `SELECT market_date
+       FROM stock_quote_snapshots
+       WHERE ticker IN (${placeholders})
+       GROUP BY market_date
+       ORDER BY market_date DESC
+       LIMIT 1`,
+    )
+    .get(...tickers) as MarketDateRow | undefined;
+  return latestAny?.market_date ?? null;
+}
+
+function recentCachedMarketDates({
+  db,
+  tickers,
+  marketDate,
+  limit,
+}: {
+  db: DatabaseSync;
+  tickers: string[];
+  marketDate: string;
+  limit: number;
+}) {
+  if (tickers.length === 0) return [];
+  const placeholders = queryPlaceholders(tickers.length);
+  const rows = db
+    .prepare(
+      `SELECT market_date
+       FROM stock_quote_snapshots
+       WHERE ticker IN (${placeholders}) AND market_date <= ?
+       GROUP BY market_date
+       ORDER BY market_date DESC
+       LIMIT ?`,
+    )
+    .all(...tickers, marketDate, limit) as MarketDateRow[];
+  if (rows.length > 0) {
+    return rows.map((row) => row.market_date).reverse();
+  }
+
+  return (
+    db
+      .prepare(
+        `SELECT market_date
+         FROM stock_quote_snapshots
+         WHERE ticker IN (${placeholders})
+         GROUP BY market_date
+         ORDER BY market_date DESC
+         LIMIT ?`,
+      )
+      .all(...tickers, limit) as MarketDateRow[]
+  )
+    .map((row) => row.market_date)
+    .reverse();
+}
+
+function formatMarketDateLabel(marketDates: string[], fallback: string) {
+  if (marketDates.length === 0) return fallback;
+  const first = marketDates[0];
+  const last = marketDates[marketDates.length - 1];
+  return first === last ? first : `${first} → ${last}`;
+}
+
 export function recordStocksPerformanceSnapshot({
   snapshot,
   env = process.env,
@@ -188,11 +293,13 @@ export function recordStocksPerformanceSnapshot({
 export function getStocksPerformanceSnapshot({
   tickers,
   marketDate = marketDateInNewYork(),
+  lookbackDays = 1,
   env = process.env,
   dbPath = stocksPerformanceDbPath(env),
 }: {
   tickers: string[];
   marketDate?: string;
+  lookbackDays?: number;
   env?: EnvLike;
   dbPath?: string;
 }): StocksPerformanceSnapshot {
@@ -201,17 +308,46 @@ export function getStocksPerformanceSnapshot({
   );
   const db = openStocksPerformanceDb(dbPath);
   try {
+    const requestedLookbackDays = Math.max(
+      1,
+      Math.min(30, Math.floor(lookbackDays)),
+    );
+    const resolvedMarketDates =
+      requestedLookbackDays > 1
+        ? recentCachedMarketDates({
+            db,
+            tickers: normalizedTickers,
+            marketDate,
+            limit: requestedLookbackDays,
+          })
+        : [];
+    const resolvedMarketDate =
+      resolvedMarketDates[resolvedMarketDates.length - 1] ??
+      latestCachedMarketDate({
+        db,
+        tickers: normalizedTickers,
+        marketDate,
+      }) ??
+      marketDate;
+    const marketDates =
+      resolvedMarketDates.length > 0 ? resolvedMarketDates : [resolvedMarketDate];
+    const errors =
+      resolvedMarketDate === marketDate
+        ? []
+        : [
+            `No performance cache for ${marketDate}; using latest cached market date ${resolvedMarketDate}.`,
+          ];
     const select = db.prepare(`
       SELECT ticker, market_date, captured_at, price, provider, freshness, confidence
       FROM stock_quote_snapshots
-      WHERE ticker = ? AND market_date = ?
+      WHERE ticker = ? AND market_date IN (${queryPlaceholders(marketDates.length)})
       ORDER BY captured_at ASC
     `);
     const series: StocksPerformanceSeries[] = [];
     const missingTickers: string[] = [];
 
     for (const ticker of normalizedTickers) {
-      const rows = select.all(ticker, marketDate) as StockQuoteSnapshotRow[];
+      const rows = select.all(ticker, ...marketDates) as StockQuoteSnapshotRow[];
       const anchor = rows[0]?.price;
       if (!anchor) {
         missingTickers.push(ticker);
@@ -244,12 +380,13 @@ export function getStocksPerformanceSnapshot({
 
     return {
       generatedAt: new Date().toISOString(),
-      marketDate,
+      marketDate: formatMarketDateLabel(marketDates, resolvedMarketDate),
+      marketDates,
       source: series.length > 0 ? "local-cache" : "empty",
       provider: "local-cache",
       series,
       missingTickers,
-      errors: [],
+      errors,
     };
   } finally {
     db.close();
