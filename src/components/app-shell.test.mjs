@@ -8,4 +8,10 @@ assert.match(source, /<aside className="[^"]*lg:top-0[^"]*"/);
 assert.match(source, /<aside className="[^"]*lg:h-screen[^"]*"/);
 assert.match(source, /href="\/api\/logout"/);
 
-console.log("ok - app shell sidebar layout");
+assert.match(source, /data-mobile-command-shell/);
+assert.match(source, /overflow-x-auto/);
+assert.match(source, /fixed bottom-0/);
+assert.match(source, /lg:hidden/);
+assert.match(source, /pb-20 lg:pb-0/);
+
+console.log("ok - app shell mobile command layout");

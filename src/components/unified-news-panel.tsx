@@ -1095,8 +1095,9 @@ export function UnifiedNewsPanel({
 
   return (
     <section
+      data-mobile-command-feed
       className={[
-        "min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]",
+        "min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel/95 shadow-[0_24px_60px_-50px_rgba(0,0,0,0.65)]",
         rail
           ? "lg:sticky lg:top-[5.25rem] lg:flex lg:h-[calc(100vh-6rem)] lg:min-h-0 lg:flex-col"
           : "",
@@ -1105,11 +1106,11 @@ export function UnifiedNewsPanel({
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="shrink-0 border-b border-line/70 bg-panel-strong">
+      <div className="shrink-0 border-b border-line/70 bg-panel-strong/95">
         <div className="px-3 py-3">
           <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
-              <h2 className="font-serif text-2xl font-medium text-foreground">信号流</h2>
+              <h2 className="text-lg font-semibold text-foreground">Signal Flow</h2>
               <p className="mt-0.5 text-[11px] text-muted">
                 {filteredFeed.length} / {unifiedFeed.length} 条信号
               </p>
@@ -1288,7 +1289,7 @@ export function UnifiedNewsPanel({
 
       {/* Timeline */}
       <div
-        className={`min-h-0 space-y-2 bg-background/30 p-2 sm:p-3 ${
+        className={`min-h-0 space-y-2.5 bg-background/70 p-2 sm:p-3 ${
           rail ? "lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" : ""
         }`}
       >
@@ -1329,7 +1330,7 @@ export function UnifiedNewsPanel({
                     });
                   }
                 }}
-                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2.5 rounded-lg border border-line/70 bg-panel px-3 py-3 transition-colors hover:border-accent/45 hover:bg-panel-strong focus:outline-none focus:ring-2 focus:ring-accent"
+                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2.5 rounded-lg border border-line/70 border-l-2 border-l-accent/45 bg-panel-strong/92 px-3 py-3.5 shadow-[0_16px_34px_-30px_rgba(0,0,0,0.75)] transition-all active:scale-[0.995] hover:border-accent/45 hover:bg-panel-strong focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 {/* Avatar */}
                 <div className="relative shrink-0 pt-0.5">

@@ -167,7 +167,10 @@ export function AppShell({
   }, [activeNav]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div
+      data-mobile-command-shell
+      className="min-h-screen pb-20 lg:pb-0 bg-background text-foreground"
+    >
       <div className="flex min-h-screen">
         <aside className="hidden w-[5.5rem] shrink-0 border-r border-line/70 bg-panel-strong/76 px-2 py-4 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-center lg:overflow-y-auto lg:overscroll-contain">
           <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background shadow-[0_18px_36px_-28px_rgba(38,31,27,0.8)]">
@@ -196,7 +199,7 @@ export function AppShell({
 
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-40 border-b border-line/70 bg-panel-strong/90 backdrop-blur-xl">
-            <div className="flex min-h-[4.75rem] flex-col gap-3 px-3 py-3 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-h-[4.25rem] flex-col gap-2 px-3 py-2.5 sm:px-5 lg:min-h-[4.75rem] lg:flex-row lg:items-center lg:justify-between lg:py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background shadow-[0_18px_36px_-28px_rgba(38,31,27,0.8)] lg:hidden">
                   SH
@@ -209,7 +212,7 @@ export function AppShell({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="-mx-3 flex min-w-0 items-center gap-2 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:flex-wrap sm:px-0">
                 {statusPills.map((pill) => (
                   <StatusPill key={pill.label} {...pill} />
                 ))}
@@ -237,6 +240,34 @@ export function AppShell({
           <main className={mainClassName}>{children}</main>
         </div>
       </div>
+      <nav
+        aria-label="Mobile primary navigation"
+        className="fixed bottom-0 left-0 right-0 z-50 border-t border-line/70 bg-panel-strong/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-18px_45px_-36px_rgba(0,0,0,0.8)] backdrop-blur-xl lg:hidden"
+      >
+        <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
+          {shellNavItems.map((item) => {
+            const active = item.key === optimisticActiveNav;
+            return (
+              <Link
+                key={item.key}
+                href={item.href}
+                title={item.label}
+                aria-label={item.label}
+                onClick={() => setOptimisticActiveNav(item.key)}
+                className={[
+                  "flex h-12 flex-col items-center justify-center gap-0.5 rounded-lg border text-[10px] font-semibold transition-colors",
+                  active
+                    ? "border-accent/45 bg-accent-soft text-accent"
+                    : "border-transparent text-muted hover:bg-panel hover:text-foreground",
+                ].join(" ")}
+              >
+                <ShellGlyph icon={item.icon} />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

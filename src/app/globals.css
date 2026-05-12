@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f0e6;
-  --foreground: #261f1b;
-  --panel: rgba(255, 250, 242, 0.78);
-  --panel-strong: rgba(255, 250, 242, 0.94);
-  --muted: #76695d;
-  --line: rgba(78, 61, 45, 0.18);
-  --accent: #c65f3d;
-  --accent-soft: rgba(198, 95, 61, 0.13);
-  --success: #2f7a61;
-  --success-soft: rgba(47, 122, 97, 0.13);
-  --warning: #9b6a26;
-  --warning-soft: rgba(155, 106, 38, 0.14);
-  --danger: #a64233;
-  --danger-soft: rgba(166, 66, 51, 0.13);
-  --info: #3f6386;
-  --info-soft: rgba(63, 99, 134, 0.13);
+  --background: #101312;
+  --foreground: #f4f1ea;
+  --panel: rgba(24, 29, 28, 0.82);
+  --panel-strong: rgba(30, 36, 34, 0.96);
+  --muted: #aeb8b3;
+  --line: rgba(222, 232, 226, 0.15);
+  --accent: #d7b56d;
+  --accent-soft: rgba(215, 181, 109, 0.16);
+  --success: #75c7a2;
+  --success-soft: rgba(117, 199, 162, 0.14);
+  --warning: #e1b765;
+  --warning-soft: rgba(225, 183, 101, 0.15);
+  --danger: #ee7d70;
+  --danger-soft: rgba(238, 125, 112, 0.16);
+  --info: #8fb9d8;
+  --info-soft: rgba(143, 185, 216, 0.15);
   --app-font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "PingFang SC",
     "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei",
@@ -30,22 +30,22 @@
 }
 
 html.dark {
-  --background: #19130f;
-  --foreground: #f3e9dc;
-  --panel: rgba(37, 29, 24, 0.86);
-  --panel-strong: rgba(45, 35, 29, 0.94);
-  --muted: #bbaea0;
-  --line: rgba(235, 217, 196, 0.15);
-  --accent: #e07a55;
-  --accent-soft: rgba(224, 122, 85, 0.18);
-  --success: #65b695;
-  --success-soft: rgba(101, 182, 149, 0.16);
-  --warning: #d1a354;
-  --warning-soft: rgba(209, 163, 84, 0.16);
-  --danger: #e06d5a;
-  --danger-soft: rgba(224, 109, 90, 0.17);
-  --info: #86a6c5;
-  --info-soft: rgba(134, 166, 197, 0.18);
+  --background: #0c0f0e;
+  --foreground: #f5f2eb;
+  --panel: rgba(19, 23, 22, 0.88);
+  --panel-strong: rgba(25, 30, 29, 0.97);
+  --muted: #aeb8b3;
+  --line: rgba(226, 235, 230, 0.14);
+  --accent: #e0be76;
+  --accent-soft: rgba(224, 190, 118, 0.17);
+  --success: #7ed0aa;
+  --success-soft: rgba(126, 208, 170, 0.15);
+  --warning: #e7bf71;
+  --warning-soft: rgba(231, 191, 113, 0.15);
+  --danger: #f08779;
+  --danger-soft: rgba(240, 135, 121, 0.16);
+  --info: #95c0df;
+  --info-soft: rgba(149, 192, 223, 0.15);
 }
 
 @theme inline {
@@ -87,7 +87,7 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background: var(--background);
-  background-image: linear-gradient(180deg, #fbf6ee 0%, #f7f0e6 52%, #efe3d4 100%);
+  background-image: none;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01", "ss03", "kern";
@@ -111,7 +111,7 @@ textarea,
 
 html.dark body {
   background: var(--background);
-  background-image: linear-gradient(180deg, #241a14 0%, #19130f 56%, #100c09 100%);
+  background-image: none;
 }
 
 a {
