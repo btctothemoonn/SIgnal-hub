@@ -11,6 +11,7 @@ import type {
   AlphaResearchSector,
   AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
+import { packChartLabelPositions } from "@/lib/chart-label-layout";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
 
 type StocksPerformanceChartProps = {
@@ -197,6 +198,22 @@ export function StocksPerformanceChart({
       width;
   const toY = (changePct: number) =>
     plot.bottom - ((changePct - yMin) / valueSpan) * height;
+  const labelYByTicker = packChartLabelPositions(
+    series.flatMap((item) => {
+      const labelPoint = [...item.points].reverse().find((point) => {
+        const index = axisIndexForCapturedAt(point.capturedAt);
+        return index >= visibleStartIndex && index <= visibleEndIndex;
+      });
+      return labelPoint
+        ? [{ id: item.ticker, y: toY(labelPoint.changePct) }]
+        : [];
+    }),
+    {
+      minY: plot.top + 10,
+      maxY: plot.bottom - 10,
+      minGap: 22,
+    },
+  );
   const setCurrentZoomRange = useCallback(
     (nextRange: ZoomRange | ((range: ZoomRange) => ZoomRange)) => {
       setZoomState((state) => {
@@ -438,7 +455,9 @@ export function StocksPerformanceChart({
               });
               const latestX = labelPoint ? toX(labelPoint.capturedAt) : plot.left;
               const latestY = labelPoint ? toY(labelPoint.changePct) : plot.bottom;
-              const labelY = Math.max(plot.top + 10, Math.min(plot.bottom - 10, latestY));
+              const labelY =
+                labelYByTicker[item.ticker] ??
+                Math.max(plot.top + 10, Math.min(plot.bottom - 10, latestY));
               return (
                 <g key={item.ticker}>
                   <path
