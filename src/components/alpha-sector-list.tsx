@@ -119,7 +119,7 @@ export function AlphaSectorList({
                     type="button"
                     onClick={() => onSelectTicker(stock.ticker)}
                     className={[
-                      "grid w-full grid-cols-[4.25rem_minmax(0,1fr)_5.75rem] items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
+                      "grid w-full grid-cols-[3.75rem_minmax(8rem,1fr)_5.25rem] items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
                       selected
                         ? "border-accent/45 bg-accent-soft shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
                         : "border-line/60 bg-panel-strong/70 hover:border-line hover:bg-panel-strong",
@@ -133,7 +133,13 @@ export function AlphaSectorList({
                         className="block truncate text-xs font-medium text-foreground"
                         title={`${stock.companyNameZh} · ${stock.companyName}`}
                       >
-                        {stock.companyNameZh} · {stock.companyName}
+                        {stock.companyNameZh}
+                      </span>
+                      <span
+                        className="mt-0.5 block truncate text-[11px] font-medium text-muted"
+                        title={stock.companyName}
+                      >
+                        {stock.companyName}
                       </span>
                       <span className="mt-1 flex min-w-0 flex-wrap gap-1">
                         {stock.businessTags.slice(0, 2).map((tag) => (
