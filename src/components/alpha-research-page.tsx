@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlphaResearchPool } from "@/components/alpha-research-pool";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
-import { StocksPerformanceChart } from "@/components/stocks-performance-chart";
+import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import {
   ALPHA_RESEARCH_DEFAULT_TICKER,
   ALPHA_RESEARCH_SECTORS,
@@ -438,33 +437,28 @@ export function AlphaResearchPage() {
       </section>
 
       {activeTab === "research" ? (
-        <>
-          <StocksPerformanceChart
-            snapshot={performanceSnapshot}
-            stocks={stocks}
-            tickers={performanceTickers}
-            sectors={ALPHA_RESEARCH_SECTORS}
-            activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
-            onSelectSector={(sectorId) => {
-              const sector = ALPHA_RESEARCH_SECTORS.find(
-                (item) => item.id === sectorId,
-              );
-              if (!sector) {
-                return;
-              }
-              setSelectedTicker(sector.tickers[0]);
-            }}
-            loading={performanceSnapshot === null && performanceError === null}
-          />
-          <AlphaResearchPool
-            stocks={stocks}
-            selectedStock={selectedStock}
-            selectedTicker={selectedTicker}
-            onSelectTicker={setSelectedTicker}
-            marketDataLabel={marketDataLabel}
-            marketDataLoading={marketDataLoading}
-          />
-        </>
+        <StocksResearchLayout
+          performanceSnapshot={performanceSnapshot}
+          stocks={stocks}
+          selectedStock={selectedStock}
+          selectedTicker={selectedTicker}
+          performanceTickers={performanceTickers}
+          sectors={ALPHA_RESEARCH_SECTORS}
+          activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
+          onSelectSector={(sectorId) => {
+            const sector = ALPHA_RESEARCH_SECTORS.find(
+              (item) => item.id === sectorId,
+            );
+            if (!sector) {
+              return;
+            }
+            setSelectedTicker(sector.tickers[0]);
+          }}
+          onSelectTicker={setSelectedTicker}
+          marketDataLabel={marketDataLabel}
+          marketDataLoading={marketDataLoading}
+          performanceLoading={performanceSnapshot === null && performanceError === null}
+        />
       ) : (
         <AlphaSummaryCard
           audience="stocks"

@@ -21,6 +21,7 @@ type StocksPerformanceChartProps = {
   activeSectorId: string;
   onSelectSector: (sectorId: string) => void;
   loading: boolean;
+  compact?: boolean;
 };
 
 type ZoomRange = {
@@ -131,6 +132,7 @@ export function StocksPerformanceChart({
   activeSectorId,
   onSelectSector,
   loading,
+  compact = false,
 }: StocksPerformanceChartProps) {
   const [zoomState, setZoomState] = useState<ZoomState>({
     key: "",
@@ -173,7 +175,11 @@ export function StocksPerformanceChart({
   const yPad = Math.max(2, (maxChange - minChange) * 0.18);
   const yMin = minChange - yPad;
   const yMax = maxChange + yPad;
-  const plot = { left: 42, right: 604, top: 28, bottom: 222 };
+  const viewBoxHeight = compact ? 220 : 260;
+  const plot = compact
+    ? { left: 42, right: 604, top: 24, bottom: 184 }
+    : { left: 42, right: 604, top: 28, bottom: 222 };
+  const axisLabelY = compact ? 204 : 244;
   const width = plot.right - plot.left;
   const height = plot.bottom - plot.top;
   const axisSpan = visibleEndIndex - visibleStartIndex || 1;
@@ -343,7 +349,12 @@ export function StocksPerformanceChart({
 
       <div className="relative">
         {!hasData ? (
-          <div className="flex min-h-[17rem] items-center justify-center px-6 text-center text-sm text-slate-300">
+          <div
+            className={[
+              "flex items-center justify-center px-6 text-center text-sm text-slate-300",
+              compact ? "min-h-[14rem]" : "min-h-[17rem]",
+            ].join(" ")}
+          >
             {loading
               ? "正在读取本地行情缓存..."
               : "等待下一次行情刷新写入缓存后开始画线。"}
@@ -351,7 +362,7 @@ export function StocksPerformanceChart({
         ) : (
           <svg
             ref={chartSvgRef}
-            viewBox="0 0 720 260"
+            viewBox={compact ? "0 0 720 220" : "0 0 720 260"}
             role="img"
             aria-label="今日股票相对涨跌幅对比图"
             onPointerDown={handlePointerDown}
@@ -361,7 +372,7 @@ export function StocksPerformanceChart({
             onDoubleClick={resetZoom}
             className="h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing"
           >
-            <rect x="0" y="0" width="720" height="260" fill="#10141f" />
+            <rect x="0" y="0" width="720" height={viewBoxHeight} fill="#10141f" />
             <defs>
               <clipPath id="stocks-performance-chart-plot">
                 <rect
@@ -479,7 +490,7 @@ export function StocksPerformanceChart({
                 </g>
               );
             })}
-            <text x={plot.left} y={244} fill="#cbd5e1" fontSize="10">
+            <text x={plot.left} y={axisLabelY} fill="#cbd5e1" fontSize="10">
               {formatAxisTime(
                 new Date(
                   axisTimes[
@@ -492,7 +503,7 @@ export function StocksPerformanceChart({
                 hasMultipleMarketDates,
               )}
             </text>
-            <text x={plot.right - 70} y={244} fill="#cbd5e1" fontSize="10">
+            <text x={plot.right - 70} y={axisLabelY} fill="#cbd5e1" fontSize="10">
               {formatAxisTime(
                 new Date(
                   axisTimes[
