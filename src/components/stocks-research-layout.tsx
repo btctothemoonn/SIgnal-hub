@@ -93,6 +93,7 @@ export function StocksResearchLayout({
       onSelectSector={onSelectSector}
       loading={performanceLoading}
       compact
+      labelMode="ranked-list"
     />
   );
   const pool = (

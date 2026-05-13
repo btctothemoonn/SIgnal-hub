@@ -23,6 +23,7 @@ type StocksPerformanceChartProps = {
   onSelectSector: (sectorId: string) => void;
   loading: boolean;
   compact?: boolean;
+  labelMode?: "inline" | "ranked-list";
 };
 
 type ZoomRange = {
@@ -134,6 +135,7 @@ export function StocksPerformanceChart({
   onSelectSector,
   loading,
   compact = false,
+  labelMode = "inline",
 }: StocksPerformanceChartProps) {
   const [zoomState, setZoomState] = useState<ZoomState>({
     key: "",
@@ -176,10 +178,12 @@ export function StocksPerformanceChart({
   const yPad = Math.max(2, (maxChange - minChange) * 0.18);
   const yMin = minChange - yPad;
   const yMax = maxChange + yPad;
+  const usesRankedList = labelMode === "ranked-list";
   const viewBoxHeight = compact ? 220 : 260;
+  const plotRight = usesRankedList ? 662 : 604;
   const plot = compact
-    ? { left: 42, right: 604, top: 24, bottom: 184 }
-    : { left: 42, right: 604, top: 28, bottom: 222 };
+    ? { left: 42, right: plotRight, top: 24, bottom: 184 }
+    : { left: 42, right: plotRight, top: 28, bottom: 222 };
   const axisLabelY = compact ? 204 : 244;
   const width = plot.right - plot.left;
   const height = plot.bottom - plot.top;
@@ -214,6 +218,25 @@ export function StocksPerformanceChart({
       minGap: 22,
     },
   );
+  const seriesLabelItems = series
+    .flatMap((item, index) => {
+      const labelPoint = [...item.points].reverse().find((point) => {
+        const index = axisIndexForCapturedAt(point.capturedAt);
+        return index >= visibleStartIndex && index <= visibleEndIndex;
+      });
+
+      return labelPoint
+        ? [
+            {
+              ticker: item.ticker,
+              color: palette[index % palette.length],
+              changePct: labelPoint.changePct,
+              companyName: stockNames.get(item.ticker) ?? item.ticker,
+            },
+          ]
+        : [];
+    })
+    .sort((a, b) => b.changePct - a.changePct);
   const setCurrentZoomRange = useCallback(
     (nextRange: ZoomRange | ((range: ZoomRange) => ZoomRange)) => {
       setZoomState((state) => {
@@ -377,6 +400,13 @@ export function StocksPerformanceChart({
               : "等待下一次行情刷新写入缓存后开始画线。"}
           </div>
         ) : (
+          <div
+            className={
+              usesRankedList
+                ? "grid min-w-0 gap-2 px-3 py-3 md:grid-cols-[minmax(0,1fr)_9.5rem] md:items-stretch"
+                : ""
+            }
+          >
           <svg
             ref={chartSvgRef}
             viewBox={compact ? "0 0 720 220" : "0 0 720 260"}
@@ -387,7 +417,12 @@ export function StocksPerformanceChart({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onDoubleClick={resetZoom}
-            className="h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing"
+            className={[
+              "h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing",
+              usesRankedList
+                ? "rounded-md border border-white/10 bg-[#10141f]"
+                : "",
+            ].join(" ")}
           >
             <rect x="0" y="0" width="720" height={viewBoxHeight} fill="#10141f" />
             <defs>
@@ -478,32 +513,36 @@ export function StocksPerformanceChart({
                         fill={color}
                         clipPath="url(#stocks-performance-chart-plot)"
                       />
-                      <line
-                        x1={latestX + 4}
-                        x2={plot.right + 24}
-                        y1={latestY}
-                        y2={labelY}
-                        stroke={color}
-                        strokeOpacity="0.45"
-                      />
-                      <rect
-                        x={plot.right + 24}
-                        y={labelY - 10}
-                        width="92"
-                        height="20"
-                        rx="2"
-                        fill={color}
-                        opacity="0.95"
-                      />
-                      <text
-                        x={plot.right + 30}
-                        y={labelY + 4}
-                        fill="#111827"
-                        fontSize="10"
-                        fontWeight="700"
-                      >
-                        {item.ticker} {formatSignedPercent(labelPoint.changePct)}
-                      </text>
+                      {labelMode === "inline" ? (
+                        <>
+                          <line
+                            x1={latestX + 4}
+                            x2={plot.right + 24}
+                            y1={latestY}
+                            y2={labelY}
+                            stroke={color}
+                            strokeOpacity="0.45"
+                          />
+                          <rect
+                            x={plot.right + 24}
+                            y={labelY - 10}
+                            width="92"
+                            height="20"
+                            rx="2"
+                            fill={color}
+                            opacity="0.95"
+                          />
+                          <text
+                            x={plot.right + 30}
+                            y={labelY + 4}
+                            fill="#111827"
+                            fontSize="10"
+                            fontWeight="700"
+                          >
+                            {item.ticker} {formatSignedPercent(labelPoint.changePct)}
+                          </text>
+                        </>
+                      ) : null}
                     </>
                   ) : null}
                 </g>
@@ -536,6 +575,39 @@ export function StocksPerformanceChart({
               )}
             </text>
           </svg>
+          {usesRankedList ? (
+            <aside
+              data-chart-rank-list
+              aria-label="股票涨跌榜"
+              className="grid grid-cols-2 gap-1.5 border-t border-white/10 pt-2 text-[11px] md:block md:border-l md:border-t-0 md:pl-3 md:pt-0"
+            >
+              {seriesLabelItems.map((item) => (
+                <div
+                  key={item.ticker}
+                  className="mb-1.5 flex min-w-0 items-center justify-between gap-2 border-l-2 bg-white/[0.03] px-2 py-1.5 text-slate-100 last:mb-0"
+                  style={{ borderColor: item.color }}
+                  title={`${item.ticker} ${item.companyName} ${formatSignedPercent(item.changePct)}`}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="truncate font-semibold">{item.ticker}</span>
+                  </span>
+                  <span
+                    className={[
+                      "shrink-0 font-bold tabular-nums",
+                      item.changePct >= 0 ? "text-emerald-200" : "text-rose-200",
+                    ].join(" ")}
+                  >
+                    {formatSignedPercent(item.changePct)}
+                  </span>
+                </div>
+              ))}
+            </aside>
+          ) : null}
+          </div>
         )}
       </div>
 

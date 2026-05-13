@@ -25,6 +25,7 @@ assert.match(layout, /<AlphaSectorList/);
 assert.match(layout, /<StocksPerformanceChart/);
 assert.match(layout, /<AlphaStockDetail/);
 assert.match(layout, /compact/);
+assert.match(layout, /labelMode="ranked-list"/);
 assert.match(page, /import \{ StocksResearchLayout \}/);
 assert.match(page, /<StocksResearchLayout/);
 assert.doesNotMatch(page, /<AlphaResearchPool/);
