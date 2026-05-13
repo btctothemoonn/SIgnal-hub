@@ -892,6 +892,22 @@ export async function fetchPatreonSubscriptionItems({
       creatorName: patreonCreatorName(env),
       maxPosts: positiveInt(env.STOCKS_PATREON_MAX_POSTS, 10, 25),
     });
+    if (items.length === 0 && fetchImpl === fetch && cacheMs > 0) {
+      const stale = readStaleExternalNewsResult({
+        env,
+        key: cacheKey,
+        now: Date.now(),
+      });
+      if (stale?.items.length) {
+        return {
+          items: stale.items,
+          errors: [
+            "Patreon: no subscription posts parsed",
+            `cache: using stale Patreon subscription cache (${stale.items.length} items)`,
+          ],
+        };
+      }
+    }
     const result = {
       items,
       errors: items.length > 0 ? [] : ["Patreon: no subscription posts parsed"],
@@ -906,6 +922,22 @@ export async function fetchPatreonSubscriptionItems({
     }
     return result;
   } catch (error) {
+    if (fetchImpl === fetch && cacheMs > 0) {
+      const stale = readStaleExternalNewsResult({
+        env,
+        key: cacheKey,
+        now: Date.now(),
+      });
+      if (stale?.items.length) {
+        return {
+          items: stale.items,
+          errors: [
+            `Patreon: ${errorMessage(error)}`,
+            `cache: using stale Patreon subscription cache (${stale.items.length} items)`,
+          ],
+        };
+      }
+    }
     return {
       items: [],
       errors: [`Patreon: ${errorMessage(error)}`],

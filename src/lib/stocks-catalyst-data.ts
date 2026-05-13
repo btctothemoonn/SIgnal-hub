@@ -461,8 +461,8 @@ function collectPatreonPostRecords(
   const type = stringValue(record.type).toLowerCase();
   const postHint =
     type.includes("post") ||
-    /patreon\.com\/posts\//i.test(link) ||
-    Boolean(firstDateFromRecord(record, PATREON_DATE_KEYS));
+    /(?:^|\/)posts\//i.test(link) ||
+    /patreon\.com\/posts\//i.test(link);
   if (title && postHint) records.push(record);
 
   for (const child of Object.values(value)) {

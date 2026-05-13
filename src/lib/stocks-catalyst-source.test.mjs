@@ -551,6 +551,47 @@ assert.equal(patreonOnlySnapshot.source, "live");
 assert.equal(patreonOnlySnapshot.provider, "subscription-research");
 assert.equal(patreonOnlySnapshot.catalysts.NVDA[0].sourceRole, "subscription");
 
+const patreonCachePath = join(
+  process.cwd(),
+  ".signal-hub",
+  `stocks-patreon-cache-test-${process.pid}.json`,
+);
+rmSync(patreonCachePath, { force: true });
+let patreonCacheCalls = 0;
+globalThis.fetch = async () => {
+  patreonCacheCalls += 1;
+  if (patreonCacheCalls === 1) {
+    return new Response(patreonHtml, { status: 200 });
+  }
+  return new Response("rate limit", { status: 429 });
+};
+
+try {
+  const patreonCacheEnv = {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: `https://www.patreon.com/c/bboczeng/posts?cache-test=${process.pid}`,
+    STOCKS_PATREON_COOKIE: "session_id=secret",
+    STOCKS_PATREON_CACHE_MS: "1",
+    STOCKS_NEWS_CACHE_PATH: patreonCachePath,
+    STOCKS_NEWS_STALE_CACHE_MS: "600000",
+  };
+  await fetchPatreonSubscriptionItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    env: patreonCacheEnv,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const patreonStale = await fetchPatreonSubscriptionItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    env: patreonCacheEnv,
+  });
+  assert.equal(patreonStale.items[0].source, "Patreon");
+  assert.ok(patreonStale.errors.some((error) => error.includes("stale Patreon")));
+  assert.equal(patreonCacheCalls, 2);
+} finally {
+  globalThis.fetch = originalFetch;
+  rmSync(patreonCachePath, { force: true });
+}
+
 const translatedSnapshot = await getStocksCatalystSnapshot({
   stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
   fetchImpl,
