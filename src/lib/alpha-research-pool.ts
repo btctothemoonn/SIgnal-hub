@@ -77,7 +77,7 @@ export type AlphaResearchCatalyst = {
   impact: "positive" | "neutral" | "negative";
   summary: string;
   source?: string;
-  sourceRole?: "external" | "supplemental" | "mock";
+  sourceRole?: "external" | "supplemental" | "subscription" | "mock";
   author?: string;
   link?: string;
 };

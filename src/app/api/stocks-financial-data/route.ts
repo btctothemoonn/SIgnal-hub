@@ -11,6 +11,7 @@ export async function GET() {
   const provider =
     configuredProvider === "mock" ||
     configuredProvider === "yahoo" ||
+    configuredProvider === "alpha-vantage" ||
     configuredProvider === "fmp"
       ? configuredProvider
       : undefined;

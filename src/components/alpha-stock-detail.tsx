@@ -5,7 +5,6 @@ import {
   getAlphaResearchSectorById,
   type AlphaCatalystType,
   type AlphaResearchEarningsStatus,
-  type AlphaResearchSession,
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
 
@@ -44,15 +43,6 @@ function earningsLabel(status: AlphaResearchEarningsStatus) {
   return labels[status];
 }
 
-function sessionLabel(session: AlphaResearchSession) {
-  const labels: Record<AlphaResearchSession, string> = {
-    "pre-market": "盘前",
-    regular: "盘中",
-    "after-hours": "盘后",
-  };
-  return labels[session];
-}
-
 function catalystLabel(type: AlphaCatalystType) {
   const labels: Record<AlphaCatalystType, string> = {
     earnings: "财报",
@@ -73,6 +63,12 @@ function impactLabel(impact: "positive" | "neutral" | "negative") {
     negative: "负向",
   };
   return labels[impact];
+}
+
+function impactTone(impact: "positive" | "neutral" | "negative") {
+  if (impact === "positive") return "text-success";
+  if (impact === "negative") return "text-danger";
+  return "text-muted";
 }
 
 function providerTraceLabel(
@@ -121,6 +117,30 @@ function BulletList({ items }: { items: string[] }) {
   );
 }
 
+function MetricTile({
+  label,
+  value,
+  note,
+  tone = "text-foreground",
+}: {
+  label: string;
+  value: ReactNode;
+  note: ReactNode;
+  tone?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-line/60 bg-background/35 p-3">
+      <p className="text-[11px] font-semibold text-muted">{label}</p>
+      <p className={`mt-2 min-w-0 break-words font-mono text-xl font-semibold ${tone}`}>
+        {value}
+      </p>
+      <p className="mt-1 min-w-0 break-words text-xs leading-5 text-muted">
+        {note}
+      </p>
+    </div>
+  );
+}
+
 export function AlphaStockDetail({
   stock,
   marketDataLabel,
@@ -141,8 +161,6 @@ export function AlphaStockDetail({
   const stockMarketIsLoading = marketDataLoading && !stockMarketIsLive;
   const stockCandlesAreLive =
     stock.market.source === "live" && stock.market.candlesSource === "live";
-  const stockPrePostIsLive =
-    stock.market.source === "live" && stock.market.prePostAvailable === true;
   const stockProviderTraceLabel = providerTraceLabel(stock.market.providerTrace);
   const stockMarketLabel = stockMarketIsLive
     ? (stock.market.dataQualityLabel ??
@@ -158,141 +176,103 @@ export function AlphaStockDetail({
     : stockMarketIsLoading
       ? "行情加载中"
       : "未获取实时价";
+  const visibleCatalysts = stock.catalysts.slice(0, 5);
+  const hiddenCatalysts = stock.catalysts.slice(5);
+  const businessTags = stock.businessTags.slice(0, 3);
+  const dataStatusLabel = stockMarketIsLive
+    ? (stock.market.dataQualityLabel ?? stockMarketLabel)
+    : stockPrePostLabel;
+  const dayChangeLabel = stockMarketIsLive
+    ? formatSignedPercent(stock.market.dayChangePct)
+    : "待获取";
+  const strengthLabel = stockCandlesAreLive
+    ? formatSignedPercent(stock.market.sevenDayChangePct)
+    : "K 线待补";
+  const strengthNote = stockCandlesAreLive
+    ? stock.market.relativeStrengthLabel
+    : "暂无可用 7 日走势";
+  const financialRows = [
+    ["营收", stock.financialSnapshot.revenue],
+    ["营收同比", stock.financialSnapshot.revenueYoY],
+    ["EPS", stock.financialSnapshot.eps],
+    ["毛利率", stock.financialSnapshot.grossMargin],
+    ["自由现金流", stock.financialSnapshot.freeCashFlow],
+    ["指引", stock.financialSnapshot.guidance],
+  ];
 
   return (
     <article className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <div className="flex flex-col gap-4 border-b border-line/60 pb-5 xl:flex-row xl:items-start xl:justify-between">
+      <div className="grid gap-5 border-b border-line/60 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:items-start">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[11px] font-semibold text-muted">研究结论</p>
+          <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
             <h2 className="font-mono text-2xl font-semibold text-foreground">
               {stock.ticker}
             </h2>
-            <span
-              className={[
-                "rounded-md px-2 py-1 font-mono text-sm font-semibold",
-                stockMarketIsLive
-                  ? "bg-success-soft text-success"
-                  : "bg-warning-soft text-warning",
-              ].join(" ")}
-            >
-              {stockPriceLabel}
+            <span className="text-lg font-semibold text-foreground">
+              {stock.companyNameZh}
             </span>
+            <span className="pb-0.5 text-xs font-medium text-muted">
+              {stock.companyName}
+            </span>
+          </div>
+          <p className="mt-3 max-w-5xl text-sm leading-6 text-foreground">
+            {stock.summary}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
             <span className="rounded-md bg-info-soft px-2 py-1 text-xs font-semibold text-info">
               {sector?.name ?? stock.sectorId}
             </span>
-            <span className="rounded-md bg-accent-soft px-2 py-1 text-xs font-semibold text-accent">
-              Priority {stock.priority}
+            <span className="rounded-md bg-warning-soft px-2 py-1 text-xs font-semibold text-warning">
+              财报{earningsLabel(stock.market.earningsStatus)}
             </span>
-            <span
-              className={[
-                "rounded-md border px-2 py-1 text-xs font-semibold",
-                stockMarketIsLive
-                  ? "border-success/30 bg-success-soft text-success"
-                  : "border-warning/30 bg-warning-soft text-warning",
-              ].join(" ")}
-              title={stockProviderTraceLabel || stockMarketLabel}
-            >
-              {stockMarketLabel}
-            </span>
+            {businessTags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-[11px] font-medium text-muted"
+              >
+                {tag}
+              </span>
+            ))}
           </div>
-          <p className="mt-1 text-sm font-medium text-foreground">
-            {stock.companyNameZh}
-          </p>
-          <p className="mt-0.5 text-xs font-medium text-muted">
-            {stock.companyName}
-          </p>
-          <p className="mt-2 max-w-5xl text-sm leading-6 text-muted">
-            {stock.summary}
-          </p>
-          {stockMarketIsLive ? (
-            <p className="mt-2 max-w-5xl text-xs leading-5 text-muted">
-              数据链路：{stock.market.dataQualityLabel ?? stockMarketLabel}
-              {stockProviderTraceLabel ? ` · ${stockProviderTraceLabel}` : ""}
+          <details className="mt-3 max-w-5xl text-xs text-muted">
+            <summary className="cursor-pointer select-none hover:text-foreground">
+              数据状态
+            </summary>
+            <p className="mt-2 leading-5">
+              {dataStatusLabel}
+              {stockProviderTraceLabel ? ` · 链路：${stockProviderTraceLabel}` : ""}
             </p>
-          ) : null}
+          </details>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {stock.businessTags.map((tag) => (
-            <span
-              key={tag}
-              className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-[11px] font-medium text-muted"
-            >
-              {tag}
-            </span>
-          ))}
+
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+          <MetricTile
+            label="价格 / 今日"
+            value={stockPriceLabel}
+            note={dayChangeLabel}
+            tone={stockMarketIsLive ? changeTone(stock.market.dayChangePct) : "text-muted"}
+          />
+          <MetricTile
+            label="7 日强弱"
+            value={strengthLabel}
+            note={strengthNote}
+            tone={stockCandlesAreLive ? changeTone(stock.market.sevenDayChangePct) : "text-muted"}
+          />
+          <MetricTile
+            label="财报窗口"
+            value={earningsLabel(stock.market.earningsStatus)}
+            note={stock.financialSnapshot.nextEarningsDate}
+            tone="text-warning"
+          />
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
-        <div className="rounded-lg border border-line/60 bg-panel-strong/80 p-4">
-          <p className="text-[11px] font-semibold uppercase text-muted">
-            {stockMarketIsLive ? "当前价 / 当日" : "基线价 / 非实时"}
-          </p>
-          <p
-            className={`mt-2 font-mono text-2xl font-semibold ${changeTone(
-              stock.market.dayChangePct,
-            )}`}
-          >
-            {stockMarketIsLive
-              ? formatSignedPercent(stock.market.dayChangePct)
-              : "n/a"}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Last {stockPriceLabel}
-          </p>
-        </div>
-        <div className="rounded-lg border border-line/60 bg-panel-strong/80 p-4">
-          <p className="text-[11px] font-semibold uppercase text-muted">
-            盘前 / 盘后
-          </p>
-          <p
-            className={`mt-2 font-mono text-2xl font-semibold ${changeTone(
-              stock.market.prePostChangePct,
-            )}`}
-          >
-            {stockPrePostIsLive
-              ? formatSignedPercent(stock.market.prePostChangePct)
-              : "n/a"}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            {stockPrePostIsLive
-              ? sessionLabel(stock.market.marketSession)
-              : stockPrePostLabel}
-          </p>
-        </div>
-        <div className="rounded-lg border border-line/60 bg-panel-strong/80 p-4">
-          <p className="text-[11px] font-semibold uppercase text-muted">
-            最近 7 日
-          </p>
-          <p
-            className={`mt-2 font-mono text-2xl font-semibold ${changeTone(
-              stock.market.sevenDayChangePct,
-            )}`}
-          >
-            {stockCandlesAreLive
-              ? formatSignedPercent(stock.market.sevenDayChangePct)
-              : "n/a"}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            {stockCandlesAreLive ? stock.market.relativeStrengthLabel : "K 线未获取"}
-          </p>
-        </div>
-        <div className="rounded-lg border border-line/60 bg-panel-strong/80 p-4">
-          <p className="text-[11px] font-semibold uppercase text-muted">财报</p>
-          <p className="mt-2 text-lg font-semibold text-warning">
-            {earningsLabel(stock.market.earningsStatus)}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            {stock.financialSnapshot.nextEarningsDate}
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(26rem,0.88fr)]">
+      <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
         <div className="space-y-5">
-          <Section title="催化事件 / 新闻驱动">
+          <Section title="今日催化">
             <div className="space-y-3">
-              {stock.catalysts.map((catalyst) => (
+              {visibleCatalysts.map((catalyst) => (
                 <article
                   key={`${catalyst.date}-${catalyst.title}`}
                   className="rounded-lg border border-line/60 bg-panel px-4 py-3"
@@ -301,11 +281,11 @@ export function AlphaStockDetail({
                     <span className="rounded bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info">
                       {catalystLabel(catalyst.type)}
                     </span>
-                    <span className="text-[11px] text-muted">
-                      {catalyst.date}
+                    <span className={`text-[11px] font-semibold ${impactTone(catalyst.impact)}`}>
+                      {impactLabel(catalyst.impact)}
                     </span>
                     <span className="text-[11px] text-muted">
-                      {impactLabel(catalyst.impact)}
+                      {catalyst.date}
                     </span>
                     {catalyst.source ? (
                       <span className="text-[11px] text-muted">
@@ -334,44 +314,33 @@ export function AlphaStockDetail({
                 </article>
               ))}
             </div>
-          </Section>
-
-          <Section title="财报解读">
-            <BulletList items={stock.financialReadthrough} />
-          </Section>
-
-          <Section title="研究要点">
-            <BulletList items={stock.thesis} />
+            {hiddenCatalysts.length > 0 ? (
+              <details className="mt-3 rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm">
+                <summary className="cursor-pointer select-none font-semibold text-muted hover:text-foreground">
+                  更多普通新闻 {hiddenCatalysts.length} 条
+                </summary>
+                <div className="mt-3 space-y-2">
+                  {hiddenCatalysts.map((catalyst) => (
+                    <p
+                      key={`${catalyst.date}-${catalyst.title}`}
+                      className="break-words text-sm leading-6 text-muted"
+                    >
+                      {catalyst.date} · {catalyst.title}
+                    </p>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </Section>
         </div>
 
         <div className="space-y-5">
-          <Section title="财报速览">
+          <Section title="财报复盘">
             <div className="grid gap-2 text-sm">
-              {[
-                ["营收", stock.financialSnapshot.revenue],
-                ["营收同比", stock.financialSnapshot.revenueYoY],
-                ["EPS", stock.financialSnapshot.eps],
-                ["毛利率", stock.financialSnapshot.grossMargin],
-                ["自由现金流", stock.financialSnapshot.freeCashFlow],
-                ["指引", stock.financialSnapshot.guidance],
-                ...(stock.financialSnapshot.periodLabel
-                  ? [["期间", stock.financialSnapshot.periodLabel]]
-                  : []),
-                ...(stock.financialSnapshot.source
-                  ? [
-                      [
-                        "来源",
-                        stock.financialSnapshot.source === "live"
-                          ? "Yahoo"
-                          : "Mock",
-                      ],
-                    ]
-                  : []),
-              ].map(([label, value]) => (
+              {financialRows.map(([label, value]) => (
                 <div
                   key={label}
-                  className="grid grid-cols-[6.25rem_minmax(0,1fr)] gap-2 rounded-md bg-background/45 px-3 py-2"
+                  className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 rounded-md bg-background/45 px-3 py-2"
                 >
                   <span className="text-muted">{label}</span>
                   <span className="min-w-0 break-words font-medium text-foreground">
@@ -382,17 +351,43 @@ export function AlphaStockDetail({
             </div>
           </Section>
 
-          <Section title="观察点">
-            <BulletList items={stock.watchPoints} />
+          <Section title="主线验证">
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-[11px] font-semibold text-muted">
+                  财报 / 经营
+                </p>
+                <BulletList items={stock.financialReadthrough} />
+              </div>
+              <div>
+                <p className="mb-2 text-[11px] font-semibold text-muted">
+                  产业主线
+                </p>
+                <BulletList items={stock.thesis} />
+              </div>
+            </div>
           </Section>
 
-          <Section title="风险">
-            <div className="space-y-2">
-              {stock.risks.map((risk) => (
-                <p key={risk} className="text-sm leading-6 text-warning">
-                  {risk}
+          <Section title="接下来盯什么">
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-[11px] font-semibold text-muted">
+                  验证点
                 </p>
-              ))}
+                <BulletList items={stock.watchPoints} />
+              </div>
+              <div>
+                <p className="mb-2 text-[11px] font-semibold text-muted">
+                  反证 / 风险
+                </p>
+                <div className="space-y-2">
+                  {stock.risks.map((risk) => (
+                    <p key={risk} className="text-sm leading-6 text-warning">
+                      {risk}
+                    </p>
+                  ))}
+                </div>
+              </div>
             </div>
           </Section>
         </div>

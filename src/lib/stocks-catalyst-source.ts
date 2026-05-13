@@ -6,6 +6,9 @@ import {
   buildStocksCatalystSnapshotFromItems,
   parseAlphaVantageNewsPayload,
   parseFmpStockNewsPayload,
+  parseFinnhubCompanyNewsPayload,
+  parseGoogleNewsRss,
+  parsePatreonPostsPage,
   parsePolygonNewsPayload,
   parseYahooFinanceRss,
   type StocksCatalystSnapshot,
@@ -29,8 +32,10 @@ type ExternalNewsProvider =
   | "auto"
   | "polygon"
   | "fmp"
+  | "finnhub"
   | "alpha-vantage"
   | "yahoo"
+  | "google-news"
   | "mock";
 type ExternalCatalystResult = {
   items: StocksCatalystSourceItem[];
@@ -82,12 +87,16 @@ function normalizeExternalNewsProvider(
   if (
     value === "polygon" ||
     value === "fmp" ||
+    value === "finnhub" ||
     value === "alpha-vantage" ||
     value === "alphavantage" ||
     value === "yahoo" ||
+    value === "google-news" ||
+    value === "googlenews" ||
     value === "mock"
   ) {
     if (value === "alphavantage") return "alpha-vantage";
+    if (value === "googlenews") return "google-news";
     return value;
   }
   return "auto";
@@ -115,8 +124,47 @@ function alphaVantageApiKey(env: EnvLike) {
   );
 }
 
+function finnhubApiKey(env: EnvLike) {
+  return env.STOCKS_FINNHUB_API_KEY?.trim() || env.FINNHUB_API_KEY?.trim() || "";
+}
+
+function shouldUseFmpNewsInAuto(env: EnvLike) {
+  return env.STOCKS_FMP_NEWS_ENABLED?.trim().toLowerCase() === "true";
+}
+
 function shouldIncludeLocalSignals(env: EnvLike) {
   return env.STOCKS_INCLUDE_LOCAL_SIGNALS?.trim().toLowerCase() !== "false";
+}
+
+function shouldIncludePatreonSubscription(env: EnvLike) {
+  return (
+    env.STOCKS_PATREON_ENABLED?.trim().toLowerCase() === "true" ||
+    env.STOCKS_SUBSCRIPTION_RESEARCH_ENABLED?.trim().toLowerCase() === "true"
+  );
+}
+
+function patreonPostsUrl(env: EnvLike) {
+  return (
+    env.STOCKS_PATREON_URL?.trim() ||
+    env.PATREON_POSTS_URL?.trim() ||
+    ""
+  );
+}
+
+function patreonCookie(env: EnvLike) {
+  return (
+    env.STOCKS_PATREON_COOKIE?.trim() ||
+    env.PATREON_COOKIE?.trim() ||
+    ""
+  );
+}
+
+function patreonCreatorName(env: EnvLike) {
+  const configured = env.STOCKS_PATREON_CREATOR_NAME?.trim();
+  if (configured) return configured;
+  const url = patreonPostsUrl(env);
+  const match = url.match(/patreon\.com\/(?:c\/)?([^/?#]+)/i);
+  return match?.[1] || "Patreon";
 }
 
 function sortedStocksByPriority(stocks: AlphaResearchStock[]) {
@@ -151,6 +199,14 @@ function externalNewsCacheMs(env: EnvLike) {
   return nonNegativeInt(env.STOCKS_NEWS_CACHE_MS, 10 * 60 * 1000, 60 * 60 * 1000);
 }
 
+function externalNewsStaleCacheMs(env: EnvLike) {
+  return nonNegativeInt(
+    env.STOCKS_NEWS_STALE_CACHE_MS,
+    24 * 60 * 60 * 1000,
+    7 * 24 * 60 * 60 * 1000,
+  );
+}
+
 function externalNewsCacheKey({
   stocks,
   provider,
@@ -172,7 +228,11 @@ function externalNewsCacheKey({
     env.STOCKS_ALPHA_VANTAGE_BATCH_SIZE ?? "",
     env.STOCKS_ALPHA_VANTAGE_LIMIT ?? "",
     env.STOCKS_ALPHA_VANTAGE_REQUEST_DELAY_MS ?? "",
+    env.STOCKS_FINNHUB_NEWS_MAX_TICKERS ?? "",
+    env.STOCKS_FINNHUB_NEWS_LOOKBACK_DAYS ?? "",
+    env.STOCKS_GOOGLE_NEWS_MAX_TICKERS ?? "",
     env.STOCKS_YAHOO_NEWS_MAX_TICKERS ?? "",
+    env.STOCKS_FMP_NEWS_ENABLED ?? "",
     env.STOCKS_POLYGON_BASE_URL ?? env.STOCKS_MASSIVE_BASE_URL ?? "",
     "translation-v4",
     env.STOCKS_NEWS_TRANSLATE_ENABLED ?? "",
@@ -184,6 +244,30 @@ function externalNewsCacheKey({
     env.AI_TRANSLATION_TIMEOUT_MS ?? "",
     env.AI_TRANSLATION_BASE_URL ?? env.AI_SUMMARY_BASE_URL ?? "",
     env.AI_TRANSLATION_MODEL ?? env.AI_SUMMARY_MODEL ?? "",
+  ].join("|");
+}
+
+function patreonCacheMs(env: EnvLike) {
+  return nonNegativeInt(
+    env.STOCKS_PATREON_CACHE_MS,
+    30 * 60 * 1000,
+    24 * 60 * 60 * 1000,
+  );
+}
+
+function patreonCacheKey({
+  stocks,
+  env,
+}: {
+  stocks: AlphaResearchStock[];
+  env: EnvLike;
+}) {
+  return [
+    "patreon-v1",
+    stocks.map((stock) => `${stock.ticker}:${stock.priority}`).join(","),
+    patreonPostsUrl(env),
+    env.STOCKS_PATREON_CREATOR_NAME ?? "",
+    env.STOCKS_PATREON_MAX_POSTS ?? "",
   ].join("|");
 }
 
@@ -239,10 +323,44 @@ function readCachedExternalNewsResult({
   return null;
 }
 
+function readStaleExternalNewsResult({
+  env,
+  key,
+  now,
+}: {
+  env: EnvLike;
+  key: string;
+  now: number;
+}) {
+  const staleMs = externalNewsStaleCacheMs(env);
+  if (staleMs <= 0) return null;
+  const memoryEntry = externalCatalystCache.get(key);
+  if (memoryEntry && memoryEntry.expiresAt + staleMs > now) {
+    return memoryEntry.result;
+  }
+  const fileEntry = readExternalNewsFileCache(env)[key];
+  if (fileEntry && fileEntry.expiresAt + staleMs > now) {
+    externalCatalystCache.set(key, fileEntry);
+    return fileEntry.result;
+  }
+  return null;
+}
+
 function yahooRssUrl(ticker: string) {
   return `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(
     ticker,
   )}&region=US&lang=en-US`;
+}
+
+function googleNewsRssUrl(stock: AlphaResearchStock) {
+  const query = `${stock.ticker} stock OR ${stock.companyName}`;
+  const params = new URLSearchParams({
+    q: query,
+    hl: "en-US",
+    gl: "US",
+    ceid: "US:en",
+  });
+  return `https://news.google.com/rss/search?${params.toString()}`;
 }
 
 function polygonNewsUrl(ticker: string, apiKey: string, limit: number) {
@@ -299,6 +417,32 @@ function alphaVantageNewsUrl(tickers: string[], apiKey: string, limit: number) {
     apikey: apiKey,
   });
   return `https://www.alphavantage.co/query?${params.toString()}`;
+}
+
+function finnhubCompanyNewsUrl({
+  ticker,
+  apiKey,
+  env,
+}: {
+  ticker: string;
+  apiKey: string;
+  env: EnvLike;
+}) {
+  const lookbackDays = positiveInt(
+    env.STOCKS_FINNHUB_NEWS_LOOKBACK_DAYS,
+    7,
+    30,
+  );
+  const to = new Date();
+  const from = new Date(to.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+  const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+  const params = new URLSearchParams({
+    symbol: ticker,
+    from: formatDate(from),
+    to: formatDate(to),
+    token: apiKey,
+  });
+  return `https://finnhub.io/api/v1/company-news?${params.toString()}`;
 }
 
 function shouldFetchFmpByTicker(env: EnvLike) {
@@ -558,7 +702,7 @@ async function fetchAlphaVantageCatalystItems({
     env.STOCKS_ALPHA_VANTAGE_MAX_TICKERS,
     5,
   );
-  const batchSize = positiveInt(env.STOCKS_ALPHA_VANTAGE_BATCH_SIZE, 1, 10);
+  const batchSize = positiveInt(env.STOCKS_ALPHA_VANTAGE_BATCH_SIZE, 5, 10);
   const limit = positiveInt(env.STOCKS_ALPHA_VANTAGE_LIMIT, 50, 1000);
   const requestDelay =
     fetchImpl === fetch
@@ -593,6 +737,46 @@ async function fetchAlphaVantageCatalystItems({
   return items.flat();
 }
 
+async function fetchFinnhubCatalystItems({
+  stocks,
+  fetchImpl,
+  env,
+}: {
+  stocks: AlphaResearchStock[];
+  fetchImpl: FetchLike;
+  env: EnvLike;
+}) {
+  const apiKey = finnhubApiKey(env);
+  if (!apiKey) throw new Error("Finnhub API key is not configured");
+  const limit = positiveInt(env.STOCKS_NEWS_ITEMS_PER_TICKER, 2, 5);
+  const providerStocks = selectProviderStocks(
+    stocks.filter((stock) => !stock.ticker.includes(".")),
+    env.STOCKS_FINNHUB_NEWS_MAX_TICKERS,
+    8,
+  );
+  if (providerStocks.length === 0) return [];
+  const items = await Promise.all(
+    providerStocks.map(async (stock) => {
+      const response = await fetchImpl(
+        finnhubCompanyNewsUrl({
+          ticker: stock.ticker,
+          apiKey,
+          env,
+        }),
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(`Finnhub company news HTTP ${response.status}`);
+      }
+      return parseFinnhubCompanyNewsPayload(
+        await response.json(),
+        stock.ticker,
+      ).slice(0, limit);
+    }),
+  );
+  return items.flat();
+}
+
 async function fetchYahooCatalystItems({
   stocks,
   fetchImpl,
@@ -621,6 +805,112 @@ async function fetchYahooCatalystItems({
     }),
   );
   return items.flat();
+}
+
+async function fetchGoogleNewsCatalystItems({
+  stocks,
+  fetchImpl,
+  env,
+}: {
+  stocks: AlphaResearchStock[];
+  fetchImpl: FetchLike;
+  env: EnvLike;
+}) {
+  const limit = positiveInt(env.STOCKS_NEWS_ITEMS_PER_TICKER, 2, 5);
+  const providerStocks = selectProviderStocks(
+    stocks,
+    env.STOCKS_GOOGLE_NEWS_MAX_TICKERS,
+    8,
+  );
+  const items = await Promise.all(
+    providerStocks.map(async (stock) => {
+      const response = await fetchImpl(googleNewsRssUrl(stock), {
+        cache: "no-store",
+        headers: {
+          accept: "application/rss+xml,text/xml,*/*",
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Google News RSS HTTP ${response.status}`);
+      }
+      const xml = await response.text();
+      return parseGoogleNewsRss(xml, stock.ticker).slice(0, limit);
+    }),
+  );
+  return items.flat();
+}
+
+export async function fetchPatreonSubscriptionItems({
+  stocks,
+  fetchImpl = fetch,
+  env = process.env,
+}: {
+  stocks: AlphaResearchStock[];
+  fetchImpl?: FetchLike;
+  env?: EnvLike;
+}): Promise<ExternalCatalystResult> {
+  if (!shouldIncludePatreonSubscription(env)) return { items: [], errors: [] };
+
+  const url = patreonPostsUrl(env);
+  if (!url) {
+    return { items: [], errors: ["Patreon: STOCKS_PATREON_URL is not configured"] };
+  }
+  const cookie = patreonCookie(env);
+  if (!cookie) {
+    return { items: [], errors: ["Patreon: STOCKS_PATREON_COOKIE is not configured"] };
+  }
+
+  const cacheMs = patreonCacheMs(env);
+  const cacheKey = patreonCacheKey({ stocks, env });
+  if (fetchImpl === fetch && cacheMs > 0) {
+    const cached = readCachedExternalNewsResult({
+      env,
+      key: cacheKey,
+      now: Date.now(),
+    });
+    if (cached) return cached;
+  }
+
+  try {
+    const response = await fetchImpl(url, {
+      cache: "no-store",
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        cookie,
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Patreon posts HTTP ${response.status}`);
+    }
+    const items = parsePatreonPostsPage(await response.text(), {
+      sourceUrl: url,
+      creatorName: patreonCreatorName(env),
+      maxPosts: positiveInt(env.STOCKS_PATREON_MAX_POSTS, 10, 25),
+    });
+    const result = {
+      items,
+      errors: items.length > 0 ? [] : ["Patreon: no subscription posts parsed"],
+    };
+    if (fetchImpl === fetch && cacheMs > 0 && result.items.length > 0) {
+      const entry = {
+        expiresAt: Date.now() + cacheMs,
+        result,
+      };
+      externalCatalystCache.set(cacheKey, entry);
+      writeExternalNewsFileCache(env, cacheKey, entry);
+    }
+    return result;
+  } catch (error) {
+    return {
+      items: [],
+      errors: [`Patreon: ${errorMessage(error)}`],
+    };
+  }
 }
 
 export async function fetchExternalCatalystItems({
@@ -652,9 +942,11 @@ export async function fetchExternalCatalystItems({
     provider === "auto"
       ? ([
           ...(polygonApiKey(env) ? ["polygon"] : []),
-          ...(fmpApiKey(env) ? ["fmp"] : []),
+          ...(finnhubApiKey(env) ? ["finnhub"] : []),
           ...(alphaVantageApiKey(env) ? ["alpha-vantage"] : []),
           "yahoo",
+          "google-news",
+          ...(fmpApiKey(env) && shouldUseFmpNewsInAuto(env) ? ["fmp"] : []),
         ] as ExternalNewsProvider[])
       : [provider];
   const errors: string[] = [];
@@ -667,9 +959,13 @@ export async function fetchExternalCatalystItems({
           ? await fetchPolygonCatalystItems({ stocks, fetchImpl, env })
           : candidate === "fmp"
             ? await fetchFmpCatalystItems({ stocks, fetchImpl, env })
-            : candidate === "alpha-vantage"
-              ? await fetchAlphaVantageCatalystItems({ stocks, fetchImpl, env })
-              : await fetchYahooCatalystItems({ stocks, fetchImpl, env });
+            : candidate === "finnhub"
+              ? await fetchFinnhubCatalystItems({ stocks, fetchImpl, env })
+              : candidate === "alpha-vantage"
+                ? await fetchAlphaVantageCatalystItems({ stocks, fetchImpl, env })
+                : candidate === "google-news"
+                  ? await fetchGoogleNewsCatalystItems({ stocks, fetchImpl, env })
+                  : await fetchYahooCatalystItems({ stocks, fetchImpl, env });
       if (items.length > 0) {
         collected.push(...items);
       } else {
@@ -689,6 +985,22 @@ export async function fetchExternalCatalystItems({
     seen.add(key);
     return true;
   });
+  if (deduped.length === 0 && fetchImpl === fetch && cacheMs > 0) {
+    const stale = readStaleExternalNewsResult({
+      env,
+      key: cacheKey,
+      now: Date.now(),
+    });
+    if (stale?.items.length) {
+      return {
+        items: stale.items,
+        errors: [
+          ...errors,
+          `cache: using stale external news cache (${stale.items.length} items)`,
+        ],
+      };
+    }
+  }
   const translationResult = await translateExternalCatalystItems({
     items: deduped,
     env,
@@ -793,11 +1105,20 @@ export async function getStocksCatalystSnapshot({
     env,
     translateImpl,
   });
+  const subscription = await fetchPatreonSubscriptionItems({
+    stocks,
+    fetchImpl,
+    env,
+  });
   const supplemental = shouldIncludeLocalSignals(env)
     ? readLocalFeedCatalystItems()
     : { items: [], errors: [] };
-  const items = [...external.items, ...supplemental.items];
-  const errors = [...external.errors, ...supplemental.errors];
+  const items = [...subscription.items, ...external.items, ...supplemental.items];
+  const errors = [
+    ...subscription.errors,
+    ...external.errors,
+    ...supplemental.errors,
+  ];
   const snapshot = buildStocksCatalystSnapshotFromItems({
     stocks,
     items,

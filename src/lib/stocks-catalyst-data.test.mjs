@@ -6,6 +6,9 @@ import {
   mergeStocksCatalystSnapshot,
   parseAlphaVantageNewsPayload,
   parseFmpStockNewsPayload,
+  parseFinnhubCompanyNewsPayload,
+  parseGoogleNewsRss,
+  parsePatreonPostsPage,
   parsePolygonNewsPayload,
   parseYahooFinanceRss,
 } from "./stocks-catalyst-data.ts";
@@ -71,6 +74,73 @@ const alphaVantageItems = parseAlphaVantageNewsPayload({
 assert.equal(alphaVantageItems[0].source, "Alpha Vantage");
 assert.equal(alphaVantageItems[0].sourceRole, "external");
 assert.equal(alphaVantageItems[0].tickers?.[0], "NVDA");
+
+const finnhubItems = parseFinnhubCompanyNewsPayload(
+  [
+    {
+      id: 1001,
+      headline: "Nvidia supplier checks improve",
+      summary: "Cloud demand remains strong.",
+      url: "https://finnhub.example.com/nvda",
+      datetime: 1778117400,
+      source: "Finnhub Source",
+      related: "NVDA",
+    },
+  ],
+  "NVDA",
+);
+assert.equal(finnhubItems[0].source, "Finnhub");
+assert.equal(finnhubItems[0].sourceRole, "external");
+assert.equal(finnhubItems[0].tickers?.[0], "NVDA");
+
+const googleItems = parseGoogleNewsRss(
+  `<?xml version="1.0"?><rss><channel><item><title>Nvidia stock rises - Reuters</title><link>https://news.google.com/rss/articles/nvda</link><pubDate>Thu, 07 May 2026 01:35:00 GMT</pubDate><source url="https://reuters.com">Reuters</source><description>Nvidia shares rise as AI demand improves.</description></item></channel></rss>`,
+  "NVDA",
+);
+assert.equal(googleItems[0].source, "Google News");
+assert.equal(googleItems[0].author, "Reuters");
+assert.equal(googleItems[0].tickers?.[0], "NVDA");
+
+const patreonItems = parsePatreonPostsPage(
+  `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        posts: [
+          {
+            id: "post-1",
+            title: "NVDA inference demand and Micron HBM follow-through",
+            url: "https://www.patreon.com/posts/post-1",
+            published_at: "2026-05-12T12:00:00.000Z",
+            excerpt:
+              "NVDA demand remains strong and Micron HBM supply is tightening.",
+            content: "paid full body ".repeat(200),
+          },
+        ],
+      },
+    },
+  })}</script></html>`,
+  {
+    creatorName: "bboczeng",
+    sourceUrl: "https://www.patreon.com/c/bboczeng/posts",
+    maxPosts: 5,
+  },
+);
+assert.equal(patreonItems[0].source, "Patreon");
+assert.equal(patreonItems[0].sourceRole, "subscription");
+assert.equal(patreonItems[0].author, "bboczeng");
+assert.equal(patreonItems[0].link, "https://www.patreon.com/posts/post-1");
+assert.ok(patreonItems[0].text.includes("Micron HBM"));
+assert.ok(!patreonItems[0].text.includes("paid full body paid full body"));
+
+const subscriptionSnapshot = buildStocksCatalystSnapshotFromItems({
+  stocks: ALPHA_RESEARCH_STOCKS,
+  items: patreonItems,
+  generatedAt: "2026-05-12T12:05:00.000Z",
+});
+assert.equal(subscriptionSnapshot.source, "live");
+assert.equal(subscriptionSnapshot.provider, "subscription-research");
+assert.equal(subscriptionSnapshot.catalysts.NVDA[0].source, "Patreon");
+assert.equal(subscriptionSnapshot.catalysts.NVDA[0].sourceRole, "subscription");
 
 const sourceItems = [
   {

@@ -19,7 +19,7 @@ export type StocksFinancialStatement = AlphaResearchFinancialSnapshot & {
 export type StocksFinancialSnapshot = {
   generatedAt: string;
   source: StocksFinancialDataSource;
-  provider: "fmp" | "yahoo" | "mock";
+  provider: "fmp" | "yahoo" | "alpha-vantage" | "mock";
   financials: Record<string, StocksFinancialStatement>;
   errors: string[];
 };
@@ -101,6 +101,13 @@ function formatRawPercent(value: unknown, fallback = "n/a") {
   return raw === null ? fallback : `${(raw * 100).toFixed(1)}%`;
 }
 
+function formatRatioPercent(numerator: unknown, denominator: unknown) {
+  const top = numberValue(numerator);
+  const bottom = numberValue(denominator);
+  if (top === null || bottom === null || bottom === 0) return "n/a";
+  return `${((top / bottom) * 100).toFixed(1)}%`;
+}
+
 function earningsDate(value: unknown) {
   const earnings = asRecord(value);
   const firstDate = asRecord(asArray(earnings.earningsDate)[0]);
@@ -148,6 +155,14 @@ function fmpApiKey(env: EnvLike) {
   return env.STOCKS_FMP_API_KEY?.trim() || env.FMP_API_KEY?.trim() || "";
 }
 
+function alphaVantageApiKey(env: EnvLike) {
+  return (
+    env.STOCKS_ALPHA_VANTAGE_API_KEY?.trim() ||
+    env.ALPHA_VANTAGE_API_KEY?.trim() ||
+    ""
+  );
+}
+
 function fmpUrl(
   endpoint: string,
   ticker: string,
@@ -160,6 +175,15 @@ function fmpUrl(
     ...params,
   });
   return `https://financialmodelingprep.com/stable/${endpoint}?${search.toString()}`;
+}
+
+function alphaVantageOverviewUrl(ticker: string, apiKey: string) {
+  const search = new URLSearchParams({
+    function: "OVERVIEW",
+    symbol: ticker,
+    apikey: apiKey,
+  });
+  return `https://www.alphavantage.co/query?${search.toString()}`;
 }
 
 function truncateDiagnostic(value: string, maxLength = 140) {
@@ -318,6 +342,35 @@ export function parseFmpFinancialStatement(
     nextEarningsDate: stringValue(estimate.date) || "n/a",
     guidance,
     periodLabel: [period, fiscalYear].filter(Boolean).join(" ") || "FMP latest",
+    source: "live",
+    updatedAt: generatedAt,
+  };
+}
+
+export function parseAlphaVantageFinancialStatement(
+  ticker: string,
+  payload: unknown,
+  { generatedAt = new Date().toISOString() } = {},
+): StocksFinancialStatement | null {
+  const overview = asRecord(payload);
+  const revenue = formatLargeUsd(overview.RevenueTTM);
+  const eps = stringValue(overview.EPS) || "n/a";
+  if (revenue === "n/a" && eps === "n/a") return null;
+  const analystTarget = stringValue(overview.AnalystTargetPrice);
+
+  return {
+    ticker: ticker.trim().toUpperCase(),
+    revenue,
+    revenueYoY: formatRawPercent(overview.QuarterlyRevenueGrowthYOY),
+    eps,
+    grossMargin: formatRatioPercent(overview.GrossProfitTTM, overview.RevenueTTM),
+    freeCashFlow: "n/a",
+    nextEarningsDate: stringValue(overview.LatestQuarter) || "n/a",
+    guidance:
+      analystTarget && analystTarget !== "None"
+        ? `Analyst target $${analystTarget}`
+        : "No forward estimate",
+    periodLabel: "TTM / Alpha Vantage overview",
     source: "live",
     updatedAt: generatedAt,
   };
@@ -523,22 +576,101 @@ export async function fetchFmpStocksFinancialSnapshot({
   };
 }
 
-export async function getStocksFinancialSnapshot({
+export async function fetchAlphaVantageStocksFinancialSnapshot({
   stocks,
   fetchImpl = fetch,
   env = process.env,
-  provider = fmpApiKey(env) ? "fmp" : "yahoo",
 }: {
   stocks: AlphaResearchStock[];
   fetchImpl?: FetchLike;
   env?: EnvLike;
-  provider?: "fmp" | "yahoo" | "mock";
+}): Promise<StocksFinancialSnapshot> {
+  const apiKey = alphaVantageApiKey(env);
+  if (!apiKey) throw new Error("Alpha Vantage API key is not configured");
+  const generatedAt = new Date().toISOString();
+  const providerStocks = stocks.slice(
+    0,
+    positiveInt(env.STOCKS_ALPHA_VANTAGE_FINANCIAL_MAX_TICKERS, 3, stocks.length),
+  );
+  const errors: string[] = [];
+  const entries: Array<readonly [string, StocksFinancialStatement] | null> =
+    await Promise.all(
+      providerStocks.map(async (stock) => {
+        try {
+          const response = await fetchImpl(
+            alphaVantageOverviewUrl(stock.ticker, apiKey),
+            { cache: "no-store" },
+          );
+          if (!response.ok) {
+            throw new Error(`Alpha Vantage overview HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          const message = fmpPayloadMessage(payload);
+          if (message) throw new Error(message);
+          const statement = parseAlphaVantageFinancialStatement(
+            stock.ticker,
+            payload,
+            { generatedAt },
+          );
+          if (!statement) {
+            throw new Error("Alpha Vantage overview returned no usable statement");
+          }
+          return [stock.ticker, statement] as const;
+        } catch (error) {
+          errors.push(
+            `${stock.ticker}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return null;
+        }
+      }),
+    );
+
+  const financialEntries = entries.filter(
+    (entry): entry is readonly [string, StocksFinancialStatement] =>
+      entry !== null,
+  );
+  const financials = Object.fromEntries(financialEntries);
+  if (Object.keys(financials).length === 0) {
+    const details = errors.slice(0, 3).join(" | ");
+    throw new Error(
+      details
+        ? `Alpha Vantage financials returned no usable statements: ${details}`
+        : "Alpha Vantage financials returned no usable statements",
+    );
+  }
+
+  return {
+    generatedAt,
+    source: "live",
+    provider: "alpha-vantage",
+    errors,
+    financials,
+  };
+}
+
+export async function getStocksFinancialSnapshot({
+  stocks,
+  fetchImpl = fetch,
+  env = process.env,
+  provider = "yahoo",
+}: {
+  stocks: AlphaResearchStock[];
+  fetchImpl?: FetchLike;
+  env?: EnvLike;
+  provider?: "fmp" | "yahoo" | "alpha-vantage" | "mock";
 }): Promise<StocksFinancialSnapshot> {
   if (provider === "mock") return buildMockStocksFinancialSnapshot(stocks);
   const errors: string[] = [];
   try {
     if (provider === "fmp") {
       return await fetchFmpStocksFinancialSnapshot({ stocks, fetchImpl, env });
+    }
+    if (provider === "alpha-vantage") {
+      return await fetchAlphaVantageStocksFinancialSnapshot({
+        stocks,
+        fetchImpl,
+        env,
+      });
     }
     return await fetchYahooStocksFinancialSnapshot({
       tickers: stocks.map((stock) => stock.ticker),
@@ -559,6 +691,25 @@ export async function getStocksFinancialSnapshot({
       } catch (yahooError) {
         errors.push(
           yahooError instanceof Error ? yahooError.message : String(yahooError),
+        );
+      }
+    }
+    if (provider !== "alpha-vantage" && alphaVantageApiKey(env)) {
+      try {
+        const alphaVantageSnapshot = await fetchAlphaVantageStocksFinancialSnapshot({
+          stocks,
+          fetchImpl,
+          env,
+        });
+        return {
+          ...alphaVantageSnapshot,
+          errors: [...errors, ...alphaVantageSnapshot.errors],
+        };
+      } catch (alphaVantageError) {
+        errors.push(
+          alphaVantageError instanceof Error
+            ? alphaVantageError.message
+            : String(alphaVantageError),
         );
       }
     }

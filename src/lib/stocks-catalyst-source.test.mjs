@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ALPHA_RESEARCH_STOCKS } from "./alpha-research-pool.ts";
 import {
   fetchExternalCatalystItems,
+  fetchPatreonSubscriptionItems,
   getStocksCatalystSnapshot,
 } from "./stocks-catalyst-source.ts";
 
@@ -218,6 +219,54 @@ assert.equal(
 assert.equal(alphaVantageExternal.items.length, 3);
 assert.equal(alphaVantageExternal.items[0].source, "Alpha Vantage");
 
+const finnhubUrls = [];
+const finnhubExternal = await fetchExternalCatalystItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url) => {
+    finnhubUrls.push(String(url));
+    return Response.json([
+      {
+        id: 101,
+        headline: "NVDA Finnhub company news",
+        summary: "Demand remains firm.",
+        url: "https://finnhub.example.com/nvda",
+        datetime: 1778117400,
+        source: "Finnhub Source",
+        related: "NVDA",
+      },
+    ]);
+  },
+  env: {
+    STOCKS_NEWS_PROVIDER: "finnhub",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+    STOCKS_NEWS_TRANSLATE_ENABLED: "false",
+  },
+});
+assert.equal(finnhubExternal.items.length, 1);
+assert.equal(finnhubExternal.items[0].source, "Finnhub");
+assert.ok(finnhubUrls[0].includes("company-news"));
+assert.ok(finnhubUrls[0].includes("symbol=NVDA"));
+
+const googleUrls = [];
+const googleExternal = await fetchExternalCatalystItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url) => {
+    googleUrls.push(String(url));
+    return new Response(
+      `<?xml version="1.0"?><rss><channel><item><title>NVDA Google News fallback</title><link>https://news.google.com/rss/articles/nvda</link><pubDate>Thu, 07 May 2026 01:30:00 GMT</pubDate><source url="https://reuters.com">Reuters</source><description>Cloud demand remains firm.</description></item></channel></rss>`,
+      { status: 200 },
+    );
+  },
+  env: {
+    STOCKS_NEWS_PROVIDER: "google-news",
+    STOCKS_GOOGLE_NEWS_MAX_TICKERS: "1",
+    STOCKS_NEWS_TRANSLATE_ENABLED: "false",
+  },
+});
+assert.equal(googleExternal.items.length, 1);
+assert.equal(googleExternal.items[0].source, "Google News");
+assert.ok(googleUrls[0].includes("news.google.com/rss/search"));
+
 let autoCalls = [];
 const aggregateFetch = async (url) => {
   autoCalls.push(String(url));
@@ -240,6 +289,19 @@ const aggregateFetch = async (url) => {
       ],
     });
   }
+  if (String(url).includes("finnhub.io")) {
+    return Response.json([
+      {
+        id: 102,
+        headline: "Finnhub fallback news",
+        summary: "Company news remains available.",
+        url: "https://finnhub.example.com/fallback",
+        datetime: 1778117400,
+        source: "Finnhub",
+        related: "NVDA",
+      },
+    ]);
+  }
   return new Response(
     `<?xml version="1.0"?><rss><channel><item><title>Yahoo fallback news</title><link>https://finance.yahoo.com/news/nvda</link><pubDate>Thu, 07 May 2026 01:30:00 GMT</pubDate></item></channel></rss>`,
     { status: 200 },
@@ -252,17 +314,20 @@ const aggregateExternal = await fetchExternalCatalystItems({
   env: {
     STOCKS_NEWS_PROVIDER: "auto",
     STOCKS_MASSIVE_API_KEY: "massive-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
     STOCKS_FMP_BY_TICKER: "true",
     STOCKS_NEWS_TRANSLATE_ENABLED: "false",
   },
 });
-assert.equal(aggregateExternal.items.length, 2);
+assert.equal(aggregateExternal.items.length, 3);
 assert.ok(aggregateExternal.errors.some((error) => error.includes("429")));
-assert.ok(autoCalls.some((url) => url.includes("financialmodelingprep.com")));
+assert.ok(!autoCalls.some((url) => url.includes("financialmodelingprep.com")));
+assert.ok(autoCalls.some((url) => url.includes("finnhub.io")));
 assert.ok(autoCalls.some((url) => url.includes("alphavantage.co")));
 assert.ok(autoCalls.some((url) => url.includes("feeds.finance.yahoo.com")));
+assert.ok(autoCalls.some((url) => url.includes("news.google.com")));
 
 const translatedItems = await fetchExternalCatalystItems({
   stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
@@ -379,6 +444,112 @@ try {
   globalThis.fetch = originalFetch;
   rmSync(tempCachePath, { force: true });
 }
+
+const staleCachePath = join(
+  process.cwd(),
+  ".signal-hub",
+  `stocks-news-stale-cache-test-${process.pid}.json`,
+);
+rmSync(staleCachePath, { force: true });
+let staleFetchCalls = 0;
+globalThis.fetch = async () => {
+  staleFetchCalls += 1;
+  if (staleFetchCalls === 1) {
+    return new Response(
+      `<?xml version="1.0"?><rss><channel><item><title>NVDA stale cache seed</title><link>https://finance.yahoo.com/news/nvda-stale-cache-seed</link><pubDate>Thu, 07 May 2026 01:30:00 GMT</pubDate><description>Seed item.</description></item></channel></rss>`,
+      { status: 200 },
+    );
+  }
+  return new Response("rate limit", { status: 429 });
+};
+
+try {
+  const staleEnv = {
+    STOCKS_NEWS_PROVIDER: "yahoo",
+    STOCKS_NEWS_CACHE_PATH: staleCachePath,
+    STOCKS_NEWS_CACHE_MS: "1",
+    STOCKS_NEWS_STALE_CACHE_MS: "600000",
+    STOCKS_INCLUDE_LOCAL_SIGNALS: "false",
+    STOCKS_NEWS_TRANSLATE_ENABLED: "false",
+    STOCKS_NEWS_ITEMS_PER_TICKER: "2",
+    STOCKS_YAHOO_NEWS_MAX_TICKERS: "1",
+  };
+  await fetchExternalCatalystItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    env: staleEnv,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const staleRecovered = await fetchExternalCatalystItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    env: staleEnv,
+  });
+  assert.equal(staleRecovered.items[0].text.includes("NVDA stale cache seed"), true);
+  assert.ok(staleRecovered.errors.some((error) => error.includes("stale")));
+  assert.equal(staleFetchCalls, 2);
+} finally {
+  globalThis.fetch = originalFetch;
+  rmSync(staleCachePath, { force: true });
+}
+
+const patreonHtml = `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+  props: {
+    pageProps: {
+      posts: [
+        {
+          id: "patreon-post-1",
+          title: "NVDA inference demand update",
+          url: "https://www.patreon.com/posts/patreon-post-1",
+          published_at: "2026-05-12T12:00:00.000Z",
+          excerpt: "NVDA demand remains strong in the latest checks.",
+          content: "subscriber-only full post ".repeat(100),
+        },
+      ],
+    },
+  },
+})}</script></html>`;
+const patreonCalls = [];
+const patreonSubscription = await fetchPatreonSubscriptionItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url, init) => {
+    patreonCalls.push({
+      url: String(url),
+      cookie: init?.headers?.cookie ?? init?.headers?.Cookie ?? "",
+    });
+    return new Response(patreonHtml, { status: 200 });
+  },
+  env: {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_COOKIE: "session_id=secret; patreon_device_id=device",
+    STOCKS_PATREON_CACHE_MS: "0",
+  },
+});
+assert.equal(patreonSubscription.items.length, 1);
+assert.equal(patreonSubscription.items[0].source, "Patreon");
+assert.equal(patreonSubscription.items[0].sourceRole, "subscription");
+assert.ok(patreonCalls[0].url.includes("patreon.com/c/bboczeng/posts"));
+assert.ok(patreonCalls[0].cookie.includes("session_id=secret"));
+assert.ok(!patreonSubscription.items[0].text.includes("subscriber-only full post subscriber-only"));
+
+const patreonOnlySnapshot = await getStocksCatalystSnapshot({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url, init) => {
+    assert.ok(String(url).includes("patreon.com"));
+    assert.ok(String(init?.headers?.cookie ?? "").includes("session_id=secret"));
+    return new Response(patreonHtml, { status: 200 });
+  },
+  env: {
+    STOCKS_NEWS_PROVIDER: "mock",
+    STOCKS_INCLUDE_LOCAL_SIGNALS: "false",
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_COOKIE: "session_id=secret",
+    STOCKS_PATREON_CACHE_MS: "0",
+  },
+});
+assert.equal(patreonOnlySnapshot.source, "live");
+assert.equal(patreonOnlySnapshot.provider, "subscription-research");
+assert.equal(patreonOnlySnapshot.catalysts.NVDA[0].sourceRole, "subscription");
 
 const translatedSnapshot = await getStocksCatalystSnapshot({
   stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),

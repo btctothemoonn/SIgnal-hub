@@ -75,6 +75,21 @@ function hasPerformanceSeries(snapshot: StocksPerformanceSnapshot | null) {
   return (snapshot?.series ?? []).some((series) => series.points.length > 0);
 }
 
+function snapshotIssueLabel(
+  label: string,
+  snapshot: { source: "live" | "mock"; errors: string[] } | null,
+) {
+  const count = snapshot?.errors.filter(Boolean).length ?? 0;
+  if (!snapshot || count === 0) return null;
+  return snapshot.source === "live"
+    ? `${label}部分源失败 ${count}`
+    : `${label}已回落本地`;
+}
+
+function snapshotIssueTitle(snapshot: { errors: string[] } | null) {
+  return snapshot?.errors.filter(Boolean).join(" | ") ?? "";
+}
+
 export function AlphaResearchPage() {
   const [activeTab, setActiveTab] = useState<AlphaTab>("research");
   const [selectedTicker, setSelectedTicker] = useState(
@@ -160,14 +175,26 @@ export function AlphaResearchPage() {
         : "财报加载中";
   const catalystStatus =
     catalystSnapshot?.source === "live"
-      ? catalystSnapshot.provider === "external-plus-supplemental"
+      ? catalystSnapshot.provider === "all-sources"
+        ? "订阅+外部新闻+信号"
+        : catalystSnapshot.provider === "external-plus-supplemental"
         ? "外部新闻+信号"
+        : catalystSnapshot.provider === "external-plus-subscription"
+          ? "订阅+外部新闻"
+          : catalystSnapshot.provider === "subscription-plus-supplemental"
+            ? "订阅+信号"
+            : catalystSnapshot.provider === "subscription-research"
+              ? "订阅研报"
         : catalystSnapshot.provider === "external-news"
           ? "外部新闻"
           : "补充信号"
       : catalystSnapshot?.source === "mock"
         ? "Mock 新闻"
         : "新闻加载中";
+
+  const marketIssue = snapshotIssueLabel("行情", marketSnapshot);
+  const financialIssue = snapshotIssueLabel("财报", financialSnapshot);
+  const catalystIssue = snapshotIssueLabel("新闻", catalystSnapshot);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,7 +218,7 @@ export function AlphaResearchPage() {
         if (!cancelled) {
           setMarketSnapshot(snapshot);
           writeCachedSnapshot(STOCKS_MARKET_SNAPSHOT_CACHE_KEY, snapshot);
-          setMarketError(snapshot.errors[0] ?? null);
+          setMarketError(null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -270,7 +297,7 @@ export function AlphaResearchPage() {
         if (!cancelled) {
           setFinancialSnapshot(snapshot);
           writeCachedSnapshot(STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY, snapshot);
-          setFinancialError(snapshot.errors[0] ?? null);
+          setFinancialError(null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -310,7 +337,7 @@ export function AlphaResearchPage() {
         if (!cancelled) {
           setCatalystSnapshot(snapshot);
           writeCachedSnapshot(STOCKS_CATALYST_SNAPSHOT_CACHE_KEY, snapshot);
-          setCatalystError(snapshot.errors.slice(0, 2).join(" | ") || null);
+          setCatalystError(null);
         }
       } catch (error) {
         if (!cancelled) {
@@ -393,14 +420,38 @@ export function AlphaResearchPage() {
                 {marketError}
               </span>
             ) : null}
+            {marketIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotIssueTitle(marketSnapshot)}
+              >
+                {marketIssue}
+              </span>
+            ) : null}
             {financialError ? (
               <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
                 {financialError}
               </span>
             ) : null}
+            {financialIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotIssueTitle(financialSnapshot)}
+              >
+                {financialIssue}
+              </span>
+            ) : null}
             {catalystError ? (
               <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
                 {catalystError}
+              </span>
+            ) : null}
+            {catalystIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotIssueTitle(catalystSnapshot)}
+              >
+                {catalystIssue}
               </span>
             ) : null}
             {performanceError ? (

@@ -8,6 +8,10 @@ export type StocksCatalystDataSource = "live" | "mock";
 export type StocksCatalystProvider =
   | "external-news"
   | "external-plus-supplemental"
+  | "external-plus-subscription"
+  | "subscription-plus-supplemental"
+  | "all-sources"
+  | "subscription-research"
   | "supplemental"
   | "mock";
 
@@ -17,10 +21,13 @@ export type StocksCatalystSourceItem = {
     | "Yahoo Finance"
     | "Polygon"
     | "FMP"
+    | "Finnhub"
     | "Alpha Vantage"
+    | "Google News"
+    | "Patreon"
     | "Telegram"
     | "X";
-  sourceRole: "external" | "supplemental";
+  sourceRole: "external" | "supplemental" | "subscription";
   author: string;
   createdAt: string;
   text: string;
@@ -84,6 +91,11 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function numberValue(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function sourceId(prefix: string, value: string) {
   return `${prefix}:${value || Math.random().toString(36).slice(2)}`;
 }
@@ -120,6 +132,40 @@ function decodeXml(value: string) {
 function xmlTag(block: string, tag: string) {
   const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
   return match ? stripHtml(decodeXml(match[1])).trim() : "";
+}
+
+function textFromHtml(value: string) {
+  return stripHtml(decodeXml(value));
+}
+
+function firstStringFromRecord(record: JsonRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = stringValue(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function recordWithAttributes(record: JsonRecord) {
+  return {
+    ...asRecord(record.attributes),
+    ...record,
+  };
+}
+
+function dateValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value > 10_000_000_000 ? value : value * 1000).toISOString();
+  }
+  return stringValue(value);
+}
+
+function firstDateFromRecord(record: JsonRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = dateValue(record[key]);
+    if (value) return value;
+  }
+  return "";
 }
 
 function alphaVantageDate(value: string) {
@@ -187,6 +233,39 @@ export function parseFmpStockNewsPayload(payload: unknown): StocksCatalystSource
     .filter((item): item is StocksCatalystSourceItem => Boolean(item));
 }
 
+export function parseFinnhubCompanyNewsPayload(
+  payload: unknown,
+  ticker: string,
+): StocksCatalystSourceItem[] {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  return asArray(payload)
+    .map((item): StocksCatalystSourceItem | null => {
+      const row = asRecord(item);
+      const title = stringValue(row.headline) || stringValue(row.title);
+      const summary = stringValue(row.summary);
+      const link = stringValue(row.url);
+      if (!title || !link) return null;
+      const timestamp = numberValue(row.datetime);
+      return {
+        id: sourceId("finnhub", stringValue(row.id) || link),
+        source: "Finnhub" as const,
+        sourceRole: "external" as const,
+        author: stringValue(row.source) || "Finnhub",
+        createdAt:
+          timestamp === null
+            ? new Date().toISOString()
+            : new Date(timestamp * 1000).toISOString(),
+        text: [title, summary].filter(Boolean).join("\n"),
+        translation: null,
+        link,
+        tickers: normalizeTickerList(row.related).length > 0
+          ? normalizeTickerList(row.related)
+          : [normalizedTicker],
+      };
+    })
+    .filter((item): item is StocksCatalystSourceItem => Boolean(item));
+}
+
 export function parseAlphaVantageNewsPayload(
   payload: unknown,
 ): StocksCatalystSourceItem[] {
@@ -239,6 +318,193 @@ export function parseYahooFinanceRss(
       };
     })
     .filter((item): item is StocksCatalystSourceItem => Boolean(item));
+}
+
+export function parseGoogleNewsRss(
+  xml: string,
+  ticker: string,
+): StocksCatalystSourceItem[] {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  return Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi))
+    .map((match, index): StocksCatalystSourceItem | null => {
+      const block = match[1];
+      const title = xmlTag(block, "title");
+      const description = xmlTag(block, "description");
+      const link = xmlTag(block, "link");
+      if (!title || !link) return null;
+      return {
+        id: sourceId("google-news", `${normalizedTicker}:${link || index}`),
+        source: "Google News" as const,
+        sourceRole: "external" as const,
+        author: xmlTag(block, "source") || "Google News",
+        createdAt: xmlTag(block, "pubDate") || new Date().toISOString(),
+        text: [title, description].filter(Boolean).join("\n"),
+        translation: null,
+        link,
+        tickers: [normalizedTicker],
+      };
+    })
+    .filter((item): item is StocksCatalystSourceItem => Boolean(item));
+}
+
+type PatreonPostsPageOptions = {
+  sourceUrl?: string;
+  creatorName?: string;
+  maxPosts?: number;
+};
+
+const PATREON_TITLE_KEYS = ["title", "post_title", "postTitle", "name"];
+const PATREON_LINK_KEYS = [
+  "url",
+  "post_url",
+  "postUrl",
+  "canonical_url",
+  "canonicalUrl",
+  "share_url",
+  "shareUrl",
+  "full_url",
+  "fullUrl",
+  "permalink",
+];
+const PATREON_DATE_KEYS = [
+  "published_at",
+  "publishedAt",
+  "published",
+  "published_date",
+  "datePublished",
+  "created_at",
+  "createdAt",
+];
+const PATREON_EXCERPT_KEYS = [
+  "excerpt",
+  "summary",
+  "description",
+  "teaser_text",
+  "teaserText",
+  "teaser",
+  "preview_text",
+  "previewText",
+];
+const PATREON_BODY_KEYS = [
+  "content",
+  "body",
+  "post_content",
+  "postContent",
+  "plain_text",
+  "plainText",
+  "text",
+];
+
+function parseJsonScriptPayloads(html: string): unknown[] {
+  return Array.from(html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi))
+    .map((match) => decodeXml(match[1]).trim())
+    .filter((script) => script.startsWith("{") || script.startsWith("["))
+    .map((script) => {
+      try {
+        return JSON.parse(script) as unknown;
+      } catch {
+        return null;
+      }
+    })
+    .filter((payload): payload is unknown => payload !== null);
+}
+
+function normalizePatreonUrl(value: string, sourceUrl: string) {
+  if (!value) return sourceUrl;
+  try {
+    return new URL(value, sourceUrl || "https://www.patreon.com").toString();
+  } catch {
+    return value;
+  }
+}
+
+function patreonTitle(record: JsonRecord) {
+  return textFromHtml(firstStringFromRecord(record, PATREON_TITLE_KEYS));
+}
+
+function patreonLink(record: JsonRecord, sourceUrl: string) {
+  return normalizePatreonUrl(
+    firstStringFromRecord(record, PATREON_LINK_KEYS),
+    sourceUrl,
+  );
+}
+
+function patreonCreatedAt(record: JsonRecord) {
+  return firstDateFromRecord(record, PATREON_DATE_KEYS);
+}
+
+function patreonText(record: JsonRecord, title: string) {
+  const excerpt = textFromHtml(firstStringFromRecord(record, PATREON_EXCERPT_KEYS));
+  if (excerpt) return clampText([title, excerpt].filter(Boolean).join("\n"), 900);
+
+  const body = textFromHtml(firstStringFromRecord(record, PATREON_BODY_KEYS));
+  return clampText([title, body].filter(Boolean).join("\n"), 900);
+}
+
+function collectPatreonPostRecords(
+  value: unknown,
+  records: JsonRecord[],
+  seen: WeakSet<object>,
+) {
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectPatreonPostRecords(item, records, seen);
+    return;
+  }
+
+  const record = recordWithAttributes(value as JsonRecord);
+  const title = patreonTitle(record);
+  const link = firstStringFromRecord(record, PATREON_LINK_KEYS);
+  const type = stringValue(record.type).toLowerCase();
+  const postHint =
+    type.includes("post") ||
+    /patreon\.com\/posts\//i.test(link) ||
+    Boolean(firstDateFromRecord(record, PATREON_DATE_KEYS));
+  if (title && postHint) records.push(record);
+
+  for (const child of Object.values(value)) {
+    collectPatreonPostRecords(child, records, seen);
+  }
+}
+
+export function parsePatreonPostsPage(
+  html: string,
+  options: PatreonPostsPageOptions = {},
+): StocksCatalystSourceItem[] {
+  const sourceUrl =
+    options.sourceUrl?.trim() || "https://www.patreon.com/posts";
+  const creatorName = options.creatorName?.trim() || "Patreon";
+  const maxPosts = Math.max(1, Math.min(options.maxPosts ?? 10, 25));
+  const records: JsonRecord[] = [];
+  for (const payload of parseJsonScriptPayloads(html)) {
+    collectPatreonPostRecords(payload, records, new WeakSet<object>());
+  }
+
+  const seen = new Set<string>();
+  return records
+    .map((record): StocksCatalystSourceItem | null => {
+      const title = patreonTitle(record);
+      if (!title) return null;
+      const link = patreonLink(record, sourceUrl);
+      const dedupeKey = link || `${title}:${patreonCreatedAt(record)}`;
+      if (seen.has(dedupeKey)) return null;
+      seen.add(dedupeKey);
+      return {
+        id: sourceId("patreon", stringValue(record.id) || dedupeKey),
+        source: "Patreon" as const,
+        sourceRole: "subscription" as const,
+        author: creatorName,
+        createdAt: patreonCreatedAt(record) || new Date().toISOString(),
+        text: patreonText(record, title),
+        translation: null,
+        link,
+      };
+    })
+    .filter((item): item is StocksCatalystSourceItem => Boolean(item))
+    .slice(0, maxPosts);
 }
 
 function escapeRegExp(value: string) {
@@ -360,14 +626,21 @@ function catalystProviderFromItems(
 ): StocksCatalystProvider {
   const hasExternal = items.some((item) => item.sourceRole === "external");
   const hasSupplemental = items.some((item) => item.sourceRole === "supplemental");
+  const hasSubscription = items.some((item) => item.sourceRole === "subscription");
+  if (hasExternal && hasSupplemental && hasSubscription) return "all-sources";
+  if (hasExternal && hasSubscription) return "external-plus-subscription";
+  if (hasSupplemental && hasSubscription) return "subscription-plus-supplemental";
   if (hasExternal && hasSupplemental) return "external-plus-supplemental";
   if (hasExternal) return "external-news";
+  if (hasSubscription) return "subscription-research";
   if (hasSupplemental) return "supplemental";
   return "mock";
 }
 
 function sourceRoleRank(item: StocksCatalystSourceItem) {
-  return item.sourceRole === "external" ? 0 : 1;
+  if (item.sourceRole === "subscription") return 0;
+  if (item.sourceRole === "external") return 1;
+  return 2;
 }
 
 export function buildStocksCatalystSnapshotFromItems({
