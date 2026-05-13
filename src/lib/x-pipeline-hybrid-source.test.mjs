@@ -6,24 +6,37 @@ import ts from "typescript";
 
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "x-pipeline-hybrid-source-test-"));
-  const configSource = await readFile(
-    new URL("./x-pipeline-config.ts", import.meta.url),
+  const runtimeStorageSource = await readFile(
+    new URL("./runtime-storage.ts", import.meta.url),
     "utf8",
   );
+  const configSource = (
+    await readFile(new URL("./x-pipeline-config.ts", import.meta.url), "utf8")
+  ).replace('from "./runtime-storage.ts"', 'from "./runtime-storage.mjs"');
   const usageSource = (
     await readFile(new URL("./x-api-usage.ts", import.meta.url), "utf8")
   ).replace('from "./x-pipeline-config.ts"', 'from "./x-pipeline-config.mjs"');
+  const translationQualitySource = await readFile(
+    new URL("./translation-quality.ts", import.meta.url),
+    "utf8",
+  );
   const storeSource = (
     await readFile(new URL("./x-pipeline-store.ts", import.meta.url), "utf8")
   )
     .replace('from "./x-pipeline-config.ts"', 'from "./x-pipeline-config.mjs"')
-    .replace('from "./x-api-usage.ts"', 'from "./x-api-usage.mjs"');
+    .replace('from "./x-api-usage.ts"', 'from "./x-api-usage.mjs"')
+    .replace('from "./translation-quality.ts"', 'from "./translation-quality.mjs"');
 
   const compilerOptions = {
     module: ts.ModuleKind.ESNext,
     target: ts.ScriptTarget.ES2022,
     verbatimModuleSyntax: false,
   };
+  await writeFile(
+    join(dir, "runtime-storage.mjs"),
+    ts.transpileModule(runtimeStorageSource, { compilerOptions }).outputText,
+    "utf8",
+  );
   await writeFile(
     join(dir, "x-pipeline-config.mjs"),
     ts.transpileModule(configSource, { compilerOptions }).outputText,
@@ -32,6 +45,11 @@ async function transpileToTemp() {
   await writeFile(
     join(dir, "x-api-usage.mjs"),
     ts.transpileModule(usageSource, { compilerOptions }).outputText,
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "translation-quality.mjs"),
+    ts.transpileModule(translationQualitySource, { compilerOptions }).outputText,
     "utf8",
   );
   await writeFile(
@@ -65,12 +83,21 @@ markXHybridSource(
   db,
 );
 
-assert.deepEqual(getXHybridSourceStatus("telegram:1", db), {
-  sourceId: "telegram:1",
-  status: "enriched",
-  detail: "matched tweet",
-  tweetId: "2048993047942181129",
-});
+const sourceStatus = getXHybridSourceStatus("telegram:1", db);
+assert.match(sourceStatus?.updatedAt ?? "", /^\d{4}-/);
+assert.deepEqual(
+  {
+    ...sourceStatus,
+    updatedAt: "stable",
+  },
+  {
+    sourceId: "telegram:1",
+    status: "enriched",
+    detail: "matched tweet",
+    tweetId: "2048993047942181129",
+    updatedAt: "stable",
+  },
+);
 
 const cooldownMs = 30 * 60 * 1000;
 assert.deepEqual(

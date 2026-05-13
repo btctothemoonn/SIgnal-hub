@@ -1,6 +1,5 @@
-import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { AppShell } from "@/components/app-shell";
-import { UnifiedNewsPanel } from "@/components/unified-news-panel";
+import { SignalsResponsiveLayout } from "@/components/signals-responsive-layout";
 import { getCached6551TwitterSnapshot } from "@/lib/6551-twitter";
 import { buildSignalSourceStats } from "@/lib/signal-source-stats";
 import { prepareTelegramSnapshotForClient } from "@/lib/telegram-client-snapshot";
@@ -51,31 +50,15 @@ export default async function Home() {
           children: `${sourceStats.truthItems} 条`,
         },
       ]}
-      mainClassName="mx-auto grid w-full max-w-[1780px] min-h-0 gap-3 px-3 py-3 sm:px-5 lg:gap-4 lg:py-4 lg:grid-cols-[minmax(0,1.58fr)_minmax(22rem,0.82fr)] lg:items-start xl:grid-cols-[minmax(0,1.72fr)_minmax(24rem,0.72fr)]"
+      mainClassName="mx-auto w-full max-w-[1780px] min-h-0 px-3 py-3 sm:px-5 lg:py-4"
     >
-      <section id="signals" className="order-2 min-w-0 lg:order-1">
-        <UnifiedNewsPanel
-          initialTelegramSnapshot={prepareTelegramSnapshotForClient(
-            telegramSnapshot,
-          )}
-          initialXSnapshot={xSnapshot}
-          pollXSnapshot={pollXSnapshot}
-          rail
-        />
-      </section>
-
-      <aside
-        id="alpha"
-        className="order-1 relative z-10 min-w-0 lg:order-2 lg:sticky lg:top-[5.25rem]"
-      >
-        <AlphaSummaryCard
-          audience="signals"
-          compact
-          className="mobile-command-summary lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain"
-          deskLabel="Signals AI"
-          endpoint="/api/signal-summary"
-        />
-      </aside>
+      <SignalsResponsiveLayout
+        initialTelegramSnapshot={prepareTelegramSnapshotForClient(
+          telegramSnapshot,
+        )}
+        initialXSnapshot={xSnapshot}
+        pollXSnapshot={pollXSnapshot}
+      />
     </AppShell>
   );
 }

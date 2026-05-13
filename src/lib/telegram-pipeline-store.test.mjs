@@ -6,10 +6,13 @@ import ts from "typescript";
 
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "telegram-pipeline-store-test-"));
-  const configSource = await readFile(
-    new URL("./telegram-pipeline-config.ts", import.meta.url),
+  const runtimeStorageSource = await readFile(
+    new URL("./runtime-storage.ts", import.meta.url),
     "utf8",
   );
+  const configSource = (
+    await readFile(new URL("./telegram-pipeline-config.ts", import.meta.url), "utf8")
+  ).replace('from "./runtime-storage.ts"', 'from "./runtime-storage.mjs"');
   const xSourceChannelSource = await readFile(
     new URL("./telegram-x-source-channels.ts", import.meta.url),
     "utf8",
@@ -36,6 +39,11 @@ async function transpileToTemp() {
     target: ts.ScriptTarget.ES2022,
     verbatimModuleSyntax: false,
   };
+  await writeFile(
+    join(dir, "runtime-storage.mjs"),
+    ts.transpileModule(runtimeStorageSource, { compilerOptions }).outputText,
+    "utf8",
+  );
   await writeFile(
     join(dir, "telegram-pipeline-config.mjs"),
     ts.transpileModule(configSource, { compilerOptions }).outputText,

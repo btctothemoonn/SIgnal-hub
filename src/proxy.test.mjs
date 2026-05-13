@@ -29,6 +29,10 @@ const loginResponse = proxy(request("/login?next=%2Fsettings"));
 assert.equal(loginResponse.status, 200);
 assert.equal(loginResponse.headers.get("x-middleware-next"), "1");
 
+const loginApiResponse = proxy(request("/api/login"));
+assert.equal(loginApiResponse.status, 200);
+assert.equal(loginApiResponse.headers.get("x-middleware-next"), "1");
+
 const assetResponse = proxy(request("/favicon.ico"));
 assert.equal(assetResponse.status, 200);
 assert.equal(assetResponse.headers.get("x-middleware-next"), "1");

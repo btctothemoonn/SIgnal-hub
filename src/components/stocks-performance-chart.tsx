@@ -1,10 +1,11 @@
 "use client";
 
 import {
+  useCallback,
+  useEffect,
   useRef,
   useState,
   type PointerEvent,
-  type WheelEvent,
 } from "react";
 import type {
   AlphaResearchSector,
@@ -136,6 +137,7 @@ export function StocksPerformanceChart({
     range: FULL_ZOOM_RANGE,
   });
   const dragState = useRef<DragState | null>(null);
+  const chartSvgRef = useRef<SVGSVGElement | null>(null);
   const stockNames = new Map(
     stocks.map((stock) => [stock.ticker, stock.companyNameZh]),
   );
@@ -189,40 +191,55 @@ export function StocksPerformanceChart({
       width;
   const toY = (changePct: number) =>
     plot.bottom - ((changePct - yMin) / valueSpan) * height;
-  const setCurrentZoomRange = (
-    nextRange: ZoomRange | ((range: ZoomRange) => ZoomRange),
-  ) => {
-    setZoomState((state) => {
-      const currentRange =
-        state.key === visibleRangeKey ? state.range : FULL_ZOOM_RANGE;
-      const range =
-        typeof nextRange === "function" ? nextRange(currentRange) : nextRange;
+  const setCurrentZoomRange = useCallback(
+    (nextRange: ZoomRange | ((range: ZoomRange) => ZoomRange)) => {
+      setZoomState((state) => {
+        const currentRange =
+          state.key === visibleRangeKey ? state.range : FULL_ZOOM_RANGE;
+        const range =
+          typeof nextRange === "function" ? nextRange(currentRange) : nextRange;
 
-      if (
-        state.key === visibleRangeKey &&
-        state.range.start === range.start &&
-        state.range.end === range.end
-      ) {
-        return state;
-      }
+        if (
+          state.key === visibleRangeKey &&
+          state.range.start === range.start &&
+          state.range.end === range.end
+        ) {
+          return state;
+        }
 
-      return { key: visibleRangeKey, range };
-    });
-  };
+        return { key: visibleRangeKey, range };
+      });
+    },
+    [visibleRangeKey],
+  );
   const resetZoom = () => setCurrentZoomRange(FULL_ZOOM_RANGE);
   const zoomFromCenter = (scale: number) => {
     setCurrentZoomRange((range) => zoomRangeAround(range, 0.5, scale));
   };
-  const handleWheelZoom = (event: WheelEvent<SVGSVGElement>) => {
-    if (!hasData) return;
-    event.preventDefault();
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const viewBoxX = ((event.clientX - bounds.left) / bounds.width) * SVG_WIDTH;
-    const focusRatio = clamp((viewBoxX - plot.left) / width, 0, 1);
-    setCurrentZoomRange((range) =>
-      zoomRangeAround(range, focusRatio, event.deltaY > 0 ? 1.18 : 0.82),
-    );
-  };
+  useEffect(() => {
+    const svg = chartSvgRef.current;
+    if (!svg || !hasData) return;
+
+    const handleNativeWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const bounds = svg.getBoundingClientRect();
+      if (bounds.width <= 0) return;
+
+      const viewBoxX =
+        ((event.clientX - bounds.left) / bounds.width) * SVG_WIDTH;
+      const focusRatio = clamp((viewBoxX - plot.left) / width, 0, 1);
+      setCurrentZoomRange((range) =>
+        zoomRangeAround(range, focusRatio, event.deltaY > 0 ? 1.18 : 0.82),
+      );
+    };
+
+    svg.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => {
+      svg.removeEventListener("wheel", handleNativeWheel);
+    };
+  }, [hasData, plot.left, setCurrentZoomRange, width]);
   const handlePointerDown = (event: PointerEvent<SVGSVGElement>) => {
     if (!hasData) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -251,15 +268,15 @@ export function StocksPerformanceChart({
 
   return (
     <section className="overflow-hidden rounded-lg border border-line/70 bg-[#10141f] shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 px-4 py-3">
-        <div className="flex min-w-0 flex-1 flex-wrap items-start gap-3">
-          <div className="min-w-[12rem]">
+      <div className="flex flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-start lg:gap-3">
+          <div className="w-full min-w-0 lg:w-auto lg:min-w-[12rem]">
             <h2 className="text-sm font-semibold text-white">今日相对涨跌幅</h2>
             <p className="mt-1 text-xs text-slate-300">
               {tickers.join(", ")} · 基准为今天第一条本地缓存价
             </p>
           </div>
-          <div className="flex max-w-full flex-wrap gap-1 rounded-md border border-white/10 bg-white/5 p-1">
+          <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-md border border-white/10 bg-white/5 p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
             {sectors.map((sector) => {
               const selected = sector.id === activeSectorId;
               return (
@@ -270,7 +287,7 @@ export function StocksPerformanceChart({
                   onClick={() => onSelectSector(sector.id)}
                   title={sector.tickers.join(", ")}
                   className={[
-                    "rounded px-2 py-1 text-[11px] font-semibold transition-colors",
+                    "shrink-0 whitespace-nowrap rounded px-2 py-1 text-[11px] font-semibold transition-colors",
                     selected
                       ? "bg-white text-[#10141f]"
                       : "text-slate-300 hover:bg-white/10 hover:text-white",
@@ -282,7 +299,7 @@ export function StocksPerformanceChart({
             })}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-[11px] font-medium">
+        <div className="flex w-full flex-wrap gap-2 text-[11px] font-medium lg:w-auto lg:justify-end">
           <div className="flex overflow-hidden rounded-md border border-white/10 bg-white/5 text-slate-200">
             <button
               type="button"
@@ -333,16 +350,16 @@ export function StocksPerformanceChart({
           </div>
         ) : (
           <svg
+            ref={chartSvgRef}
             viewBox="0 0 720 260"
             role="img"
             aria-label="今日股票相对涨跌幅对比图"
-            onWheel={handleWheelZoom}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onDoubleClick={resetZoom}
-            className="h-auto w-full touch-none select-none cursor-grab active:cursor-grabbing"
+            className="h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing"
           >
             <rect x="0" y="0" width="720" height="260" fill="#10141f" />
             <defs>

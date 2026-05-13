@@ -6,7 +6,8 @@ const source = readFileSync(new URL("./app-shell.tsx", import.meta.url), "utf8")
 assert.match(source, /<aside className="[^"]*lg:sticky[^"]*"/);
 assert.match(source, /<aside className="[^"]*lg:top-0[^"]*"/);
 assert.match(source, /<aside className="[^"]*lg:h-screen[^"]*"/);
-assert.match(source, /href="\/api\/logout"/);
+assert.match(source, /<form action="\/api\/logout" method="post"/);
+assert.match(source, /type="submit"/);
 
 assert.match(source, /data-mobile-command-shell/);
 assert.match(source, /overflow-x-auto/);

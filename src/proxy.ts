@@ -12,6 +12,7 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 function isPublicPath(pathname: string): boolean {
+  if (pathname === "/api/login") return true;
   if (pathname.startsWith("/api/")) return false;
 
   return (

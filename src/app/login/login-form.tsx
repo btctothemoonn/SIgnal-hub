@@ -1,15 +1,11 @@
-"use client";
+type LoginFormProps = {
+  error: string | null;
+  nextPath: string;
+};
 
-import { useActionState } from "react";
-import { loginAdmin, type LoginState } from "./actions";
-
-const initialState: LoginState = { error: null };
-
-export function LoginForm({ nextPath }: { nextPath: string }) {
-  const [state, formAction, pending] = useActionState(loginAdmin, initialState);
-
+export function LoginForm({ error, nextPath }: LoginFormProps) {
   return (
-    <form action={formAction} className="flex flex-col gap-4">
+    <form action="/api/login" method="post" className="flex flex-col gap-4">
       <input name="next" type="hidden" value={nextPath} />
       <div className="flex flex-col gap-2">
         <label htmlFor="password" className="text-sm font-semibold text-foreground">
@@ -26,18 +22,17 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
         />
       </div>
 
-      {state.error ? (
+      {error ? (
         <p className="rounded-lg border border-danger/25 bg-danger-soft px-3 py-2 text-sm text-danger">
-          {state.error}
+          {error}
         </p>
       ) : null}
 
       <button
         type="submit"
-        disabled={pending}
         className="inline-flex h-11 items-center justify-center rounded-lg bg-foreground px-4 text-sm font-semibold text-background transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {pending ? "Signing in..." : "Sign in"}
+        Sign in
       </button>
     </form>
   );

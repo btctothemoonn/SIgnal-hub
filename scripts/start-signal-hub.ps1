@@ -1,5 +1,6 @@
 param(
-  [switch]$NoBrowser
+  [switch]$NoBrowser,
+  [switch]$WithWorkers
 )
 
 $ErrorActionPreference = "Stop"
@@ -136,8 +137,8 @@ function Start-ManagedNodeProcess {
       Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
       Start-Sleep -Milliseconds 800
     } else {
-    Write-Host "$Name already running (PID $existingPid)"
-    return
+      Write-Host "$Name already running (PID $existingPid)"
+      return
     }
   }
 
@@ -154,6 +155,22 @@ function Start-ManagedNodeProcess {
 
   Set-Content -Path $pidFile -Value $process.Id -Encoding ascii
   Write-Host "Started $Name (PID $($process.Id))"
+}
+
+function Stop-ManagedNodeProcess {
+  param([string]$Name)
+
+  $pidFile = Join-Path $RuntimeDir "$Name.pid"
+  $existingPid = Read-PidFile -Path $pidFile
+  if ($existingPid -and (Test-ProcessId -ProcessId $existingPid)) {
+    Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+    Write-Host "Stopped local $Name (PID $existingPid)"
+  }
+
+  if (Test-Path $pidFile) {
+    Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Wait-ForWeb {
@@ -174,38 +191,46 @@ try {
     -Arguments @("scripts\start-next-dev-inline.mjs") `
     -SkipWhenWebReady
 
-  Start-ManagedNodeProcess `
-    -Name "signal-hub-telegram" `
-    -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\telegram-pipeline-worker.mjs") `
-    -RestartExisting
-
-  $xHybridEnabled = Get-ProjectEnvValue "X_HYBRID_ENABLED"
-  if (-not $xHybridEnabled -or (Test-EnvEnabled $xHybridEnabled)) {
-    Start-ManagedNodeProcess `
-      -Name "signal-hub-x-hybrid" `
-      -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\x-hybrid-worker.mjs") `
-      -RestartExisting
+  if (-not $WithWorkers) {
+    Stop-ManagedNodeProcess -Name "signal-hub-telegram"
+    Stop-ManagedNodeProcess -Name "signal-hub-x-hybrid"
+    Stop-ManagedNodeProcess -Name "signal-hub-monitor985"
+    Stop-ManagedNodeProcess -Name "signal-hub-alpha-summary"
+    Write-Host "Local background workers are disabled. Use -WithWorkers only for deliberate local worker testing."
   } else {
-    Write-Host "signal-hub-x-hybrid disabled (X_HYBRID_ENABLED=false)"
-  }
-
-  if (Test-EnvEnabled (Get-ProjectEnvValue "MONITOR985_ENABLED")) {
     Start-ManagedNodeProcess `
-      -Name "signal-hub-monitor985" `
-      -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\monitor985-worker.mjs") `
+      -Name "signal-hub-telegram" `
+      -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\telegram-pipeline-worker.mjs") `
       -RestartExisting
-  } else {
-    Write-Host "signal-hub-monitor985 disabled (MONITOR985_ENABLED=false)"
-  }
 
-  $alphaSummaryPrewarmEnabled = Get-ProjectEnvValue "AI_SUMMARY_PREWARM_ENABLED"
-  if (-not $alphaSummaryPrewarmEnabled -or (Test-EnvEnabled $alphaSummaryPrewarmEnabled)) {
-    Start-ManagedNodeProcess `
-      -Name "signal-hub-alpha-summary" `
-      -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\alpha-summary-worker.mjs") `
-      -RestartExisting
-  } else {
-    Write-Host "signal-hub-alpha-summary disabled (AI_SUMMARY_PREWARM_ENABLED=false)"
+    $xHybridEnabled = Get-ProjectEnvValue "X_HYBRID_ENABLED"
+    if (-not $xHybridEnabled -or (Test-EnvEnabled $xHybridEnabled)) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-x-hybrid" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\x-hybrid-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "signal-hub-x-hybrid disabled (X_HYBRID_ENABLED=false)"
+    }
+
+    if (Test-EnvEnabled (Get-ProjectEnvValue "MONITOR985_ENABLED")) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-monitor985" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\monitor985-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "signal-hub-monitor985 disabled (MONITOR985_ENABLED=false)"
+    }
+
+    $alphaSummaryPrewarmEnabled = Get-ProjectEnvValue "AI_SUMMARY_PREWARM_ENABLED"
+    if (-not $alphaSummaryPrewarmEnabled -or (Test-EnvEnabled $alphaSummaryPrewarmEnabled)) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-alpha-summary" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\alpha-summary-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "signal-hub-alpha-summary disabled (AI_SUMMARY_PREWARM_ENABLED=false)"
+    }
   }
 
   $ready = Wait-ForWeb

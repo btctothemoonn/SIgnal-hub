@@ -15,9 +15,11 @@ const globals = await readFile("src/app/globals.css", "utf8");
 const appShell = await readFile("src/components/app-shell.tsx", "utf8");
 const settingsPage = await readFile("src/app/settings/page.tsx", "utf8");
 
-await test("global theme uses the Claude-style warm paper palette", () => {
-  assert.match(globals, /--background:\s*#f7f0e6;/);
-  assert.match(globals, /--accent:\s*#c65f3d;/);
+await test("global theme uses the mobile command dark palette", () => {
+  assert.match(globals, /--background:\s*#101312;/);
+  assert.match(globals, /--foreground:\s*#f4f1ea;/);
+  assert.match(globals, /--accent:\s*#d7b56d;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--background:\s*#0c0f0e;/);
   assert.match(globals, /--app-font-serif:/);
   assert.match(globals, /--font-serif:\s*var\(--app-font-serif\);/);
   assert.doesNotMatch(globals, /28px 28px/);
@@ -33,7 +35,9 @@ await test("app shell exposes the redesigned accent navigation and serif identit
 await test("app shell gives sidebar navigation immediate optimistic feedback", () => {
   assert.match(appShell, /"use client";/);
   assert.match(appShell, /useState<AppShellNavKey>\(activeNav\)/);
-  assert.match(appShell, /onPointerDown=\{\(\) => onActivate\(item\.key\)\}/);
+  assert.match(appShell, /onPointerDown=\{\(\) => \{/);
+  assert.match(appShell, /onActivate\(item\.key\);/);
+  assert.match(appShell, /onWarm\?\.\(item\);/);
   assert.match(appShell, /active:scale-\[0\.98\]/);
   assert.match(appShell, /duration-75/);
 });

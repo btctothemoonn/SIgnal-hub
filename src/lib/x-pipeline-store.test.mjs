@@ -6,10 +6,13 @@ import ts from "typescript";
 
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "x-pipeline-store-test-"));
-  const configSource = await readFile(
-    new URL("./x-pipeline-config.ts", import.meta.url),
+  const runtimeStorageSource = await readFile(
+    new URL("./runtime-storage.ts", import.meta.url),
     "utf8",
   );
+  const configSource = (
+    await readFile(new URL("./x-pipeline-config.ts", import.meta.url), "utf8")
+  ).replace('from "./runtime-storage.ts"', 'from "./runtime-storage.mjs"');
   const usageSource = (
     await readFile(new URL("./x-api-usage.ts", import.meta.url), "utf8")
   ).replace('from "./x-pipeline-config.ts"', 'from "./x-pipeline-config.mjs"');
@@ -34,6 +37,11 @@ async function transpileToTemp() {
     target: ts.ScriptTarget.ES2022,
     verbatimModuleSyntax: false,
   };
+  await writeFile(
+    join(dir, "runtime-storage.mjs"),
+    ts.transpileModule(runtimeStorageSource, { compilerOptions }).outputText,
+    "utf8",
+  );
   await writeFile(
     join(dir, "x-pipeline-config.mjs"),
     ts.transpileModule(configSource, { compilerOptions }).outputText,
@@ -467,6 +475,58 @@ const quotedMissingAvatarItem = getXPipelineSnapshot(100, db).feed.find(
 assert.equal(
   quotedMissingAvatarItem?.quotedTweet?.userAvatar,
   "https://unavatar.io/twitter/QuoteAuthor",
+);
+
+upsertXPipelineRealtimeUpdate(
+  {
+    eventType: "NEW_RETWEET",
+    account: "SpaceY",
+    displayName: "Space Y",
+    createdAt: "2026-04-28T04:00:00.000Z",
+    profileUrl: "https://x.com/SpaceY",
+    remark: "",
+    feedItem: {
+      id: "legacy-short-translation",
+      text: "1/ Meet Dritan Kapllani Jr, a US based threat actor tied to $19M from social engineering thefts targeting crypto holders.\n\nDritan flexes luxury cars, watches, private jets, & clubs all over social media.\n\nRecently he was recorded on a call showing off a wallet with stolen funds.",
+      createdAt: "2026-04-28T04:00:00.000Z",
+      username: "SpaceY",
+      displayName: "Space Y",
+      profileUrl: "https://x.com/SpaceY",
+      userAvatar: "https://cdn.example/avatar.jpg",
+      tweetUrl: "https://x.com/SpaceY/status/legacy-short-translation",
+      hashtags: [],
+      likes: 0,
+      retweets: 0,
+      replies: 0,
+      quotes: 0,
+      views: 0,
+      media: [],
+      quotedTweet: null,
+      origin: "watch",
+      queryLabel: "985monitor / NEW_RETWEET",
+      translation: null,
+    },
+  },
+  db,
+);
+setXPipelineFeedTranslation(
+  "legacy-short-translation",
+  {
+    provider: "985monitor",
+    sourceLanguage: "auto",
+    targetLanguage: "zh-CN",
+    text: "RT @zachxbt:1/ 见到美国威胁演员小Dritan Kapllani,",
+  },
+  db,
+);
+const legacyShortTranslationItem = getXPipelineSnapshot(100, db).feed.find(
+  (item) => item.id === "legacy-short-translation",
+);
+assert.equal(legacyShortTranslationItem?.translation, null);
+assert.ok(
+  listXPipelineTranslationCandidates(100, db).some(
+    (item) => item.id === "legacy-short-translation",
+  ),
 );
 
 console.log("ok - x pipeline store builds local dashboard snapshots");

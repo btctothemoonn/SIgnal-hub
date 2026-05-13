@@ -43,6 +43,10 @@ import {
   normalizeMonitor985Event,
 } from "../src/lib/monitor985.ts";
 import {
+  mergeFullTweetIntoMonitor985Update,
+  shouldRefreshMonitor985FeedItem,
+} from "../src/lib/monitor985-enrichment.ts";
+import {
   buildMonitor985RequestHeaders,
   buildMonitor985RequestUrl,
   describeMonitor985AuthMode,
@@ -320,10 +324,23 @@ async function runMonitor985PreflightCatchup(allowedAccountKeys) {
   let ignored = 0;
 
   for (const rawEvent of events.slice().reverse()) {
-    const update = normalizeMonitor985Event(rawEvent);
+    let update = normalizeMonitor985Event(rawEvent);
     if (!update || !allowedAccountKeys.has(accountKey(update.account))) {
       ignored += 1;
       continue;
+    }
+    if (shouldRefreshMonitor985FeedItem(update.feedItem)) {
+      try {
+        update = mergeFullTweetIntoMonitor985Update(
+          update,
+          await get6551TwitterTweetById(update.feedItem.id),
+        );
+      } catch (error) {
+        log("x_hybrid_monitor985_full_tweet_refresh_failed", {
+          tweetId: update.feedItem.id,
+          error: String(error),
+        });
+      }
     }
     upsertXPipelineRealtimeUpdate({
       ...update,

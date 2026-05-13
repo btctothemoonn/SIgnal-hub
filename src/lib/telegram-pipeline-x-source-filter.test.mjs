@@ -7,6 +7,7 @@ import ts from "typescript";
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "telegram-pipeline-x-filter-test-"));
   const files = [
+    "runtime-storage.ts",
     "telegram-pipeline-config.ts",
     "telegram-translation-policy.ts",
     "telegram-x-source-channels.ts",
@@ -22,6 +23,7 @@ async function transpileToTemp() {
     let source = await readFile(new URL(`./${file}`, import.meta.url), "utf8");
     source = source
       .replace('from "./telegram-pipeline-config.ts"', 'from "./telegram-pipeline-config.mjs"')
+      .replace('from "./runtime-storage.ts"', 'from "./runtime-storage.mjs"')
       .replace('from "./telegram-translation-policy.ts"', 'from "./telegram-translation-policy.mjs"')
       .replace('from "./telegram-x-source-channels.ts"', 'from "./telegram-x-source-channels.mjs"');
     await writeFile(

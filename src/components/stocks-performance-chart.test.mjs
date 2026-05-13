@@ -16,8 +16,6 @@ assert.match(source, /aria-pressed=\{selected\}/);
 assert.match(source, /onSelectSector\(sector\.id\)/);
 assert.match(source, /sector\.tickers\.join\(", "\)/);
 assert.match(source, /useState<ZoomState>/);
-assert.match(source, /handleWheelZoom/);
-assert.match(source, /onWheel=\{handleWheelZoom\}/);
 assert.match(source, /onPointerDown=\{handlePointerDown\}/);
 assert.match(source, /onPointerMove=\{handlePointerMove\}/);
 assert.match(source, /onDoubleClick=\{resetZoom\}/);
@@ -36,5 +34,25 @@ assert.match(source, /const visibleRangeKey =/);
 assert.match(source, /setCurrentZoomRange\(FULL_ZOOM_RANGE\)/);
 assert.match(source, /zoomState\.key === visibleRangeKey/);
 assert.match(source, /setCurrentZoomRange/);
+assert.match(
+  source,
+  /addEventListener\("wheel"/,
+  "chart zoom must use a native wheel listener",
+);
+assert.match(
+  source,
+  /passive:\s*false/,
+  "native wheel listener must be non-passive so preventDefault blocks page scroll",
+);
+assert.match(
+  source,
+  /ref=\{chartSvgRef\}/,
+  "the SVG must expose a ref for native wheel handling",
+);
+assert.doesNotMatch(
+  source,
+  /onWheel=\{handleWheelZoom\}/,
+  "React onWheel should not also run zoom and double-apply the gesture",
+);
 
 console.log("ok - stocks performance chart UI");

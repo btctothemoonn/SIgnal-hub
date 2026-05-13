@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const responsiveLayout = readFileSync(
+  new URL("../components/signals-responsive-layout.tsx", import.meta.url),
+  "utf8",
+);
 
-assert.match(source, /mainClassName="[^"]*gap-3[^"]*lg:gap-4[^"]*"/);
-assert.match(source, /<section id="signals" className="[^"]*order-2[^"]*lg:order-1[^"]*"/);
-assert.match(source, /<aside\s+id="alpha"\s+className="[^"]*order-1[^"]*lg:order-2[^"]*"/);
-assert.match(source, /className="[^"]*mobile-command-summary[^"]*"/);
+assert.match(page, /import \{ SignalsResponsiveLayout \}/);
+assert.match(page, /mainClassName="[^"]*min-h-0[^"]*"/);
+assert.match(responsiveLayout, /data-mobile-signal-pager/);
+assert.match(responsiveLayout, /snap-x snap-mandatory/);
+assert.match(responsiveLayout, /lg:gap-4/);
+assert.match(responsiveLayout, /<section id="signals"/);
+assert.match(responsiveLayout, /<aside\s+id="alpha"/);
+assert.match(responsiveLayout, /className="[^"]*mobile-command-summary[^"]*"/);
 
-console.log("ok - homepage mobile command ordering");
+console.log("ok - homepage mobile signal pager layout");

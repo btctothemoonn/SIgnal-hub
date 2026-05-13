@@ -268,14 +268,16 @@ export function AppShell({
                 >
                   <ShellGlyph icon="settings" />
                 </Link>
-                <Link
-                  href="/api/logout"
-                  title="Sign out"
-                  aria-label="Sign out"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line/70 bg-panel-strong/90 text-muted shadow-[0_12px_28px_-24px_rgba(38,31,27,0.55)] transition-colors hover:border-danger/35 hover:bg-danger-soft hover:text-danger"
-                >
-                  <ShellGlyph icon="logout" />
-                </Link>
+                <form action="/api/logout" method="post" className="contents">
+                  <button
+                    type="submit"
+                    title="Sign out"
+                    aria-label="Sign out"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line/70 bg-panel-strong/90 text-muted shadow-[0_12px_28px_-24px_rgba(38,31,27,0.55)] transition-colors hover:border-danger/35 hover:bg-danger-soft hover:text-danger"
+                  >
+                    <ShellGlyph icon="logout" />
+                  </button>
+                </form>
               </div>
             </div>
           </header>

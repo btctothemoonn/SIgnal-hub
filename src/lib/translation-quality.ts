@@ -14,6 +14,27 @@ function comparableText(text: string): string {
     .trim();
 }
 
+function startsWithRetweetMarker(text: string): boolean {
+  return /^\s*RT\s+@[\w_]+/i.test(text);
+}
+
+function isClearlyIncompleteTranslation(
+  sourceText: string,
+  translatedText: string,
+): boolean {
+  if (startsWithRetweetMarker(translatedText) && !startsWithRetweetMarker(sourceText)) {
+    return true;
+  }
+
+  const sourceLength = comparableText(sourceText).length;
+  const translatedLength = comparableText(translatedText).length;
+  if (sourceLength < 120) {
+    return false;
+  }
+
+  return translatedLength < sourceLength * 0.25;
+}
+
 export function shouldTranslateText(text: string): boolean {
   const compact = text.replace(/https?:\/\/\S+/g, " ").replace(/\s+/g, " ").trim();
   if (compact.length < 6) {
@@ -47,5 +68,6 @@ export function isUsefulTranslation<T extends TranslationQualityNote>(
   const sourceComparable = comparableText(sourceText);
   const translatedComparable = comparableText(translated);
   if (!sourceComparable || !translatedComparable) return false;
-  return sourceComparable !== translatedComparable;
+  if (sourceComparable === translatedComparable) return false;
+  return !isClearlyIncompleteTranslation(sourceText, translated);
 }

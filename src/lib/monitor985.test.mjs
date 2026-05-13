@@ -70,12 +70,13 @@ assert.deepEqual(quoteUpdate?.feedItem.quotedTweet, {
   userAvatar: "https://pbs.twimg.com/profile_images/1736904520729341952/M7fED2Pw_normal.jpg",
   tweetUrl: "https://x.com/coin_casanova/status/2050445523879174448",
   media: [],
-  translation: {
+  translation: null,
+  /* skippedTranslation: {
     provider: "985monitor",
     sourceLanguage: "auto",
     targetLanguage: "zh-CN",
     text: "$BIO 代表左派智商 - 肽动量 - 链上退化 - 叙事驱动",
-  },
+  }, */
 });
 
 const replyUpdate = normalizeMonitor985Event({

@@ -777,17 +777,28 @@ export function listXPipelineTranslationCandidates(
   limit = 20,
   db = getXPipelineDb(),
 ) {
+  const scanLimit = Math.max(limit * 5, limit);
   return db
     .prepare(
       `
-      select id, text
+      select id, text, translation_json
       from x_feed
-      where translation_json is null and trim(text) != ''
+      where trim(text) != ''
+        and (
+          translation_json is null
+          or translation_json like '%"provider":"985monitor"%'
+          or translation_json like '%"provider": "985monitor"%'
+        )
       order by created_at desc, updated_at desc
       limit ?
     `,
     )
-    .all(limit)
+    .all(scanLimit)
+    .filter((row) => {
+      const text = stringValue(row.text);
+      return !isUsefulTranslation(text, parseTranslation(row.translation_json));
+    })
+    .slice(0, limit)
     .map((row) => ({
       id: stringValue(row.id),
       text: stringValue(row.text),

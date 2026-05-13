@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  get6551TwitterTweetById,
+} from "../src/lib/6551-twitter.ts";
+import {
+  mergeFullTweetIntoMonitor985Update,
+  shouldRefreshMonitor985FeedItem,
+} from "../src/lib/monitor985-enrichment.ts";
+import {
   getXPipelineConfiguredAccounts,
   getXPipelineConfiguredTruthAccounts,
 } from "../src/lib/x-pipeline-accounts.ts";
@@ -225,13 +232,36 @@ function shouldAcceptUpdate(update, allowedAccountKeys) {
   return allowedAccountKeys.has(accountKey(update.account));
 }
 
-function ingestRawEvent(rawEvent, allowedAccountKeys) {
-  const update = normalizeMonitor985Event(rawEvent);
+async function refreshMonitor985Update(update) {
+  if (!shouldRefreshMonitor985FeedItem(update.feedItem)) return update;
+  try {
+    const fullTweet = await get6551TwitterTweetById(update.feedItem.id);
+    const merged = mergeFullTweetIntoMonitor985Update(update, fullTweet);
+    if (merged !== update) {
+      log("monitor985_full_tweet_refreshed", {
+        tweetId: update.feedItem.id,
+        oldLength: update.feedItem.text.length,
+        newLength: merged.feedItem.text.length,
+      });
+    }
+    return merged;
+  } catch (error) {
+    log("monitor985_full_tweet_refresh_failed", {
+      tweetId: update.feedItem.id,
+      error: String(error),
+    });
+    return update;
+  }
+}
+
+async function ingestRawEvent(rawEvent, allowedAccountKeys) {
+  let update = normalizeMonitor985Event(rawEvent);
   if (!update) return { accepted: false, reason: "not-normalized" };
   if (!shouldAcceptUpdate(update, allowedAccountKeys)) {
     return { accepted: false, reason: `not-configured:${update.account}` };
   }
 
+  update = await refreshMonitor985Update(update);
   upsertXPipelineRealtimeUpdate({
     ...update,
     remark: "985monitor",
@@ -258,7 +288,7 @@ async function bootstrapRecentEvents(allowedAccountKeys, reason = "bootstrap") {
   let accepted = 0;
   let ignored = 0;
   for (const rawEvent of events.slice().reverse()) {
-    const result = ingestRawEvent(rawEvent, allowedAccountKeys);
+    const result = await ingestRawEvent(rawEvent, allowedAccountKeys);
     if (result.accepted) accepted += 1;
     else ignored += 1;
   }
@@ -324,7 +354,7 @@ async function readSseStream(response, allowedAccountKeys) {
         markHealth("connected", "985monitor SSE connected");
       } else if (SSE_EVENT_TYPES.has(message.event) && message.data) {
         const payload = JSON.parse(message.data);
-        const result = ingestRawEvent(payload?.event, allowedAccountKeys);
+        const result = await ingestRawEvent(payload?.event, allowedAccountKeys);
         if (result.accepted) {
           accepted += 1;
           log("monitor985_event", result);

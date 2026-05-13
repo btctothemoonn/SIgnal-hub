@@ -15,6 +15,13 @@ function envText(env: AdminAuthEnv, key: string): string {
   return env[key]?.trim() || "";
 }
 
+function envFlag(env: AdminAuthEnv, key: string): boolean | null {
+  const value = envText(env, key).toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  return null;
+}
+
 function constantTimeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -98,12 +105,14 @@ export function verifyAdminSessionToken(
 }
 
 export function buildAdminSessionCookieOptions(env: AdminAuthEnv = process.env) {
+  const configuredSecure = envFlag(env, "ADMIN_COOKIE_SECURE");
+
   return {
     httpOnly: true,
     maxAge: ADMIN_SESSION_TTL_SECONDS,
     path: "/",
     sameSite: "lax" as const,
-    secure: envText(env, "NODE_ENV") === "production",
+    secure: configuredSecure ?? envText(env, "NODE_ENV") === "production",
   };
 }
 

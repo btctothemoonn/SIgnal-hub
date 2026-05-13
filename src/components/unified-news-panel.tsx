@@ -1216,7 +1216,7 @@ export function UnifiedNewsPanel({
               type="button"
               disabled={telegramRefreshBusy}
               onClick={() => void refreshTelegramNow()}
-              className="rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
+              className="order-[-10] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
             >
               {telegramRefreshBusy ? "TG 刷新中..." : "刷新 TG"}
             </button>
@@ -1268,7 +1268,7 @@ export function UnifiedNewsPanel({
                   type="button"
                   disabled={monitor985RefreshBusy || xCatchupBusy || xCatchupRunning}
                   onClick={() => void refreshMonitor985Latest()}
-                  className="rounded-md border border-accent/35 bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/15 disabled:opacity-60"
+                  className="order-[-30] rounded-md border border-accent/35 bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/15 disabled:opacity-60"
                 >
                   {monitor985RefreshBusy ? "刷新中..." : "刷新 985"}
                 </button>
@@ -1276,7 +1276,7 @@ export function UnifiedNewsPanel({
                   type="button"
                   disabled={monitor985RefreshBusy || xCatchupBusy || xCatchupRunning}
                   onClick={() => void startXManualCatchup()}
-                  className="rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
+                  className="order-[-20] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
                 >
                   {xCatchupRunning || xCatchupBusy ? "补漏中..." : "6551 补漏"}
                 </button>

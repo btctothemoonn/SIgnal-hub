@@ -11,7 +11,7 @@ $Shortcut = $Shell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = $PowerShell
 $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$LauncherScript`""
 $Shortcut.WorkingDirectory = $ProjectRoot
-$Shortcut.Description = "Start Signal Hub dashboard, Telegram worker, and X worker"
+$Shortcut.Description = "Start local Signal Hub web preview only"
 $Shortcut.IconLocation = "$PowerShell,0"
 $Shortcut.Save()
 
