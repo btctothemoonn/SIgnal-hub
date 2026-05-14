@@ -1,5 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { connect as connectNet, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
+import { connect as connectTls, type TLSSocket } from "node:tls";
 import type { AlphaResearchStock } from "./alpha-research-pool.ts";
 import {
   buildMockStocksCatalystSnapshot,
@@ -80,6 +82,266 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function waitForSocketConnect(socket: Socket) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("connect", onConnect);
+      socket.off("error", onError);
+    };
+    const onConnect = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+  });
+}
+
+function waitForTlsConnect(socket: TLSSocket) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.off("secureConnect", onConnect);
+      socket.off("error", onError);
+    };
+    const onConnect = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    socket.once("secureConnect", onConnect);
+    socket.once("error", onError);
+  });
+}
+
+function readHttpHeader(socket: Socket | TLSSocket) {
+  return new Promise<{ header: string; rest: Buffer }>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let totalLength = 0;
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("end", onEnd);
+    };
+    const onData = (chunk: Buffer) => {
+      chunks.push(chunk);
+      totalLength += chunk.length;
+      const buffer = Buffer.concat(chunks, totalLength);
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) return;
+      cleanup();
+      resolve({
+        header: buffer.subarray(0, headerEnd).toString("latin1"),
+        rest: buffer.subarray(headerEnd + 4),
+      });
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onEnd = () => {
+      cleanup();
+      reject(new Error("connection ended before HTTP headers"));
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("end", onEnd);
+  });
+}
+
+function readSocketBody(socket: Socket | TLSSocket, initial: Buffer) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = initial.length ? [initial] : [];
+    let totalLength = initial.length;
+    const cleanup = () => {
+      socket.off("data", onData);
+      socket.off("error", onError);
+      socket.off("end", onEnd);
+    };
+    const onData = (chunk: Buffer) => {
+      chunks.push(chunk);
+      totalLength += chunk.length;
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve(Buffer.concat(chunks, totalLength));
+    };
+    socket.on("data", onData);
+    socket.once("error", onError);
+    socket.once("end", onEnd);
+  });
+}
+
+function decodeChunkedBody(body: Buffer) {
+  const chunks: Buffer[] = [];
+  let offset = 0;
+  while (offset < body.length) {
+    const lineEnd = body.indexOf("\r\n", offset);
+    if (lineEnd < 0) break;
+    const sizeText = body
+      .subarray(offset, lineEnd)
+      .toString("ascii")
+      .split(";", 1)[0]
+      .trim();
+    const size = Number.parseInt(sizeText, 16);
+    if (!Number.isFinite(size) || size < 0) break;
+    if (size === 0) break;
+    const start = lineEnd + 2;
+    const end = start + size;
+    if (end > body.length) break;
+    chunks.push(body.subarray(start, end));
+    offset = end + 2;
+  }
+  return Buffer.concat(chunks);
+}
+
+function parseHttpResponse(header: string, body: Buffer) {
+  const [statusLine, ...headerLines] = header.split("\r\n");
+  const status = Number(statusLine.match(/^HTTP\/\d(?:\.\d)?\s+(\d+)/)?.[1]);
+  const headers = new Headers();
+  for (const line of headerLines) {
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+  }
+  const transferEncoding = headers.get("transfer-encoding")?.toLowerCase() ?? "";
+  return {
+    status,
+    headers,
+    body: transferEncoding.includes("chunked") ? decodeChunkedBody(body) : body,
+  };
+}
+
+function formatHeaderLines(headers: Record<string, string>) {
+  return Object.entries(headers)
+    .filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `${key}: ${value.replace(/\r?\n/g, " ")}`);
+}
+
+async function openHttpsProxyTunnel(target: URL, proxyUrl: string) {
+  const proxy = new URL(proxyUrl);
+  if (proxy.protocol !== "http:") {
+    throw new Error(`unsupported Patreon proxy protocol ${proxy.protocol}`);
+  }
+  const proxyPort = Number(proxy.port || 80);
+  const targetPort = Number(target.port || 443);
+  const socket = connectNet({ host: proxy.hostname, port: proxyPort });
+  await waitForSocketConnect(socket);
+
+  const auth =
+    proxy.username || proxy.password
+      ? [
+          "Proxy-Authorization",
+          `Basic ${Buffer.from(
+            `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`,
+          ).toString("base64")}`,
+        ]
+      : null;
+  const connectHeaders: Record<string, string> = {
+    Host: `${target.hostname}:${targetPort}`,
+    "Proxy-Connection": "keep-alive",
+  };
+  if (auth) connectHeaders[auth[0]] = auth[1];
+  socket.write(
+    [
+      `CONNECT ${target.hostname}:${targetPort} HTTP/1.1`,
+      ...formatHeaderLines(connectHeaders),
+      "",
+      "",
+    ].join("\r\n"),
+  );
+  const tunnelResponse = await readHttpHeader(socket);
+  const status = Number(tunnelResponse.header.match(/^HTTP\/\d(?:\.\d)?\s+(\d+)/)?.[1]);
+  if (status < 200 || status >= 300) {
+    socket.destroy();
+    throw new Error(`Patreon proxy CONNECT HTTP ${status || "unknown"}`);
+  }
+  if (tunnelResponse.rest.length) socket.unshift(tunnelResponse.rest);
+  const tlsSocket = connectTls({ socket, servername: target.hostname });
+  await waitForTlsConnect(tlsSocket);
+  return tlsSocket;
+}
+
+async function fetchPatreonThroughHttpProxy({
+  url,
+  headers,
+  proxyUrl,
+  redirects = 3,
+}: {
+  url: string;
+  headers: Record<string, string>;
+  proxyUrl: string;
+  redirects?: number;
+}): Promise<Response> {
+  const target = new URL(url);
+  if (target.protocol !== "https:") {
+    throw new Error(`unsupported Patreon URL protocol ${target.protocol}`);
+  }
+  const socket = await openHttpsProxyTunnel(target, proxyUrl);
+  const path = `${target.pathname || "/"}${target.search}`;
+  socket.write(
+    [
+      `GET ${path} HTTP/1.1`,
+      ...formatHeaderLines({
+        Host: target.host,
+        Connection: "close",
+        "Accept-Encoding": "identity",
+        ...headers,
+      }),
+      "",
+      "",
+    ].join("\r\n"),
+  );
+  const responseHeader = await readHttpHeader(socket);
+  const responseBody = await readSocketBody(socket, responseHeader.rest);
+  socket.end();
+  const response = parseHttpResponse(responseHeader.header, responseBody);
+  const location = response.headers.get("location");
+  if (response.status >= 300 && response.status < 400 && location && redirects > 0) {
+    return fetchPatreonThroughHttpProxy({
+      url: new URL(location, target).toString(),
+      headers,
+      proxyUrl,
+      redirects: redirects - 1,
+    });
+  }
+  return new Response(response.body.toString("utf8"), {
+    status: response.status || 500,
+    headers: response.headers,
+  });
+}
+
+async function fetchPatreonPage({
+  url,
+  headers,
+  env,
+  fetchImpl,
+}: {
+  url: string;
+  headers: Record<string, string>;
+  env: EnvLike;
+  fetchImpl: FetchLike;
+}) {
+  const proxyUrl = patreonProxyUrl(env);
+  if (fetchImpl === fetch && proxyUrl) {
+    return fetchPatreonThroughHttpProxy({ url, headers, proxyUrl });
+  }
+  return fetchImpl(url, {
+    cache: "no-store",
+    headers,
+  });
+}
+
 function normalizeExternalNewsProvider(
   raw: string | undefined,
 ): ExternalNewsProvider {
@@ -155,6 +417,14 @@ function patreonCookie(env: EnvLike) {
   return (
     env.STOCKS_PATREON_COOKIE?.trim() ||
     env.PATREON_COOKIE?.trim() ||
+    ""
+  );
+}
+
+function patreonProxyUrl(env: EnvLike) {
+  return (
+    env.STOCKS_PATREON_PROXY_URL?.trim() ||
+    env.PATREON_PROXY_URL?.trim() ||
     ""
   );
 }
@@ -858,9 +1128,6 @@ export async function fetchPatreonSubscriptionItems({
     return { items: [], errors: ["Patreon: STOCKS_PATREON_URL is not configured"] };
   }
   const cookie = patreonCookie(env);
-  if (!cookie) {
-    return { items: [], errors: ["Patreon: STOCKS_PATREON_COOKIE is not configured"] };
-  }
 
   const cacheMs = patreonCacheMs(env);
   const cacheKey = patreonCacheKey({ stocks, env });
@@ -874,15 +1141,20 @@ export async function fetchPatreonSubscriptionItems({
   }
 
   try {
-    const response = await fetchImpl(url, {
-      cache: "no-store",
-      headers: {
-        accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        cookie,
-        "user-agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+    const headers = {
+      accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+      ...(cookie ? { cookie } : {}),
+      referer: "https://www.patreon.com/home",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    };
+    const response = await fetchPatreonPage({
+      url,
+      headers,
+      env,
+      fetchImpl,
     });
     if (!response.ok) {
       throw new Error(`Patreon posts HTTP ${response.status}`);

@@ -531,6 +531,42 @@ assert.ok(patreonCalls[0].url.includes("patreon.com/c/bboczeng/posts"));
 assert.ok(patreonCalls[0].cookie.includes("session_id=secret"));
 assert.ok(!patreonSubscription.items[0].text.includes("subscriber-only full post subscriber-only"));
 
+const publicPatreonCalls = [];
+const publicPatreonSubscription = await fetchPatreonSubscriptionItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url, init) => {
+    publicPatreonCalls.push({
+      url: String(url),
+      cookie: init?.headers?.cookie ?? init?.headers?.Cookie ?? "",
+    });
+    return new Response(patreonHtml, { status: 200 });
+  },
+  env: {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_CACHE_MS: "0",
+  },
+});
+assert.equal(publicPatreonSubscription.items.length, 1);
+assert.equal(publicPatreonSubscription.items[0].sourceRole, "subscription");
+assert.equal(publicPatreonCalls[0].cookie, "");
+
+const unsupportedPatreonProxy = await fetchPatreonSubscriptionItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  env: {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_PROXY_URL: "socks5://127.0.0.1:7890",
+    STOCKS_PATREON_CACHE_MS: "0",
+  },
+});
+assert.equal(unsupportedPatreonProxy.items.length, 0);
+assert.ok(
+  unsupportedPatreonProxy.errors[0].includes(
+    "unsupported Patreon proxy protocol socks5:",
+  ),
+);
+
 const patreonOnlySnapshot = await getStocksCatalystSnapshot({
   stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
   fetchImpl: async (url, init) => {
