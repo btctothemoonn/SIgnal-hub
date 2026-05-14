@@ -7,6 +7,7 @@ import {
   type AlphaResearchEarningsStatus,
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
+import { splitStocksCatalystsForDisplay } from "@/lib/stocks-catalyst-display";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
@@ -176,8 +177,8 @@ export function AlphaStockDetail({
     : stockMarketIsLoading
       ? "行情加载中"
       : "未获取实时价";
-  const visibleCatalysts = stock.catalysts.slice(0, 5);
-  const hiddenCatalysts = stock.catalysts.slice(5);
+  const { subscriptionReports, visibleCatalysts, hiddenCatalysts } =
+    splitStocksCatalystsForDisplay(stock.catalysts, 5);
   const businessTags = stock.businessTags.slice(0, 3);
   const dataStatusLabel = stockMarketIsLive
     ? (stock.market.dataQualityLabel ?? stockMarketLabel)
@@ -270,6 +271,50 @@ export function AlphaStockDetail({
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
         <div className="space-y-5">
+          {subscriptionReports.length > 0 ? (
+            <Section title="订阅研报">
+              <div className="space-y-3">
+                {subscriptionReports.map((report) => (
+                  <article
+                    key={`${report.date}-${report.title}`}
+                    className="rounded-lg border border-accent/45 bg-accent-soft/20 px-4 py-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] font-semibold text-warning">
+                        Patreon
+                      </span>
+                      <span className="text-[11px] text-muted">
+                        {report.date}
+                      </span>
+                      {report.author ? (
+                        <span className="text-[11px] text-muted">
+                          {report.author}
+                        </span>
+                      ) : null}
+                    </div>
+                    <h4 className="mt-2 text-base font-semibold leading-6 text-foreground">
+                      {report.link ? (
+                        <a
+                          href={report.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-accent"
+                        >
+                          {report.title}
+                        </a>
+                      ) : (
+                        report.title
+                      )}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-muted">
+                      {report.summary}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </Section>
+          ) : null}
+
           <Section title="今日催化">
             <div className="space-y-3">
               {visibleCatalysts.map((catalyst) => (

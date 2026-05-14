@@ -1,26 +1,21 @@
 import { NextResponse } from "next/server";
 import { ALPHA_RESEARCH_STOCKS } from "@/lib/alpha-research-pool";
-import { getStocksMarketSnapshot } from "@/lib/stocks-market-data";
 import { recordStocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import {
+  getCachedStocksMarketSnapshot,
+  resolveStocksMarketProvider,
+} from "@/lib/stocks-prewarm";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
-  const configuredProvider =
-    process.env.STOCKS_MARKET_DATA_PROVIDER?.trim().toLowerCase();
-  const provider =
-    configuredProvider === "mock" ||
-    configuredProvider === "finnhub" ||
-    configuredProvider === "massive" ||
-    configuredProvider === "yahoo" ||
-    configuredProvider === "alpha-vantage" ||
-    configuredProvider === "naver" ||
-    configuredProvider === "fmp"
-      ? configuredProvider
-      : undefined;
-  const snapshot = await getStocksMarketSnapshot({
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const force = params.get("refresh") === "1" || params.get("force") === "1";
+  const provider = resolveStocksMarketProvider(process.env);
+  const snapshot = await getCachedStocksMarketSnapshot({
     stocks: ALPHA_RESEARCH_STOCKS,
+    force,
     ...(provider ? { provider } : {}),
   });
   try {

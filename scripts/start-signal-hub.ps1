@@ -196,6 +196,7 @@ try {
     Stop-ManagedNodeProcess -Name "signal-hub-x-hybrid"
     Stop-ManagedNodeProcess -Name "signal-hub-monitor985"
     Stop-ManagedNodeProcess -Name "signal-hub-alpha-summary"
+    Stop-ManagedNodeProcess -Name "signal-hub-stocks-cache"
     Write-Host "Local background workers are disabled. Use -WithWorkers only for deliberate local worker testing."
   } else {
     Start-ManagedNodeProcess `
@@ -230,6 +231,16 @@ try {
         -RestartExisting
     } else {
       Write-Host "signal-hub-alpha-summary disabled (AI_SUMMARY_PREWARM_ENABLED=false)"
+    }
+
+    $stocksCachePrewarmEnabled = Get-ProjectEnvValue "STOCKS_CACHE_PREWARM_ENABLED"
+    if (-not $stocksCachePrewarmEnabled -or (Test-EnvEnabled $stocksCachePrewarmEnabled)) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-stocks-cache" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\stocks-cache-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "signal-hub-stocks-cache disabled (STOCKS_CACHE_PREWARM_ENABLED=false)"
     }
   }
 

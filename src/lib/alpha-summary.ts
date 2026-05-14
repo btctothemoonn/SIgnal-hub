@@ -7,15 +7,17 @@ import {
   ALPHA_RESEARCH_STOCK_UNIVERSE,
 } from "./alpha-research-pool.ts";
 import { mergeStocksCatalystSnapshot } from "./stocks-catalyst-data.ts";
-import { getStocksCatalystSnapshot } from "./stocks-catalyst-source.ts";
 import {
-  getStocksFinancialSnapshot,
   mergeStocksFinancialSnapshot,
 } from "./stocks-financial-data.ts";
 import {
-  getStocksMarketSnapshot,
   mergeStocksMarketSnapshot,
 } from "./stocks-market-data.ts";
+import {
+  getCachedStocksCatalystSnapshot,
+  getCachedStocksFinancialSnapshot,
+  getCachedStocksMarketSnapshot,
+} from "./stocks-prewarm.ts";
 import { getTelegramPipelineConfig } from "./telegram-pipeline-config.ts";
 import { cleanTranslationText } from "./translate.ts";
 import { getXPipelineConfig } from "./x-pipeline-config.ts";
@@ -860,9 +862,9 @@ async function readStocksExternalSummaryItems(
   if (period.audience !== "stocks") return [];
   const [marketSnapshot, financialSnapshot, catalystSnapshot] =
     await Promise.all([
-      getStocksMarketSnapshot({ stocks: ALPHA_RESEARCH_STOCKS }),
-      getStocksFinancialSnapshot({ stocks: ALPHA_RESEARCH_STOCKS }),
-      getStocksCatalystSnapshot({ stocks: ALPHA_RESEARCH_STOCKS, env }),
+      getCachedStocksMarketSnapshot({ stocks: ALPHA_RESEARCH_STOCKS, env }),
+      getCachedStocksFinancialSnapshot({ stocks: ALPHA_RESEARCH_STOCKS, env }),
+      getCachedStocksCatalystSnapshot({ stocks: ALPHA_RESEARCH_STOCKS, env }),
     ]);
   const withMarket = mergeStocksMarketSnapshot(
     ALPHA_RESEARCH_STOCKS,
