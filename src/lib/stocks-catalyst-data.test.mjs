@@ -142,6 +142,28 @@ assert.equal(subscriptionSnapshot.provider, "subscription-research");
 assert.equal(subscriptionSnapshot.catalysts.NVDA[0].source, "Patreon");
 assert.equal(subscriptionSnapshot.catalysts.NVDA[0].sourceRole, "subscription");
 
+const storageSubscriptionSnapshot = buildStocksCatalystSnapshotFromItems({
+  stocks: ALPHA_RESEARCH_STOCKS,
+  items: [
+    {
+      id: "patreon:storage-cycle",
+      source: "Patreon",
+      sourceRole: "subscription",
+      author: "bboczeng",
+      createdAt: "2026-05-12T13:00:00.000Z",
+      text: "NAND and SSD pricing checks are moving higher as storage demand improves.",
+      translation: null,
+      link: "https://www.patreon.com/posts/storage-cycle",
+      tickers: [],
+    },
+  ],
+  generatedAt: "2026-05-12T13:05:00.000Z",
+});
+assert.equal(storageSubscriptionSnapshot.catalysts.DRAM[0].sourceRole, "subscription");
+assert.equal(storageSubscriptionSnapshot.catalysts.MU[0].sourceRole, "subscription");
+assert.equal(storageSubscriptionSnapshot.catalysts.SNDK[0].sourceRole, "subscription");
+assert.equal(storageSubscriptionSnapshot.catalysts.WDC[0].sourceRole, "subscription");
+
 const sourceItems = [
   {
     id: "polygon:article-1",

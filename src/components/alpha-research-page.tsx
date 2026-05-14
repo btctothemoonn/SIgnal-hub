@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
+import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
 import {
   ALPHA_RESEARCH_DEFAULT_TICKER,
   ALPHA_RESEARCH_SECTORS,
@@ -21,14 +22,20 @@ import {
   type StocksCatalystSnapshot,
 } from "@/lib/stocks-catalyst-data";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import { buildStocksSubscriptionReports } from "@/lib/stocks-subscription-reports";
 
-type AlphaTab = "research" | "messages";
+type AlphaTab = "research" | "reports" | "messages";
 
 const tabs: { id: AlphaTab; label: string; description: string }[] = [
   {
     id: "research",
     label: "美股投研池",
     description: "AI / 算力链股票池、催化事件和财报速览",
+  },
+  {
+    id: "reports",
+    label: "订阅研报",
+    description: "Patreon 研报列表、主题和 ticker 归因",
   },
   {
     id: "messages",
@@ -139,6 +146,10 @@ export function AlphaResearchPage() {
   const selectedStock = useMemo(
     () => stocks.find((stock) => stock.ticker === selectedTicker) ?? null,
     [selectedTicker, stocks],
+  );
+  const subscriptionReports = useMemo(
+    () => buildStocksSubscriptionReports(stocks),
+    [stocks],
   );
   const selectedSector = useMemo(
     () =>
@@ -460,7 +471,7 @@ export function AlphaResearchPage() {
               </span>
             ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[24rem]">
+          <div className="grid grid-cols-3 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[32rem]">
             {tabs.map((tab) => {
               const selected = activeTab === tab.id;
               return (
@@ -509,6 +520,15 @@ export function AlphaResearchPage() {
           marketDataLabel={marketDataLabel}
           marketDataLoading={marketDataLoading}
           performanceLoading={performanceSnapshot === null && performanceError === null}
+        />
+      ) : activeTab === "reports" ? (
+        <StocksSubscriptionReports
+          reports={subscriptionReports}
+          generatedAt={catalystSnapshot?.generatedAt ?? null}
+          onSelectTicker={(ticker) => {
+            setSelectedTicker(ticker);
+            setActiveTab("research");
+          }}
         />
       ) : (
         <AlphaSummaryCard

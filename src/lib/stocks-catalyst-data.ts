@@ -45,6 +45,23 @@ export type StocksCatalystSnapshot = {
 };
 
 const COMMON_WORD_TICKERS = new Set(["FN", "NOW"]);
+const SUBSCRIPTION_THEME_TICKERS = [
+  {
+    terms: [
+      "dram",
+      "hbm",
+      "nand",
+      "ssd",
+      "memory",
+      "storage",
+      "存储",
+      "内存",
+      "闪存",
+      "固态",
+    ],
+    tickers: ["DRAM", "MU", "WDC", "SNDK", "STX", "000660.KS", "005930.KS"],
+  },
+];
 const POSITIVE_TERMS = [
   "beat",
   "beats",
@@ -543,12 +560,35 @@ function termMatches(text: string, term: string) {
   return normalized.length >= 3 && text.toLowerCase().includes(normalized);
 }
 
+function thematicSubscriptionTickers(
+  text: string,
+  stocks: AlphaResearchStock[],
+) {
+  const availableTickers = new Set(stocks.map((stock) => stock.ticker));
+  const lower = text.toLowerCase();
+  const tickers = new Set<string>();
+  for (const rule of SUBSCRIPTION_THEME_TICKERS) {
+    if (!rule.terms.some((term) => lower.includes(term.toLowerCase()))) {
+      continue;
+    }
+    for (const ticker of rule.tickers) {
+      if (availableTickers.has(ticker)) tickers.add(ticker);
+    }
+  }
+  return tickers;
+}
+
 function matchedTickersForItem(
   item: StocksCatalystSourceItem,
   stocks: AlphaResearchStock[],
 ) {
   const text = [item.author, item.text, item.translation ?? ""].join("\n");
   const tickerSet = new Set((item.tickers ?? []).map((ticker) => ticker.toUpperCase()));
+  if (item.sourceRole === "subscription") {
+    for (const ticker of thematicSubscriptionTickers(text, stocks)) {
+      tickerSet.add(ticker);
+    }
+  }
   if (item.sourceRole === "external" && tickerSet.size > 0) {
     return stocks
       .filter((stock) => tickerSet.has(stock.ticker))
