@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import {
   createBinanceHoldingSnapshotCache,
+  mergeBinanceFuturesEquityHistory,
   getBinanceHoldingSnapshotCacheTtlMs,
 } from "./binance-holdings-cache.ts";
 
-function buildSnapshot(updatedAt) {
+function buildSnapshot(updatedAt, marginBalance = 0) {
   return {
     exchange: "binance",
     accountMode: "portfolioMargin",
@@ -16,7 +17,7 @@ function buildSnapshot(updatedAt) {
       futuresPositionCount: 0,
       futuresWalletBalance: 0,
       futuresUnrealizedPnl: 0,
-      futuresMarginBalance: 0,
+      futuresMarginBalance: marginBalance,
       futuresAvailableBalance: 0,
       futuresLongNotional: 0,
       futuresShortNotional: 0,
@@ -79,6 +80,57 @@ function buildSnapshot(updatedAt) {
 
   const refreshed = await cache.get();
   assert.equal(refreshed.updatedAt, "snapshot-2");
+}
+
+{
+  const history = mergeBinanceFuturesEquityHistory({
+    history: [
+      {
+        at: "2026-05-15T01:02:10.000Z",
+        walletBalance: 900,
+        unrealizedPnl: 10,
+        marginBalance: 910,
+        availableBalance: 500,
+      },
+      {
+        at: "2026-05-15T01:03:00.000Z",
+        walletBalance: 950,
+        unrealizedPnl: 20,
+        marginBalance: 970,
+        availableBalance: 520,
+      },
+    ],
+    point: {
+      at: "2026-05-15T01:02:50.000Z",
+      walletBalance: 1000,
+      unrealizedPnl: 30,
+      marginBalance: 1030,
+      availableBalance: 600,
+    },
+    maxPoints: 5,
+  });
+
+  assert.deepEqual(history.map((point) => point.marginBalance), [1030, 970]);
+}
+
+{
+  let calls = 0;
+  const recorded = [];
+  const cache = createBinanceHoldingSnapshotCache({
+    fetcher: async () => buildSnapshot(`snapshot-${++calls}`, calls * 100),
+    ttlMs: 60_000,
+    readSnapshot: async () => null,
+    writeSnapshot: async () => {},
+    writeEquityPoint: async (snapshot) => {
+      recorded.push(snapshot.summary.futuresMarginBalance);
+    },
+  });
+
+  await cache.get();
+  await cache.get();
+  await cache.get({ force: true });
+
+  assert.deepEqual(recorded, [100, 200]);
 }
 
 {

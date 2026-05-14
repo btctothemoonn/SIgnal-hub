@@ -9,6 +9,7 @@ import {
 import {
   getCachedBinanceHoldingSnapshot,
   invalidateCachedBinanceHoldingSnapshot,
+  readPersistedBinanceFuturesEquityHistory,
 } from "@/lib/binance-holdings-cache";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const force = url.searchParams.get("refresh") === "1";
     const snapshot = await getCachedBinanceHoldingSnapshot({ force });
-    return NextResponse.json({ success: true, snapshot });
+    const equityHistory = await readPersistedBinanceFuturesEquityHistory();
+    return NextResponse.json({ success: true, snapshot, equityHistory });
   } catch (error) {
     if (error instanceof BinanceConfigError) {
       return NextResponse.json(

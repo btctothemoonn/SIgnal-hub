@@ -50,6 +50,14 @@ export type BinanceHoldingSummary = {
   futuresNetNotional: number;
 };
 
+export type BinanceFuturesEquityPoint = {
+  at: string;
+  walletBalance: number;
+  unrealizedPnl: number;
+  marginBalance: number;
+  availableBalance: number;
+};
+
 export type BinanceHoldingWarning = {
   scope: "spot" | "futures";
   endpoint: string;

@@ -15,13 +15,18 @@ import {
 } from "@/lib/holding-analytics";
 import { formatUsdtPrice } from "@/lib/holding-display";
 import type {
+  BinanceFuturesEquityPoint,
   BinanceFuturesPosition,
   BinanceHoldingSnapshot,
   BinanceSpotBalance,
 } from "@/lib/binance-holdings";
 
 type BinanceHoldingResponse =
-  | { success: true; snapshot: BinanceHoldingSnapshot }
+  | {
+      success: true;
+      snapshot: BinanceHoldingSnapshot;
+      equityHistory?: BinanceFuturesEquityPoint[];
+    }
   | { success: false; error: string; upstreamStatus?: number };
 
 type BinanceCredentialResponse =
@@ -90,6 +95,17 @@ function formatTime(raw: string | null) {
   }).format(date);
 }
 
+function formatChartTime(raw: string) {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function pnlTone(value: number) {
   if (value > 0) return "text-success";
   if (value < 0) return "text-danger";
@@ -134,6 +150,23 @@ function marginTypeText(marginType: string) {
   return marginType;
 }
 
+function isEquityPoint(value: unknown): value is BinanceFuturesEquityPoint {
+  if (!value || typeof value !== "object") return false;
+  const point = value as Partial<BinanceFuturesEquityPoint>;
+  return (
+    typeof point.at === "string" &&
+    !Number.isNaN(new Date(point.at).getTime()) &&
+    typeof point.walletBalance === "number" &&
+    Number.isFinite(point.walletBalance) &&
+    typeof point.unrealizedPnl === "number" &&
+    Number.isFinite(point.unrealizedPnl) &&
+    typeof point.marginBalance === "number" &&
+    Number.isFinite(point.marginBalance) &&
+    typeof point.availableBalance === "number" &&
+    Number.isFinite(point.availableBalance)
+  );
+}
+
 function isBinanceHoldingSnapshot(value: unknown): value is BinanceHoldingSnapshot {
   if (!value || typeof value !== "object") return false;
   const snapshot = value as Partial<BinanceHoldingSnapshot>;
@@ -144,6 +177,36 @@ function isBinanceHoldingSnapshot(value: unknown): value is BinanceHoldingSnapsh
     Array.isArray(snapshot.futuresPositions) &&
     Boolean(snapshot.summary)
   );
+}
+
+function equityPointFromSnapshot(
+  snapshot: BinanceHoldingSnapshot,
+): BinanceFuturesEquityPoint {
+  return {
+    at: snapshot.updatedAt,
+    walletBalance: snapshot.summary.futuresWalletBalance,
+    unrealizedPnl: snapshot.summary.futuresUnrealizedPnl,
+    marginBalance: snapshot.summary.futuresMarginBalance,
+    availableBalance: snapshot.summary.futuresAvailableBalance,
+  };
+}
+
+function equityHistoryWithCurrent({
+  history,
+  snapshot,
+}: {
+  history: BinanceFuturesEquityPoint[];
+  snapshot: BinanceHoldingSnapshot;
+}) {
+  const points = new Map<string, BinanceFuturesEquityPoint>();
+  for (const point of history) {
+    if (isEquityPoint(point)) points.set(point.at, point);
+  }
+  const current = equityPointFromSnapshot(snapshot);
+  if (isEquityPoint(current)) points.set(current.at, current);
+  return [...points.values()]
+    .sort((left, right) => new Date(left.at).getTime() - new Date(right.at).getTime())
+    .slice(-240);
 }
 
 function readBrowserCachedSnapshot(): BinanceHoldingSnapshot | null {
@@ -318,6 +381,195 @@ function MeterBar({
   );
 }
 
+function FuturesEquityCurve({
+  snapshot,
+  history,
+}: {
+  snapshot: BinanceHoldingSnapshot;
+  history: BinanceFuturesEquityPoint[];
+}) {
+  const points = equityHistoryWithCurrent({ history, snapshot });
+  const width = 720;
+  const height = 240;
+  const padX = 34;
+  const padY = 24;
+  const chartWidth = width - padX * 2;
+  const chartHeight = height - padY * 2;
+  const values = points.flatMap((point) => [
+    point.marginBalance,
+    point.walletBalance,
+  ]);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = Math.max(1, maxValue - minValue);
+  const paddedMin = minValue - range * 0.12;
+  const paddedMax = maxValue + range * 0.12;
+  const paddedRange = Math.max(1, paddedMax - paddedMin);
+  const xForIndex = (index: number) =>
+    points.length <= 1
+      ? padX + chartWidth / 2
+      : padX + (index / (points.length - 1)) * chartWidth;
+  const yForValue = (value: number) =>
+    padY + ((paddedMax - value) / paddedRange) * chartHeight;
+  const equityPolyline = points
+    .map((point, index) => `${xForIndex(index)},${yForValue(point.marginBalance)}`)
+    .join(" ");
+  const walletPolyline = points
+    .map((point, index) => `${xForIndex(index)},${yForValue(point.walletBalance)}`)
+    .join(" ");
+  const firstPoint = points[0] ?? equityPointFromSnapshot(snapshot);
+  const lastPoint = points[points.length - 1] ?? firstPoint;
+  const equityChange = lastPoint.marginBalance - firstPoint.marginBalance;
+  const equityChangePercent =
+    firstPoint.marginBalance > 0
+      ? (equityChange / firstPoint.marginBalance) * 100
+      : 0;
+  const hasTrend = points.length >= 2;
+
+  return (
+    <div className="border-b border-line/70 p-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className="min-w-0 rounded-lg border border-line/70 bg-background/35 p-3">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
+                合约账户权益曲线
+              </div>
+              <div className="mt-1 text-xs text-muted">
+                本地快照 · {points.length} 个点 · 最近 {formatChartTime(lastPoint.at)}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 text-[11px] font-semibold text-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-success" />
+                账户权益
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-info" />
+                钱包余额
+              </span>
+            </div>
+          </div>
+
+          <svg
+            className="h-64 w-full overflow-visible"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label="合约账户权益历史曲线"
+            preserveAspectRatio="none"
+          >
+            <line
+              x1={padX}
+              y1={padY}
+              x2={padX}
+              y2={height - padY}
+              stroke="var(--line)"
+              strokeWidth="1"
+            />
+            {[0, 0.5, 1].map((ratio) => {
+              const y = padY + ratio * chartHeight;
+              const value = paddedMax - ratio * paddedRange;
+              return (
+                <g key={ratio}>
+                  <line
+                    x1={padX}
+                    y1={y}
+                    x2={width - padX}
+                    y2={y}
+                    stroke="var(--line)"
+                    strokeOpacity="0.7"
+                    strokeWidth="1"
+                    strokeDasharray={ratio === 0.5 ? "4 6" : undefined}
+                  />
+                  <text
+                    x={width - padX + 8}
+                    y={y + 4}
+                    fill="currentColor"
+                    className="text-[10px] font-semibold text-muted"
+                  >
+                    {formatCompactUsd(value).replace("+", "")}
+                  </text>
+                </g>
+              );
+            })}
+            <polyline
+              points={walletPolyline}
+              fill="none"
+              stroke="var(--info)"
+              strokeOpacity="0.7"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            <polyline
+              points={equityPolyline}
+              fill="none"
+              stroke="var(--success)"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {points.map((point, index) => (
+              <circle
+                key={point.at}
+                cx={xForIndex(index)}
+                cy={yForValue(point.marginBalance)}
+                r={index === points.length - 1 ? 4 : 2.5}
+                fill="var(--success)"
+              />
+            ))}
+            <text
+              x={padX}
+              y={height - 4}
+              fill="currentColor"
+              className="text-[10px] font-semibold text-muted"
+            >
+              {formatChartTime(firstPoint.at)}
+            </text>
+            <text
+              x={width - padX}
+              y={height - 4}
+              textAnchor="end"
+              fill="currentColor"
+              className="text-[10px] font-semibold text-muted"
+            >
+              {formatChartTime(lastPoint.at)}
+            </text>
+          </svg>
+
+          {!hasTrend ? (
+            <div className="mt-2 rounded-md border border-line/60 bg-panel px-3 py-2 text-xs text-muted">
+              已保存当前权益点；继续刷新后会形成完整曲线。
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+          <SummaryTile
+            label="当前权益"
+            value={formatUsd(lastPoint.marginBalance)}
+            detail={`钱包 ${formatUsd(lastPoint.walletBalance)}`}
+          />
+          <SummaryTile
+            label="区间变化"
+            value={formatSignedUsd(equityChange)}
+            detail={`${formatPercent(equityChangePercent)} · ${formatChartTime(firstPoint.at)} 起`}
+            tone={pnlTone(equityChange)}
+          />
+          <SummaryTile
+            label="未实现盈亏"
+            value={formatSignedUsd(lastPoint.unrealizedPnl)}
+            detail={`可用余额 ${formatUsd(lastPoint.availableBalance)}`}
+            tone={pnlTone(lastPoint.unrealizedPnl)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FuturesHeatmap({
   positions,
   maxAbsNotional,
@@ -399,7 +651,13 @@ function FuturesHeatmap({
   );
 }
 
-function FuturesDashboard({ snapshot }: { snapshot: BinanceHoldingSnapshot }) {
+function FuturesDashboard({
+  snapshot,
+  equityHistory,
+}: {
+  snapshot: BinanceHoldingSnapshot;
+  equityHistory: BinanceFuturesEquityPoint[];
+}) {
   const summary = snapshot.summary;
   const analytics = analyzeFuturesPositions({
     positions: snapshot.futuresPositions,
@@ -474,6 +732,8 @@ function FuturesDashboard({ snapshot }: { snapshot: BinanceHoldingSnapshot }) {
           </div>
         </div>
       </div>
+
+      <FuturesEquityCurve snapshot={snapshot} history={equityHistory} />
 
       <div className="grid xl:grid-cols-[minmax(22rem,0.85fr)_minmax(32rem,1.15fr)]">
         <div className="space-y-5 border-b border-line/70 p-4 xl:border-b-0 xl:border-r">
@@ -716,6 +976,7 @@ export function HoldingPanel() {
   const [snapshot, setSnapshot] = useState<BinanceHoldingSnapshot | null>(() =>
     readBrowserCachedSnapshot(),
   );
+  const [equityHistory, setEquityHistory] = useState<BinanceFuturesEquityPoint[]>([]);
   const [state, setState] = useState<LoadState>(() =>
     readBrowserCachedSnapshot() ? "ready" : "idle",
   );
@@ -747,6 +1008,7 @@ export function HoldingPanel() {
         throw new Error(payload.error || "持仓数据刷新失败。");
       }
       setSnapshot(payload.snapshot);
+      setEquityHistory(payload.equityHistory ?? []);
       writeBrowserCachedSnapshot(payload.snapshot);
       setState("ready");
     } catch (loadError) {
@@ -902,7 +1164,9 @@ export function HoldingPanel() {
         </div>
       ) : null}
 
-      {snapshot ? <FuturesDashboard snapshot={snapshot} /> : null}
+      {snapshot ? (
+        <FuturesDashboard snapshot={snapshot} equityHistory={equityHistory} />
+      ) : null}
 
       {apiDialogOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/72 px-3 backdrop-blur-sm">
