@@ -75,6 +75,7 @@ const {
   getTelegramPipelineMessageMediaPreview,
   getTelegramPipelineSnapshot,
   listTelegramPipelineTranslationCandidates,
+  setTelegramPipelineHealth,
   setTelegramPipelineMessageTranslation,
 } = await transpileToTemp();
 
@@ -234,4 +235,18 @@ setTelegramPipelineMessageTranslation("2955560057:123", {
   text: "更新翻译",
 }, db);
 assert.equal(getTelegramPipelineSnapshot(100, db).feed[0].translation?.text, "更新翻译");
+setTelegramPipelineHealth(
+  {
+    scope: "collector",
+    status: "live",
+    detail: "collector heartbeat",
+  },
+  db,
+);
+db.prepare("update telegram_health set updated_at = ? where scope = 'collector'")
+  .run("2026-04-28T00:00:00.000Z");
+const staleSnapshot = getTelegramPipelineSnapshot(100, db);
+assert.equal(staleSnapshot.status, "error");
+assert.equal(staleSnapshot.isConnected, false);
+assert.match(staleSnapshot.errors[0] ?? "", /heartbeat/i);
 console.log("ok - telegram pipeline store builds dashboard snapshots");

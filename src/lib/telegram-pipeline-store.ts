@@ -53,10 +53,38 @@ type HealthInput = {
   detail: string;
 };
 
+const MIN_TELEGRAM_HEALTH_STALE_MS = 10 * 60_000;
+const TELEGRAM_HEALTH_STALE_INTERVALS = 3;
+
 let sharedDb: DatabaseSync | null = null;
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function getTelegramPipelineHealthStaleMs() {
+  return Math.max(
+    MIN_TELEGRAM_HEALTH_STALE_MS,
+    getTelegramPipelineConfig().backfillIntervalMs * TELEGRAM_HEALTH_STALE_INTERVALS,
+  );
+}
+
+export function isTelegramPipelineHealthStale(
+  updatedAt: string | null,
+  servedAt = nowIso(),
+  staleMs = getTelegramPipelineHealthStaleMs(),
+) {
+  if (!updatedAt) {
+    return false;
+  }
+
+  const updatedAtMs = new Date(updatedAt).getTime();
+  const servedAtMs = new Date(servedAt).getTime();
+  if (!Number.isFinite(updatedAtMs) || !Number.isFinite(servedAtMs)) {
+    return false;
+  }
+
+  return servedAtMs - updatedAtMs > staleMs;
 }
 
 function stringValue(value: unknown): string {
@@ -655,27 +683,42 @@ export function getTelegramPipelineSnapshot(
   const health = db
     .prepare("select * from telegram_health where scope = 'collector'")
     .get();
+  const servedAt = nowIso();
   const status = stringValue(health?.status);
-  const healthError =
-    status === "error" ? nullableString(health?.detail) : null;
+  const healthUpdatedAt = nullableString(health?.updated_at);
+  const healthStale =
+    status !== "" &&
+    status !== "error" &&
+    isTelegramPipelineHealthStale(healthUpdatedAt, servedAt);
+  const healthError = status === "error"
+    ? nullableString(health?.detail)
+    : healthStale
+      ? `TG collector heartbeat stale since ${healthUpdatedAt}; signal-hub-telegram may be stopped.`
+      : null;
+  const snapshotStatus =
+    status === "error" || healthStale
+      ? "error"
+      : feed.length > 0
+        ? "live"
+        : "limited";
 
   return {
     provider: "telegram",
     mode: "mtproto",
     isConfigured: true,
-    isConnected: status === "live",
-    status: feed.length > 0 ? "live" : status === "error" ? "error" : "limited",
+    isConnected: status === "live" && !healthStale,
+    status: snapshotStatus,
     channels,
     feed,
     note: "Telegram Pipeline 本地持久化缓存；页面不再直接请求 Telegram。",
     errors: healthError ? [healthError] : [],
     refresh: {
       source: "cache",
-      servedAt: nowIso(),
+      servedAt,
       startedAt: null,
-      finishedAt: nullableString(health?.updated_at),
+      finishedAt: healthUpdatedAt,
       durationMs: null,
-      cacheFetchedAt: nullableString(health?.updated_at),
+      cacheFetchedAt: healthUpdatedAt,
     },
   };
 }

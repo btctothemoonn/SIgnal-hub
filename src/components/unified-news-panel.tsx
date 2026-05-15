@@ -218,9 +218,11 @@ function mergeTelegramSnapshot(
   return {
     ...current,
     ...incoming,
-    isConnected: current.isConnected || incoming.isConnected,
-    status:
-      incoming.status === "error" && mergedFeed.length > 0 ? "live" : incoming.status,
+    isConnected:
+      incoming.status === "error"
+        ? false
+        : current.isConnected || incoming.isConnected,
+    status: incoming.status,
     channels: mergeTelegramChannels(current.channels, incoming.channels),
     feed: mergedFeed,
   };
@@ -1303,6 +1305,18 @@ export function UnifiedNewsPanel({
           </div>
         </div>
       </div>
+
+      {telegramFirstError ? (
+        <div
+          data-telegram-fault-alert
+          className="border-b border-danger/30 bg-danger-soft/35 px-3 py-2"
+        >
+          <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-xs font-medium leading-5 text-danger">
+            <span className="font-semibold">TG 采集异常</span>
+            <span className="ml-2">{telegramFirstError}</span>
+          </p>
+        </div>
+      ) : null}
 
       {/* Timeline */}
       <div
