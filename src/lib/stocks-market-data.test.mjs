@@ -265,6 +265,30 @@ assert.equal(
   false,
 );
 
+const finnhubKeyPoolUrls = [];
+const finnhubKeyPoolSnapshot = await fetchFinnhubStocksMarketSnapshot({
+  tickers: ["NVDA", "AMD"],
+  env: {
+    STOCKS_FINNHUB_API_KEYS: "finnhub-key-a,finnhub-key-b",
+    STOCKS_FINNHUB_MARKET_REQUEST_DELAY_MS: "0",
+    STOCKS_FINNHUB_MARKET_CHART_MAX_TICKERS: "0",
+  },
+  fetchImpl: async (url) => {
+    const requestUrl = String(url);
+    finnhubKeyPoolUrls.push(requestUrl);
+    const symbol = new URL(requestUrl).searchParams.get("symbol");
+    return Response.json({
+      c: symbol === "AMD" ? 52 : 126.5,
+      pc: symbol === "AMD" ? 50 : 120,
+      dp: symbol === "AMD" ? 4 : 5.4167,
+      t: 1778146200,
+    });
+  },
+});
+assert.equal(Object.keys(finnhubKeyPoolSnapshot.quotes).length, 2);
+assert.equal(new URL(finnhubKeyPoolUrls[0]).searchParams.get("token"), "finnhub-key-a");
+assert.equal(new URL(finnhubKeyPoolUrls[1]).searchParams.get("token"), "finnhub-key-b");
+
 const naverFetchUrls = [];
 const naverSnapshot = await fetchNaverStocksMarketSnapshot({
   tickers: ["000660.KS", "005930.KS"],
@@ -395,6 +419,7 @@ assert.equal(partialFinnhubSnapshot.quotes.AMD.provider, "yahoo");
 assert.equal(partialFinnhubSnapshot.quotes.AMD.fallbackUsed, true);
 assert.equal(partialFinnhubSnapshot.quotes.AMD.dataQualityLabel, "回落到 Yahoo / 实时");
 
+const krxFallbackUrls = [];
 const krxFallbackSnapshot = await getStocksMarketSnapshot({
   stocks: ["NVDA", "000660.KS", "005930.KS"]
     .map((ticker) => getAlphaResearchStockByTicker(ticker))
@@ -406,6 +431,7 @@ const krxFallbackSnapshot = await getStocksMarketSnapshot({
   },
   fetchImpl: async (url) => {
     const requestUrl = String(url);
+    krxFallbackUrls.push(requestUrl);
     if (requestUrl.includes("finnhub.io") && requestUrl.includes("/quote")) {
       const symbol = new URL(requestUrl).searchParams.get("symbol");
       if (symbol?.endsWith(".KS")) {
@@ -446,6 +472,12 @@ assert.equal(krxFallbackSnapshot.quotes.NVDA.provider, "finnhub");
 assert.equal(krxFallbackSnapshot.quotes["000660.KS"].provider, "naver");
 assert.equal(krxFallbackSnapshot.quotes["005930.KS"].provider, "naver");
 assert.equal(krxFallbackSnapshot.quotes["000660.KS"].dayChangePct, -3.56);
+assert.equal(
+  krxFallbackUrls.some(
+    (url) => url.includes("finnhub.io") && url.includes(".KS"),
+  ),
+  false,
+);
 assert.deepEqual(
   krxFallbackSnapshot.trace.map((item) => `${item.provider}:${item.status}`),
   ["finnhub:success", "naver:success"],
@@ -454,7 +486,7 @@ assert.deepEqual(
 const fmpFetchUrls = [];
 const fmpSnapshot = await fetchFmpStocksMarketSnapshot({
   tickers: ["NVDA", "AMD"],
-  env: { STOCKS_FMP_API_KEY: "fmp-key" },
+  env: { STOCKS_FMP_API_KEYS: "fmp-key-a,fmp-key-b" },
   fetchImpl: async (url) => {
     fmpFetchUrls.push(String(url));
     if (String(url).includes("batch-quote")) {
@@ -475,6 +507,13 @@ assert.equal(fmpSnapshot.provider, "fmp");
 assert.equal(fmpSnapshot.quotes.NVDA.lastPrice, 112.5);
 assert.equal(fmpSnapshot.quotes.AMD.candles3d.length, 3);
 assert.ok(fmpFetchUrls[0].includes("batch-quote"));
+assert.equal(new URL(fmpFetchUrls[0]).searchParams.get("apikey"), "fmp-key-a");
+assert.equal(
+  new URL(
+    fmpFetchUrls.find((url) => url.includes("symbol=NVDA")) ?? "",
+  ).searchParams.get("apikey"),
+  "fmp-key-b",
+);
 
 const massiveFetchUrls = [];
 const massiveSnapshot = await fetchMassiveStocksMarketSnapshot({

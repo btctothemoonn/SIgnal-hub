@@ -6,6 +6,10 @@ import type {
   AlphaResearchSession,
   AlphaResearchStock,
 } from "./alpha-research-pool.ts";
+import {
+  getProviderApiKeys,
+  pickProviderApiKey,
+} from "./provider-api-keys.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -810,12 +814,30 @@ function chartUrl(ticker: string) {
   )}?range=10d&interval=1d&includePrePost=true`;
 }
 
+function fmpApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_FMP_API_KEYS",
+    "STOCKS_FMP_API_KEY",
+    "FMP_API_KEYS",
+    "FMP_API_KEY",
+  ]);
+}
+
 function fmpApiKey(env: EnvLike) {
-  return env.STOCKS_FMP_API_KEY?.trim() || env.FMP_API_KEY?.trim() || "";
+  return pickProviderApiKey(fmpApiKeys(env), 0);
+}
+
+function finnhubApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_FINNHUB_API_KEYS",
+    "STOCKS_FINNHUB_API_KEY",
+    "FINNHUB_API_KEYS",
+    "FINNHUB_API_KEY",
+  ]);
 }
 
 function finnhubApiKey(env: EnvLike) {
-  return env.STOCKS_FINNHUB_API_KEY?.trim() || env.FINNHUB_API_KEY?.trim() || "";
+  return pickProviderApiKey(finnhubApiKeys(env), 0);
 }
 
 function alphaVantageApiKey(env: EnvLike) {
@@ -823,6 +845,13 @@ function alphaVantageApiKey(env: EnvLike) {
     env.STOCKS_ALPHA_VANTAGE_API_KEY?.trim() ||
     env.ALPHA_VANTAGE_API_KEY?.trim() ||
     ""
+  );
+}
+
+function shouldUseAlphaVantageMarketFallback(env: EnvLike) {
+  return (
+    env.STOCKS_ALPHA_VANTAGE_MARKET_FALLBACK_ENABLED?.trim().toLowerCase() ===
+    "true"
   );
 }
 
@@ -1125,10 +1154,16 @@ export async function fetchFinnhubStocksMarketSnapshot({
   fetchImpl?: FetchLike;
   env?: EnvLike;
 }): Promise<StocksMarketSnapshot> {
-  const apiKey = finnhubApiKey(env);
-  if (!apiKey) throw new Error("Finnhub API key is not configured");
+  const apiKeys = finnhubApiKeys(env);
+  if (apiKeys.length === 0) {
+    throw new Error("Finnhub API key is not configured");
+  }
   const normalizedTickers = Array.from(
-    new Set(tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)),
+    new Set(
+      tickers
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter((ticker) => ticker && !naverDomesticCode(ticker)),
+    ),
   );
   const maxTickers = nonNegativeInt(
     env.STOCKS_FINNHUB_MARKET_MAX_TICKERS,
@@ -1163,6 +1198,7 @@ export async function fetchFinnhubStocksMarketSnapshot({
     if (index > 0 && requestDelayMs > 0) {
       await delay(requestDelayMs);
     }
+    const apiKey = pickProviderApiKey(apiKeys, index);
     try {
       const quoteResponse = await fetchImpl(finnhubQuoteUrl(ticker, apiKey), {
         cache: "no-store",
@@ -1279,7 +1315,8 @@ export async function fetchFmpStocksMarketSnapshot({
   fetchImpl?: FetchLike;
   env?: EnvLike;
 }): Promise<StocksMarketSnapshot> {
-  const apiKey = fmpApiKey(env);
+  const apiKeys = fmpApiKeys(env);
+  const apiKey = pickProviderApiKey(apiKeys, 0);
   if (!apiKey) throw new Error("FMP API key is not configured");
   const normalizedTickers = Array.from(
     new Set(tickers.map((ticker) => ticker.trim().toUpperCase()).filter(Boolean)),
@@ -1307,7 +1344,7 @@ export async function fetchFmpStocksMarketSnapshot({
   );
   const entries: Array<readonly [string, StocksMarketQuoteCore] | null> =
     await Promise.all(
-      normalizedTickers.map(async (ticker) => {
+      normalizedTickers.map(async (ticker, index) => {
         const quote = quoteMap.get(ticker);
         if (!quote) return null;
         if (!chartTickerSet.has(ticker)) {
@@ -1324,9 +1361,10 @@ export async function fetchFmpStocksMarketSnapshot({
           ] as const;
         }
         try {
-          const chartResponse = await fetchImpl(fmpHistoricalUrl(ticker, apiKey), {
-            cache: "no-store",
-          });
+          const chartResponse = await fetchImpl(
+            fmpHistoricalUrl(ticker, pickProviderApiKey(apiKeys, index + 1)),
+            { cache: "no-store" },
+          );
           if (!chartResponse.ok) {
             throw new Error(`FMP historical HTTP ${chartResponse.status}`);
           }
@@ -1563,16 +1601,20 @@ export async function getStocksMarketSnapshot({
         ? ([
             "massive",
             ...(fmpApiKey(env) ? ["fmp" as const] : []),
-            ...(alphaVantageApiKey(env) ? ["alpha-vantage" as const] : []),
             ...naverFallbackProviders,
             "yahoo",
+            ...(alphaVantageApiKey(env) && shouldUseAlphaVantageMarketFallback(env)
+              ? ["alpha-vantage" as const]
+              : []),
           ] as const)
         : provider === "fmp"
           ? ([
               "fmp",
-              ...(alphaVantageApiKey(env) ? ["alpha-vantage" as const] : []),
               ...naverFallbackProviders,
               "yahoo",
+              ...(alphaVantageApiKey(env) && shouldUseAlphaVantageMarketFallback(env)
+                ? ["alpha-vantage" as const]
+                : []),
             ] as const)
           : provider === "alpha-vantage"
             ? (["alpha-vantage", ...naverFallbackProviders, "yahoo"] as const)

@@ -2,6 +2,10 @@ import type {
   AlphaResearchFinancialSnapshot,
   AlphaResearchStock,
 } from "./alpha-research-pool.ts";
+import {
+  getProviderApiKeys,
+  pickProviderApiKey,
+} from "./provider-api-keys.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -151,8 +155,17 @@ function yahooFinancialUrl(ticker: string) {
   )}?modules=${modules}`;
 }
 
+function fmpApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_FMP_API_KEYS",
+    "STOCKS_FMP_API_KEY",
+    "FMP_API_KEYS",
+    "FMP_API_KEY",
+  ]);
+}
+
 function fmpApiKey(env: EnvLike) {
-  return env.STOCKS_FMP_API_KEY?.trim() || env.FMP_API_KEY?.trim() || "";
+  return pickProviderApiKey(fmpApiKeys(env), 0);
 }
 
 function alphaVantageApiKey(env: EnvLike) {
@@ -160,6 +173,38 @@ function alphaVantageApiKey(env: EnvLike) {
     env.STOCKS_ALPHA_VANTAGE_API_KEY?.trim() ||
     env.ALPHA_VANTAGE_API_KEY?.trim() ||
     ""
+  );
+}
+
+function shouldUseAlphaVantageFinancialFallback(env: EnvLike) {
+  return (
+    env.STOCKS_ALPHA_VANTAGE_FINANCIAL_FALLBACK_ENABLED?.trim().toLowerCase() ===
+    "true"
+  );
+}
+
+function configuredTickerSet(value: string | undefined) {
+  const tickers = (value ?? "")
+    .split(/[,;\s]+/)
+    .map((ticker) => ticker.trim().toUpperCase())
+    .filter(Boolean);
+  return tickers.length > 0 ? new Set(tickers) : null;
+}
+
+function selectFmpFinancialStocks(stocks: AlphaResearchStock[], env: EnvLike) {
+  const allowedTickers = configuredTickerSet(env.STOCKS_FMP_FINANCIAL_TICKERS);
+  const excludedTickers = configuredTickerSet(
+    env.STOCKS_FMP_FINANCIAL_EXCLUDE_TICKERS,
+  );
+  const candidates = stocks.filter((stock) => {
+    const ticker = stock.ticker.trim().toUpperCase();
+    if (allowedTickers && !allowedTickers.has(ticker)) return false;
+    if (excludedTickers?.has(ticker)) return false;
+    return true;
+  });
+  return candidates.slice(
+    0,
+    positiveInt(env.STOCKS_FMP_FINANCIAL_MAX_TICKERS, 8, candidates.length),
   );
 }
 
@@ -471,17 +516,15 @@ export async function fetchFmpStocksFinancialSnapshot({
   fetchImpl?: FetchLike;
   env?: EnvLike;
 }): Promise<StocksFinancialSnapshot> {
-  const apiKey = fmpApiKey(env);
-  if (!apiKey) throw new Error("FMP API key is not configured");
+  const apiKeys = fmpApiKeys(env);
+  if (apiKeys.length === 0) throw new Error("FMP API key is not configured");
   const generatedAt = new Date().toISOString();
-  const providerStocks = stocks.slice(
-    0,
-    positiveInt(env.STOCKS_FMP_FINANCIAL_MAX_TICKERS, 8, stocks.length),
-  );
+  const providerStocks = selectFmpFinancialStocks(stocks, env);
   const errors: string[] = [];
   const entries: Array<readonly [string, StocksFinancialStatement] | null> =
     await Promise.all(
-      providerStocks.map(async (stock) => {
+      providerStocks.map(async (stock, index) => {
+        const apiKey = pickProviderApiKey(apiKeys, index);
         try {
           const [incomeResponse, cashFlowResponse, growthResponse, estimatesResponse] =
             await Promise.all([
@@ -520,19 +563,21 @@ export async function fetchFmpStocksFinancialSnapshot({
             readFmpEndpointPayload("financial-growth", growthResponse),
             readFmpEndpointPayload("analyst-estimates", estimatesResponse),
           ]);
-          const failed = endpointPayloads.find((payload) => !payload.ok);
-          if (failed) {
+          const incomePayload = endpointPayloads[0];
+          if (!incomePayload?.ok) {
             throw new Error(
-              `FMP ${failed.endpoint} HTTP ${failed.status}: ${failed.summary}`,
+              incomePayload
+                ? `FMP ${incomePayload.endpoint} HTTP ${incomePayload.status}: ${incomePayload.summary}`
+                : "FMP income-statement returned no payload",
             );
           }
           const statement = parseFmpFinancialStatement(
             stock.ticker,
             {
-              income: endpointPayloads[0]?.payload,
-              cashFlow: endpointPayloads[1]?.payload,
-              growth: endpointPayloads[2]?.payload,
-              estimates: endpointPayloads[3]?.payload,
+              income: incomePayload.payload,
+              cashFlow: endpointPayloads[1]?.ok ? endpointPayloads[1].payload : [],
+              growth: endpointPayloads[2]?.ok ? endpointPayloads[2].payload : [],
+              estimates: endpointPayloads[3]?.ok ? endpointPayloads[3].payload : [],
             },
             { generatedAt },
           );
@@ -694,7 +739,11 @@ export async function getStocksFinancialSnapshot({
         );
       }
     }
-    if (provider !== "alpha-vantage" && alphaVantageApiKey(env)) {
+    if (
+      provider !== "alpha-vantage" &&
+      alphaVantageApiKey(env) &&
+      shouldUseAlphaVantageFinancialFallback(env)
+    ) {
       try {
         const alphaVantageSnapshot = await fetchAlphaVantageStocksFinancialSnapshot({
           stocks,

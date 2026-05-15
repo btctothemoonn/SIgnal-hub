@@ -97,6 +97,17 @@ function snapshotIssueTitle(snapshot: { errors: string[] } | null) {
   return snapshot?.errors.filter(Boolean).join(" | ") ?? "";
 }
 
+function isPerformanceCacheNotice(message: string | null) {
+  return Boolean(message?.startsWith("No performance cache "));
+}
+
+function performanceIssueLabel(message: string) {
+  const match = message.match(
+    /^No performance cache for ([^;]+); using latest cached market date ([^.]+)\.$/,
+  );
+  return match ? `使用最近缓存 ${match[2]}` : message;
+}
+
 export function AlphaResearchPage() {
   const [activeTab, setActiveTab] = useState<AlphaTab>("research");
   const [selectedTicker, setSelectedTicker] = useState(
@@ -466,8 +477,16 @@ export function AlphaResearchPage() {
               </span>
             ) : null}
             {performanceError ? (
-              <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {performanceError}
+              <span
+                className={[
+                  "max-w-[18rem] truncate rounded-md border px-2 py-1 text-[11px]",
+                  isPerformanceCacheNotice(performanceError)
+                    ? "border-warning/30 bg-warning-soft text-warning"
+                    : "border-danger/30 bg-danger-soft text-danger",
+                ].join(" ")}
+                title={performanceError}
+              >
+                {performanceIssueLabel(performanceError)}
               </span>
             ) : null}
           </div>

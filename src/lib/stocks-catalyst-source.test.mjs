@@ -142,7 +142,7 @@ const fmpBatchExternal = await fetchExternalCatalystItems({
   fetchImpl: fmpBatchFetch,
   env: {
     STOCKS_NEWS_PROVIDER: "fmp",
-    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FMP_API_KEYS: "fmp-key-a,fmp-key-b",
     STOCKS_FMP_BY_TICKER: "true",
     STOCKS_FMP_BATCH_SIZE: "3",
     STOCKS_NEWS_TRANSLATE_ENABLED: "false",
@@ -150,6 +150,8 @@ const fmpBatchExternal = await fetchExternalCatalystItems({
 });
 assert.equal(fmpBatchUrls.length, 2);
 assert.equal(new URL(fmpBatchUrls[0]).searchParams.get("symbols"), "NVDA,TSM,ASML");
+assert.equal(new URL(fmpBatchUrls[0]).searchParams.get("apikey"), "fmp-key-a");
+assert.equal(new URL(fmpBatchUrls[1]).searchParams.get("apikey"), "fmp-key-b");
 assert.equal(fmpBatchExternal.items.length, 5);
 
 const fmpFallbackUrls = [];
@@ -182,6 +184,36 @@ const fmpFallbackExternal = await fetchExternalCatalystItems({
 });
 assert.equal(fmpFallbackExternal.items.length, 1);
 assert.ok(fmpFallbackUrls.some((url) => url.includes("stock-latest")));
+
+const fmpArticlesFallbackUrls = [];
+const fmpArticlesFallbackExternal = await fetchExternalCatalystItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  fetchImpl: async (url) => {
+    const requestUrl = String(url);
+    fmpArticlesFallbackUrls.push(requestUrl);
+    if (requestUrl.includes("fmp-articles")) {
+      return Response.json([
+        {
+          title: "Nvidia FMP article fallback",
+          content: "Blackwell demand remains firm.",
+          link: "https://fmp.example.com/articles/nvda",
+          date: "2026-05-14 21:11:35",
+          tickers: "NASDAQ:NVDA",
+          site: "Financial Modeling Prep",
+        },
+      ]);
+    }
+    return new Response("restricted", { status: 402 });
+  },
+  env: {
+    STOCKS_NEWS_PROVIDER: "fmp",
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FMP_BY_TICKER: "true",
+    STOCKS_NEWS_TRANSLATE_ENABLED: "false",
+  },
+});
+assert.equal(fmpArticlesFallbackExternal.items.length, 1);
+assert.ok(fmpArticlesFallbackUrls.some((url) => url.includes("fmp-articles")));
 
 const alphaVantageUrls = [];
 const alphaVantageFetch = async (url) => {
@@ -221,31 +253,34 @@ assert.equal(alphaVantageExternal.items[0].source, "Alpha Vantage");
 
 const finnhubUrls = [];
 const finnhubExternal = await fetchExternalCatalystItems({
-  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  stocks: ALPHA_RESEARCH_STOCKS.slice(0, 2),
   fetchImpl: async (url) => {
     finnhubUrls.push(String(url));
+    const symbol = new URL(String(url)).searchParams.get("symbol") ?? "NVDA";
     return Response.json([
       {
         id: 101,
-        headline: "NVDA Finnhub company news",
+        headline: `${symbol} Finnhub company news`,
         summary: "Demand remains firm.",
-        url: "https://finnhub.example.com/nvda",
+        url: `https://finnhub.example.com/${symbol.toLowerCase()}`,
         datetime: 1778117400,
         source: "Finnhub Source",
-        related: "NVDA",
+        related: symbol,
       },
     ]);
   },
   env: {
     STOCKS_NEWS_PROVIDER: "finnhub",
-    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+    STOCKS_FINNHUB_API_KEYS: "finnhub-key-a,finnhub-key-b",
     STOCKS_NEWS_TRANSLATE_ENABLED: "false",
   },
 });
-assert.equal(finnhubExternal.items.length, 1);
+assert.equal(finnhubExternal.items.length, 2);
 assert.equal(finnhubExternal.items[0].source, "Finnhub");
 assert.ok(finnhubUrls[0].includes("company-news"));
 assert.ok(finnhubUrls[0].includes("symbol=NVDA"));
+assert.equal(new URL(finnhubUrls[0]).searchParams.get("token"), "finnhub-key-a");
+assert.equal(new URL(finnhubUrls[1]).searchParams.get("token"), "finnhub-key-b");
 
 const googleUrls = [];
 const googleExternal = await fetchExternalCatalystItems({
@@ -317,15 +352,16 @@ const aggregateExternal = await fetchExternalCatalystItems({
     STOCKS_FINNHUB_API_KEY: "finnhub-key",
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+    STOCKS_FMP_NEWS_ENABLED: "true",
     STOCKS_FMP_BY_TICKER: "true",
     STOCKS_NEWS_TRANSLATE_ENABLED: "false",
   },
 });
-assert.equal(aggregateExternal.items.length, 3);
+assert.equal(aggregateExternal.items.length, 2);
 assert.ok(aggregateExternal.errors.some((error) => error.includes("429")));
-assert.ok(!autoCalls.some((url) => url.includes("financialmodelingprep.com")));
+assert.ok(autoCalls[0].includes("financialmodelingprep.com"));
 assert.ok(autoCalls.some((url) => url.includes("finnhub.io")));
-assert.ok(autoCalls.some((url) => url.includes("alphavantage.co")));
+assert.ok(!autoCalls.some((url) => url.includes("alphavantage.co")));
 assert.ok(autoCalls.some((url) => url.includes("feeds.finance.yahoo.com")));
 assert.ok(autoCalls.some((url) => url.includes("news.google.com")));
 

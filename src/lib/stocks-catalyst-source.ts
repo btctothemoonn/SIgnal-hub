@@ -16,6 +16,10 @@ import {
   type StocksCatalystSnapshot,
   type StocksCatalystSourceItem,
 } from "./stocks-catalyst-data.ts";
+import {
+  getProviderApiKeys,
+  pickProviderApiKey,
+} from "./provider-api-keys.ts";
 import { getTelegramPipelineSnapshot } from "./telegram-pipeline-store.ts";
 import { getXPipelineSnapshot } from "./x-pipeline-store.ts";
 import { translateText, type TranslationNote } from "./translate.ts";
@@ -374,8 +378,17 @@ function polygonApiKey(env: EnvLike) {
   );
 }
 
+function fmpApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_FMP_API_KEYS",
+    "STOCKS_FMP_API_KEY",
+    "FMP_API_KEYS",
+    "FMP_API_KEY",
+  ]);
+}
+
 function fmpApiKey(env: EnvLike) {
-  return env.STOCKS_FMP_API_KEY?.trim() || env.FMP_API_KEY?.trim() || "";
+  return pickProviderApiKey(fmpApiKeys(env), 0);
 }
 
 function alphaVantageApiKey(env: EnvLike) {
@@ -386,12 +399,27 @@ function alphaVantageApiKey(env: EnvLike) {
   );
 }
 
+function finnhubApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_FINNHUB_API_KEYS",
+    "STOCKS_FINNHUB_API_KEY",
+    "FINNHUB_API_KEYS",
+    "FINNHUB_API_KEY",
+  ]);
+}
+
 function finnhubApiKey(env: EnvLike) {
-  return env.STOCKS_FINNHUB_API_KEY?.trim() || env.FINNHUB_API_KEY?.trim() || "";
+  return pickProviderApiKey(finnhubApiKeys(env), 0);
 }
 
 function shouldUseFmpNewsInAuto(env: EnvLike) {
-  return env.STOCKS_FMP_NEWS_ENABLED?.trim().toLowerCase() === "true";
+  return env.STOCKS_FMP_NEWS_ENABLED?.trim().toLowerCase() !== "false";
+}
+
+function shouldUseAlphaVantageNewsInAuto(env: EnvLike) {
+  return (
+    env.STOCKS_ALPHA_VANTAGE_NEWS_ENABLED?.trim().toLowerCase() === "true"
+  );
 }
 
 function shouldIncludeLocalSignals(env: EnvLike) {
@@ -504,7 +532,7 @@ function externalNewsCacheKey({
     env.STOCKS_YAHOO_NEWS_MAX_TICKERS ?? "",
     env.STOCKS_FMP_NEWS_ENABLED ?? "",
     env.STOCKS_POLYGON_BASE_URL ?? env.STOCKS_MASSIVE_BASE_URL ?? "",
-    "translation-v4",
+    "translation-v5-fmp-articles",
     env.STOCKS_NEWS_TRANSLATE_ENABLED ?? "",
     env.STOCKS_NEWS_TRANSLATE_TARGET ?? env.TELEGRAM_TRANSLATE_TARGET ?? "",
     env.STOCKS_NEWS_TRANSLATE_MAX_ITEMS ?? "",
@@ -667,6 +695,15 @@ function fmpNewsUrl(apiKey: string, limit: number) {
     apikey: apiKey,
   });
   return `https://financialmodelingprep.com/stable/news/stock-latest?${params.toString()}`;
+}
+
+function fmpArticlesUrl(apiKey: string, limit: number) {
+  const params = new URLSearchParams({
+    page: "0",
+    limit: String(limit),
+    apikey: apiKey,
+  });
+  return `https://financialmodelingprep.com/stable/fmp-articles?${params.toString()}`;
 }
 
 function fmpTickerNewsUrl(tickers: string[], apiKey: string, limit: number) {
@@ -897,20 +934,51 @@ async function fetchFmpCatalystItems({
   fetchImpl: FetchLike;
   env: EnvLike;
 }) {
-  const apiKey = fmpApiKey(env);
-  if (!apiKey) throw new Error("FMP API key is not configured");
+  const apiKeys = fmpApiKeys(env);
+  if (apiKeys.length === 0) throw new Error("FMP API key is not configured");
   const stockTickers = new Set(stocks.map((stock) => stock.ticker));
-  const fetchLatestItems = async () => {
+  const filterStockItems = (items: StocksCatalystSourceItem[]) =>
+    items.filter((item) =>
+      (item.tickers ?? []).some((ticker) => stockTickers.has(ticker)),
+    );
+  const readLimit = positiveInt(env.STOCKS_NEWS_READ_LIMIT, 120, 300);
+  const fetchArticleItems = async (apiKeyIndex = 0) => {
     const response = await fetchImpl(
-      fmpNewsUrl(apiKey, positiveInt(env.STOCKS_NEWS_READ_LIMIT, 120, 300)),
+      fmpArticlesUrl(pickProviderApiKey(apiKeys, apiKeyIndex), readLimit),
       { cache: "no-store" },
     );
     if (!response.ok) {
-      throw new Error(`FMP stock news HTTP ${response.status}`);
+      throw new Error(`FMP articles HTTP ${response.status}`);
     }
-    return parseFmpStockNewsPayload(await response.json()).filter((item) =>
-      (item.tickers ?? []).some((ticker) => stockTickers.has(ticker)),
-    );
+    return filterStockItems(parseFmpStockNewsPayload(await response.json()));
+  };
+  const fetchLatestItems = async (apiKeyIndex = 0) => {
+    let stockNewsError: unknown = null;
+    try {
+      const response = await fetchImpl(
+        fmpNewsUrl(pickProviderApiKey(apiKeys, apiKeyIndex), readLimit),
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        throw new Error(`FMP stock news HTTP ${response.status}`);
+      }
+      const items = filterStockItems(
+        parseFmpStockNewsPayload(await response.json()),
+      );
+      if (items.length > 0) return items;
+      stockNewsError = new Error("FMP stock news returned no matching items");
+    } catch (error) {
+      stockNewsError = error;
+    }
+    try {
+      return await fetchArticleItems(apiKeyIndex + 1);
+    } catch (articleError) {
+      throw new Error(
+        `${errorMessage(stockNewsError)}; articles fallback failed: ${errorMessage(
+          articleError,
+        )}`,
+      );
+    }
   };
 
   if (shouldFetchFmpByTicker(env)) {
@@ -921,13 +989,14 @@ async function fetchFmpCatalystItems({
       stocks.length,
     );
     const batchSize = positiveInt(env.STOCKS_FMP_BATCH_SIZE, 10, 25);
+    const batches = chunks(providerStocks, batchSize);
     try {
       const tickerItems = await Promise.all(
-        chunks(providerStocks, batchSize).map(async (batch) => {
+        batches.map(async (batch, index) => {
           const response = await fetchImpl(
             fmpTickerNewsUrl(
               batch.map((stock) => stock.ticker),
-              apiKey,
+              pickProviderApiKey(apiKeys, index),
               limit,
             ),
             { cache: "no-store" },
@@ -938,12 +1007,10 @@ async function fetchFmpCatalystItems({
           return parseFmpStockNewsPayload(await response.json());
         }),
       );
-      return tickerItems.flat().filter((item) =>
-        (item.tickers ?? []).some((ticker) => stockTickers.has(ticker)),
-      );
+      return filterStockItems(tickerItems.flat());
     } catch (error) {
       try {
-        return await fetchLatestItems();
+        return await fetchLatestItems(batches.length);
       } catch (fallbackError) {
         throw new Error(
           `${errorMessage(error)}; latest fallback failed: ${errorMessage(
@@ -1016,8 +1083,10 @@ async function fetchFinnhubCatalystItems({
   fetchImpl: FetchLike;
   env: EnvLike;
 }) {
-  const apiKey = finnhubApiKey(env);
-  if (!apiKey) throw new Error("Finnhub API key is not configured");
+  const apiKeys = finnhubApiKeys(env);
+  if (apiKeys.length === 0) {
+    throw new Error("Finnhub API key is not configured");
+  }
   const limit = positiveInt(env.STOCKS_NEWS_ITEMS_PER_TICKER, 2, 5);
   const providerStocks = selectProviderStocks(
     stocks.filter((stock) => !stock.ticker.includes(".")),
@@ -1026,11 +1095,11 @@ async function fetchFinnhubCatalystItems({
   );
   if (providerStocks.length === 0) return [];
   const items = await Promise.all(
-    providerStocks.map(async (stock) => {
+    providerStocks.map(async (stock, index) => {
       const response = await fetchImpl(
         finnhubCompanyNewsUrl({
           ticker: stock.ticker,
-          apiKey,
+          apiKey: pickProviderApiKey(apiKeys, index),
           env,
         }),
         { cache: "no-store" },
@@ -1245,12 +1314,14 @@ export async function fetchExternalCatalystItems({
   const providers =
     provider === "auto"
       ? ([
+          ...(fmpApiKey(env) && shouldUseFmpNewsInAuto(env) ? ["fmp"] : []),
           ...(polygonApiKey(env) ? ["polygon"] : []),
           ...(finnhubApiKey(env) ? ["finnhub"] : []),
-          ...(alphaVantageApiKey(env) ? ["alpha-vantage"] : []),
           "yahoo",
           "google-news",
-          ...(fmpApiKey(env) && shouldUseFmpNewsInAuto(env) ? ["fmp"] : []),
+          ...(alphaVantageApiKey(env) && shouldUseAlphaVantageNewsInAuto(env)
+            ? ["alpha-vantage"]
+            : []),
         ] as ExternalNewsProvider[])
       : [provider];
   const errors: string[] = [];

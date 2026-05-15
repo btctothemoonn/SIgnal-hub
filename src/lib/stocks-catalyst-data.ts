@@ -118,16 +118,20 @@ function sourceId(prefix: string, value: string) {
 }
 
 function normalizeTickerList(value: unknown): string[] {
+  const normalizeTicker = (item: string) => {
+    const ticker = item.trim().toUpperCase();
+    return ticker.includes(":") ? (ticker.split(":").pop() ?? ticker) : ticker;
+  };
   if (Array.isArray(value)) {
     return value
-      .map((item) => stringValue(item).toUpperCase())
+      .map((item) => normalizeTicker(stringValue(item)))
       .filter(Boolean);
   }
   const text = stringValue(value);
   if (!text) return [];
   return text
     .split(/[,\s]+/)
-    .map((item) => item.trim().toUpperCase())
+    .map(normalizeTicker)
     .filter(Boolean);
 }
 
@@ -230,7 +234,7 @@ export function parseFmpStockNewsPayload(payload: unknown): StocksCatalystSource
       const row = asRecord(item);
       const title = stringValue(row.title);
       const text = stringValue(row.text) || stringValue(row.content);
-      const link = stringValue(row.url);
+      const link = stringValue(row.url) || stringValue(row.link);
       if (!title || !link) return null;
       return {
         id: sourceId("fmp", link),

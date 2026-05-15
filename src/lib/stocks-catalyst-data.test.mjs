@@ -45,6 +45,19 @@ assert.equal(fmpItems[0].source, "FMP");
 assert.equal(fmpItems[0].sourceRole, "external");
 assert.equal(fmpItems[0].tickers?.[0], "NVDA");
 
+const fmpArticleItems = parseFmpStockNewsPayload([
+  {
+    title: "Nvidia receives upgrade amid AI growth",
+    content: "Analysts cite Blackwell demand.",
+    link: "https://fmp.example.com/articles/nvda",
+    date: "2026-05-14 21:11:35",
+    tickers: "NASDAQ:NVDA",
+    site: "Financial Modeling Prep",
+  },
+]);
+assert.equal(fmpArticleItems[0].link, "https://fmp.example.com/articles/nvda");
+assert.equal(fmpArticleItems[0].tickers?.[0], "NVDA");
+
 const yahooItems = parseYahooFinanceRss(
   `<?xml version="1.0"?><rss><channel><item><title><![CDATA[NVDA capex story improves]]></title><link>https://finance.yahoo.com/news/nvda</link><pubDate>Thu, 07 May 2026 01:30:00 GMT</pubDate><description><![CDATA[Cloud capex remains strong.]]></description></item></channel></rss>`,
   "NVDA",

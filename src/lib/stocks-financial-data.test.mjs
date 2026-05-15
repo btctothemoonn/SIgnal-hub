@@ -148,6 +148,113 @@ assert.equal(Object.keys(fmpFinancialSnapshot.financials).length, 1);
 assert.equal(fmpFinancialSnapshot.financials.NVDA.revenue, "$26.04B");
 assert.ok(fmpFinancialUrls.some((url) => url.includes("income-statement")));
 
+const fmpFinancialKeyPoolUrls = [];
+const fmpFinancialKeyPoolSnapshot = await fetchFmpStocksFinancialSnapshot({
+  stocks: ALPHA_RESEARCH_STOCKS.slice(0, 2),
+  env: {
+    STOCKS_FMP_API_KEYS: "fmp-key-a,fmp-key-b",
+    STOCKS_FMP_FINANCIAL_MAX_TICKERS: "2",
+  },
+  fetchImpl: async (url) => {
+    fmpFinancialKeyPoolUrls.push(String(url));
+    if (String(url).includes("income-statement")) {
+      const symbol = new URL(String(url)).searchParams.get("symbol");
+      return Response.json([
+        {
+          date: "2026-01-31",
+          fiscalYear: "2026",
+          period: "FY",
+          revenue: symbol === "TSM" ? 78000000000 : 26040000000,
+          eps: symbol === "TSM" ? 8.1 : 6.12,
+          grossProfitRatio: 0.745,
+        },
+      ]);
+    }
+    if (String(url).includes("cash-flow-statement")) {
+      return Response.json([{ freeCashFlow: 14900000000 }]);
+    }
+    if (String(url).includes("financial-growth")) {
+      return Response.json([{ revenueGrowth: 0.182 }]);
+    }
+    return Response.json([{ date: "2026-05-22", estimatedEpsAvg: 6.35 }]);
+  },
+});
+assert.equal(Object.keys(fmpFinancialKeyPoolSnapshot.financials).length, 2);
+assert.equal(
+  new URL(
+    fmpFinancialKeyPoolUrls.find((url) => url.includes("symbol=NVDA")) ?? "",
+  ).searchParams.get("apikey"),
+  "fmp-key-a",
+);
+assert.equal(
+  new URL(
+    fmpFinancialKeyPoolUrls.find((url) => url.includes("symbol=TSM")) ?? "",
+  ).searchParams.get("apikey"),
+  "fmp-key-b",
+);
+
+const fmpAllowedTickerUrls = [];
+const fmpAllowedTickerSnapshot = await fetchFmpStocksFinancialSnapshot({
+  stocks: ALPHA_RESEARCH_STOCKS.slice(0, 4),
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FMP_FINANCIAL_TICKERS: "NVDA,AMD",
+    STOCKS_FMP_FINANCIAL_MAX_TICKERS: "4",
+  },
+  fetchImpl: async (url) => {
+    fmpAllowedTickerUrls.push(String(url));
+    if (String(url).includes("income-statement")) {
+      const symbol = new URL(String(url)).searchParams.get("symbol");
+      return Response.json([
+        {
+          date: "2026-01-31",
+          fiscalYear: "2026",
+          period: "FY",
+          revenue: symbol === "AMD" ? 18000000000 : 26040000000,
+          eps: symbol === "AMD" ? 2.1 : 6.12,
+        },
+      ]);
+    }
+    return Response.json([]);
+  },
+});
+assert.deepEqual(Object.keys(fmpAllowedTickerSnapshot.financials), ["NVDA", "AMD"]);
+assert.equal(
+  fmpAllowedTickerUrls.some((url) => url.includes("symbol=ASML")),
+  false,
+);
+
+const fmpPartialEndpointSnapshot = await fetchFmpStocksFinancialSnapshot({
+  stocks: [getAlphaResearchStockByTicker("NVDA")].filter(Boolean),
+  env: { STOCKS_FMP_API_KEY: "fmp-key" },
+  fetchImpl: async (url) => {
+    if (String(url).includes("income-statement")) {
+      return Response.json([
+        {
+          date: "2026-01-31",
+          fiscalYear: "2026",
+          period: "FY",
+          revenue: 26040000000,
+          eps: 6.12,
+          grossProfitRatio: 0.745,
+        },
+      ]);
+    }
+    if (String(url).includes("analyst-estimates")) {
+      return new Response("restricted", { status: 402 });
+    }
+    return Response.json([]);
+  },
+});
+assert.equal(fmpPartialEndpointSnapshot.provider, "fmp");
+assert.equal(fmpPartialEndpointSnapshot.financials.NVDA.revenue, "$26.04B");
+assert.equal(fmpPartialEndpointSnapshot.financials.NVDA.guidance, "No forward estimate");
+assert.ok(
+  !fmpPartialEndpointSnapshot.errors.some((error) =>
+    error.includes("analyst-estimates"),
+  ),
+);
+
 const alphaFinancialUrls = [];
 const alphaFinancialSnapshot = await fetchAlphaVantageStocksFinancialSnapshot({
   stocks: ALPHA_RESEARCH_STOCKS.slice(0, 2),
@@ -208,7 +315,10 @@ assert.ok(defaultFinancialUrls[0].includes("query1.finance.yahoo.com"));
 
 const alphaFallbackSnapshot = await getStocksFinancialSnapshot({
   stocks: [getAlphaResearchStockByTicker("NVDA")].filter(Boolean),
-  env: { STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key" },
+  env: {
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+    STOCKS_ALPHA_VANTAGE_FINANCIAL_FALLBACK_ENABLED: "true",
+  },
   fetchImpl: async (url) => {
     if (String(url).includes("query1.finance.yahoo.com")) {
       return new Response("forbidden", { status: 403 });
@@ -225,6 +335,20 @@ const alphaFallbackSnapshot = await getStocksFinancialSnapshot({
 });
 assert.equal(alphaFallbackSnapshot.provider, "alpha-vantage");
 assert.equal(alphaFallbackSnapshot.financials.NVDA.revenue, "$26.04B");
+
+const alphaDisabledFallbackUrls = [];
+const alphaDisabledFallbackSnapshot = await getStocksFinancialSnapshot({
+  stocks: [getAlphaResearchStockByTicker("NVDA")].filter(Boolean),
+  env: { STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key" },
+  fetchImpl: async (url) => {
+    alphaDisabledFallbackUrls.push(String(url));
+    return new Response("forbidden", { status: 403 });
+  },
+});
+assert.equal(alphaDisabledFallbackSnapshot.provider, "mock");
+assert.ok(
+  !alphaDisabledFallbackUrls.some((url) => url.includes("alphavantage.co")),
+);
 
 await assert.rejects(
   () =>
