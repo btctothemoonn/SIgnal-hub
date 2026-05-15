@@ -325,6 +325,17 @@ function isTruthUsername(username: string) {
   return username.startsWith("truth:");
 }
 
+function formatXAuthorSubtitle(username: string, detail?: string | null) {
+  const handle = username ? `@${username}` : "";
+  const cleanDetail = detail?.trim();
+
+  if (handle && cleanDetail) {
+    return `${handle} · ${cleanDetail}`;
+  }
+
+  return handle || cleanDetail || null;
+}
+
 function toUnifiedTwitterItems(
   snapshot: TwitterDashboardSnapshot,
 ): UnifiedNewsItem[] {
@@ -341,9 +352,9 @@ function toUnifiedTwitterItems(
       createdAt: tweet.createdAt,
       sourceLabel:
         source === "truth" ? "Truth" : source === "monitor985" ? "X-985" : "X-6551",
-      title: `@${displayUsername}`,
+      title: tweet.displayName || `@${displayUsername}`,
       titleUrl: tweet.profileUrl,
-      subtitle: tweet.queryLabel,
+      subtitle: formatXAuthorSubtitle(displayUsername, tweet.queryLabel),
       text: tweet.text,
       translation: isUsefulTranslation(tweet.text, tweet.translation)
         ? tweet.translation
@@ -357,13 +368,15 @@ function toUnifiedTwitterItems(
             text: tweet.quotedTweet.text,
             createdAt: tweet.quotedTweet.createdAt,
             relation: tweet.quotedTweet.relation === "reply" ? "reply" : "quote",
-            title: tweet.quotedTweet.username
+            title: tweet.quotedTweet.displayName || (tweet.quotedTweet.username
               ? `@${tweet.quotedTweet.username.replace(/^truth:/, "")}`
               : tweet.quotedTweet.relation === "reply"
                 ? "回复上文"
-                : "引用推文",
+                : "引用推文"),
             titleUrl: tweet.quotedTweet.profileUrl || "#",
-            subtitle: tweet.quotedTweet.displayName || null,
+            subtitle: formatXAuthorSubtitle(
+              tweet.quotedTweet.username.replace(/^truth:/, ""),
+            ),
             link: tweet.quotedTweet.tweetUrl || "#",
             media: tweet.quotedTweet.media[0] ?? null,
             translation: isUsefulTranslation(
