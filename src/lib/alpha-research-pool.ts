@@ -21,6 +21,7 @@ export type AlphaResearchMarketProvider =
   | "finnhub"
   | "massive"
   | "fmp"
+  | "eodhd"
   | "alpha-vantage"
   | "naver"
   | "yahoo"

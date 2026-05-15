@@ -11,6 +11,7 @@ function providerLabel(provider: NonNullable<AlphaResearchMarket["provider"]>) {
     finnhub: "Finnhub",
     massive: "Massive",
     fmp: "FMP",
+    eodhd: "EODHD",
     "alpha-vantage": "Alpha Vantage",
     naver: "Naver",
     yahoo: "Yahoo",

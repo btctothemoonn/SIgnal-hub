@@ -9,6 +9,7 @@ import {
 import {
   buildMockStocksMarketSnapshot,
   fetchAlphaVantageStocksMarketSnapshot,
+  fetchEodhdStocksMarketSnapshot,
   fetchFmpStocksMarketSnapshot,
   fetchFinnhubStocksMarketSnapshot,
   fetchMassiveStocksMarketSnapshot,
@@ -16,6 +17,8 @@ import {
   getStocksMarketSnapshot,
   mergeStocksMarketSnapshot,
   parseAlphaVantageGlobalQuote,
+  parseEodhdEodCandles,
+  parseEodhdRealtimeQuote,
   parseFinnhubQuote,
   parseFinnhubStockCandles,
   parseFmpHistoricalCandles,
@@ -175,6 +178,28 @@ assert.equal(fmpQuoteRows[0].lastPrice, 112.5);
 assert.equal(fmpQuoteRows[0].dayChangePct, 4.17);
 assert.equal(fmpQuoteRows[0].prePostChangePct, -0.35);
 assert.equal(fmpQuoteRows[0].marketSession, "after-hours");
+
+const eodhdQuote = parseEodhdRealtimeQuote("NVDA", {
+  code: "NVDA.US",
+  timestamp: 1778146200,
+  close: 126.5,
+  previousClose: 120,
+  change_p: 5.4167,
+});
+assert.equal(eodhdQuote?.ticker, "NVDA");
+assert.equal(eodhdQuote?.lastPrice, 126.5);
+assert.equal(eodhdQuote?.dayChangePct, 5.42);
+assert.equal(eodhdQuote?.updatedAt, "2026-05-07T09:30:00.000Z");
+
+const eodhdCandles = parseEodhdEodCandles("NVDA", [
+  { date: "2026-05-04", open: 100, high: 104, low: 99, close: 103, volume: 100 },
+  { date: "2026-05-05", open: 104, high: 106, low: 102, adjusted_close: 105, volume: 200 },
+  { date: "2026-05-06", open: 105, high: 110, low: 104, close: 109, volume: 300 },
+]);
+assert.deepEqual(
+  eodhdCandles.map((candle) => candle.close),
+  [103, 105, 109],
+);
 
 const fmpCandles = parseFmpHistoricalCandles("NVDA", [
   { date: "2026-05-04", open: 100, high: 104, low: 99, close: 103, volume: 100 },
@@ -513,6 +538,79 @@ assert.equal(
     fmpFetchUrls.find((url) => url.includes("symbol=NVDA")) ?? "",
   ).searchParams.get("apikey"),
   "fmp-key-b",
+);
+
+const eodhdFetchUrls = [];
+const eodhdSnapshot = await fetchEodhdStocksMarketSnapshot({
+  tickers: ["NVDA", "AMD", "000660.KS"],
+  env: {
+    STOCKS_EODHD_API_KEYS: "eodhd-key-a,eodhd-key-b",
+    STOCKS_EODHD_MARKET_REQUEST_DELAY_MS: "0",
+    STOCKS_EODHD_MARKET_CHART_MAX_TICKERS: "1",
+  },
+  fetchImpl: async (url) => {
+    const requestUrl = String(url);
+    eodhdFetchUrls.push(requestUrl);
+    if (requestUrl.includes("/real-time/")) {
+      const symbol = requestUrl.match(/real-time\/([^?]+)/)?.[1];
+      return Response.json({
+        code: symbol,
+        timestamp: 1778146200,
+        close: symbol === "AMD.US" ? 52 : 126.5,
+        previousClose: symbol === "AMD.US" ? 50 : 120,
+        change_p: symbol === "AMD.US" ? 4 : 5.4167,
+      });
+    }
+    return Response.json([
+      { date: "2026-05-04", open: 100, high: 104, low: 99, close: 103, volume: 100 },
+      { date: "2026-05-05", open: 104, high: 106, low: 102, close: 105, volume: 200 },
+      { date: "2026-05-06", open: 105, high: 110, low: 104, close: 109, volume: 300 },
+    ]);
+  },
+});
+assert.equal(eodhdSnapshot.provider, "eodhd");
+assert.equal(eodhdSnapshot.quotes.NVDA.lastPrice, 126.5);
+assert.equal(eodhdSnapshot.quotes.NVDA.candles3d.length, 3);
+assert.equal(eodhdSnapshot.quotes.AMD.dayChangePct, 4);
+assert.equal(eodhdSnapshot.quotes["000660.KS"], undefined);
+assert.equal(new URL(eodhdFetchUrls[0]).searchParams.get("api_token"), "eodhd-key-a");
+assert.ok(eodhdFetchUrls[0].includes("/real-time/NVDA.US"));
+assert.equal(new URL(eodhdFetchUrls[2]).searchParams.get("api_token"), "eodhd-key-b");
+assert.ok(!eodhdFetchUrls.some((url) => url.includes("000660.KS")));
+
+const eodhdFallbackSnapshot = await getStocksMarketSnapshot({
+  stocks: ["NVDA"]
+    .map((ticker) => getAlphaResearchStockByTicker(ticker))
+    .filter(Boolean),
+  provider: "finnhub",
+  env: {
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+    STOCKS_EODHD_API_KEY: "eodhd-key",
+    STOCKS_FINNHUB_MARKET_REQUEST_DELAY_MS: "0",
+    STOCKS_EODHD_MARKET_REQUEST_DELAY_MS: "0",
+  },
+  fetchImpl: async (url) => {
+    const requestUrl = String(url);
+    if (requestUrl.includes("finnhub.io")) {
+      return new Response("rate limit", { status: 429 });
+    }
+    if (requestUrl.includes("eodhd.com/api/real-time")) {
+      return Response.json({
+        code: "NVDA.US",
+        timestamp: 1778146200,
+        close: 126.5,
+        previousClose: 120,
+        change_p: 5.4167,
+      });
+    }
+    throw new Error(`unexpected request ${requestUrl}`);
+  },
+});
+assert.equal(eodhdFallbackSnapshot.provider, "eodhd");
+assert.equal(eodhdFallbackSnapshot.fallbackUsed, true);
+assert.deepEqual(
+  eodhdFallbackSnapshot.trace.map((item) => `${item.provider}:${item.status}`),
+  ["finnhub:failed", "eodhd:success"],
 );
 
 const massiveFetchUrls = [];

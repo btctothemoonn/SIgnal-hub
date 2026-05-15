@@ -14,6 +14,7 @@ const {
   getStocksSnapshotCachePath,
   isStocksCachePrewarmEnabled,
   prewarmStocksCaches,
+  resolveStocksMarketProvider,
   writeStocksSnapshotCache,
 } = await import(moduleUrl);
 
@@ -25,6 +26,10 @@ try {
   assert.equal(getStocksPrewarmIntervalMs("market", {}), 5 * 60 * 1000);
   assert.equal(getStocksPrewarmIntervalMs("catalysts", {}), 15 * 60 * 1000);
   assert.equal(getStocksPrewarmIntervalMs("financial", {}), 60 * 60 * 1000);
+  assert.equal(
+    resolveStocksMarketProvider({ STOCKS_MARKET_DATA_PROVIDER: "eodhd" }),
+    "eodhd",
+  );
 
   const cachedMarket = {
     generatedAt: "2026-05-14T01:00:00.000Z",

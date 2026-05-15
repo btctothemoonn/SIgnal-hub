@@ -20,6 +20,7 @@ export type StocksMarketDataProvider =
   | "finnhub"
   | "massive"
   | "fmp"
+  | "eodhd"
   | "alpha-vantage"
   | "naver"
   | "yahoo"
@@ -171,6 +172,7 @@ function providerLabel(provider: StocksMarketDataProvider) {
     finnhub: "Finnhub",
     massive: "Massive",
     fmp: "FMP",
+    eodhd: "EODHD",
     "alpha-vantage": "Alpha Vantage",
     naver: "Naver",
     yahoo: "Yahoo",
@@ -550,6 +552,33 @@ export function parseFinnhubQuote(
   };
 }
 
+export function parseEodhdRealtimeQuote(
+  symbol: string,
+  payload: unknown,
+): StocksMarketQuoteCore | null {
+  const row = asRecord(payload);
+  const ticker = symbol.trim().toUpperCase();
+  const lastPrice = numberValue(row.close);
+  if (!ticker || lastPrice === null || lastPrice <= 0) return null;
+
+  const previousClose = requiredNumber(row.previousClose, lastPrice);
+  return {
+    ticker,
+    lastPrice: roundPrice(lastPrice),
+    dayChangePct: roundPercent(
+      numberValue(row.change_p) ?? percentChange(lastPrice, previousClose),
+    ),
+    prePostChangePct: 0,
+    prePostAvailable: false,
+    sevenDayChangePct: 0,
+    relativeStrengthLabel: relativeStrengthLabel(0),
+    marketSession: "regular",
+    candles3d: [],
+    source: "live",
+    updatedAt: secondsToIso(row.timestamp),
+  };
+}
+
 export function parseNaverRealtimeDomesticStock(
   ticker: string,
   payload: unknown,
@@ -794,6 +823,48 @@ export function parseFinnhubStockCandles(
   }));
 }
 
+export function parseEodhdEodCandles(
+  ticker: string,
+  payload: unknown,
+): AlphaResearchCandle[] {
+  void ticker;
+  const rows = asArray(payload)
+    .map((item) => {
+      const row = asRecord(item);
+      const open = numberValue(row.open);
+      const high = numberValue(row.high);
+      const low = numberValue(row.low);
+      const close = numberValue(row.adjusted_close ?? row.close);
+      if (open === null || high === null || low === null || close === null) {
+        return null;
+      }
+      return {
+        date: typeof row.date === "string" ? row.date.slice(5) : "",
+        open: roundPrice(open),
+        high: roundPrice(high),
+        low: roundPrice(low),
+        close: roundPrice(close),
+        volume: requiredNumber(row.volume, 0),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-3);
+
+  const averageVolume =
+    rows.reduce((sum, item) => sum + item.volume, 0) / Math.max(rows.length, 1);
+
+  return rows.map((item) => ({
+    date: item.date,
+    open: item.open,
+    high: item.high,
+    low: item.low,
+    close: item.close,
+    volumeLabel:
+      averageVolume > 0 ? `${(item.volume / averageVolume).toFixed(1)}x` : "n/a",
+  }));
+}
+
 function sevenDayChangeFromCandles(
   candles: AlphaResearchCandle[],
   lastPrice: number,
@@ -838,6 +909,19 @@ function finnhubApiKeys(env: EnvLike) {
 
 function finnhubApiKey(env: EnvLike) {
   return pickProviderApiKey(finnhubApiKeys(env), 0);
+}
+
+function eodhdApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
+    "STOCKS_EODHD_API_KEYS",
+    "STOCKS_EODHD_API_KEY",
+    "EODHD_API_KEYS",
+    "EODHD_API_KEY",
+  ]);
+}
+
+function eodhdApiKey(env: EnvLike) {
+  return pickProviderApiKey(eodhdApiKeys(env), 0);
 }
 
 function alphaVantageApiKey(env: EnvLike) {
@@ -919,6 +1003,37 @@ function finnhubStockCandlesUrl(ticker: string, apiKey: string) {
     token: apiKey,
   });
   return `https://finnhub.io/api/v1/stock/candle?${params.toString()}`;
+}
+
+function eodhdSymbol(ticker: string) {
+  const normalizedTicker = ticker.trim().toUpperCase();
+  if (!normalizedTicker || naverDomesticCode(normalizedTicker)) return "";
+  return normalizedTicker.includes(".") ? normalizedTicker : `${normalizedTicker}.US`;
+}
+
+function eodhdRealtimeUrl(ticker: string, apiKey: string) {
+  const params = new URLSearchParams({
+    api_token: apiKey,
+    fmt: "json",
+  });
+  return `https://eodhd.com/api/real-time/${encodeURIComponent(
+    eodhdSymbol(ticker),
+  )}?${params.toString()}`;
+}
+
+function eodhdEodUrl(ticker: string, apiKey: string) {
+  const to = new Date();
+  const from = new Date(to.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const params = new URLSearchParams({
+    api_token: apiKey,
+    fmt: "json",
+    period: "d",
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+  });
+  return `https://eodhd.com/api/eod/${encodeURIComponent(
+    eodhdSymbol(ticker),
+  )}?${params.toString()}`;
 }
 
 function alphaVantageGlobalQuoteUrl(ticker: string, apiKey: string) {
@@ -1271,6 +1386,128 @@ export async function fetchFinnhubStocksMarketSnapshot({
   });
 }
 
+export async function fetchEodhdStocksMarketSnapshot({
+  tickers,
+  fetchImpl = fetch,
+  env = process.env,
+}: {
+  tickers: string[];
+  fetchImpl?: FetchLike;
+  env?: EnvLike;
+}): Promise<StocksMarketSnapshot> {
+  const apiKeys = eodhdApiKeys(env);
+  if (apiKeys.length === 0) {
+    throw new Error("EODHD API key is not configured");
+  }
+  const normalizedTickers = Array.from(
+    new Set(
+      tickers
+        .map((ticker) => ticker.trim().toUpperCase())
+        .filter((ticker) => ticker && eodhdSymbol(ticker)),
+    ),
+  );
+  const maxTickers = nonNegativeInt(
+    env.STOCKS_EODHD_MARKET_MAX_TICKERS,
+    normalizedTickers.length,
+    normalizedTickers.length,
+  );
+  const limitedTickers = normalizedTickers.slice(0, maxTickers);
+  if (limitedTickers.length === 0) {
+    throw new Error("EODHD market quote limit is 0");
+  }
+
+  const generatedAt = new Date().toISOString();
+  const requestDelayMs = nonNegativeInt(
+    env.STOCKS_EODHD_MARKET_REQUEST_DELAY_MS,
+    150,
+    30000,
+  );
+  const chartTickerSet = new Set(
+    limitedTickers.slice(
+      0,
+      nonNegativeInt(
+        env.STOCKS_EODHD_MARKET_CHART_MAX_TICKERS,
+        0,
+        limitedTickers.length,
+      ),
+    ),
+  );
+  const entries: Array<readonly [string, StocksMarketQuoteCore]> = [];
+  const errors: string[] = [];
+
+  for (const [index, ticker] of limitedTickers.entries()) {
+    if (index > 0 && requestDelayMs > 0) {
+      await delay(requestDelayMs);
+    }
+    const apiKey = pickProviderApiKey(apiKeys, index);
+    try {
+      const quoteResponse = await fetchImpl(eodhdRealtimeUrl(ticker, apiKey), {
+        cache: "no-store",
+      });
+      if (!quoteResponse.ok) {
+        throw new Error(`EODHD quote HTTP ${quoteResponse.status}`);
+      }
+      const quote = parseEodhdRealtimeQuote(ticker, await quoteResponse.json());
+      if (!quote) throw new Error("EODHD returned no usable quote");
+
+      let candles3d: AlphaResearchCandle[] = [];
+      if (chartTickerSet.has(ticker)) {
+        try {
+          const chartResponse = await fetchImpl(eodhdEodUrl(ticker, apiKey), {
+            cache: "no-store",
+          });
+          if (!chartResponse.ok) {
+            throw new Error(`EODHD EOD HTTP ${chartResponse.status}`);
+          }
+          candles3d = parseEodhdEodCandles(ticker, await chartResponse.json());
+        } catch (chartError) {
+          errors.push(
+            `${ticker}: ${
+              chartError instanceof Error ? chartError.message : String(chartError)
+            }`,
+          );
+        }
+      }
+
+      const sevenDayChangePct = sevenDayChangeFromCandles(
+        candles3d,
+        quote.lastPrice,
+      );
+      entries.push([
+        quote.ticker,
+        {
+          ...quote,
+          candles3d,
+          sevenDayChangePct,
+          relativeStrengthLabel: relativeStrengthLabel(sevenDayChangePct),
+          updatedAt: quote.updatedAt || generatedAt,
+        },
+      ]);
+    } catch (error) {
+      errors.push(
+        `${ticker}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const quotes = Object.fromEntries(entries);
+  if (Object.keys(quotes).length === 0) {
+    throw new Error(
+      errors.length > 0
+        ? `EODHD market data returned no usable quotes (${errors.join("; ")})`
+        : "EODHD market data returned no usable quotes",
+    );
+  }
+
+  return withMarketMetadata({
+    generatedAt,
+    source: "live",
+    provider: "eodhd",
+    errors,
+    quotes,
+  });
+}
+
 export async function fetchMassiveStocksMarketSnapshot({
   tickers,
   fetchImpl = fetch,
@@ -1577,7 +1814,11 @@ export async function getStocksMarketSnapshot({
   stocks,
   fetchImpl = fetch,
   env = process.env,
-  provider = finnhubApiKey(env) ? "finnhub" : "yahoo",
+  provider = finnhubApiKey(env)
+    ? "finnhub"
+    : eodhdApiKey(env)
+      ? "eodhd"
+      : "yahoo",
 }: {
   stocks: AlphaResearchStock[];
   fetchImpl?: FetchLike;
@@ -1596,12 +1837,18 @@ export async function getStocksMarketSnapshot({
 
   const providerChain =
     provider === "finnhub"
-      ? (["finnhub", ...naverFallbackProviders, "yahoo"] as const)
+      ? ([
+          "finnhub",
+          ...naverFallbackProviders,
+          ...(eodhdApiKey(env) ? ["eodhd" as const] : []),
+          "yahoo",
+        ] as const)
       : provider === "massive"
         ? ([
             "massive",
             ...(fmpApiKey(env) ? ["fmp" as const] : []),
             ...naverFallbackProviders,
+            ...(eodhdApiKey(env) ? ["eodhd" as const] : []),
             "yahoo",
             ...(alphaVantageApiKey(env) && shouldUseAlphaVantageMarketFallback(env)
               ? ["alpha-vantage" as const]
@@ -1611,11 +1858,14 @@ export async function getStocksMarketSnapshot({
           ? ([
               "fmp",
               ...naverFallbackProviders,
+              ...(eodhdApiKey(env) ? ["eodhd" as const] : []),
               "yahoo",
               ...(alphaVantageApiKey(env) && shouldUseAlphaVantageMarketFallback(env)
                 ? ["alpha-vantage" as const]
                 : []),
             ] as const)
+          : provider === "eodhd"
+            ? (["eodhd", ...naverFallbackProviders, "yahoo"] as const)
           : provider === "alpha-vantage"
             ? (["alpha-vantage", ...naverFallbackProviders, "yahoo"] as const)
             : provider === "naver"
@@ -1635,6 +1885,12 @@ export async function getStocksMarketSnapshot({
             fetchImpl,
             env,
           })
+        : activeProvider === "eodhd"
+          ? fetchEodhdStocksMarketSnapshot({
+              tickers,
+              fetchImpl,
+              env,
+            })
         : activeProvider === "fmp"
           ? fetchFmpStocksMarketSnapshot({
               tickers,

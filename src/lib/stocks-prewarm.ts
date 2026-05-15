@@ -287,6 +287,7 @@ export function resolveStocksMarketProvider(
   return configuredProvider === "mock" ||
     configuredProvider === "finnhub" ||
     configuredProvider === "massive" ||
+    configuredProvider === "eodhd" ||
     configuredProvider === "yahoo" ||
     configuredProvider === "alpha-vantage" ||
     configuredProvider === "naver" ||
