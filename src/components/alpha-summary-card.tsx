@@ -209,6 +209,7 @@ export function AlphaSummaryCard({
     snapshot?.status === "needs_key" || snapshot?.status === "error";
   const activeScope = scopeConfig(scope);
   const activeScopeTitle = scopeTitle(scope, audience);
+  const summaryPeriodLabel = snapshot?.period.label ?? activeScope.emptyWindow;
   const metaItems = snapshot
     ? [
         { label: "窗口", value: snapshot.period.label },
@@ -272,7 +273,17 @@ export function AlphaSummaryCard({
                   </span>
                 ))}
               </div>
-            ) : null}
+            ) : (
+              <div
+                data-alpha-summary-period
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted sm:w-fit"
+              >
+                <span className="shrink-0">周期</span>
+                <span className="min-w-0 truncate font-medium text-foreground">
+                  {summaryPeriodLabel}
+                </span>
+              </div>
+            )}
 
             <div className="grid w-full grid-cols-4 gap-0.5 rounded-md border border-line/70 bg-background/40 p-0.5 sm:max-w-sm">
               {SUMMARY_SCOPES.map((item) => {

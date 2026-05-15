@@ -12,6 +12,8 @@ const layoutSource = readFileSync(
 
 assert.match(cardSource, /showHeaderMeta = true/);
 assert.match(cardSource, /showHeaderMeta \? \(/);
+assert.match(cardSource, /const summaryPeriodLabel =/);
+assert.match(cardSource, /data-alpha-summary-period/);
 assert.match(layoutSource, /showHeaderMeta=\{false\}/);
 
 console.log("ok - alpha summary card can hide low-value header metadata");
