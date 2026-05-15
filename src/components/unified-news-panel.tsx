@@ -39,7 +39,7 @@ import {
 const MAX_ALL_NEWS_ITEMS = 200;
 const MAX_TELEGRAM_NEWS_ITEMS = 300;
 const MAX_X_NEWS_ITEMS = 200;
-const SNAPSHOT_REFRESH_MS = 120000;
+const SNAPSHOT_REFRESH_MS = 30000;
 
 type UnifiedTranslation = {
   sourceLanguage: string;
@@ -720,12 +720,11 @@ export function UnifiedNewsPanel({
       try {
         const settled = await Promise.allSettled([
           requestTelegramSnapshot(),
-          ...(pollXSnapshot ? [requestXSnapshot()] : []),
+          requestXSnapshot(),
         ]);
         results = [
           settled[0] as PromiseSettledResult<TelegramDashboardSnapshot>,
-          (settled[1] as PromiseSettledResult<TwitterDashboardSnapshot> | undefined) ??
-            null,
+          settled[1] as PromiseSettledResult<TwitterDashboardSnapshot>,
         ];
       } finally {
         refreshInFlightRef.current = false;
@@ -790,7 +789,6 @@ export function UnifiedNewsPanel({
 
     if (
       !pollXSnapshot &&
-      initialXSnapshot.isConfigured &&
       initialXSnapshot.status !== "paused"
     ) {
       const handleXSnapshot = (event: Event) => {
@@ -1262,7 +1260,7 @@ export function UnifiedNewsPanel({
                 ) : null}
               </>
             ) : null}
-            {!pollXSnapshot && initialXSnapshot.isConfigured ? (
+            {!pollXSnapshot && xSnapshot.isConfigured ? (
               <>
                 <button
                   type="button"

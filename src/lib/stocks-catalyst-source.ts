@@ -10,6 +10,7 @@ import {
   parseFmpStockNewsPayload,
   parseFinnhubCompanyNewsPayload,
   parseGoogleNewsRss,
+  parsePatreonPostApiResponse,
   parsePatreonPostsPage,
   parsePolygonNewsPayload,
   parseYahooFinanceRss,
@@ -344,6 +345,159 @@ async function fetchPatreonPage({
     cache: "no-store",
     headers,
   });
+}
+
+function patreonBodyText(item: StocksCatalystSourceItem) {
+  const lines = item.text
+    .replace(/\r\n/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const title = lines[0]?.toLowerCase() || "";
+  if (lines[1] && lines[1].toLowerCase() === title) {
+    lines.splice(1, 1);
+  }
+  if (lines[0]?.toLowerCase() === title) {
+    lines.shift();
+  }
+  return lines.join("\n").trim();
+}
+
+function shouldFetchPatreonPostDetail(item: StocksCatalystSourceItem) {
+  return Boolean(item.link && patreonBodyText(item).length < 32);
+}
+
+function choosePatreonDetailItem(
+  item: StocksCatalystSourceItem,
+  detailItems: StocksCatalystSourceItem[],
+) {
+  return (
+    detailItems.find((detail) => detail.link === item.link) ||
+    detailItems.find((detail) => detail.id === item.id) ||
+    detailItems[0] ||
+    null
+  );
+}
+
+function patreonPostId(item: StocksCatalystSourceItem) {
+  return (
+    item.link.match(/-(\d+)(?:[/?#]|$)/)?.[1] ||
+    item.id.match(/^patreon:(\d+)$/)?.[1] ||
+    null
+  );
+}
+
+async function fetchPatreonApiDetail({
+  item,
+  headers,
+  env,
+  fetchImpl,
+  creatorName,
+}: {
+  item: StocksCatalystSourceItem;
+  headers: Record<string, string>;
+  env: EnvLike;
+  fetchImpl: FetchLike;
+  creatorName: string;
+}) {
+  const id = patreonPostId(item);
+  if (!id) return null;
+  const response = await fetchPatreonPage({
+    url: `https://www.patreon.com/api/posts/${id}?include=campaign,user,access_rules,attachments,images,media`,
+    headers: {
+      ...headers,
+      accept: "application/json,text/plain,*/*",
+      referer: item.link || headers.referer,
+    },
+    env,
+    fetchImpl,
+  });
+  if (!response.ok) {
+    throw new Error(`Patreon post API HTTP ${response.status}`);
+  }
+  return parsePatreonPostApiResponse(await response.text(), {
+    sourceUrl: item.link,
+    creatorName,
+  });
+}
+
+async function enrichPatreonPostDetails({
+  items,
+  headers,
+  env,
+  fetchImpl,
+  creatorName,
+}: {
+  items: StocksCatalystSourceItem[];
+  headers: Record<string, string>;
+  env: EnvLike;
+  fetchImpl: FetchLike;
+  creatorName: string;
+}) {
+  const errors: string[] = [];
+  const enriched: StocksCatalystSourceItem[] = [];
+
+  for (const item of items) {
+    if (!shouldFetchPatreonPostDetail(item)) {
+      enriched.push(item);
+      continue;
+    }
+
+    try {
+      const apiDetail = await fetchPatreonApiDetail({
+        item,
+        headers,
+        env,
+        fetchImpl,
+        creatorName,
+      });
+      if (
+        apiDetail &&
+        patreonBodyText(apiDetail).length > patreonBodyText(item).length
+      ) {
+        enriched.push({
+          ...item,
+          text: apiDetail.text,
+          translation: apiDetail.translation ?? item.translation,
+          link: apiDetail.link || item.link,
+        });
+        continue;
+      }
+
+      const response = await fetchPatreonPage({
+        url: item.link,
+        headers,
+        env,
+        fetchImpl,
+      });
+      if (!response.ok) {
+        throw new Error(`Patreon post HTTP ${response.status}`);
+      }
+      const detail = choosePatreonDetailItem(
+        item,
+        parsePatreonPostsPage(await response.text(), {
+          sourceUrl: item.link,
+          creatorName,
+          maxPosts: 3,
+        }),
+      );
+      if (detail && patreonBodyText(detail).length > patreonBodyText(item).length) {
+        enriched.push({
+          ...item,
+          text: detail.text,
+          translation: detail.translation ?? item.translation,
+          link: detail.link || item.link,
+        });
+      } else {
+        enriched.push(item);
+      }
+    } catch (error) {
+      errors.push(`Patreon detail: ${errorMessage(error)}`);
+      enriched.push(item);
+    }
+  }
+
+  return { items: enriched, errors };
 }
 
 function normalizeExternalNewsProvider(
@@ -1228,11 +1382,20 @@ export async function fetchPatreonSubscriptionItems({
     if (!response.ok) {
       throw new Error(`Patreon posts HTTP ${response.status}`);
     }
-    const items = parsePatreonPostsPage(await response.text(), {
+    const creatorName = patreonCreatorName(env);
+    const parsedItems = parsePatreonPostsPage(await response.text(), {
       sourceUrl: url,
-      creatorName: patreonCreatorName(env),
+      creatorName,
       maxPosts: positiveInt(env.STOCKS_PATREON_MAX_POSTS, 10, 25),
     });
+    const detailResult = await enrichPatreonPostDetails({
+      items: parsedItems,
+      headers,
+      env,
+      fetchImpl,
+      creatorName,
+    });
+    const items = detailResult.items;
     if (items.length === 0 && fetchImpl === fetch && cacheMs > 0) {
       const stale = readStaleExternalNewsResult({
         env,
@@ -1251,7 +1414,10 @@ export async function fetchPatreonSubscriptionItems({
     }
     const result = {
       items,
-      errors: items.length > 0 ? [] : ["Patreon: no subscription posts parsed"],
+      errors:
+        items.length > 0
+          ? detailResult.errors
+          : ["Patreon: no subscription posts parsed", ...detailResult.errors],
     };
     if (fetchImpl === fetch && cacheMs > 0 && result.items.length > 0) {
       const entry = {

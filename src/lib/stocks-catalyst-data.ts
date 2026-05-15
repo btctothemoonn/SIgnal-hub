@@ -92,6 +92,47 @@ const NEGATIVE_TERMS = [
   "限制",
 ];
 
+const SUBSCRIPTION_SUMMARY_TERMS = [
+  "ai",
+  "capex",
+  "cycle",
+  "demand",
+  "dram",
+  "eps",
+  "gross margin",
+  "growth",
+  "guidance",
+  "hbm",
+  "inventory",
+  "melt-up",
+  "margin",
+  "nand",
+  "price",
+  "pricing",
+  "regroup",
+  "revenue",
+  "risk",
+  "sndk",
+  "ssd",
+  "storage",
+  "supply",
+  "target",
+  "tokenomics",
+  "valuation",
+  "财报",
+  "仓位",
+  "供应",
+  "回调",
+  "存储",
+  "强弱",
+  "毛利",
+  "目标",
+  "短线",
+  "风险",
+  "需求",
+  "预期",
+];
+
 type JsonRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): JsonRecord {
@@ -528,6 +569,79 @@ export function parsePatreonPostsPage(
     .slice(0, maxPosts);
 }
 
+function collectJsonText(value: unknown, lines: string[]) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonText(item, lines);
+    return;
+  }
+
+  const record = value as JsonRecord;
+  if (typeof record.text === "string" && record.text.trim()) {
+    lines.push(record.text.trim());
+  }
+  collectJsonText(record.content, lines);
+}
+
+function textFromJsonDocumentString(raw: unknown) {
+  if (typeof raw !== "string" || !raw.trim()) return "";
+  try {
+    const lines: string[] = [];
+    collectJsonText(JSON.parse(raw), lines);
+    return lines.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function patreonApiPayload(json: string) {
+  try {
+    const payload = asRecord(JSON.parse(json));
+    const data = asRecord(payload.data);
+    const attributes = asRecord(data.attributes);
+    return Object.keys(attributes).length > 0 ? { data, attributes } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parsePatreonPostApiResponse(
+  json: string,
+  options: PatreonPostsPageOptions = {},
+): StocksCatalystSourceItem | null {
+  const payload = patreonApiPayload(json);
+  if (!payload) return null;
+  const { data, attributes } = payload;
+
+  const title = textFromHtml(stringValue(attributes.title)).trim();
+  if (!title) return null;
+
+  const sourceUrl =
+    options.sourceUrl?.trim() || stringValue(attributes.url) || stringValue(attributes.patreon_url);
+  const creatorName = options.creatorName?.trim() || "Patreon";
+  const body =
+    textFromHtml(stringValue(attributes.content)) ||
+    textFromJsonDocumentString(attributes.content_json_string) ||
+    textFromHtml(stringValue(attributes.teaser_text)) ||
+    textFromJsonDocumentString(attributes.teaser_text_json_string);
+
+  return {
+    id: sourceId("patreon", stringValue(data.id) || sourceUrl || title),
+    source: "Patreon" as const,
+    sourceRole: "subscription" as const,
+    author: creatorName,
+    createdAt:
+      firstDateFromRecord(attributes, ["published_at", "created_at", "edited_at"]) ||
+      new Date().toISOString(),
+    text: clampText([title, body].filter(Boolean).join("\n"), 2400),
+    translation: null,
+    link: normalizePatreonUrl(
+      stringValue(attributes.url) || stringValue(attributes.patreon_url),
+      sourceUrl,
+    ),
+  };
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -649,8 +763,109 @@ function titleFromItem(item: StocksCatalystSourceItem) {
   return clampText(firstLine, 120);
 }
 
+function summaryTextFromItem(item: StocksCatalystSourceItem) {
+  const sourceText = item.translation || item.text;
+  const lines = sourceText
+    .replace(/\r\n/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const title = titleFromItem(item).trim().toLowerCase();
+  if (lines[0]?.toLowerCase() === title) {
+    lines.shift();
+  }
+  return lines.join("\n") || sourceText;
+}
+
+function subscriptionSentences(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .split(/\n+/)
+    .flatMap(
+      (line) =>
+        line.match(/[^\u3002\uff01\uff1f\uff1b!?;]+[\u3002\uff01\uff1f\uff1b!?;]?/gu) ??
+        [line],
+    )
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 10);
+}
+
+function subscriptionSentenceScore(sentence: string) {
+  const lower = sentence.toLowerCase();
+  let score = 0;
+  for (const term of SUBSCRIPTION_SUMMARY_TERMS) {
+    if (lower.includes(term.toLowerCase())) score += 2;
+  }
+  if (/\$?[A-Z]{2,6}(?:\.[A-Z]{1,3})?\b/.test(sentence)) score += 2;
+  if (/\d+(?:\.\d+)?%|\$?\d+(?:\.\d+)?[BMK]?/i.test(sentence)) score += 2;
+  if (
+    /\u98ce\u9669|\u538b\u529b|\u56de\u64a4|\u56de\u8c03|\u5931\u8d25|\u4e0b\u884c|risk|pressure|downside/i.test(
+      sentence,
+    )
+  ) {
+    score += 2;
+  }
+  if (
+    /^\u5927\u5bb6\u597d|^\u4eca\u5929\u662f|^hi\b|^hello\b|\u514d\u8d23\u58f0\u660e|\u4ec5\u4f9b\u53c2\u8003/i.test(
+      sentence,
+    )
+  ) {
+    score -= 6;
+  }
+  if (sentence.length > 220) score -= 1;
+  return score;
+}
+
+function selectedSubscriptionSentences(text: string, maxCount: number) {
+  const seen = new Set<string>();
+  const scored = subscriptionSentences(text)
+    .map((sentence, index) => ({
+      sentence: clampText(sentence, 150),
+      index,
+      score: subscriptionSentenceScore(sentence),
+    }))
+    .filter((item) => {
+      const key = item.sentence.toLowerCase();
+      if (item.score <= 0 || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  const selected = scored
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, maxCount)
+    .sort((left, right) => left.index - right.index)
+    .map((item) => item.sentence);
+
+  if (selected.length > 0) return selected;
+  return subscriptionSentences(text).slice(0, maxCount).map((sentence) => clampText(sentence, 150));
+}
+
+function subscriptionBriefSummary(text: string) {
+  const selected = selectedSubscriptionSentences(text, 2);
+  return clampText(selected.join(" ") || text, 180);
+}
+
+function subscriptionExpandedSummary(text: string) {
+  const selected = selectedSubscriptionSentences(text, 6);
+  if (selected.length === 0) return clampText(text, 420);
+  return clampText(
+    ["\u6838\u5fc3\u8981\u70b9", ...selected.map((sentence) => `- ${sentence}`)].join("\n"),
+    900,
+  );
+}
+
 function catalystFromItem(item: StocksCatalystSourceItem): AlphaResearchCatalyst {
-  const summary = clampText(item.translation || item.text, 420);
+  const summarySource = summaryTextFromItem(item);
+  const summary =
+    item.sourceRole === "subscription"
+      ? subscriptionBriefSummary(summarySource)
+      : clampText(summarySource, 420);
+  const fullSummary =
+    item.sourceRole === "subscription"
+      ? subscriptionExpandedSummary(summarySource)
+      : undefined;
   const text = [item.text, item.translation ?? ""].join("\n");
   return {
     title: titleFromItem(item),
@@ -658,6 +873,7 @@ function catalystFromItem(item: StocksCatalystSourceItem): AlphaResearchCatalyst
     date: dateLabel(item.createdAt),
     impact: classifyImpact(text),
     summary,
+    ...(fullSummary ? { fullSummary } : {}),
     source: item.source,
     sourceRole: item.sourceRole,
     author: item.author,

@@ -86,15 +86,16 @@ function snapshotIssueLabel(
   label: string,
   snapshot: { source: "live" | "mock"; errors: string[] } | null,
 ) {
-  const count = snapshot?.errors.filter(Boolean).length ?? 0;
-  if (!snapshot || count === 0) return null;
-  return snapshot.source === "live"
-    ? `${label}部分源失败 ${count}`
-    : `${label}已回落本地`;
+  if (!snapshot) return null;
+  return snapshot.source === "mock" ? `${label}已回落本地` : null;
 }
 
-function snapshotIssueTitle(snapshot: { errors: string[] } | null) {
-  return snapshot?.errors.filter(Boolean).join(" | ") ?? "";
+function snapshotStatusTitle(
+  snapshot: { errors: string[] } | null,
+  fallback: string,
+) {
+  const errors = snapshot?.errors.filter(Boolean) ?? [];
+  return errors.length > 0 ? errors.join(" | ") : fallback;
 }
 
 function isPerformanceCacheNotice(message: string | null) {
@@ -399,6 +400,7 @@ export function AlphaResearchPage() {
                     ? "bg-warning-soft text-warning"
                     : "bg-info-soft text-info",
               ].join(" ")}
+              title={snapshotStatusTitle(marketSnapshot, marketStatus)}
             >
               {marketStatus}
             </span>
@@ -411,6 +413,7 @@ export function AlphaResearchPage() {
                     ? "bg-warning-soft text-warning"
                     : "bg-info-soft text-info",
               ].join(" ")}
+              title={snapshotStatusTitle(financialSnapshot, financialStatus)}
             >
               {financialStatus}
             </span>
@@ -423,6 +426,7 @@ export function AlphaResearchPage() {
                     ? "bg-warning-soft text-warning"
                     : "bg-info-soft text-info",
               ].join(" ")}
+              title={snapshotStatusTitle(catalystSnapshot, catalystStatus)}
             >
               {catalystStatus}
             </span>
@@ -445,7 +449,7 @@ export function AlphaResearchPage() {
             {marketIssue ? (
               <span
                 className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotIssueTitle(marketSnapshot)}
+                title={snapshotStatusTitle(marketSnapshot, marketIssue)}
               >
                 {marketIssue}
               </span>
@@ -458,7 +462,7 @@ export function AlphaResearchPage() {
             {financialIssue ? (
               <span
                 className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotIssueTitle(financialSnapshot)}
+                title={snapshotStatusTitle(financialSnapshot, financialIssue)}
               >
                 {financialIssue}
               </span>
@@ -471,7 +475,7 @@ export function AlphaResearchPage() {
             {catalystIssue ? (
               <span
                 className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotIssueTitle(catalystSnapshot)}
+                title={snapshotStatusTitle(catalystSnapshot, catalystIssue)}
               >
                 {catalystIssue}
               </span>

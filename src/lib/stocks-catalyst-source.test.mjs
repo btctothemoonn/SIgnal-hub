@@ -567,6 +567,68 @@ assert.ok(patreonCalls[0].url.includes("patreon.com/c/bboczeng/posts"));
 assert.ok(patreonCalls[0].cookie.includes("session_id=secret"));
 assert.ok(!patreonSubscription.items[0].text.includes("subscriber-only full post subscriber-only"));
 
+const patreonListOnlyHtml = `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+  props: {
+    pageProps: {
+      posts: [
+        {
+          id: "patreon-post-2",
+          title: "MU and SNDK storage cycle plan",
+          url: "https://www.patreon.com/posts/mu-sndk-157941919",
+          published_at: "2026-05-12T13:00:00.000Z",
+        },
+      ],
+    },
+  },
+})}</script></html>`;
+const patreonDetailJson = JSON.stringify({
+  data: {
+    id: "157941919",
+    type: "post",
+    attributes: {
+      title: "MU and SNDK storage cycle plan",
+      published_at: "2026-05-12T13:00:00.000Z",
+      url: "https://www.patreon.com/posts/mu-sndk-157941919",
+      teaser_text_json_string: JSON.stringify({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "Full subscriber note: MU keeps HBM pricing power and SNDK benefits from NAND contract price resets.",
+              },
+            ],
+          },
+        ],
+      }),
+    },
+  },
+});
+const patreonDetailCalls = [];
+const patreonDetailSubscription = await fetchPatreonSubscriptionItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "MU"),
+  fetchImpl: async (url) => {
+    patreonDetailCalls.push(String(url));
+    return new Response(
+      String(url).includes("/api/posts/157941919")
+        ? patreonDetailJson
+        : patreonListOnlyHtml,
+      { status: 200 },
+    );
+  },
+  env: {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_COOKIE: "session_id=secret; patreon_device_id=device",
+    STOCKS_PATREON_CACHE_MS: "0",
+  },
+});
+assert.equal(patreonDetailSubscription.items.length, 1);
+assert.equal(patreonDetailCalls.length, 2);
+assert.ok(patreonDetailSubscription.items[0].text.includes("Full subscriber note"));
+
 const publicPatreonCalls = [];
 const publicPatreonSubscription = await fetchPatreonSubscriptionItems({
   stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),

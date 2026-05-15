@@ -8,6 +8,7 @@ import {
   parseFmpStockNewsPayload,
   parseFinnhubCompanyNewsPayload,
   parseGoogleNewsRss,
+  parsePatreonPostApiResponse,
   parsePatreonPostsPage,
   parsePolygonNewsPayload,
   parseYahooFinanceRss,
@@ -145,6 +146,50 @@ assert.equal(patreonItems[0].link, "https://www.patreon.com/posts/post-1");
 assert.ok(patreonItems[0].text.includes("Micron HBM"));
 assert.ok(!patreonItems[0].text.includes("paid full body paid full body"));
 
+const patreonApiItem = parsePatreonPostApiResponse(
+  JSON.stringify({
+    data: {
+      id: "157941919",
+      type: "post",
+      attributes: {
+        title: "MU and SNDK storage cycle plan",
+        published_at: "2026-05-12T13:00:00.000Z",
+        url: "https://www.patreon.com/posts/mu-sndk-157941919",
+        teaser_text_json_string: JSON.stringify({
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: "Full subscriber note: MU keeps HBM pricing power.",
+                },
+              ],
+            },
+            {
+              type: "paragraph",
+              content: [
+                {
+                  type: "text",
+                  text: "SNDK benefits from NAND contract price resets.",
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    },
+  }),
+  {
+    creatorName: "bboczeng",
+    sourceUrl: "https://www.patreon.com/posts/mu-sndk-157941919",
+  },
+);
+assert.equal(patreonApiItem?.source, "Patreon");
+assert.ok(patreonApiItem?.text.includes("Full subscriber note"));
+assert.ok(patreonApiItem?.text.includes("SNDK benefits"));
+
 const subscriptionSnapshot = buildStocksCatalystSnapshotFromItems({
   stocks: ALPHA_RESEARCH_STOCKS,
   items: patreonItems,
@@ -154,6 +199,49 @@ assert.equal(subscriptionSnapshot.source, "live");
 assert.equal(subscriptionSnapshot.provider, "subscription-research");
 assert.equal(subscriptionSnapshot.catalysts.NVDA[0].source, "Patreon");
 assert.equal(subscriptionSnapshot.catalysts.NVDA[0].sourceRole, "subscription");
+assert.ok(subscriptionSnapshot.catalysts.NVDA[0].fullSummary.includes("Micron HBM"));
+assert.ok(
+  subscriptionSnapshot.catalysts.NVDA[0].fullSummary.length >=
+    subscriptionSnapshot.catalysts.NVDA[0].summary.length,
+);
+
+const rawSubscriberArticle = [
+  "Hello, this is the full subscriber note for today.",
+  "MU keeps HBM pricing power because supply remains tight and cloud demand is still improving.",
+  "SNDK benefits from NAND contract price resets, while WDC shipment discipline supports the storage cycle.",
+  "The main risk is that storage equities have already priced in too much near-term optimism.",
+  "This filler sentence should never be copied into the expanded summary. ".repeat(30),
+].join("\n");
+const detailedSubscriptionSnapshot = buildStocksCatalystSnapshotFromItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) =>
+    ["MU", "SNDK"].includes(stock.ticker),
+  ),
+  items: [
+    {
+      id: "patreon:detailed-storage-cycle",
+      source: "Patreon",
+      sourceRole: "subscription",
+      author: "bboczeng",
+      createdAt: "2026-05-12T14:00:00.000Z",
+      text: `Storage cycle detailed note\n${rawSubscriberArticle}`,
+      translation: null,
+      link: "https://www.patreon.com/posts/detailed-storage-cycle",
+      tickers: [],
+    },
+  ],
+  generatedAt: "2026-05-12T14:05:00.000Z",
+});
+const detailedSubscriptionReport = detailedSubscriptionSnapshot.catalysts.MU[0];
+assert.ok(detailedSubscriptionReport.fullSummary?.startsWith("\u6838\u5fc3\u8981\u70b9"));
+assert.ok(detailedSubscriptionReport.fullSummary.includes("HBM pricing power"));
+assert.ok(
+  detailedSubscriptionReport.fullSummary.length < rawSubscriberArticle.length / 2,
+);
+assert.ok(
+  !detailedSubscriptionReport.fullSummary.includes(
+    "This filler sentence should never be copied",
+  ),
+);
 
 const storageSubscriptionSnapshot = buildStocksCatalystSnapshotFromItems({
   stocks: ALPHA_RESEARCH_STOCKS,
