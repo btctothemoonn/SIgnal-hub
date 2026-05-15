@@ -89,6 +89,7 @@ export function SignalsResponsiveLayout({
             className="mobile-command-summary lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain"
             deskLabel="Signals AI"
             endpoint="/api/signal-summary"
+            showHeaderMeta={false}
           />
         </aside>
       </div>
@@ -137,6 +138,7 @@ export function SignalsResponsiveLayout({
             className="mobile-command-summary"
             deskLabel="Signals AI"
             endpoint="/api/signal-summary"
+            showHeaderMeta={false}
           />
         </div>
       </div>

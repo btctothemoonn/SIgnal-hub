@@ -58,6 +58,7 @@ type AlphaSummaryCardProps = {
   className?: string;
   deskLabel?: string;
   endpoint?: string;
+  showHeaderMeta?: boolean;
 };
 
 function formatTime(raw: string | null) {
@@ -126,6 +127,7 @@ export function AlphaSummaryCard({
   className = "",
   deskLabel = "Signals AI",
   endpoint = "/api/alpha-summary",
+  showHeaderMeta = true,
 }: AlphaSummaryCardProps) {
   const [scope, setScope] = useState<AlphaSummaryScope>("12h");
   const [snapshot, setSnapshot] = useState<AlphaSummarySnapshot | null>(null);
@@ -248,27 +250,29 @@ export function AlphaSummaryCard({
           }`}
         >
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="rounded-md border border-line/70 bg-background/45 px-2 py-1 text-[11px] font-semibold uppercase text-muted">
-                {deskLabel}
-              </span>
-              <span
-                className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusTone(snapshot)}`}
-              >
-                {statusLabel(snapshot)}
-              </span>
-              {metaItems.map((item) => (
-                <span
-                  key={item.label}
-                  className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted"
-                >
-                  <span className="shrink-0">{item.label}</span>
-                  <span className="min-w-0 truncate font-medium text-foreground">
-                    {item.value}
-                  </span>
+            {showHeaderMeta ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="rounded-md border border-line/70 bg-background/45 px-2 py-1 text-[11px] font-semibold uppercase text-muted">
+                  {deskLabel}
                 </span>
-              ))}
-            </div>
+                <span
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusTone(snapshot)}`}
+                >
+                  {statusLabel(snapshot)}
+                </span>
+                {metaItems.map((item) => (
+                  <span
+                    key={item.label}
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted"
+                  >
+                    <span className="shrink-0">{item.label}</span>
+                    <span className="min-w-0 truncate font-medium text-foreground">
+                      {item.value}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
             <div className="grid w-full grid-cols-4 gap-0.5 rounded-md border border-line/70 bg-background/40 p-0.5 sm:max-w-sm">
               {SUMMARY_SCOPES.map((item) => {

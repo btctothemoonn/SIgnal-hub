@@ -160,7 +160,7 @@ export function AppShell({
   activeNav,
   children,
   statusPills = [],
-  subtitle = "Telegram / X / Truth / 消息总结 · 本地缓存面板",
+  subtitle = "",
   mainClassName = "mx-auto w-full max-w-[1780px] min-h-0 px-3 py-4 sm:px-5",
 }: {
   activeNav: AppShellNavKey;
@@ -251,7 +251,11 @@ export function AppShell({
                   <h1 className="font-serif text-2xl font-medium leading-tight text-foreground">
                     Signal Hub
                   </h1>
-                  <p className="mt-0.5 truncate text-xs text-muted">{subtitle}</p>
+                  {subtitle ? (
+                    <p className="mt-0.5 truncate text-xs text-muted">
+                      {subtitle}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 

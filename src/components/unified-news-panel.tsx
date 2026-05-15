@@ -23,7 +23,6 @@ import type {
   TwitterWatchAccount,
 } from "@/lib/6551-twitter";
 import { formatDisplayTime } from "@/lib/display-time";
-import { formatTelegramRefreshDuration } from "@/lib/telegram-refresh-meta";
 import { shouldSkipTelegramChannelTranslation } from "@/lib/telegram-translation-policy";
 import { isUsefulTranslation } from "@/lib/translation-quality";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
@@ -98,12 +97,6 @@ function formatStatusTime(raw: string | null | undefined) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
-}
-
-function refreshSourceLabel(source: string | undefined) {
-  if (source === "refresh") return "实时刷新";
-  if (source === "cache") return "缓存";
-  return "初始";
 }
 
 const URL_REGEX = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]}])/g;
@@ -1219,14 +1212,6 @@ export function UnifiedNewsPanel({
               TG {telegramSnapshot.status}
             </span>
             <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">更新 {formatStatusTime(telegramLastUpdatedAt)}</span>
-            <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">来源 {refreshSourceLabel(telegramRefresh?.source)}</span>
-            {telegramRefresh?.durationMs != null ? (
-              <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">耗时 {formatTelegramRefreshDuration(telegramRefresh.durationMs)}</span>
-            ) : null}
-            {telegramRefresh?.cacheFetchedAt ? (
-              <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">缓存 {formatStatusTime(telegramRefresh.cacheFetchedAt)}</span>
-            ) : null}
-            <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">{telegramSnapshot.channels.length} 频道</span>
             <button
               type="button"
               disabled={telegramRefreshBusy}

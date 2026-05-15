@@ -14,5 +14,6 @@ assert.match(source, /overflow-x-auto/);
 assert.match(source, /fixed bottom-0/);
 assert.match(source, /lg:hidden/);
 assert.match(source, /pb-20 lg:pb-0/);
+assert.match(source, /\{subtitle \? \(/);
 
 console.log("ok - app shell mobile command layout");

@@ -13,5 +13,8 @@ assert.match(source, /bg-background\/70/);
 assert.match(source, /active:scale-\[0\.995\]/);
 assert.match(source, /border-l-2 border-l-accent\/45/);
 assert.match(source, /data-telegram-fault-alert/);
+assert.doesNotMatch(source, /refreshSourceLabel\(telegramRefresh\?\.source\)/);
+assert.doesNotMatch(source, /telegramRefresh\.cacheFetchedAt/);
+assert.doesNotMatch(source, /telegramSnapshot\.channels\.length[^\n]*频道/);
 
 console.log("ok - unified news mobile command surface");
