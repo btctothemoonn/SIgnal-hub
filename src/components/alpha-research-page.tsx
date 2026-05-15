@@ -40,7 +40,7 @@ const tabs: { id: AlphaTab; label: string; description: string }[] = [
   {
     id: "messages",
     label: "STOCKS 投研总结",
-    description: "观察池 + 美股普通消息一起总结",
+    description: "行情/财报/新闻优先，TG/X 补充信号",
   },
 ];
 
