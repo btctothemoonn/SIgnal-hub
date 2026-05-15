@@ -18,6 +18,24 @@ function startsWithRetweetMarker(text: string): boolean {
   return /^\s*RT\s+@[\w_]+/i.test(text);
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cashtags(text: string): string[] {
+  const matches = text.match(/\$[A-Za-z][A-Za-z0-9_]{1,15}\b/g) ?? [];
+  return [...new Set(matches.map((tag) => tag.toUpperCase()))];
+}
+
+function hasMissingCashtag(sourceText: string, translatedText: string): boolean {
+  return cashtags(sourceText).some((tag) => {
+    const ticker = tag.slice(1);
+    return !new RegExp(`\\$?${escapeRegExp(ticker)}\\b`, "i").test(
+      translatedText,
+    );
+  });
+}
+
 function isClearlyIncompleteTranslation(
   sourceText: string,
   translatedText: string,
@@ -69,5 +87,6 @@ export function isUsefulTranslation<T extends TranslationQualityNote>(
   const translatedComparable = comparableText(translated);
   if (!sourceComparable || !translatedComparable) return false;
   if (sourceComparable === translatedComparable) return false;
+  if (hasMissingCashtag(sourceText, translated)) return false;
   return !isClearlyIncompleteTranslation(sourceText, translated);
 }

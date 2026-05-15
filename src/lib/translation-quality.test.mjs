@@ -33,6 +33,14 @@ assert.equal(
 
 assert.equal(
   isUsefulTranslation(
+    'JUST IN: Drake mentions Bitcoin in new song. "I\'m a $BTC crypto big-timer."',
+    note("\u6700\u65b0\u6d88\u606f\uff1a\u51f5entity"),
+  ),
+  false,
+);
+
+assert.equal(
+  isUsefulTranslation(
     "RT @CryptoSylar: The barbell of AI <> Memetics is what makes $SOL a Gem.",
     {
       ...note("转发 @CryptoSylar：AI 与迷因的杠铃结构让 $SOL 成为宝石。"),
