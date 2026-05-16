@@ -95,7 +95,7 @@ const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
-const AI_SUMMARY_INPUT_BUDGET_VERSION = 3;
+const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
 const DEFAULT_REFRESH_INTERVALS_MS: Record<AlphaSummaryScope, number> = {
   "12h": DEFAULT_REFRESH_INTERVAL_MS,
   today: 60 * 60 * 1000,
@@ -637,8 +637,8 @@ export function getAlphaSummaryPeriod({
       scope: normalizedScope,
       audience: normalizedAudience,
       inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
-      label: `${dateKey} 00:00-现在`,
-      startAt: shanghaiLocalToUtcIso(parts.year, parts.month, parts.day, 0),
+      label: "最近 24 小时",
+      startAt: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
       endAt: now.toISOString(),
       timeZone,
     };
@@ -674,16 +674,15 @@ export function getAlphaSummaryPeriod({
   }
 
   const startHour = parts.hour < 12 ? 0 : 12;
-  const endHour = startHour + 12;
   const periodKey = `12h:${dateKey}-${pad2(startHour)}`;
   return {
     key: periodKeyForAudience(normalizedAudience, periodKey),
     scope: normalizedScope,
     audience: normalizedAudience,
     inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
-    label: `${dateKey} ${pad2(startHour)}:00-${startHour === 0 ? "11:59" : "23:59"}`,
-    startAt: shanghaiLocalToUtcIso(parts.year, parts.month, parts.day, startHour),
-    endAt: shanghaiLocalToUtcIso(parts.year, parts.month, parts.day, endHour),
+    label: "最近 12 小时",
+    startAt: new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString(),
+    endAt: now.toISOString(),
     timeZone,
   };
 }
@@ -998,7 +997,7 @@ function inputHashForItems(items: AlphaSummarySourceItem[]) {
 
 function alphaSummaryScopeInstruction(scope: AlphaSummaryScope) {
   if (scope === "today") {
-    return "今日视角：优先提炼日内已经形成共振的主题，并指出仍需要等待确认的变量。";
+    return "24 小时视角：优先提炼最近 24 小时内已经形成共振的主题，并指出仍需要等待确认的变量。";
   }
   if (scope === "3d") {
     return "三日视角：优先识别连续多次出现的叙事、资金流和事件链，不要逐条复述短消息。";

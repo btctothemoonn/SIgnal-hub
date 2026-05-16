@@ -106,6 +106,29 @@ const stocksPeriod = getAlphaSummaryPeriod({
 assert.equal(stocksPeriod.audience, "stocks");
 assert.ok(stocksPeriod.key.startsWith("stocks:"), stocksPeriod.key);
 
+const rollingWindowNow = new Date("2026-05-07T06:34:56.000Z");
+const rolling12hPeriod = getAlphaSummaryPeriod({
+  now: rollingWindowNow,
+  scope: "12h",
+});
+assert.equal(rolling12hPeriod.label, "最近 12 小时");
+assert.equal(
+  rolling12hPeriod.startAt,
+  new Date(rollingWindowNow.getTime() - 12 * 60 * 60 * 1000).toISOString(),
+);
+assert.equal(rolling12hPeriod.endAt, rollingWindowNow.toISOString());
+
+const rolling24hPeriod = getAlphaSummaryPeriod({
+  now: rollingWindowNow,
+  scope: "today",
+});
+assert.equal(rolling24hPeriod.label, "最近 24 小时");
+assert.equal(
+  rolling24hPeriod.startAt,
+  new Date(rollingWindowNow.getTime() - 24 * 60 * 60 * 1000).toISOString(),
+);
+assert.equal(rolling24hPeriod.endAt, rollingWindowNow.toISOString());
+
 assert.equal(
   isStockSummaryRelevantItem({
     id: "x:1",

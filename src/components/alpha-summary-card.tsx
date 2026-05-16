@@ -22,15 +22,15 @@ const SUMMARY_SCOPES: {
     id: "12h",
     label: "12h",
     title: "短线消息总结",
-    emptyWindow: "当前 12 小时",
+    emptyWindow: "最近 12 小时",
     autoMs: AUTO_GENERATE_INTERVAL_MS,
     pollMs: POLL_INTERVAL_MS,
   },
   {
     id: "today",
-    label: "今日",
-    title: "今日消息总结",
-    emptyWindow: "今日 00:00 至今",
+    label: "24h",
+    title: "24 小时消息总结",
+    emptyWindow: "最近 24 小时",
     autoMs: 60 * 60 * 1000,
     pollMs: 15 * 60 * 1000,
   },
@@ -80,7 +80,7 @@ function scopeTitle(scope: AlphaSummaryScope, audience: AlphaSummaryAudience) {
   if (audience !== "stocks") return scopeConfig(scope).title;
   const titles: Record<AlphaSummaryScope, string> = {
     "12h": "短线投研总结",
-    today: "今日投研总结",
+    today: "24 小时投研总结",
     "3d": "近 3 天投研总结",
     "7d": "近 7 天投研总结",
   };
