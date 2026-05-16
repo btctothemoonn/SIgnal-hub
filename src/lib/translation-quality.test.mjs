@@ -41,6 +41,22 @@ assert.equal(
 
 assert.equal(
   isUsefulTranslation(
+    "@Naeven_0 Yesterday was my first worst experience of it.. I never care in the past",
+    note("@Naeven_0 昨天是我第一次最糟糕的经历。"),
+  ),
+  false,
+);
+
+assert.equal(
+  isUsefulTranslation(
+    "@SpecterAnalyst Going through the same phase, its so bad one wants to just delete the app lol",
+    note("@SpecterAnalyst 经历同样的阶段，"),
+  ),
+  false,
+);
+
+assert.equal(
+  isUsefulTranslation(
     "RT @CryptoSylar: The barbell of AI <> Memetics is what makes $SOL a Gem.",
     {
       ...note("转发 @CryptoSylar：AI 与迷因的杠铃结构让 $SOL 成为宝石。"),

@@ -36,6 +36,20 @@ function hasMissingCashtag(sourceText: string, translatedText: string): boolean 
   });
 }
 
+function meaningfulSourceTokens(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/https?:\/\/\S+/g, " ")
+        .replace(/@\w+/g, " ")
+        .replace(/\$[a-z][a-z0-9_]{1,15}\b/g, " ")
+        .match(/\p{Letter}[\p{Letter}\p{Number}'-]{2,}/gu) ?? [],
+    ),
+  ].filter((token) => !/^\d+$/.test(token));
+}
+
 function isClearlyIncompleteTranslation(
   sourceText: string,
   translatedText: string,
@@ -47,6 +61,11 @@ function isClearlyIncompleteTranslation(
   const sourceLength = comparableText(sourceText).length;
   const translatedLength = comparableText(translatedText).length;
   if (sourceLength < 120) {
+    const sourceTokens = meaningfulSourceTokens(sourceText);
+    if (sourceTokens.length >= 8 && translatedLength < sourceLength * 0.4) {
+      return true;
+    }
+
     return false;
   }
 
