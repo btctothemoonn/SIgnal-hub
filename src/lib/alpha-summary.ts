@@ -532,6 +532,21 @@ function isCachedSummaryFresh({
   return now.getTime() - generatedAt < getAlphaSummaryRefreshIntervalMs(env, scope);
 }
 
+export function shouldReuseCachedAlphaSummary({
+  snapshot,
+  now,
+  env,
+  scope,
+}: {
+  snapshot: AlphaSummarySnapshot;
+  now: Date;
+  env: EnvLike;
+  scope: AlphaSummaryScope;
+}) {
+  if (!isCachedSummaryFresh({ snapshot, now, env, scope })) return false;
+  return snapshot.success || Boolean(snapshot.summary);
+}
+
 function getShanghaiLocalParts(date: Date) {
   const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
   return {
@@ -1171,7 +1186,12 @@ export async function getOrCreateAlphaSummary({
       cached &&
       !force &&
       cached.model === model &&
-      isCachedSummaryFresh({ snapshot: cached, now, env, scope: normalizedScope })
+      shouldReuseCachedAlphaSummary({
+        snapshot: cached,
+        now,
+        env,
+        scope: normalizedScope,
+      })
     ) {
       return cached;
     }

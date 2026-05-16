@@ -3,10 +3,18 @@ import { translateText } from "./translate.ts";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
+  AI_TRANSLATION_ALLOW_SUMMARY_KEY: process.env.AI_TRANSLATION_ALLOW_SUMMARY_KEY,
+  AI_TRANSLATION_API_KEY: process.env.AI_TRANSLATION_API_KEY,
+  AI_TRANSLATION_BASE_URL: process.env.AI_TRANSLATION_BASE_URL,
+  AI_TRANSLATION_MODEL: process.env.AI_TRANSLATION_MODEL,
   TRANSLATION_PROVIDERS: process.env.TRANSLATION_PROVIDERS,
   MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
+  AI_SUMMARY_API_KEY: process.env.AI_SUMMARY_API_KEY,
   AI_SUMMARY_BASE_URL: process.env.AI_SUMMARY_BASE_URL,
   AI_SUMMARY_MODEL: process.env.AI_SUMMARY_MODEL,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+  OPENAI_MODEL: process.env.OPENAI_MODEL,
 };
 
 const finalTranslation =
@@ -49,6 +57,46 @@ try {
   const body = JSON.parse(String(requests[0].init.body));
   assert.equal(body.model, "MiniMax-M2.7");
   assert.ok(body.messages[1].content.includes("NVDA supplier checks raised"));
+} finally {
+  globalThis.fetch = originalFetch;
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
+const summaryOnlyRequests = [];
+globalThis.fetch = async (url, init) => {
+  summaryOnlyRequests.push({ url: String(url), init });
+  return Response.json({
+    choices: [{ message: { content: finalTranslation } }],
+  });
+};
+
+process.env.TRANSLATION_PROVIDERS = "minimax";
+delete process.env.AI_TRANSLATION_ALLOW_SUMMARY_KEY;
+delete process.env.AI_TRANSLATION_API_KEY;
+delete process.env.AI_TRANSLATION_BASE_URL;
+delete process.env.AI_TRANSLATION_MODEL;
+delete process.env.MINIMAX_API_KEY;
+process.env.AI_SUMMARY_API_KEY = "summary-only-key";
+process.env.AI_SUMMARY_BASE_URL = "http://127.0.0.1:1435/v1";
+process.env.AI_SUMMARY_MODEL = "chatgpt/gpt-5.2-instant";
+
+try {
+  const translated = await translateText(
+    "NVDA supplier checks raised. Cloud capex remains strong.",
+    {
+      targetLanguage: "zh-CN",
+      cacheNamespace: `translate-summary-key-test-${Date.now()}`,
+    },
+  );
+
+  assert.equal(translated, null);
+  assert.equal(summaryOnlyRequests.length, 0);
 } finally {
   globalThis.fetch = originalFetch;
   for (const [key, value] of Object.entries(originalEnv)) {

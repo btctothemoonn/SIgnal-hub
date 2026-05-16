@@ -286,18 +286,28 @@ async function translateWithMyMemory(
 }
 
 function getMiniMaxTranslationBaseUrl() {
+  const explicit = process.env.AI_TRANSLATION_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  if (!allowSummaryKeyForTranslation()) return DEFAULT_MINIMAX_BASE_URL;
   return (
-    process.env.AI_TRANSLATION_BASE_URL?.trim() ||
     process.env.AI_SUMMARY_BASE_URL?.trim() ||
     process.env.OPENAI_BASE_URL?.trim() ||
     DEFAULT_MINIMAX_BASE_URL
   ).replace(/\/+$/, "");
 }
 
+function allowSummaryKeyForTranslation() {
+  return process.env.AI_TRANSLATION_ALLOW_SUMMARY_KEY?.trim().toLowerCase() === "true";
+}
+
 function getMiniMaxTranslationApiKey() {
-  return (
+  const explicit =
     process.env.AI_TRANSLATION_API_KEY?.trim() ||
     process.env.MINIMAX_API_KEY?.trim() ||
+    "";
+  if (explicit) return explicit;
+  if (!allowSummaryKeyForTranslation()) return "";
+  return (
     process.env.AI_SUMMARY_API_KEY?.trim() ||
     process.env.OPENAI_API_KEY?.trim() ||
     ""
@@ -305,8 +315,10 @@ function getMiniMaxTranslationApiKey() {
 }
 
 function getMiniMaxTranslationModel() {
+  const explicit = process.env.AI_TRANSLATION_MODEL?.trim();
+  if (explicit) return explicit;
+  if (!allowSummaryKeyForTranslation()) return DEFAULT_MINIMAX_MODEL;
   return (
-    process.env.AI_TRANSLATION_MODEL?.trim() ||
     process.env.AI_SUMMARY_MODEL?.trim() ||
     process.env.OPENAI_MODEL?.trim() ||
     DEFAULT_MINIMAX_MODEL

@@ -6,6 +6,7 @@ import {
   isMiniMaxBaseUrl,
   isStockSummaryRelevantItem,
   normalizeAlphaSummaryAudience,
+  shouldReuseCachedAlphaSummary,
 } from "./alpha-summary.ts";
 
 const now = new Date("2026-05-07T04:00:00.000Z");
@@ -20,6 +21,54 @@ assert.match(getAlphaSummaryDbPath({}, "stocks"), /stocks-summary\.sqlite$/);
 assert.notEqual(
   getAlphaSummaryDbPath({}, "signals"),
   getAlphaSummaryDbPath({}, "stocks"),
+);
+
+const reusableCachePeriod = getAlphaSummaryPeriod({ now });
+assert.equal(
+  shouldReuseCachedAlphaSummary({
+    snapshot: {
+      success: false,
+      status: "error",
+      configured: true,
+      period: reusableCachePeriod,
+      generatedAt: now.toISOString(),
+      model: "chatgpt/gpt-5.2-instant",
+      itemCount: 12,
+      sourceCounts: { telegram: 6, x: 6 },
+      summary: null,
+      error: "AI summary returned empty content",
+    },
+    now,
+    env: {},
+    scope: "12h",
+  }),
+  false,
+);
+assert.equal(
+  shouldReuseCachedAlphaSummary({
+    snapshot: {
+      success: false,
+      status: "error",
+      configured: true,
+      period: reusableCachePeriod,
+      generatedAt: now.toISOString(),
+      model: "chatgpt/gpt-5.2-instant",
+      itemCount: 12,
+      sourceCounts: { telegram: 6, x: 6 },
+      summary: {
+        headline: "cached headline",
+        authors: [],
+        consensus: [],
+        risks: [],
+        watchlist: [],
+      },
+      error: "temporary provider error",
+    },
+    now,
+    env: {},
+    scope: "12h",
+  }),
+  true,
 );
 
 const stocksPeriod = getAlphaSummaryPeriod({
