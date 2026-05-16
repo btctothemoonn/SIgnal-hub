@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import {
   buildAlphaSummaryPrompt,
   getAlphaSummaryDbPath,
+  getAlphaSummaryBaseUrl,
+  getAlphaSummaryModel,
   getAlphaSummaryPeriod,
+  isDeepSeekBaseUrl,
   isMiniMaxBaseUrl,
   isStockSummaryRelevantItem,
   normalizeAlphaSummaryAudience,
@@ -16,6 +19,31 @@ assert.equal(normalizeAlphaSummaryAudience("bad"), "signals");
 assert.equal(isMiniMaxBaseUrl("https://api.minimax.io/v1"), true);
 assert.equal(isMiniMaxBaseUrl("https://api.minimaxi.com/v1"), true);
 assert.equal(isMiniMaxBaseUrl("https://api.openai.com/v1"), false);
+assert.equal(isDeepSeekBaseUrl("https://api.deepseek.com"), true);
+assert.equal(isDeepSeekBaseUrl("https://api.deepseek.com/v1"), true);
+assert.equal(isDeepSeekBaseUrl("https://api.openai.com/v1"), false);
+assert.equal(
+  getAlphaSummaryBaseUrl({ DEEPSEEK_API_KEY: "test-deepseek-key" }),
+  "https://api.deepseek.com",
+);
+assert.equal(
+  getAlphaSummaryModel({ DEEPSEEK_API_KEY: "test-deepseek-key" }),
+  "deepseek-v4-flash",
+);
+assert.equal(
+  getAlphaSummaryBaseUrl({
+    DEEPSEEK_API_KEY: "test-deepseek-key",
+    AI_SUMMARY_BASE_URL: "http://127.0.0.1:1435/v1",
+  }),
+  "https://api.deepseek.com",
+);
+assert.equal(
+  getAlphaSummaryModel({
+    DEEPSEEK_API_KEY: "test-deepseek-key",
+    AI_SUMMARY_MODEL: "chatgpt/gpt-5.2-instant",
+  }),
+  "deepseek-v4-flash",
+);
 assert.match(getAlphaSummaryDbPath({}, "signals"), /signal-summary\.sqlite$/);
 assert.match(getAlphaSummaryDbPath({}, "stocks"), /stocks-summary\.sqlite$/);
 assert.notEqual(
