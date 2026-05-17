@@ -51,6 +51,32 @@ const MAX_ALL_NEWS_ITEMS = 200;
 const MAX_TELEGRAM_NEWS_ITEMS = 300;
 const MAX_X_NEWS_ITEMS = 200;
 const SNAPSHOT_REFRESH_MS = 30000;
+const SIGNAL_FEED_AUTHOR_FAVORITES_KEY =
+  "signal-hub:signal-feed-author-favorites";
+
+function readSignalFeedAuthorFavorites() {
+  if (typeof window === "undefined") return new Set<string>();
+
+  try {
+    const raw = window.localStorage.getItem(SIGNAL_FEED_AUTHOR_FAVORITES_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return new Set<string>();
+
+    return new Set(
+      parsed.filter((value): value is string => typeof value === "string"),
+    );
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeSignalFeedAuthorFavorites(favorites: Set<string>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    SIGNAL_FEED_AUTHOR_FAVORITES_KEY,
+    JSON.stringify([...favorites]),
+  );
+}
 
 type UnifiedTranslation = {
   sourceLanguage: string;
@@ -589,9 +615,14 @@ export function UnifiedNewsPanel({
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState(ALL_SIGNAL_FEED_AUTHOR_FILTER);
+  const [authorFavorites, setAuthorFavorites] = useState<Set<string>>(
+    new Set(),
+  );
+  const [authorMenuOpen, setAuthorMenuOpen] = useState(false);
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const authorMenuRef = useRef<HTMLDivElement | null>(null);
   const [telegramRefreshBusy, setTelegramRefreshBusy] = useState(false);
   const [telegramManualStatus, setTelegramManualStatus] = useState<string | null>(null);
   const [xUsageBusy, setXUsageBusy] = useState(false);
@@ -612,6 +643,10 @@ export function UnifiedNewsPanel({
   }, []);
 
   useEffect(() => {
+    setAuthorFavorites(readSignalFeedAuthorFavorites());
+  }, []);
+
+  useEffect(() => {
     if (!lightboxMedia) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setLightboxMedia(null);
@@ -624,6 +659,31 @@ export function UnifiedNewsPanel({
       document.body.style.overflow = previousOverflow;
     };
   }, [lightboxMedia]);
+
+  useEffect(() => {
+    if (!authorMenuOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        authorMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setAuthorMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAuthorMenuOpen(false);
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [authorMenuOpen]);
 
   useEffect(() => {
     setSeenIds((current) => {
@@ -713,6 +773,41 @@ export function UnifiedNewsPanel({
     if (authorFilterOptions.some((option) => option.value === authorFilter)) return;
     setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
   }, [authorFilter, authorFilterOptions]);
+
+  const sortedAuthorFilterOptions = useMemo(
+    () =>
+      [...authorFilterOptions].sort((left, right) => {
+        const leftFavorite = authorFavorites.has(left.value);
+        const rightFavorite = authorFavorites.has(right.value);
+        if (leftFavorite !== rightFavorite) return leftFavorite ? -1 : 1;
+        return 0;
+      }),
+    [authorFilterOptions, authorFavorites],
+  );
+
+  const selectedAuthorLabel =
+    authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
+      ? "全部博主 / 频道"
+      : authorFilterOptions.find((option) => option.value === authorFilter)
+          ?.label || "全部博主 / 频道";
+
+  const favoriteAuthorCount = authorFilterOptions.reduce(
+    (count, option) => count + (authorFavorites.has(option.value) ? 1 : 0),
+    0,
+  );
+
+  const toggleAuthorFavorite = (value: string) => {
+    setAuthorFavorites((current) => {
+      const next = new Set(current);
+      if (next.has(value)) {
+        next.delete(value);
+      } else {
+        next.add(value);
+      }
+      writeSignalFeedAuthorFavorites(next);
+      return next;
+    });
+  };
 
   const filteredFeed = useMemo(() => {
     const needle = deferredSearchQuery.trim().toLowerCase();
@@ -1307,21 +1402,130 @@ export function UnifiedNewsPanel({
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
             />
-            <select
-              aria-label="按博主或频道筛选"
-              value={authorFilter}
-              onChange={(e) => setAuthorFilter(e.target.value)}
-              className="h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs font-medium text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
-            >
-              <option value={ALL_SIGNAL_FEED_AUTHOR_FILTER}>
-                全部博主 / 频道
-              </option>
-              {authorFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label} ({option.count})
-                </option>
-              ))}
-            </select>
+            <div ref={authorMenuRef} className="relative">
+              <button
+                type="button"
+                aria-label="按博主或频道筛选"
+                aria-expanded={authorMenuOpen}
+                onClick={() => setAuthorMenuOpen((open) => !open)}
+                className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line/70 bg-background/55 px-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-panel-strong/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
+              >
+                <span className="min-w-0 truncate">{selectedAuthorLabel}</span>
+                <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted">
+                  {favoriteAuthorCount > 0 ? (
+                    <span className="rounded-md border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-accent">
+                      ★ {favoriteAuthorCount}
+                    </span>
+                  ) : null}
+                  <svg
+                    className={`h-3.5 w-3.5 transition-transform ${
+                      authorMenuOpen ? "rotate-180" : ""
+                    }`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </button>
+
+              {authorMenuOpen ? (
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 max-h-80 w-full overflow-y-auto rounded-lg border border-line/70 bg-panel-strong p-1 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.85)]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
+                      setAuthorMenuOpen(false);
+                    }}
+                    className={`flex h-8 w-full items-center justify-between rounded-md px-2 text-left text-xs font-semibold transition-colors ${
+                      authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
+                        ? "bg-foreground text-background"
+                        : "text-muted hover:bg-background/70 hover:text-foreground"
+                    }`}
+                  >
+                    <span>全部博主 / 频道</span>
+                    <span>{authorFilterOptions.length}</span>
+                  </button>
+                  {favoriteAuthorCount > 0 ? (
+                    <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-accent/80">
+                      收藏优先显示
+                    </div>
+                  ) : null}
+                  {sortedAuthorFilterOptions.length > 0 ? (
+                    sortedAuthorFilterOptions.map((option) => {
+                      const isActive = option.value === authorFilter;
+                      const isFavorite = authorFavorites.has(option.value);
+                      return (
+                        <div
+                          key={option.value}
+                          className={`group/author flex items-center gap-1 rounded-md ${
+                            isActive ? "bg-background/80" : "hover:bg-background/55"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuthorFilter(option.value);
+                              setAuthorMenuOpen(false);
+                            }}
+                            className="flex h-8 min-w-0 flex-1 items-center justify-between gap-2 px-2 text-left text-xs"
+                          >
+                            <span
+                              className={`min-w-0 truncate ${
+                                isActive
+                                  ? "font-semibold text-foreground"
+                                  : "text-muted group-hover/author:text-foreground"
+                              }`}
+                            >
+                              {option.label}
+                            </span>
+                            <span className="shrink-0 text-[10px] text-muted">
+                              {option.count}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`${isFavorite ? "取消收藏" : "收藏"} ${option.label}`}
+                            aria-pressed={isFavorite}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggleAuthorFavorite(option.value);
+                            }}
+                            className={`mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                              isFavorite
+                                ? "text-accent hover:bg-accent/10"
+                                : "text-muted/60 hover:bg-background/80 hover:text-accent"
+                            }`}
+                          >
+                            <svg
+                              className="h-3.5 w-3.5"
+                              viewBox="0 0 24 24"
+                              fill={isFavorite ? "currentColor" : "none"}
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="m12 3.6 2.5 5.1 5.6.8-4 3.9.9 5.5-5-2.7-5 2.7.9-5.5-4-3.9 5.6-.8L12 3.6Z" />
+                            </svg>
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="px-2 py-3 text-center text-xs text-muted">
+                      暂无博主 / 频道
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
