@@ -22,6 +22,12 @@ import {
 
 type DbValue = string | number | null;
 type DbRow = Record<string, unknown>;
+const EDITED_TWEET_REVISION_WINDOW_MS = 30 * 60 * 1000;
+const MIN_EDITED_TWEET_REVISION_TEXT_LENGTH = 24;
+const MIN_EDITED_TWEET_REVISION_PREFIX_LENGTH = 48;
+const MIN_EDITED_TWEET_REVISION_PREFIX_RATIO = 0.45;
+const MIN_EDITED_TWEET_REVISION_EDGE_LENGTH = 20;
+const MIN_EDITED_TWEET_REVISION_EDGE_RATIO = 0.55;
 
 export type XPipelineAccountInput = {
   id?: number | null;
@@ -117,6 +123,103 @@ function compareFeedRowsByTime(left: DbRow, right: DbRow): number {
     timeValue(right.created_at) - timeValue(left.created_at) ||
     timeValue(right.updated_at) - timeValue(left.updated_at)
   );
+}
+
+function normalizeRevisionText(value: unknown): string {
+  return stringValue(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function commonPrefixLength(left: string, right: string): number {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) {
+    index += 1;
+  }
+  return index;
+}
+
+function commonSuffixLength(
+  left: string,
+  right: string,
+  sharedPrefixLength: number,
+): number {
+  const limit = Math.min(left.length, right.length) - sharedPrefixLength;
+  let offset = 0;
+  while (
+    offset < limit &&
+    left[left.length - 1 - offset] === right[right.length - 1 - offset]
+  ) {
+    offset += 1;
+  }
+  return offset;
+}
+
+function isMonitor985NewTweetRow(row: DbRow): boolean {
+  return (
+    stringValue(row.event_type) === "NEW_TWEET" &&
+    /^985monitor\s*\/\s*NEW_TWEET$/i.test(stringValue(row.query_label))
+  );
+}
+
+function isLikelyEditedTweetRevision(newer: DbRow, older: DbRow): boolean {
+  if (!isMonitor985NewTweetRow(newer) || !isMonitor985NewTweetRow(older)) {
+    return false;
+  }
+  if (stringValue(newer.account_username_key) !== stringValue(older.account_username_key)) {
+    return false;
+  }
+
+  const newerTime = timeValue(newer.created_at);
+  const olderTime = timeValue(older.created_at);
+  if (!newerTime || !olderTime) return false;
+  const deltaMs = Math.abs(newerTime - olderTime);
+  if (deltaMs > EDITED_TWEET_REVISION_WINDOW_MS) return false;
+
+  const newerText = normalizeRevisionText(newer.text);
+  const olderText = normalizeRevisionText(older.text);
+  if (
+    newerText.length < MIN_EDITED_TWEET_REVISION_TEXT_LENGTH ||
+    olderText.length < MIN_EDITED_TWEET_REVISION_TEXT_LENGTH ||
+    newerText === olderText
+  ) {
+    return false;
+  }
+
+  if (newerText.includes(olderText) || olderText.includes(newerText)) {
+    return true;
+  }
+
+  const sharedPrefixLength = commonPrefixLength(newerText, olderText);
+  const shorterLength = Math.min(newerText.length, olderText.length);
+  if (
+    sharedPrefixLength >= MIN_EDITED_TWEET_REVISION_PREFIX_LENGTH &&
+    sharedPrefixLength / shorterLength >= MIN_EDITED_TWEET_REVISION_PREFIX_RATIO
+  ) {
+    return true;
+  }
+
+  const sharedEdgeLength =
+    sharedPrefixLength +
+    commonSuffixLength(newerText, olderText, sharedPrefixLength);
+  return (
+    sharedEdgeLength >= MIN_EDITED_TWEET_REVISION_EDGE_LENGTH &&
+    sharedEdgeLength / shorterLength >= MIN_EDITED_TWEET_REVISION_EDGE_RATIO
+  );
+}
+
+function collapseEditedTweetRevisionRows(rows: DbRow[]): DbRow[] {
+  const kept: DbRow[] = [];
+  for (const row of rows) {
+    if (kept.some((newer) => isLikelyEditedTweetRevision(newer, row))) {
+      continue;
+    }
+    kept.push(row);
+  }
+  return kept;
 }
 
 function jsonString(value: unknown): string {
@@ -989,8 +1092,11 @@ export function getXPipelineSnapshot(
     where a.enabled = 1
       ${since ? "and f.created_at >= ?" : ""}
   `;
-  const feed = (db.prepare(feedSql).all(...(since ? [since] : [])) as DbRow[])
-    .sort(compareFeedRowsByTime)
+  const feed = collapseEditedTweetRevisionRows(
+    (db.prepare(feedSql).all(...(since ? [since] : [])) as DbRow[]).sort(
+      compareFeedRowsByTime,
+    ),
+  )
     .slice(0, limit)
     .map(toFeedItem);
 

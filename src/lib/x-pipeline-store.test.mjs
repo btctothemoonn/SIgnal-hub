@@ -536,4 +536,100 @@ assert.ok(
   ),
 );
 
+const editDb = openXPipelineDb(":memory:");
+upsertXPipelineAccount(
+  {
+    username: "bboczeng",
+    name: "勃勃OC",
+    profileUrl: "https://x.com/bboczeng",
+    avatar: "https://cdn.example/bboczeng.jpg",
+    note: "monitor985",
+    tags: [],
+  },
+  editDb,
+);
+setXPipelineHealth(
+  {
+    scope: "collector",
+    status: "live",
+    detail: "connected",
+  },
+  editDb,
+);
+
+const editedTweetBase = {
+  username: "bboczeng",
+  displayName: "勃勃OC",
+  profileUrl: "https://x.com/bboczeng",
+  userAvatar: "https://cdn.example/bboczeng.jpg",
+  hashtags: [],
+  likes: 0,
+  retweets: 0,
+  replies: 0,
+  quotes: 0,
+  views: 0,
+  media: [],
+  quotedTweet: null,
+  origin: "watch",
+  queryLabel: "985monitor / NEW_TWEET",
+  translation: null,
+};
+
+for (const update of [
+  {
+    id: "edit-1",
+    createdAt: "2026-05-17T11:36:00.000Z",
+    text: "睡了一会儿，从梦中惊醒\n\nThis time, is indeed\n\nDifferent",
+  },
+  {
+    id: "edit-2",
+    createdAt: "2026-05-17T11:37:00.000Z",
+    text: "睡了一会儿，从梦中惊醒\n\nThis time, is indeed\n\nDifferent\n\nAI 将吞噬全世界\n\n直到2030年！",
+  },
+  {
+    id: "edit-3",
+    createdAt: "2026-05-17T11:39:00.000Z",
+    text: "睡了一会儿，从梦中惊醒\n\nThis time, is indeed\n\nDifferent\n\nAI 将吞噬全世界\n\n注：最终版保留\n\n直到2030年！",
+  },
+  {
+    id: "separate",
+    createdAt: "2026-05-17T11:40:00.000Z",
+    text: "这是另一条完全不同的推文，不能因为时间接近就被折叠。",
+  },
+  {
+    id: "short-edit-1",
+    createdAt: "2026-05-17T11:41:00.000Z",
+    text: "我操，这下得做多SNDK和LITE了\n\n谢谢大家\n\n😓😓😓",
+  },
+  {
+    id: "short-edit-2",
+    createdAt: "2026-05-17T11:42:00.000Z",
+    text: "我操，这下得做多SNDK和LITE了\n\nAI Bottleneck，而且还是Rule of 80\n\n谢谢大家\n\n😓😓😓",
+  },
+]) {
+  upsertXPipelineRealtimeUpdate(
+    {
+      eventType: "NEW_TWEET",
+      account: "bboczeng",
+      displayName: "勃勃OC",
+      createdAt: update.createdAt,
+      profileUrl: "https://x.com/bboczeng",
+      remark: "",
+      feedItem: {
+        ...editedTweetBase,
+        id: update.id,
+        text: update.text,
+        createdAt: update.createdAt,
+        tweetUrl: `https://x.com/bboczeng/status/${update.id}`,
+      },
+    },
+    editDb,
+  );
+}
+
+assert.deepEqual(
+  getXPipelineSnapshot(100, editDb).feed.map((item) => item.id),
+  ["short-edit-2", "separate", "edit-3"],
+);
+
 console.log("ok - x pipeline store builds local dashboard snapshots");
