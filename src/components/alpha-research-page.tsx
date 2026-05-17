@@ -50,9 +50,6 @@ const STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY =
   "signal-hub:stocks:financial-snapshot:v1";
 const STOCKS_CATALYST_SNAPSHOT_CACHE_KEY =
   "signal-hub:stocks:catalyst-snapshot:v1";
-const DEFAULT_PERFORMANCE_TICKERS_KEY =
-  ALPHA_RESEARCH_SECTORS[0]?.tickers.join(",") ?? "";
-
 function performanceSnapshotCacheKey(tickersKey: string) {
   return `signal-hub:stocks:performance-snapshot:v1:${encodeURIComponent(
     tickersKey,
@@ -115,31 +112,16 @@ export function AlphaResearchPage() {
     ALPHA_RESEARCH_DEFAULT_TICKER,
   );
   const [marketSnapshot, setMarketSnapshot] =
-    useState<StocksMarketSnapshot | null>(() =>
-      readCachedSnapshot<StocksMarketSnapshot>(STOCKS_MARKET_SNAPSHOT_CACHE_KEY),
-    );
+    useState<StocksMarketSnapshot | null>(null);
   const [marketError, setMarketError] = useState<string | null>(null);
   const [financialSnapshot, setFinancialSnapshot] =
-    useState<StocksFinancialSnapshot | null>(() =>
-      readCachedSnapshot<StocksFinancialSnapshot>(
-        STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
-      ),
-    );
+    useState<StocksFinancialSnapshot | null>(null);
   const [financialError, setFinancialError] = useState<string | null>(null);
   const [catalystSnapshot, setCatalystSnapshot] =
-    useState<StocksCatalystSnapshot | null>(() =>
-      readCachedSnapshot<StocksCatalystSnapshot>(
-        STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
-      ),
-    );
+    useState<StocksCatalystSnapshot | null>(null);
   const [catalystError, setCatalystError] = useState<string | null>(null);
   const [performanceSnapshot, setPerformanceSnapshot] =
-    useState<StocksPerformanceSnapshot | null>(() => {
-      const snapshot = readCachedSnapshot<StocksPerformanceSnapshot>(
-        performanceSnapshotCacheKey(DEFAULT_PERFORMANCE_TICKERS_KEY),
-      );
-      return hasPerformanceSeries(snapshot) ? snapshot : null;
-    });
+    useState<StocksPerformanceSnapshot | null>(null);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
   const stocks = useMemo(() => {
     const withMarket = mergeStocksMarketSnapshot(
@@ -218,6 +200,47 @@ export function AlphaResearchPage() {
   const marketIssue = snapshotIssueLabel("行情", marketSnapshot);
   const financialIssue = snapshotIssueLabel("财报", financialSnapshot);
   const catalystIssue = snapshotIssueLabel("新闻", catalystSnapshot);
+  const stocksDataHealthItems = [
+    {
+      label: "行情",
+      value: marketStatus,
+      detail: marketError ?? marketIssue ?? snapshotStatusTitle(marketSnapshot, marketStatus),
+      tone:
+        marketError || marketIssue
+          ? "warning"
+          : marketSnapshot?.source === "live"
+            ? "success"
+            : "info",
+    },
+    {
+      label: "财报",
+      value: financialStatus,
+      detail:
+        financialError ??
+        financialIssue ??
+        snapshotStatusTitle(financialSnapshot, financialStatus),
+      tone:
+        financialError || financialIssue
+          ? "warning"
+          : financialSnapshot?.source === "live"
+            ? "success"
+            : "info",
+    },
+    {
+      label: "新闻",
+      value: catalystStatus,
+      detail:
+        catalystError ??
+        catalystIssue ??
+        snapshotStatusTitle(catalystSnapshot, catalystStatus),
+      tone:
+        catalystError || catalystIssue
+          ? "warning"
+          : catalystSnapshot?.source === "live"
+            ? "success"
+            : "info",
+    },
+  ];
 
   useEffect(() => {
     let cancelled = false;
@@ -517,6 +540,29 @@ export function AlphaResearchPage() {
                 </button>
               );
             })}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 px-3 py-2 sm:px-4 lg:flex-row lg:items-center">
+          <span className="text-[11px] font-semibold uppercase tracking-normal text-muted">
+            数据健康中心
+          </span>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {stocksDataHealthItems.map((item) => (
+              <span
+                key={item.label}
+                title={item.detail}
+                className={[
+                  "max-w-[16rem] truncate rounded-md border px-2 py-1 text-[11px] font-semibold",
+                  item.tone === "success"
+                    ? "border-success/30 bg-success-soft text-success"
+                    : item.tone === "warning"
+                      ? "border-warning/30 bg-warning-soft text-warning"
+                      : "border-info/30 bg-info-soft text-info",
+                ].join(" ")}
+              >
+                {item.label}：{item.value}
+              </span>
+            ))}
           </div>
         </div>
       </section>

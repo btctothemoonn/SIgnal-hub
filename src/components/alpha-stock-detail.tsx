@@ -8,6 +8,11 @@ import {
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
 import { splitStocksCatalystsForDisplay } from "@/lib/stocks-catalyst-display";
+import {
+  buildStocksIntelligence,
+  buildSubscriptionReportInsight,
+  type StocksIntelligenceTone,
+} from "@/lib/stocks-intelligence";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
@@ -18,14 +23,6 @@ type AlphaStockDetailProps = {
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(1)}%`;
-}
-
-function formatUsd(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
 }
 
 function changeTone(value: number) {
@@ -70,6 +67,28 @@ function impactTone(impact: "positive" | "neutral" | "negative") {
   if (impact === "positive") return "text-success";
   if (impact === "negative") return "text-danger";
   return "text-muted";
+}
+
+function intelligenceTextTone(tone: StocksIntelligenceTone) {
+  const classes: Record<StocksIntelligenceTone, string> = {
+    success: "text-success",
+    warning: "text-warning",
+    danger: "text-danger",
+    info: "text-info",
+    muted: "text-muted",
+  };
+  return classes[tone];
+}
+
+function intelligenceBadgeTone(tone: StocksIntelligenceTone) {
+  const classes: Record<StocksIntelligenceTone, string> = {
+    success: "border-success/40 bg-success-soft text-success",
+    warning: "border-warning/40 bg-warning-soft text-warning",
+    danger: "border-danger/40 bg-danger-soft text-danger",
+    info: "border-info/40 bg-info-soft text-info",
+    muted: "border-line/60 bg-background/45 text-muted",
+  };
+  return classes[tone];
 }
 
 function providerTraceLabel(
@@ -142,6 +161,34 @@ function MetricTile({
   );
 }
 
+function IntelligenceMetricTile({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone: StocksIntelligenceTone;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-line/60 bg-background/35 px-3 py-2.5">
+      <p className="text-[11px] font-semibold text-muted">{label}</p>
+      <p
+        className={`mt-1 min-w-0 break-words font-mono text-base font-semibold ${intelligenceTextTone(
+          tone,
+        )}`}
+      >
+        {value}
+      </p>
+      <p className="mt-1 min-w-0 break-words text-[11px] leading-4 text-muted">
+        {note}
+      </p>
+    </div>
+  );
+}
+
 export function AlphaStockDetail({
   stock,
   marketDataLabel,
@@ -158,6 +205,19 @@ export function AlphaStockDetail({
   }
 
   const sector = getAlphaResearchSectorById(stock.sectorId);
+  const intelligence = buildStocksIntelligence(stock);
+  const { tickerContext, earningsBrief, riskTags, structure } = intelligence;
+  const intelligenceMetrics = [
+    tickerContext.price,
+    tickerContext.dayMove,
+    tickerContext.sevenDay,
+    tickerContext.earningsWindow,
+    tickerContext.revenue,
+    tickerContext.eps,
+    tickerContext.grossMargin,
+    tickerContext.freeCashFlow,
+    tickerContext.dataHealth,
+  ];
   const stockMarketIsLive = stock.market.source === "live";
   const stockMarketIsLoading = marketDataLoading && !stockMarketIsLive;
   const stockCandlesAreLive =
@@ -173,10 +233,10 @@ export function AlphaStockDetail({
     ? "盘前/盘后未获取"
     : marketDataLabel;
   const stockPriceLabel = stockMarketIsLive
-    ? formatUsd(stock.market.lastPrice)
+    ? tickerContext.price.value
     : stockMarketIsLoading
       ? "行情加载中"
-      : "未获取实时价";
+      : tickerContext.price.value;
   const { subscriptionReports, visibleCatalysts, hiddenCatalysts } =
     splitStocksCatalystsForDisplay(stock.catalysts, 5);
   const businessTags = stock.businessTags.slice(0, 3);
@@ -271,12 +331,32 @@ export function AlphaStockDetail({
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
         <div className="space-y-5">
+          <Section title="Ticker Intelligence">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {intelligenceMetrics.map((metric) => (
+                <IntelligenceMetricTile
+                  key={metric.label}
+                  label={metric.label}
+                  value={metric.value}
+                  note={metric.note}
+                  tone={metric.tone}
+                />
+              ))}
+            </div>
+          </Section>
+
           {subscriptionReports.length > 0 ? (
             <Section title="订阅研报">
               <div className="space-y-3">
-                {subscriptionReports.map((report) => (
+                {subscriptionReports.map((report, reportIndex) => {
+                  const reportInsight = buildSubscriptionReportInsight({
+                    ...report,
+                    tickers: [stock.ticker],
+                  });
+
+                  return (
                   <article
-                    key={`${report.date}-${report.title}`}
+                    key={`${report.date}-${report.title}-${reportIndex}`}
                     className="rounded-lg border border-accent/45 bg-accent-soft/20 px-4 py-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
@@ -306,20 +386,51 @@ export function AlphaStockDetail({
                         report.title
                       )}
                     </h4>
-                    <p className="mt-2 text-sm leading-6 text-muted">
-                      {report.summary}
-                    </p>
+                    <div className="mt-3 grid gap-2 text-sm">
+                      <div className="rounded-md border border-line/60 bg-panel/70 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-muted">
+                          核心结论
+                        </p>
+                        <p className="mt-1 leading-6 text-foreground">
+                          {reportInsight.coreConclusion}
+                        </p>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
+                          <p className="text-[11px] font-semibold text-muted">
+                            影响链条
+                          </p>
+                          <p className="mt-1 leading-5 text-muted">
+                            {reportInsight.impactChain}
+                          </p>
+                        </div>
+                        <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
+                          <p className="text-[11px] font-semibold text-muted">
+                            风险点
+                          </p>
+                          <p className="mt-1 leading-5 text-muted">
+                            {reportInsight.riskNote}
+                          </p>
+                        </div>
+                      </div>
+                      {reportInsight.fallbackUsed ? (
+                        <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
+                          总结未生成，当前显示为原始研报入口。
+                        </p>
+                      ) : null}
+                    </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
             </Section>
           ) : null}
 
           <Section title="今日催化">
             <div className="space-y-3">
-              {visibleCatalysts.map((catalyst) => (
+              {visibleCatalysts.map((catalyst, catalystIndex) => (
                 <article
-                  key={`${catalyst.date}-${catalyst.title}`}
+                  key={`${catalyst.date}-${catalyst.title}-${catalystIndex}`}
                   className="rounded-lg border border-line/60 bg-panel px-4 py-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
@@ -365,9 +476,9 @@ export function AlphaStockDetail({
                   更多普通新闻 {hiddenCatalysts.length} 条
                 </summary>
                 <div className="mt-3 space-y-2">
-                  {hiddenCatalysts.map((catalyst) => (
+                  {hiddenCatalysts.map((catalyst, catalystIndex) => (
                     <p
-                      key={`${catalyst.date}-${catalyst.title}`}
+                      key={`${catalyst.date}-${catalyst.title}-${catalystIndex}`}
                       className="break-words text-sm leading-6 text-muted"
                     >
                       {catalyst.date} · {catalyst.title}
@@ -380,6 +491,69 @@ export function AlphaStockDetail({
         </div>
 
         <div className="space-y-5">
+          <Section title="Impact & Risk Tags">
+            <div className="flex flex-wrap gap-2">
+              {riskTags.map((tag) => (
+                <span
+                  key={`${tag.label}-${tag.reason}`}
+                  className={`rounded-md border px-2 py-1 text-xs font-semibold ${intelligenceBadgeTone(
+                    tag.tone,
+                  )}`}
+                  title={tag.reason}
+                >
+                  {tag.label}
+                </span>
+              ))}
+              {riskTags.length === 0 ? (
+                <span className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-xs text-muted">
+                  暂无显著风险标签
+                </span>
+              ) : null}
+            </div>
+          </Section>
+
+          <Section title="Earnings Brief">
+            <div className="rounded-lg border border-line/60 bg-background/35 p-3">
+              <p className={`text-sm font-semibold ${intelligenceTextTone(earningsBrief.confidence === "normal" ? "info" : "warning")}`}>
+                {earningsBrief.title}
+              </p>
+              <div className="mt-3 space-y-2">
+                {earningsBrief.points.map((point) => (
+                  <p
+                    key={point}
+                    className="break-words text-sm leading-6 text-foreground"
+                  >
+                    {point}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Structure Snapshot">
+            <div className="rounded-lg border border-line/60 bg-background/35 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
+                    structure.tone,
+                  )}`}
+                >
+                  {structure.label}
+                </span>
+                <span className="font-mono text-xs text-muted">
+                  Score {structure.score}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1">
+                {structure.points.map((point) => (
+                  <p key={point} className="text-sm leading-6 text-muted">
+                    {point}
+                  </p>
+                ))}
+              </div>
+            </div>
+          </Section>
+
           <Section title="财报复盘">
             <div className="grid gap-2 text-sm">
               {financialRows.map(([label, value]) => (

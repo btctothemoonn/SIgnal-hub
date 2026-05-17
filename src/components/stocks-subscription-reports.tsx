@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { StocksSubscriptionReport } from "@/lib/stocks-subscription-reports";
+import { buildSubscriptionReportInsight } from "@/lib/stocks-intelligence";
 
 type StocksSubscriptionReportsProps = {
   reports: StocksSubscriptionReport[];
@@ -57,6 +58,7 @@ export function StocksSubscriptionReports({
         {reports.length > 0 ? (
           reports.map((report) => {
             const isExpanded = expandedReportId === report.id;
+            const reportInsight = buildSubscriptionReportInsight(report);
             const summaryText = isExpanded
               ? report.fullSummary || report.summary
               : report.summary;
@@ -111,11 +113,54 @@ export function StocksSubscriptionReports({
                 </div>
 
                 {isExpanded ? (
-                  <div className="mt-4 rounded-lg border border-line/60 bg-panel/70 p-3">
-                    <p className="text-xs font-semibold text-muted">总结内容</p>
-                    <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-foreground">
-                      {summaryText}
-                    </p>
+                  <div className="mt-4 grid gap-3 rounded-lg border border-line/60 bg-panel/70 p-3">
+                    <div>
+                      <p className="text-xs font-semibold text-muted">
+                        核心结论
+                      </p>
+                      <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-foreground">
+                        {reportInsight.coreConclusion}
+                      </p>
+                    </div>
+                    <div className="grid gap-2 lg:grid-cols-3">
+                      <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-muted">
+                          方向
+                        </p>
+                        <p className="mt-1 text-sm font-semibold text-foreground">
+                          {reportInsight.impactLabel}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-muted">
+                          影响链条
+                        </p>
+                        <p className="mt-1 break-words text-sm leading-5 text-foreground">
+                          {reportInsight.impactChain}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
+                        <p className="text-[11px] font-semibold text-muted">
+                          风险点
+                        </p>
+                        <p className="mt-1 break-words text-sm leading-5 text-foreground">
+                          {reportInsight.riskNote}
+                        </p>
+                      </div>
+                    </div>
+                    {reportInsight.fallbackUsed ? (
+                      <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
+                        总结未生成，下面保留原文摘录。
+                      </p>
+                    ) : null}
+                    <details className="rounded-md border border-line/60 bg-background/30 px-3 py-2">
+                      <summary className="cursor-pointer select-none text-xs font-semibold text-muted hover:text-foreground">
+                        原文摘录
+                      </summary>
+                      <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-muted">
+                        {summaryText || "n/a"}
+                      </p>
+                    </details>
                   </div>
                 ) : null}
 
