@@ -972,18 +972,24 @@ function snapshotConnected(health: DbRow | undefined): boolean {
 export function getXPipelineSnapshot(
   limit = getXPipelineConfig().maxFeedItems,
   db = getXPipelineDb(),
+  options: {
+    since?: string | null;
+  } = {},
 ): TwitterDashboardSnapshot {
   const watchAccounts = db
     .prepare("select * from x_accounts where enabled = 1 order by lower(username) asc")
     .all()
     .map(toWatchAccount);
 
-  const feed = (db.prepare(`
+  const since = nullableString(options.since);
+  const feedSql = `
     select f.*, a.avatar as account_avatar
     from x_feed f
     inner join x_accounts a on a.username_key = f.account_username_key
     where a.enabled = 1
-  `).all() as DbRow[])
+      ${since ? "and f.created_at >= ?" : ""}
+  `;
+  const feed = (db.prepare(feedSql).all(...(since ? [since] : [])) as DbRow[])
     .sort(compareFeedRowsByTime)
     .slice(0, limit)
     .map(toFeedItem);

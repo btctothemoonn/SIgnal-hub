@@ -9,6 +9,11 @@ import {
   getXPipelineSnapshot,
   upsertXPipelineAccount,
 } from "@/lib/x-pipeline-store";
+import {
+  getSignalFeedRangeLimit,
+  getSignalFeedRangeSince,
+  normalizeSignalFeedRange,
+} from "@/lib/signal-feed-range";
 import { isXRestSnapshotMode } from "@/lib/x-snapshot-mode";
 
 export const dynamic = "force-dynamic";
@@ -26,12 +31,17 @@ type DeleteWatchBody = {
 
 type ActionBody = AddWatchBody | DeleteWatchBody;
 
-export async function GET() {
+export async function GET(request: Request) {
   if (isXRestSnapshotMode()) {
     return NextResponse.json(await getCached6551TwitterSnapshot());
   }
 
-  return NextResponse.json(getXPipelineSnapshot());
+  const range = normalizeSignalFeedRange(new URL(request.url).searchParams.get("range"));
+  return NextResponse.json(
+    getXPipelineSnapshot(getSignalFeedRangeLimit(range, "x"), undefined, {
+      since: getSignalFeedRangeSince(range),
+    }),
+  );
 }
 
 export async function POST(request: Request) {

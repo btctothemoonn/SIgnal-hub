@@ -648,6 +648,9 @@ function toFeedItem(row: DbRow): TelegramFeedItem {
 export function getTelegramPipelineSnapshot(
   limit = 300,
   db = getTelegramPipelineDb(),
+  options: {
+    since?: string | null;
+  } = {},
 ): TelegramDashboardSnapshot {
   const channels = db
     .prepare("select * from telegram_channels where enabled = 1 order by lower(ref) asc")
@@ -655,19 +658,21 @@ export function getTelegramPipelineSnapshot(
     .map(toChannelWatch)
     .filter((channel) => !isTelegramXSourceChannel(channel));
 
-  const feed = db
-    .prepare(
-      `
+  const since = nullableString(options.since);
+  const feedSql = `
       select
         telegram_messages.*,
         telegram_channels.avatar as current_channel_avatar
       from telegram_messages
       left join telegram_channels
         on telegram_channels.channel_id = telegram_messages.channel_id
+      ${since ? "where telegram_messages.created_at >= ?" : ""}
       order by telegram_messages.created_at desc, telegram_messages.message_id desc
-    `,
-    )
-    .all()
+    `;
+
+  const feed = db
+    .prepare(feedSql)
+    .all(...(since ? [since] : []))
     .map(toFeedItem)
     .filter(
       (item) =>

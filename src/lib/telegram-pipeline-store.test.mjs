@@ -209,6 +209,27 @@ upsertTelegramPipelineMessage(
   },
   db,
 );
+upsertTelegramPipelineMessage(
+  {
+    channelRef: "au_call",
+    channelTitle: "AU Trading",
+    channelUsername: "au_call",
+    channelId: "2955560057",
+    channelLink: "https://t.me/au_call",
+    channelAvatar: null,
+    messageId: 124,
+    messageUrl: "https://t.me/au_call/124",
+    text: "newer rolling-window message",
+    createdAt: "2026-04-28T01:00:00.000Z",
+    views: 0,
+    forwards: 0,
+    origin: "history",
+    media: null,
+    translation: null,
+    raw: { id: 124 },
+  },
+  db,
+);
 
 const snapshot = getTelegramPipelineSnapshot(100, db);
 assert.equal(snapshot.channels.length, 2);
@@ -218,23 +239,36 @@ const bweMessage = snapshot.feed.find((message) => message.id === "888:1");
 assert.ok(auMessage);
 assert.ok(bweMessage);
 assert.equal(auMessage.channelAvatar, "/api/telegram/media/avatars/2955560057.jpg");
-assert.equal(snapshot.feed.length, 2);
+assert.equal(snapshot.feed.length, 3);
 assert.equal(auMessage.media?.previewUrl, "/api/telegram/media/2955560057/123.jpg");
 assert.equal(auMessage.quotedMessage?.text, "Don't forget our VW insider info.");
 assert.equal(auMessage.quotedMessage?.messageUrl, "https://t.me/au_call/122");
-assert.equal(snapshot.feed[0].translation?.text, "你好");
+assert.equal(auMessage.translation?.text, "你好");
+const rangeSnapshot = getTelegramPipelineSnapshot(100, db, {
+  since: "2026-04-28T00:30:00.000Z",
+});
+assert.deepEqual(
+  rangeSnapshot.feed.map((message) => message.text),
+  ["newer rolling-window message"],
+);
 assert.equal(
   getTelegramPipelineMessageMediaPreview("2955560057", 123, db)?.previewUrl,
   "/api/telegram/media/2955560057/123.jpg",
 );
-assert.deepEqual(listTelegramPipelineTranslationCandidates(10, db), []);
+assert.deepEqual(listTelegramPipelineTranslationCandidates(10, db), [
+  { id: "2955560057:124", text: "newer rolling-window message" },
+]);
 setTelegramPipelineMessageTranslation("2955560057:123", {
   provider: "mymemory",
   sourceLanguage: "en",
   targetLanguage: "zh-CN",
   text: "更新翻译",
 }, db);
-assert.equal(getTelegramPipelineSnapshot(100, db).feed[0].translation?.text, "更新翻译");
+assert.equal(
+  getTelegramPipelineSnapshot(100, db).feed.find((message) => message.id === "2955560057:123")
+    ?.translation?.text,
+  "更新翻译",
+);
 setTelegramPipelineHealth(
   {
     scope: "collector",

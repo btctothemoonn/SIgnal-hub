@@ -30,6 +30,12 @@ import {
   buildSignalFeedAuthorOptions,
   matchesSignalFeedAuthorFilter,
 } from "@/lib/signal-feed-author-filter";
+import {
+  DEFAULT_SIGNAL_FEED_RANGE,
+  SIGNAL_FEED_RANGE_OPTIONS,
+  getSignalFeedRangeLimit,
+  type SignalFeedRange,
+} from "@/lib/signal-feed-range";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
 import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
 import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
@@ -206,11 +212,12 @@ function mergeFeeds<T extends { id: string; createdAt: string }>(
 function mergeTelegramSnapshot(
   current: TelegramDashboardSnapshot,
   incoming: TelegramDashboardSnapshot,
+  limit = MAX_TELEGRAM_NEWS_ITEMS,
 ): TelegramDashboardSnapshot {
   const mergedFeed = mergeFeeds(
     current.feed,
     incoming.feed,
-    MAX_TELEGRAM_NEWS_ITEMS,
+    limit,
   );
 
   return {
@@ -229,8 +236,9 @@ function mergeTelegramSnapshot(
 function mergeTwitterSnapshot(
   current: TwitterDashboardSnapshot,
   incoming: TwitterDashboardSnapshot,
+  limit = MAX_X_NEWS_ITEMS,
 ): TwitterDashboardSnapshot {
-  const mergedFeed = mergeFeeds(current.feed, incoming.feed, MAX_X_NEWS_ITEMS);
+  const mergedFeed = mergeFeeds(current.feed, incoming.feed, limit);
 
   return {
     ...current,
@@ -408,10 +416,10 @@ function buildUnifiedFeed(
   ]);
 }
 
-function feedLimitForTab(tab: FeedTab) {
-  if (tab === "telegram") return MAX_TELEGRAM_NEWS_ITEMS;
-  if (tab === "x" || tab === "truth") return MAX_X_NEWS_ITEMS;
-  return MAX_ALL_NEWS_ITEMS;
+function feedLimitForTab(tab: FeedTab, range: SignalFeedRange) {
+  if (tab === "telegram") return getSignalFeedRangeLimit(range, "telegram");
+  if (tab === "x" || tab === "truth") return getSignalFeedRangeLimit(range, "x");
+  return getSignalFeedRangeLimit(range, "all");
 }
 
 function getMediaViewport(media: TelegramMediaPreview | null) {
@@ -430,8 +438,9 @@ function getMediaViewport(media: TelegramMediaPreview | null) {
 
 function requestTelegramSnapshot(options: {
   signal?: AbortSignal;
+  range?: SignalFeedRange;
 } = {}) {
-  return fetch("/api/telegram", {
+  return fetch(snapshotRequestUrl("/api/telegram", options.range), {
     method: "GET",
     cache: "no-store",
     signal: options.signal,
@@ -444,11 +453,14 @@ function requestTelegramSnapshot(options: {
   });
 }
 
-function requestXSnapshot(signal?: AbortSignal) {
-  return fetch("/api/x", {
+function requestXSnapshot(options: {
+  signal?: AbortSignal;
+  range?: SignalFeedRange;
+} = {}) {
+  return fetch(snapshotRequestUrl("/api/x", options.range), {
     method: "GET",
     cache: "no-store",
-    signal,
+    signal: options.signal,
   }).then(async (response) => {
     if (!response.ok) {
       throw new Error(`X snapshot request failed (${response.status})`);
@@ -456,6 +468,12 @@ function requestXSnapshot(signal?: AbortSignal) {
 
     return (await response.json()) as TwitterDashboardSnapshot;
   });
+}
+
+function snapshotRequestUrl(path: string, range = DEFAULT_SIGNAL_FEED_RANGE) {
+  if (range === DEFAULT_SIGNAL_FEED_RANGE) return path;
+  const params = new URLSearchParams({ range });
+  return `${path}?${params.toString()}`;
 }
 
 type Props = {
@@ -566,6 +584,9 @@ export function UnifiedNewsPanel({
   const [telegramSnapshot, setTelegramSnapshot] = useState(initialTelegramSnapshot);
   const [xSnapshot, setXSnapshot] = useState(initialXSnapshot);
   const [activeTab, setActiveTab] = useState<FeedTab>("all");
+  const [feedRange, setFeedRange] = useState<SignalFeedRange>(
+    DEFAULT_SIGNAL_FEED_RANGE,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState(ALL_SIGNAL_FEED_AUTHOR_FILTER);
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
@@ -717,8 +738,8 @@ export function UnifiedNewsPanel({
         item.quotedTweet?.text.toLowerCase().includes(needle) === true
       );
     });
-    return limitNewsItems(matching, feedLimitForTab(activeTab));
-  }, [unifiedFeed, activeTab, authorFilter, deferredSearchQuery]);
+    return limitNewsItems(matching, feedLimitForTab(activeTab, feedRange));
+  }, [unifiedFeed, activeTab, authorFilter, deferredSearchQuery, feedRange]);
 
   const deferredFeed = filteredFeed;
 
@@ -728,11 +749,17 @@ export function UnifiedNewsPanel({
   useEffect(() => {
     let isActive = true;
 
-    const refreshSources = async () => {
+    const refreshSources = async ({
+      ignoreThrottle = false,
+      replace = false,
+    }: {
+      ignoreThrottle?: boolean;
+      replace?: boolean;
+    } = {}) => {
       if (refreshInFlightRef.current) {
         return;
       }
-      if (Date.now() - lastRefreshAtRef.current < 15000) {
+      if (!ignoreThrottle && Date.now() - lastRefreshAtRef.current < 15000) {
         return;
       }
       refreshInFlightRef.current = true;
@@ -743,8 +770,8 @@ export function UnifiedNewsPanel({
       ];
       try {
         const settled = await Promise.allSettled([
-          requestTelegramSnapshot(),
-          requestXSnapshot(),
+          requestTelegramSnapshot({ range: feedRange }),
+          requestXSnapshot({ range: feedRange }),
         ]);
         results = [
           settled[0] as PromiseSettledResult<TelegramDashboardSnapshot>,
@@ -762,11 +789,25 @@ export function UnifiedNewsPanel({
         const [telegramResult, xResult] = results;
         if (telegramResult.status === "fulfilled") {
           setTelegramSnapshot((current) =>
-            mergeTelegramSnapshot(current, telegramResult.value),
+            replace
+              ? telegramResult.value
+              : mergeTelegramSnapshot(
+                  current,
+                  telegramResult.value,
+                  getSignalFeedRangeLimit(feedRange, "telegram"),
+                ),
           );
         }
         if (xResult?.status === "fulfilled") {
-          setXSnapshot((current) => mergeTwitterSnapshot(current, xResult.value));
+          setXSnapshot((current) =>
+            replace
+              ? xResult.value
+              : mergeTwitterSnapshot(
+                  current,
+                  xResult.value,
+                  getSignalFeedRangeLimit(feedRange, "x"),
+                ),
+          );
         }
       });
     };
@@ -822,7 +863,13 @@ export function UnifiedNewsPanel({
         }
 
         startTransition(() => {
-          setXSnapshot((current) => mergeTwitterSnapshot(current, payload));
+          setXSnapshot((current) =>
+            mergeTwitterSnapshot(
+              current,
+              payload,
+              getSignalFeedRangeLimit(feedRange, "x"),
+            ),
+          );
         });
       };
 
@@ -857,7 +904,13 @@ export function UnifiedNewsPanel({
       }
 
       startTransition(() => {
-        setTelegramSnapshot((current) => mergeTelegramSnapshot(current, payload));
+        setTelegramSnapshot((current) =>
+          mergeTelegramSnapshot(
+            current,
+            payload,
+            getSignalFeedRangeLimit(feedRange, "telegram"),
+          ),
+        );
       });
     };
 
@@ -897,7 +950,7 @@ export function UnifiedNewsPanel({
 
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    void refreshSources();
+    void refreshSources({ ignoreThrottle: true, replace: true });
     return () => {
       isActive = false;
       window.clearInterval(refreshTimer);
@@ -911,6 +964,7 @@ export function UnifiedNewsPanel({
   }, [
     initialXSnapshot.isConfigured,
     initialXSnapshot.status,
+    feedRange,
     pollXSnapshot,
   ]);
 
@@ -954,9 +1008,13 @@ export function UnifiedNewsPanel({
     setTelegramRefreshBusy(true);
     setTelegramManualStatus("TG 刷新中...");
     try {
-      const snapshot = await requestTelegramSnapshot();
+      const snapshot = await requestTelegramSnapshot({ range: feedRange });
       startTransition(() => {
-        setTelegramSnapshot((current) => mergeTelegramSnapshot(current, snapshot));
+        setTelegramSnapshot((current) =>
+          feedRange === DEFAULT_SIGNAL_FEED_RANGE
+            ? mergeTelegramSnapshot(current, snapshot)
+            : snapshot,
+        );
       });
       const refreshedAt =
         snapshot.refresh?.finishedAt ||
@@ -1014,10 +1072,13 @@ export function UnifiedNewsPanel({
       if (!response.ok || !payload.success) {
         throw new Error(payload.error || `985 refresh failed (${response.status})`);
       }
-      const snapshot = await requestXSnapshot();
+      const snapshot = await requestXSnapshot({ range: feedRange });
       startTransition(() => {
         setXSnapshot((current) => {
-          const merged = mergeTwitterSnapshot(current, snapshot);
+          const merged =
+            feedRange === DEFAULT_SIGNAL_FEED_RANGE
+              ? mergeTwitterSnapshot(current, snapshot)
+              : snapshot;
           return payload.usage
             ? {
                 ...merged,
@@ -1062,10 +1123,13 @@ export function UnifiedNewsPanel({
       if (!payload.success || !response.ok) {
         throw new Error(payload.error || `hybrid backfill failed (${response.status})`);
       }
-      const snapshot = await requestXSnapshot();
+      const snapshot = await requestXSnapshot({ range: feedRange });
       startTransition(() => {
         setXSnapshot((current) => {
-          const merged = mergeTwitterSnapshot(current, snapshot);
+          const merged =
+            feedRange === DEFAULT_SIGNAL_FEED_RANGE
+              ? mergeTwitterSnapshot(current, snapshot)
+              : snapshot;
           return payload.usage
             ? {
                 ...merged,
@@ -1117,10 +1181,14 @@ export function UnifiedNewsPanel({
         );
 
         if (!payload.running) {
-          const snapshot = await requestXSnapshot();
+          const snapshot = await requestXSnapshot({ range: feedRange });
           if (!isActive) return;
           startTransition(() => {
-            setXSnapshot((current) => mergeTwitterSnapshot(current, snapshot));
+            setXSnapshot((current) =>
+              feedRange === DEFAULT_SIGNAL_FEED_RANGE
+                ? mergeTwitterSnapshot(current, snapshot)
+                : snapshot,
+            );
           });
         }
       } catch (error) {
@@ -1138,7 +1206,7 @@ export function UnifiedNewsPanel({
       isActive = false;
       window.clearInterval(timer);
     };
-  }, [xCatchupRunning]);
+  }, [xCatchupRunning, feedRange]);
 
   return (
     <section
@@ -1208,6 +1276,27 @@ export function UnifiedNewsPanel({
                 );
               })}
             </div>
+          </div>
+
+          <div className="mt-2 grid grid-cols-5 gap-1 rounded-lg border border-line/70 bg-background/35 p-1">
+            {SIGNAL_FEED_RANGE_OPTIONS.map((option) => {
+              const selected = option.id === feedRange;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setFeedRange(option.id)}
+                  className={`h-8 rounded-md px-2 text-[11px] font-semibold transition-colors ${
+                    selected
+                      ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                      : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)]">

@@ -468,6 +468,13 @@ const fallbackIncomingItem = getXPipelineSnapshot(100, db).feed.find(
   (item) => item.id === "fallback-avatar-incoming",
 );
 assert.equal(fallbackIncomingItem?.userAvatar, "https://cdn.example/avatar.jpg");
+const rangeSnapshot = getXPipelineSnapshot(100, db, {
+  since: "2026-04-28T02:30:00.000Z",
+});
+assert.deepEqual(
+  rangeSnapshot.feed.map((item) => item.id),
+  ["fallback-avatar-incoming"],
+);
 
 const quotedMissingAvatarItem = getXPipelineSnapshot(100, db).feed.find(
   (item) => item.id === "quoted-missing-avatar",
