@@ -606,10 +606,24 @@ for (const update of [
     createdAt: "2026-05-17T11:42:00.000Z",
     text: "我操，这下得做多SNDK和LITE了\n\nAI Bottleneck，而且还是Rule of 80\n\n谢谢大家\n\n😓😓😓",
   },
+  {
+    id: "cross-event-reply",
+    eventType: "NEW_TWEET_REPLY",
+    queryLabel: "985monitor / NEW_TWEET_REPLY",
+    createdAt: "2026-05-17T11:43:00.000Z",
+    text: "这是我问了AI的结果，忘记说Offloading了，难怪NAND价格爆炸😓😓\n\n1. 片上/板内通信不需要光\n\n2. 机柜间需要光通信",
+  },
+  {
+    id: "cross-event-retweet",
+    eventType: "NEW_RETWEET",
+    queryLabel: "985monitor / NEW_RETWEET",
+    createdAt: "2026-05-17T11:43:05.000Z",
+    text: "这是我问了AI的结果，忘记说Offloading了，难怪NAND价格爆炸😓😓\n\n1. 片上/板内通信不需要光\n\n2. 机柜间需要光通信",
+  },
 ]) {
   upsertXPipelineRealtimeUpdate(
     {
-      eventType: "NEW_TWEET",
+      eventType: update.eventType || "NEW_TWEET",
       account: "bboczeng",
       displayName: "勃勃OC",
       createdAt: update.createdAt,
@@ -621,6 +635,7 @@ for (const update of [
         text: update.text,
         createdAt: update.createdAt,
         tweetUrl: `https://x.com/bboczeng/status/${update.id}`,
+        queryLabel: update.queryLabel || editedTweetBase.queryLabel,
       },
     },
     editDb,
@@ -629,7 +644,7 @@ for (const update of [
 
 assert.deepEqual(
   getXPipelineSnapshot(100, editDb).feed.map((item) => item.id),
-  ["short-edit-2", "separate", "edit-3"],
+  ["cross-event-retweet", "short-edit-2", "separate", "edit-3"],
 );
 
 console.log("ok - x pipeline store builds local dashboard snapshots");

@@ -28,6 +28,12 @@ const MIN_EDITED_TWEET_REVISION_PREFIX_LENGTH = 48;
 const MIN_EDITED_TWEET_REVISION_PREFIX_RATIO = 0.45;
 const MIN_EDITED_TWEET_REVISION_EDGE_LENGTH = 20;
 const MIN_EDITED_TWEET_REVISION_EDGE_RATIO = 0.55;
+const COLLAPSIBLE_MONITOR985_EVENT_TYPES = new Set([
+  "NEW_TWEET",
+  "NEW_TWEET_REPLY",
+  "NEW_TWEET_QUOTE",
+  "NEW_RETWEET",
+]);
 
 export type XPipelineAccountInput = {
   id?: number | null;
@@ -158,15 +164,15 @@ function commonSuffixLength(
   return offset;
 }
 
-function isMonitor985NewTweetRow(row: DbRow): boolean {
+function isMonitor985TweetEventRow(row: DbRow): boolean {
   return (
-    stringValue(row.event_type) === "NEW_TWEET" &&
-    /^985monitor\s*\/\s*NEW_TWEET$/i.test(stringValue(row.query_label))
+    COLLAPSIBLE_MONITOR985_EVENT_TYPES.has(stringValue(row.event_type)) &&
+    /^985monitor\s*\//i.test(stringValue(row.query_label))
   );
 }
 
 function isLikelyEditedTweetRevision(newer: DbRow, older: DbRow): boolean {
-  if (!isMonitor985NewTweetRow(newer) || !isMonitor985NewTweetRow(older)) {
+  if (!isMonitor985TweetEventRow(newer) || !isMonitor985TweetEventRow(older)) {
     return false;
   }
   if (stringValue(newer.account_username_key) !== stringValue(older.account_username_key)) {
@@ -183,10 +189,13 @@ function isLikelyEditedTweetRevision(newer: DbRow, older: DbRow): boolean {
   const olderText = normalizeRevisionText(older.text);
   if (
     newerText.length < MIN_EDITED_TWEET_REVISION_TEXT_LENGTH ||
-    olderText.length < MIN_EDITED_TWEET_REVISION_TEXT_LENGTH ||
-    newerText === olderText
+    olderText.length < MIN_EDITED_TWEET_REVISION_TEXT_LENGTH
   ) {
     return false;
+  }
+
+  if (newerText === olderText) {
+    return true;
   }
 
   if (newerText.includes(olderText) || olderText.includes(newerText)) {
