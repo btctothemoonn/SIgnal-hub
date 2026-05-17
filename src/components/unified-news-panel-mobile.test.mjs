@@ -8,6 +8,10 @@ const source = readFileSync(
 
 assert.match(source, /data-mobile-command-feed/);
 assert.match(source, /Signal Flow/);
+assert.match(source, /按博主或频道筛选/);
+assert.match(source, /全部博主 \/ 频道/);
+assert.match(source, /buildSignalFeedAuthorOptions/);
+assert.match(source, /matchesSignalFeedAuthorFilter/);
 assert.match(source, /rounded-lg border border-line\/70 bg-panel\/95/);
 assert.match(source, /bg-background\/70/);
 assert.match(source, /active:scale-\[0\.995\]/);

@@ -25,6 +25,11 @@ import type {
 import { formatDisplayTime } from "@/lib/display-time";
 import { shouldSkipTelegramChannelTranslation } from "@/lib/telegram-translation-policy";
 import { isUsefulTranslation } from "@/lib/translation-quality";
+import {
+  ALL_SIGNAL_FEED_AUTHOR_FILTER,
+  buildSignalFeedAuthorOptions,
+  matchesSignalFeedAuthorFilter,
+} from "@/lib/signal-feed-author-filter";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
 import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
 import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
@@ -562,6 +567,7 @@ export function UnifiedNewsPanel({
   const [xSnapshot, setXSnapshot] = useState(initialXSnapshot);
   const [activeTab, setActiveTab] = useState<FeedTab>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [authorFilter, setAuthorFilter] = useState(ALL_SIGNAL_FEED_AUTHOR_FILTER);
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
@@ -673,6 +679,20 @@ export function UnifiedNewsPanel({
     [telegramSnapshot, xSnapshot],
   );
 
+  const authorFilterOptions = useMemo(
+    () =>
+      buildSignalFeedAuthorOptions(
+        unifiedFeed.filter((item) => matchesSignalFeedTab(item, activeTab)),
+      ),
+    [unifiedFeed, activeTab],
+  );
+
+  useEffect(() => {
+    if (authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER) return;
+    if (authorFilterOptions.some((option) => option.value === authorFilter)) return;
+    setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
+  }, [authorFilter, authorFilterOptions]);
+
   const filteredFeed = useMemo(() => {
     const needle = deferredSearchQuery.trim().toLowerCase();
     const matching = unifiedFeed.filter((item) => {
@@ -680,6 +700,10 @@ export function UnifiedNewsPanel({
         matchesSignalFeedTab(item, activeTab);
 
       if (!matchesTab) {
+        return false;
+      }
+
+      if (!matchesSignalFeedAuthorFilter(item, authorFilter)) {
         return false;
       }
 
@@ -694,7 +718,7 @@ export function UnifiedNewsPanel({
       );
     });
     return limitNewsItems(matching, feedLimitForTab(activeTab));
-  }, [unifiedFeed, activeTab, deferredSearchQuery]);
+  }, [unifiedFeed, activeTab, authorFilter, deferredSearchQuery]);
 
   const deferredFeed = filteredFeed;
 
@@ -1186,13 +1210,30 @@ export function UnifiedNewsPanel({
             </div>
           </div>
 
-          <input
-            type="text"
-            placeholder="搜索关键词..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="mt-2 h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
-          />
+          <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)]">
+            <input
+              type="text"
+              placeholder="搜索关键词..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
+            />
+            <select
+              aria-label="按博主或频道筛选"
+              value={authorFilter}
+              onChange={(e) => setAuthorFilter(e.target.value)}
+              className="h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs font-medium text-foreground focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
+            >
+              <option value={ALL_SIGNAL_FEED_AUTHOR_FILTER}>
+                全部博主 / 频道
+              </option>
+              {authorFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} ({option.count})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="border-t border-line/40 px-3 py-2 text-[11px] text-muted">
