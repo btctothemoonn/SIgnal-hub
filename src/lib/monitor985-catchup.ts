@@ -10,6 +10,10 @@ import {
   upsertXPipelineAccount,
   upsertXPipelineRealtimeUpdate,
 } from "./x-pipeline-store";
+import {
+  backfillMissingXTranslations,
+  ensureXFeedItemTranslation,
+} from "./x-translation-backfill";
 import { getXPipelineConfiguredTruthAccounts } from "./x-pipeline-accounts";
 import {
   buildMonitor985CatchupSummary,
@@ -35,6 +39,20 @@ export type Monitor985CatchupResult = {
 
 function accountKey(value: string): string {
   return value.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function isXTranslationEnabled(env: EnvLike) {
+  const raw = env.TWITTER_TRANSLATE_ENABLED?.trim().toLowerCase();
+  if (!raw) return true;
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
+function getXTranslationTarget(env: EnvLike) {
+  return (
+    env.TWITTER_TRANSLATE_TARGET?.trim() ||
+    env.TELEGRAM_TRANSLATE_TARGET?.trim() ||
+    "zh-CN"
+  );
 }
 
 async function fetchJson(path: string, env: EnvLike) {
@@ -89,16 +107,27 @@ export async function runMonitor985ManualCatchup({
       ignored += 1;
       continue;
     }
+    const translatedFeedItem = await ensureXFeedItemTranslation(update.feedItem, {
+      enabled: isXTranslationEnabled(env),
+      targetLanguage: getXTranslationTarget(env),
+      cacheNamespace: "monitor985-manual",
+    });
     upsertXPipelineRealtimeUpdate({
       ...update,
       remark: "985monitor",
       feedItem: {
-        ...update.feedItem,
+        ...translatedFeedItem,
         queryLabel: update.feedItem.queryLabel || "985monitor",
       },
     });
     accepted += 1;
   }
+
+  await backfillMissingXTranslations({
+    enabled: isXTranslationEnabled(env),
+    targetLanguage: getXTranslationTarget(env),
+    cacheNamespace: "x-pipeline",
+  });
 
   const detail = buildMonitor985CatchupSummary({
     fetched: events.length,

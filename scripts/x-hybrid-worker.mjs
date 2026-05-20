@@ -13,8 +13,9 @@ import {
   getTelegramPipelineConfig,
 } from "../src/lib/telegram-pipeline-config.ts";
 import {
-  translateText,
-} from "../src/lib/translate.ts";
+  backfillMissingXTranslations as runXTranslationBackfill,
+  ensureXFeedItemTranslation,
+} from "../src/lib/x-translation-backfill.ts";
 import { getTelegramXSourceChannelKeys } from "../src/lib/telegram-x-source-channels.ts";
 import {
   getXHybridEffectiveLookbackMs,
@@ -70,11 +71,9 @@ import {
   getXPipelineQuotedTweet,
   getXPipelineHealth,
   getXHybridSourceStatus,
-  listXPipelineTranslationCandidates,
   disableXPipelineAccountsExcept,
   markXHybridAccountFetched,
   markXHybridSource,
-  setXPipelineFeedTranslation,
   setXPipelineHealth,
   upsertXPipelineQuotedTweet,
   upsertXPipelineAccount,
@@ -154,36 +153,21 @@ function xTranslationBackfillLimit() {
 }
 
 async function translateXFeedItem(feedItem) {
-  if (feedItem.translation) return feedItem;
-  return {
-    ...feedItem,
-    translation: await translateText(feedItem.text, {
-      enabled: isXTranslationEnabled(),
-      targetLanguage: getXTranslationTarget(),
-      cacheNamespace: "x-hybrid",
-    }),
-  };
+  return ensureXFeedItemTranslation(feedItem, {
+    enabled: isXTranslationEnabled(),
+    targetLanguage: getXTranslationTarget(),
+    cacheNamespace: "x-hybrid",
+  });
 }
 
 async function backfillMissingXTranslations(limit = xTranslationBackfillLimit()) {
-  const candidates = listXPipelineTranslationCandidates(limit);
-  let translated = 0;
-  for (const candidate of candidates) {
-    const translation = await translateText(candidate.text, {
-      enabled: isXTranslationEnabled(),
-      targetLanguage: getXTranslationTarget(),
-      cacheNamespace: "x-pipeline",
-    });
-    if (!translation) continue;
-    setXPipelineFeedTranslation(candidate.id, translation);
-    translated += 1;
-  }
-  if (translated > 0) {
-    log("x_translation_backfilled", {
-      checked: candidates.length,
-      translated,
-    });
-  }
+  await runXTranslationBackfill({
+    limit,
+    enabled: isXTranslationEnabled(),
+    targetLanguage: getXTranslationTarget(),
+    cacheNamespace: "x-pipeline",
+    log,
+  });
 }
 
 function stringValue(value) {

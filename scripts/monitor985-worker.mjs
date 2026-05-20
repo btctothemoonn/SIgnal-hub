@@ -19,6 +19,10 @@ import {
   upsertXPipelineRealtimeUpdate,
 } from "../src/lib/x-pipeline-store.ts";
 import {
+  backfillMissingXTranslations,
+  ensureXFeedItemTranslation,
+} from "../src/lib/x-translation-backfill.ts";
+import {
   extractMonitor985Events,
   normalizeMonitor985Event,
 } from "../src/lib/monitor985.ts";
@@ -45,6 +49,7 @@ const SSE_EVENT_TYPES = new Set(["twitter", "truth"]);
 let accountSyncTimer = null;
 let catchupTimer = null;
 let catchupInFlight = false;
+let translationBackfillInFlight = false;
 let stopRequested = false;
 let accountSyncCache = null;
 
@@ -100,6 +105,20 @@ function getAccountSyncIntervalMs() {
 function getFilterMode() {
   const raw = process.env.MONITOR985_FILTER_MODE?.trim().toLowerCase();
   return raw === "all" ? "all" : "configured";
+}
+
+function isXTranslationEnabled() {
+  const raw = process.env.TWITTER_TRANSLATE_ENABLED?.trim().toLowerCase();
+  if (!raw) return true;
+  return !["0", "false", "no", "off"].includes(raw);
+}
+
+function getXTranslationTarget() {
+  return (
+    process.env.TWITTER_TRANSLATE_TARGET?.trim() ||
+    process.env.TELEGRAM_TRANSLATE_TARGET?.trim() ||
+    "zh-CN"
+  );
 }
 
 function accountKey(value) {
@@ -254,6 +273,43 @@ async function refreshMonitor985Update(update) {
   }
 }
 
+async function translateMonitor985Update(update) {
+  return {
+    ...update,
+    feedItem: await ensureXFeedItemTranslation(update.feedItem, {
+      enabled: isXTranslationEnabled(),
+      targetLanguage: getXTranslationTarget(),
+      cacheNamespace: "monitor985",
+    }),
+  };
+}
+
+async function runTranslationBackfill(reason) {
+  if (translationBackfillInFlight) return;
+  translationBackfillInFlight = true;
+  try {
+    const stats = await backfillMissingXTranslations({
+      enabled: isXTranslationEnabled(),
+      targetLanguage: getXTranslationTarget(),
+      cacheNamespace: "x-pipeline",
+      log,
+    });
+    if (stats.translated > 0 || stats.failed > 0) {
+      log("monitor985_translation_backfill", {
+        reason,
+        ...stats,
+      });
+    }
+  } catch (error) {
+    log("monitor985_translation_backfill_failed", {
+      reason,
+      error: String(error),
+    });
+  } finally {
+    translationBackfillInFlight = false;
+  }
+}
+
 async function ingestRawEvent(rawEvent, allowedAccountKeys) {
   let update = normalizeMonitor985Event(rawEvent);
   if (!update) return { accepted: false, reason: "not-normalized" };
@@ -261,7 +317,7 @@ async function ingestRawEvent(rawEvent, allowedAccountKeys) {
     return { accepted: false, reason: `not-configured:${update.account}` };
   }
 
-  update = await refreshMonitor985Update(update);
+  update = await translateMonitor985Update(await refreshMonitor985Update(update));
   upsertXPipelineRealtimeUpdate({
     ...update,
     remark: "985monitor",
@@ -293,6 +349,7 @@ async function bootstrapRecentEvents(allowedAccountKeys, reason = "bootstrap") {
     else ignored += 1;
   }
   log("monitor985_catchup", { reason, fetched: events.length, accepted, ignored });
+  void runTranslationBackfill(reason);
   return { fetched: events.length, accepted, ignored };
 }
 

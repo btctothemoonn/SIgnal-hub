@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { translateText } from "./translate.ts";
+import { cleanTranslationText, translateText } from "./translate.ts";
 
 const originalFetch = globalThis.fetch;
 const originalEnv = {
@@ -19,6 +19,12 @@ const originalEnv = {
 
 const finalTranslation =
   "NVDA \u4f9b\u5e94\u5546\u68c0\u67e5\u4e0a\u4fee\uff0c\u4e91\u8d44\u672c\u5f00\u652f\u4ecd\u7136\u5f3a\u52b2\u3002";
+assert.equal(
+  cleanTranslationText(
+    "\u6700\u7ec8\u8bd1\u6587\uff1a\u201cNVDA \u4f9b\u5e94\u94fe\u9700\u6c42\u4ecd\u5f3a\u52b2\u3002\u201d",
+  ),
+  "NVDA \u4f9b\u5e94\u94fe\u9700\u6c42\u4ecd\u5f3a\u52b2\u3002",
+);
 const requests = [];
 globalThis.fetch = async (url, init) => {
   requests.push({ url: String(url), init });

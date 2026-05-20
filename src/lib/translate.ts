@@ -205,12 +205,19 @@ export function cleanTranslationText(text: string): string {
   if (finalMarker?.[1]) {
     cleaned = finalMarker[1].trim();
   }
+  const modernFinalMarker = cleaned.match(
+    /(?:最终翻译|最终译文|翻译结果|译文|translation|final translation)\s*[:：]\s*([\s\S]+)$/i,
+  );
+  if (modernFinalMarker?.[1]) {
+    cleaned = modernFinalMarker[1].trim();
+  }
 
   return cleaned
     .replace(/^```(?:\w+)?/i, "")
     .replace(/```$/i, "")
     .trim()
     .replace(/^[“”"']+|[“”"']+$/g, "")
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
     .trim();
 }
 
@@ -344,7 +351,7 @@ async function translateWithMiniMax(
         {
           role: "system",
           content:
-            "You translate financial market news into concise Simplified Chinese. Preserve tickers, company names, numbers, percentages, and URLs. Return only the translation.",
+            "You translate financial market posts into Simplified Chinese. Translate the entire input faithfully, including every sentence and line break. Do not summarize, shorten, omit, explain, or add commentary. Preserve @handles, tickers, company names, numbers, percentages, emojis, and URLs. Return only the translation.",
         },
         {
           role: "user",
