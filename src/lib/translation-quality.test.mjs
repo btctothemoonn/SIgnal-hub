@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { isUsefulTranslation } from "./translation-quality.ts";
+import { isUsefulTranslation, shouldTranslateText } from "./translation-quality.ts";
 
 function note(text) {
   return {
@@ -80,6 +80,18 @@ assert.equal(
     note(
       "1/ 来认识一下 Dritan Kapllani Jr，他是一名来自美国的威胁行为者，通过针对加密货币持有者的社会工程盗窃获得了 1900 万美元的损失。\n\nDritan 在社交媒体上展示豪华汽车、手表、私人飞机和俱乐部。\n\n最近，他在一次通话中被录音，展示了一个装有被盗资金的钱包。",
     ),
+  ),
+  true,
+);
+
+assert.equal(shouldTranslateText("@ethy_agent @Mute_swap @virtuals_io 👀"), false);
+assert.equal(
+  shouldTranslateText("@Artistkatty_ @fore_gate \u98ce\u518d\u5927\u4e00\u70b9\u8c22\u8c22"),
+  false,
+);
+assert.equal(
+  shouldTranslateText(
+    "@SidkMena I don't have positions anymore, so no comment there.",
   ),
   true,
 );

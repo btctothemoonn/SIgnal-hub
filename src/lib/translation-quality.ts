@@ -73,13 +73,18 @@ function isClearlyIncompleteTranslation(
 }
 
 export function shouldTranslateText(text: string): boolean {
-  const compact = text.replace(/https?:\/\/\S+/g, " ").replace(/\s+/g, " ").trim();
-  if (compact.length < 6) {
+  const semantic = text
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/@\w+/g, " ")
+    .replace(/\$[A-Za-z][A-Za-z0-9_]{1,15}\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (semantic.length < 6) {
     return false;
   }
 
-  const hanMatches = compact.match(/\p{Script=Han}/gu) ?? [];
-  const letterMatches = compact.match(/\p{Letter}/gu) ?? [];
+  const hanMatches = semantic.match(/\p{Script=Han}/gu) ?? [];
+  const letterMatches = semantic.match(/\p{Letter}/gu) ?? [];
 
   if (letterMatches.length === 0) {
     return false;
@@ -90,7 +95,7 @@ export function shouldTranslateText(text: string): boolean {
   }
 
   return /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Greek}]/u.test(
-    compact,
+    semantic,
   );
 }
 
