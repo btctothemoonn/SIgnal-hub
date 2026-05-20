@@ -24,9 +24,12 @@
     "alpha-summary:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs",
     "alpha-summary:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs --once",
     "stocks:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs",
-    "stocks:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs --once"
+    "stocks:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs --once",
+    "tiger:holdings": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs",
+    "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once"
   },
   "dependencies": {
+    "@tigeropenapi/tigeropen": "^0.4.0",
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",

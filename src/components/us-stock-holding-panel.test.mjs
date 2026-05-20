@@ -8,8 +8,10 @@ const source = readFileSync(
 
 assert.match(source, /USStockHoldingPanel/);
 assert.match(source, /US_STOCK_HOLDING_SNAPSHOT/);
+assert.match(source, /\/api\/holdings\/tiger/);
+assert.match(source, /EquityCurve/);
 assert.match(source, /PositionTreemap/);
 assert.match(source, /OptionRiskStrip/);
 assert.match(source, /HoldingDetailTable/);
 
-console.log("ok - us stock holding panel contract");
+console.log("ok - us stock holding panel tiger contract");
