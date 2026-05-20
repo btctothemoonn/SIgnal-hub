@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 const CONFIG_PATH = resolve(process.cwd(), ".signal-hub", "runtime-config.json");
@@ -23,6 +23,8 @@ const emptyConfig: RuntimeConfig = {
 
 let cache: RuntimeConfig | null = null;
 let loadPromise: Promise<RuntimeConfig> | null = null;
+let cacheMtimeMs: number | null = null;
+let loadPromiseMtimeMs: number | null = null;
 
 function sanitizeTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -74,21 +76,44 @@ function normalize(raw: RawRuntimeConfig | null | undefined): RuntimeConfig {
   };
 }
 
-async function readConfigFile(): Promise<RuntimeConfig> {
+async function getConfigMtimeMs(): Promise<number | null> {
+  try {
+    return (await stat(CONFIG_PATH)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+async function readConfigFile(): Promise<{
+  config: RuntimeConfig;
+  mtimeMs: number | null;
+}> {
   try {
     const content = await readFile(CONFIG_PATH, "utf-8");
-    return normalize(JSON.parse(content) as RawRuntimeConfig);
+    return {
+      config: normalize(JSON.parse(content) as RawRuntimeConfig),
+      mtimeMs: await getConfigMtimeMs(),
+    };
   } catch {
-    return { ...emptyConfig };
+    return { config: { ...emptyConfig }, mtimeMs: null };
   }
 }
 
 export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
-  if (cache) return cache;
-  if (!loadPromise) {
-    loadPromise = readConfigFile().then((config) => {
-      cache = config;
-      return config;
+  const mtimeMs = await getConfigMtimeMs();
+  if (cache && cacheMtimeMs === mtimeMs) return cache;
+  if (!loadPromise || loadPromiseMtimeMs !== mtimeMs) {
+    loadPromiseMtimeMs = mtimeMs;
+    const promise = readConfigFile().then((record) => {
+      cache = record.config;
+      cacheMtimeMs = record.mtimeMs;
+      return record.config;
+    });
+    loadPromise = promise.finally(() => {
+      if (loadPromise === promise) {
+        loadPromise = null;
+        loadPromiseMtimeMs = null;
+      }
     });
   }
   return loadPromise;
@@ -103,6 +128,7 @@ async function saveRuntimeConfig(config: RuntimeConfig): Promise<void> {
   const tmpPath = `${CONFIG_PATH}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   await writeFile(tmpPath, JSON.stringify(config, null, 2), "utf-8");
   await rename(tmpPath, CONFIG_PATH);
+  cacheMtimeMs = await getConfigMtimeMs();
   cache = config;
 }
 

@@ -180,9 +180,14 @@ export function AppShell({
     }
   };
 
+  const warmSettingsRoute = () => {
+    router.prefetch("/settings");
+  };
+
   useEffect(() => {
-    const warmHolding = () => {
+    const warmFrequentRoutes = () => {
       router.prefetch("/holding");
+      router.prefetch("/settings");
       void import("@/components/holding-panel");
     };
 
@@ -195,11 +200,11 @@ export function AppShell({
       typeof idleWindow.requestIdleCallback === "function" &&
       typeof idleWindow.cancelIdleCallback === "function"
     ) {
-      const idleId = idleWindow.requestIdleCallback(warmHolding);
+      const idleId = idleWindow.requestIdleCallback(warmFrequentRoutes);
       return () => idleWindow.cancelIdleCallback?.(idleId);
     }
 
-    const timeoutId = window.setTimeout(warmHolding, 500);
+    const timeoutId = window.setTimeout(warmFrequentRoutes, 500);
     return () => window.clearTimeout(timeoutId);
   }, [router]);
 
@@ -268,6 +273,9 @@ export function AppShell({
                   href="/settings"
                   title="设置"
                   aria-label="设置"
+                  onFocus={warmSettingsRoute}
+                  onPointerDown={warmSettingsRoute}
+                  onPointerEnter={warmSettingsRoute}
                   className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-line/70 bg-panel-strong/90 text-muted shadow-[0_12px_28px_-24px_rgba(38,31,27,0.55)] transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
                 >
                   <ShellGlyph icon="settings" />
