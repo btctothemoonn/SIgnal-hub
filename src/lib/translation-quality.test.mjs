@@ -57,6 +57,16 @@ assert.equal(
 
 assert.equal(
   isUsefulTranslation(
+    "JUST IN: US House passes bill to limit large investors from buying up single-family homes.",
+    note(
+      "\u6700\u65b0\u6d88\u606f\uff1a\u7f8e\u56fd\u4f17\u8bae\u9662\u901a\u8fc7\u6cd5\u6848\uff0c\u9650\u5236\u5927\u578b\u6295\u8d44\u8005\u8d2d\u4e70\u72ec\u680b\u4f4f\u5b85\u3002",
+    ),
+  ),
+  true,
+);
+
+assert.equal(
+  isUsefulTranslation(
     "RT @CryptoSylar: The barbell of AI <> Memetics is what makes $SOL a Gem.",
     {
       ...note("转发 @CryptoSylar：AI 与迷因的杠铃结构让 $SOL 成为宝石。"),

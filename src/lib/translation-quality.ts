@@ -62,7 +62,7 @@ function isClearlyIncompleteTranslation(
   const translatedLength = comparableText(translatedText).length;
   if (sourceLength < 120) {
     const sourceTokens = meaningfulSourceTokens(sourceText);
-    if (sourceTokens.length >= 8 && translatedLength < sourceLength * 0.4) {
+    if (sourceTokens.length >= 8 && translatedLength < sourceLength * 0.32) {
       return true;
     }
 
