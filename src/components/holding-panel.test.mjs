@@ -10,5 +10,7 @@ assert.match(source, /FuturesEquityCurve/);
 assert.match(source, /equityHistory/);
 assert.match(source, /polyline/);
 assert.match(source, /futuresMarginBalance/);
+assert.match(source, /USStockHoldingPanel/);
+assert.match(source, /activeHoldingView/);
 
 console.log("ok - holding panel equity curve contract");

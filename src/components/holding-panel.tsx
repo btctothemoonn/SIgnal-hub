@@ -14,6 +14,7 @@ import {
   getHeatmapTileLayout,
 } from "@/lib/holding-analytics";
 import { formatUsdtPrice } from "@/lib/holding-display";
+import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
 import type {
   BinanceFuturesEquityPoint,
   BinanceFuturesPosition,
@@ -35,6 +36,7 @@ type BinanceCredentialResponse =
 
 type LoadState = "idle" | "loading" | "refreshing" | "ready" | "error";
 type SaveState = "idle" | "saving";
+type HoldingView = "us-stocks" | "binance";
 
 const HOLDING_SNAPSHOT_STORAGE_KEY = "signal-hub.binance-holding-snapshot.v1";
 const SPOT_PIE_COLORS = [
@@ -973,6 +975,8 @@ function SpotAllocationPanel({ balances }: { balances: BinanceSpotBalance[] }) {
 }
 
 export function HoldingPanel() {
+  const [activeHoldingView, setActiveHoldingView] =
+    useState<HoldingView>("us-stocks");
   const [snapshot, setSnapshot] = useState<BinanceHoldingSnapshot | null>(() =>
     readBrowserCachedSnapshot(),
   );
@@ -1057,11 +1061,12 @@ export function HoldingPanel() {
   );
 
   useEffect(() => {
+    if (activeHoldingView !== "binance") return;
     void load();
     return () => {
       abortRef.current?.abort();
     };
-  }, [load]);
+  }, [activeHoldingView, load]);
 
   const isBusy = state === "loading" || state === "refreshing";
   const hasWarnings = Boolean(snapshot?.warnings.length);
@@ -1086,6 +1091,44 @@ export function HoldingPanel() {
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border border-line/70 bg-panel-strong p-3 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-normal text-muted">
+            Holding
+          </div>
+          <h2 className="mt-1 text-lg font-semibold text-foreground">
+            持仓账户
+          </h2>
+        </div>
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[22rem]">
+          {[
+            { id: "us-stocks" as const, label: "美股证券" },
+            { id: "binance" as const, label: "Binance" },
+          ].map((item) => {
+            const selected = activeHoldingView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveHoldingView(item.id)}
+                className={[
+                  "h-9 rounded-md px-3 text-xs font-semibold transition-colors",
+                  selected
+                    ? "bg-foreground text-background shadow-sm"
+                    : "text-muted hover:bg-panel hover:text-foreground",
+                ].join(" ")}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeHoldingView === "us-stocks" ? <USStockHoldingPanel /> : null}
+
+      {activeHoldingView === "binance" ? (
+        <>
       <div className="flex flex-col gap-3 border-b border-line/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-info">
@@ -1273,6 +1316,8 @@ export function HoldingPanel() {
         </div>
         <SpotAllocationPanel balances={snapshot?.spotBalances ?? []} />
       </section>
+        </>
+      ) : null}
     </div>
   );
 }
