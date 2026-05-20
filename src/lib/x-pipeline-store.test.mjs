@@ -536,6 +536,45 @@ assert.ok(
   ),
 );
 
+upsertXPipelineRealtimeUpdate(
+  {
+    eventType: "NEW_TWEET",
+    account: "SpaceY",
+    displayName: "Space Y",
+    createdAt: "2026-04-28T05:00:00.000Z",
+    profileUrl: "https://x.com/SpaceY",
+    remark: "",
+    feedItem: {
+      id: "already-chinese",
+      text: "\u4eca\u5929\u4e0d\u9700\u8981\u7ffb\u8bd1\u7684\u4e2d\u6587\u6d88\u606f",
+      createdAt: "2026-04-28T05:00:00.000Z",
+      username: "SpaceY",
+      displayName: "Space Y",
+      profileUrl: "https://x.com/SpaceY",
+      userAvatar: "https://cdn.example/avatar.jpg",
+      tweetUrl: "https://x.com/SpaceY/status/already-chinese",
+      hashtags: [],
+      likes: 0,
+      retweets: 0,
+      replies: 0,
+      quotes: 0,
+      views: 0,
+      media: [],
+      quotedTweet: null,
+      origin: "watch",
+      queryLabel: "985monitor / NEW_TWEET",
+      translation: null,
+    },
+  },
+  db,
+);
+assert.equal(
+  listXPipelineTranslationCandidates(100, db).some(
+    (item) => item.id === "already-chinese",
+  ),
+  false,
+);
+
 const editDb = openXPipelineDb(":memory:");
 upsertXPipelineAccount(
   {

@@ -10,7 +10,10 @@ import type {
   TwitterWatchAccount,
 } from "@/lib/6551-twitter";
 import type { TranslationNote } from "./translate.ts";
-import { isUsefulTranslation } from "./translation-quality.ts";
+import {
+  isUsefulTranslation,
+  shouldTranslateText,
+} from "./translation-quality.ts";
 import { getXApiUsageSnapshot } from "./x-api-usage.ts";
 import {
   getXPipelineConfig,
@@ -359,7 +362,7 @@ function fallbackProfileUrl(username: string): string {
   return username ? `https://x.com/${username}` : "#";
 }
 
-function fallbackAvatar(username: string): string {
+function fallbackAvatar(): string {
   return "";
 }
 
@@ -374,15 +377,13 @@ function isFallbackAvatarUrl(value: string): boolean {
 function preferredAvatar({
   incoming,
   cached,
-  username,
 }: {
   incoming: string;
   cached: string;
-  username: string;
 }) {
   if (incoming && !isFallbackAvatarUrl(incoming)) return incoming;
   if (cached) return cached;
-  return incoming || fallbackAvatar(username);
+  return incoming || fallbackAvatar();
 }
 
 function accountAvatarFor(
@@ -721,7 +722,6 @@ function upsertFeedItem(
   const resolvedUserAvatar = preferredAvatar({
     incoming: incomingUserAvatar,
     cached: accountAvatarFor(usernameKey, db),
-    username,
   });
   const usefulTranslation = isUsefulTranslation(feedItem.text, feedItem.translation)
     ? feedItem.translation
@@ -908,7 +908,10 @@ export function listXPipelineTranslationCandidates(
     .all(scanLimit)
     .filter((row) => {
       const text = stringValue(row.text);
-      return !isUsefulTranslation(text, parseTranslation(row.translation_json));
+      return (
+        shouldTranslateText(text) &&
+        !isUsefulTranslation(text, parseTranslation(row.translation_json))
+      );
     })
     .slice(0, limit)
     .map((row) => ({
@@ -1027,7 +1030,7 @@ function toWatchAccount(row: DbRow): TwitterWatchAccount {
     username,
     name: stringValue(row.name) || username,
     profileUrl: stringValue(row.profile_url) || fallbackProfileUrl(username),
-    avatar: nullableString(row.avatar) || fallbackAvatar(username),
+    avatar: nullableString(row.avatar) || fallbackAvatar(),
     note: stringValue(row.note),
   };
 }
@@ -1046,7 +1049,7 @@ function toFeedItem(row: DbRow): TwitterFeedItem {
     userAvatar:
       stringValue(row.user_avatar) ||
       stringValue(row.account_avatar) ||
-      fallbackAvatar(username),
+      fallbackAvatar(),
     tweetUrl: stringValue(row.tweet_url),
     hashtags: parseJsonArray(row.hashtags_json),
     likes: numberValue(row.likes),
