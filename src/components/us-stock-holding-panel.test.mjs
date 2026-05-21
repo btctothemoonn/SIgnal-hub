@@ -12,8 +12,10 @@ assert.match(source, /\/api\/holdings\/tiger/);
 assert.match(source, /EquityCurve/);
 assert.match(source, /PositionBriefCards/);
 assert.match(source, /getUsStockHoldingBriefCards/);
-assert.match(source, /PositionTreemap/);
+assert.match(source, /function PositionBriefPnl/);
+assert.match(source, /formatSignedPercent\(card\.unrealizedPnlPercent\)/);
 assert.match(source, /OptionRiskStrip/);
-assert.match(source, /HoldingDetailTable/);
+assert.doesNotMatch(source, /<PositionTreemap/);
+assert.doesNotMatch(source, /<HoldingDetailTable/);
 
 console.log("ok - us stock holding panel tiger contract");

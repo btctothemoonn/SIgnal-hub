@@ -1,10 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   analyzeUsStockHoldings,
   getUsStockHoldingBriefCards,
-  getUsStockHoldingGroups,
   getUsStockThemeAllocation,
   US_STOCK_HOLDING_SNAPSHOT,
   type UsStockHoldingBriefCard,
@@ -72,6 +78,11 @@ function formatPercent(value: number) {
   return `${formatNumber(value, { maximumFractionDigits: 1 })}%`;
 }
 
+function formatSignedPercent(value: number) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatPercent(value)}`;
+}
+
 function formatTime(raw: string | null | undefined) {
   if (!raw) return "n/a";
   const date = new Date(raw);
@@ -88,12 +99,6 @@ function pnlTone(value: number) {
   if (value > 0) return "text-success";
   if (value < 0) return "text-danger";
   return "text-muted";
-}
-
-function pnlBadgeClass(value: number) {
-  if (value > 0) return "border-success/30 bg-success-soft text-success";
-  if (value < 0) return "border-danger/30 bg-danger-soft text-danger";
-  return "border-line bg-panel text-muted";
 }
 
 function isTigerSnapshot(snapshot: DisplaySnapshot): snapshot is TigerHoldingSnapshot {
@@ -226,18 +231,31 @@ function PositionBriefCell({
   label,
   value,
   tone = "text-foreground",
+  valueClassName = "truncate font-mono text-xl font-bold leading-tight",
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   tone?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-[11px] font-medium text-muted">{label}</div>
-      <div className={`mt-1 truncate font-mono text-sm font-semibold ${tone}`}>
+      <div className="text-sm font-medium leading-tight text-muted">{label}</div>
+      <div className={`mt-1 min-w-0 ${valueClassName} ${tone}`}>
         {value}
       </div>
     </div>
+  );
+}
+
+function PositionBriefPnl({ card }: { card: UsStockHoldingBriefCard }) {
+  return (
+    <span className="inline-flex max-w-full items-baseline gap-2 overflow-hidden whitespace-nowrap">
+      <span className="truncate">{formatSignedUsd(card.unrealizedPnl)}</span>
+      <span className="shrink-0 text-base opacity-80">
+        {formatSignedPercent(card.unrealizedPnlPercent)}
+      </span>
+    </span>
   );
 }
 
@@ -274,7 +292,7 @@ function PositionBriefCards({ snapshot }: { snapshot: DisplaySnapshot }) {
           {cards.length} 条
         </span>
       </div>
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3">
         {cards.map((card) => (
           <PositionBriefCard key={card.id} card={card} />
         ))}
@@ -288,152 +306,54 @@ function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
   const kindLabel = card.kind === "option" ? "Option" : "Equity";
 
   return (
-    <article className="rounded-lg border border-line/70 bg-background/35 px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
+    <article className="rounded-lg border border-line/70 bg-background/35 px-4 py-4 sm:px-5 sm:py-5">
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h4 className="truncate text-xl font-bold leading-tight text-foreground">
+            <h4 className="truncate text-3xl font-bold leading-tight text-foreground">
               {card.symbol}
             </h4>
             <span className="rounded-md border border-line/60 bg-panel px-1.5 py-0.5 text-[10px] font-semibold text-muted">
               {kindLabel}
             </span>
           </div>
-          <div className="mt-1 truncate text-xs text-muted">{name}</div>
+          <div className="mt-1 truncate text-sm text-muted">{name}</div>
         </div>
-        <div className="shrink-0 text-right font-mono text-xl font-bold text-foreground">
+        <div className="shrink-0 text-right font-mono text-3xl font-bold leading-tight text-foreground">
           {formatUsd(card.marketValue)}
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-3">
-        <PositionBriefCell
-          label="数量"
-          value={formatNumber(card.quantity, { maximumFractionDigits: 6 })}
-        />
-        <PositionBriefCell label="价格" value={formatPreciseUsd(card.currentPrice)} />
-        <PositionBriefCell label="成本" value={formatPreciseUsd(card.costBasis)} />
-        <PositionBriefCell
-          label="权重"
-          value={formatPercent(card.weightPercent)}
-        />
-        <PositionBriefCell
-          label="PnL"
-          value={formatSignedUsd(card.unrealizedPnl)}
-          tone={pnlTone(card.unrealizedPnl)}
-        />
-        <PositionBriefCell
-          label="费用"
-          value={formatFee(card.fee)}
-          tone={feeTone(card.fee)}
-        />
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {[card.theme, ...card.tags].slice(0, 4).map((tag) => (
-          <span
-            key={`${card.id}-${tag}`}
-            className="rounded-md bg-panel px-1.5 py-0.5 text-[10px] font-semibold text-muted"
-          >
-            {tag}
-          </span>
-        ))}
+      <div className="mt-5 grid grid-cols-3 gap-x-5 gap-y-5">
+        <div className="space-y-4">
+          <PositionBriefCell
+            label="数量"
+            value={formatNumber(card.quantity, { maximumFractionDigits: 6 })}
+          />
+          <PositionBriefCell
+            label="权重"
+            value={formatPercent(card.weightPercent)}
+          />
+        </div>
+        <div className="space-y-4">
+          <PositionBriefCell label="价格" value={formatPreciseUsd(card.currentPrice)} />
+          <PositionBriefCell
+            label="PnL"
+            value={<PositionBriefPnl card={card} />}
+            tone={pnlTone(card.unrealizedPnl)}
+            valueClassName="font-mono text-xl font-bold leading-tight"
+          />
+        </div>
+        <div className="space-y-4">
+          <PositionBriefCell label="成本" value={formatPreciseUsd(card.costBasis)} />
+          <PositionBriefCell
+            label="费用"
+            value={formatFee(card.fee)}
+            tone={feeTone(card.fee)}
+          />
+        </div>
       </div>
     </article>
-  );
-}
-
-function tileLayout(position: UsStockHoldingPosition, maxMarketValue: number) {
-  const share = maxMarketValue > 0 ? position.marketValue / maxMarketValue : 0;
-  if (share >= 0.75) return "md:col-span-4 xl:col-span-5";
-  if (share >= 0.35) return "md:col-span-3 xl:col-span-4";
-  if (share >= 0.18) return "md:col-span-2 xl:col-span-3";
-  return "md:col-span-2 xl:col-span-2";
-}
-
-function PositionTreemap({ positions }: { positions: UsStockHoldingPosition[] }) {
-  const sorted = [...positions].sort(
-    (left, right) => right.marketValue - left.marketValue,
-  );
-  const maxMarketValue = sorted[0]?.marketValue ?? 0;
-  const totalMarketValue = sorted.reduce(
-    (sum, position) => sum + position.marketValue,
-    0,
-  );
-
-  if (sorted.length === 0) {
-    return (
-      <section className="flex min-h-[14rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel-strong p-4 text-sm text-muted">
-        暂无美股持仓
-      </section>
-    );
-  }
-
-  return (
-    <section className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">持仓热力图</h3>
-          <p className="mt-1 text-xs text-muted">
-            面积按市值，颜色按持仓盈亏
-          </p>
-        </div>
-        <span className="rounded-md border border-line/70 bg-background/40 px-2 py-1 text-xs font-semibold text-muted">
-          {positions.length} 条
-        </span>
-      </div>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-6 xl:grid-cols-12">
-        {sorted.map((position) => {
-          const weight =
-            totalMarketValue > 0 ? (position.marketValue / totalMarketValue) * 100 : 0;
-          return (
-            <article
-              key={position.id}
-              className={[
-                "min-h-[9rem] rounded-lg border px-3 py-3",
-                position.unrealizedPnl >= 0
-                  ? "border-success/25 bg-success-soft"
-                  : "border-danger/25 bg-danger-soft",
-                tileLayout(position, maxMarketValue),
-              ].join(" ")}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-lg font-bold text-foreground">
-                    {position.symbol}
-                  </div>
-                  <div className="mt-1 truncate text-xs text-muted">
-                    {position.name}
-                  </div>
-                </div>
-                <span
-                  className={[
-                    "rounded-md border px-2 py-0.5 text-[11px] font-bold",
-                    pnlBadgeClass(position.unrealizedPnl),
-                  ].join(" ")}
-                >
-                  {formatSignedUsd(position.unrealizedPnl)}
-                </span>
-              </div>
-              <div className="mt-5 flex items-end justify-between gap-3">
-                <div>
-                  <div className="font-mono text-xl font-semibold text-foreground">
-                    {formatUsd(position.marketValue)}
-                  </div>
-                  <div className="mt-1 text-xs text-muted">
-                    权重 {formatPercent(weight)}
-                  </div>
-                </div>
-                <div className="text-right text-xs text-muted">
-                  <div>{formatNumber(position.quantity)} 股/张</div>
-                  <div className="mt-1">{position.theme}</div>
-                </div>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </section>
   );
 }
 
@@ -651,97 +571,6 @@ function ThemeAllocation({ positions }: { positions: UsStockHoldingPosition[] })
   );
 }
 
-function HoldingDetailTable({ positions }: { positions: UsStockHoldingPosition[] }) {
-  const groups = getUsStockHoldingGroups(positions);
-  const rows = [...groups.equity, ...groups.option];
-
-  return (
-    <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <div className="flex items-center justify-between gap-3 border-b border-line/70 px-4 py-3">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">持仓明细</h3>
-          <p className="mt-1 text-xs text-muted">
-            股票 {groups.equity.length} · 期权 {groups.option.length}
-          </p>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[64rem] border-collapse text-left text-xs">
-          <thead className="border-b border-line/70 text-[11px] uppercase tracking-normal text-muted">
-            <tr>
-              <th className="px-3 py-2.5 font-semibold">名称 / 代码</th>
-              <th className="px-3 py-2.5 font-semibold">类型</th>
-              <th className="px-3 py-2.5 text-right font-semibold">持仓</th>
-              <th className="px-3 py-2.5 text-right font-semibold">市值</th>
-              <th className="px-3 py-2.5 text-right font-semibold">当前价</th>
-              <th className="px-3 py-2.5 text-right font-semibold">成本</th>
-              <th className="px-3 py-2.5 text-right font-semibold">盈亏</th>
-              <th className="px-3 py-2.5 font-semibold">主题</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((position) => (
-              <tr
-                key={position.id}
-                className={[
-                  "border-b border-line/50 last:border-0 hover:bg-panel/70",
-                  position.unrealizedPnl >= 0
-                    ? "shadow-[inset_3px_0_0_var(--success)]"
-                    : "shadow-[inset_3px_0_0_var(--danger)]",
-                ].join(" ")}
-              >
-                <td className="px-3 py-3">
-                  <div className="font-semibold text-foreground">{position.name}</div>
-                  <div className="mt-1 font-mono text-xs text-muted">
-                    {position.market} · {position.symbol}
-                  </div>
-                </td>
-                <td className="px-3 py-3">
-                  <span className="rounded-md border border-line/70 bg-background/35 px-2 py-1 text-[11px] font-semibold text-muted">
-                    {position.kind === "option" ? "期权" : "股票"}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-foreground">
-                  {formatNumber(position.quantity)}
-                </td>
-                <td className="px-3 py-3 text-right font-mono font-semibold text-foreground">
-                  {formatUsd(position.marketValue)}
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-muted">
-                  {formatUsd(position.currentPrice)}
-                </td>
-                <td className="px-3 py-3 text-right font-mono text-muted">
-                  {formatUsd(position.costBasis)}
-                </td>
-                <td
-                  className={`px-3 py-3 text-right font-mono font-bold ${pnlTone(
-                    position.unrealizedPnl,
-                  )}`}
-                >
-                  {formatSignedUsd(position.unrealizedPnl)}
-                </td>
-                <td className="px-3 py-3">
-                  <div className="font-semibold text-foreground">{position.theme}</div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {position.tags.slice(0, 3).map((tag) => (
-                      <span
-                        key={`${position.id}-${tag}`}
-                        className="rounded bg-background/50 px-1.5 py-0.5 text-[10px] font-semibold text-muted"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 export function USStockHoldingPanel() {
   const [snapshot, setSnapshot] = useState<DisplaySnapshot>(() => {
     return readStoredTigerSnapshot() ?? US_STOCK_HOLDING_SNAPSHOT;
@@ -909,15 +738,10 @@ export function USStockHoldingPanel() {
 
       <PositionBriefCards snapshot={snapshot} />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <PositionTreemap positions={snapshot.positions} />
-        <div className="space-y-4">
-          <OptionRiskStrip positions={snapshot.positions} />
-          <ThemeAllocation positions={snapshot.positions} />
-        </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <OptionRiskStrip positions={snapshot.positions} />
+        <ThemeAllocation positions={snapshot.positions} />
       </div>
-
-      <HoldingDetailTable positions={snapshot.positions} />
     </div>
   );
 }

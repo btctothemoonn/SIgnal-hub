@@ -56,6 +56,7 @@ export type UsStockHoldingBriefCard = {
   currentPrice: number;
   costBasis: number;
   unrealizedPnl: number;
+  unrealizedPnlPercent: number;
   weightPercent: number;
   fee: number | null;
   theme: string;
@@ -80,6 +81,24 @@ function optionLabel(position: UsStockHoldingPosition) {
   if (!position.option) return null;
   const side = position.option.type === "PUT" ? "P" : "C";
   return `${position.option.underlying} ${position.option.strike}${side} ${position.option.expiry}`;
+}
+
+const THEME_DISPLAY_NAME: Record<string, string> = {
+  "AI semiconductor": "AI 半导体",
+  "Memory chain": "存储链",
+  Optical: "光通信",
+  "Network equipment": "通信设备",
+  "AI server": "AI 服务器",
+  "Option hedge": "期权保护",
+  Options: "期权保护",
+  "Social platform": "社交平台",
+  "Storage chain": "存储链",
+  Energy: "能源",
+  "US equity": "美股持仓",
+};
+
+export function localizeUsStockTheme(theme: string) {
+  return THEME_DISPLAY_NAME[theme] ?? theme;
 }
 
 export const US_STOCK_HOLDING_SNAPSHOT: UsStockHoldingSnapshot = {
@@ -270,6 +289,11 @@ function byPnlAsc(left: UsStockHoldingPosition, right: UsStockHoldingPosition) {
   return left.unrealizedPnl - right.unrealizedPnl || left.symbol.localeCompare(right.symbol);
 }
 
+function positionPnlPercent(position: UsStockHoldingPosition) {
+  const costValue = position.marketValue - position.unrealizedPnl;
+  return costValue > 0 ? percent((position.unrealizedPnl / costValue) * 100) : 0;
+}
+
 export function analyzeUsStockHoldings(
   positions: UsStockHoldingPosition[],
   snapshot = US_STOCK_HOLDING_SNAPSHOT,
@@ -342,10 +366,11 @@ export function getUsStockHoldingBriefCards(
     currentPrice: position.currentPrice,
     costBasis: position.costBasis,
     unrealizedPnl: position.unrealizedPnl,
+    unrealizedPnlPercent: positionPnlPercent(position),
     weightPercent:
       totalMarketValue > 0 ? percent((position.marketValue / totalMarketValue) * 100) : 0,
     fee: null,
-    theme: position.theme,
+    theme: localizeUsStockTheme(position.theme),
     tags: position.tags,
     optionLabel: optionLabel(position),
   }));
@@ -354,14 +379,15 @@ export function getUsStockHoldingBriefCards(
 export function getUsStockThemeAllocation(positions: UsStockHoldingPosition[]) {
   const map = new Map<string, { theme: string; marketValue: number; pnl: number }>();
   for (const position of positions) {
-    const current = map.get(position.theme) ?? {
-      theme: position.theme,
+    const theme = localizeUsStockTheme(position.theme);
+    const current = map.get(theme) ?? {
+      theme,
       marketValue: 0,
       pnl: 0,
     };
     current.marketValue += position.marketValue;
     current.pnl += position.unrealizedPnl;
-    map.set(position.theme, current);
+    map.set(theme, current);
   }
   const total = positions.reduce((sum, position) => sum + position.marketValue, 0);
   return [...map.values()]
