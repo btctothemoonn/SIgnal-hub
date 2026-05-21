@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 const {
   US_STOCK_HOLDING_SNAPSHOT,
   analyzeUsStockHoldings,
+  getUsStockHoldingBriefCards,
   getUsStockHoldingGroups,
 } = await import("./us-stock-holdings.ts");
 
@@ -22,5 +23,15 @@ assert.equal(analysis.topPosition?.symbol, "DRAM");
 const groups = getUsStockHoldingGroups(US_STOCK_HOLDING_SNAPSHOT.positions);
 assert.equal(groups.equity.length, 9);
 assert.equal(groups.option.length, 2);
+
+const briefCards = getUsStockHoldingBriefCards(US_STOCK_HOLDING_SNAPSHOT);
+assert.equal(briefCards.length, US_STOCK_HOLDING_SNAPSHOT.positions.length);
+assert.equal(briefCards[0].symbol, "DRAM");
+assert.equal(briefCards[0].weightPercent, 37.79);
+assert.equal(briefCards[0].fee, null);
+assert.equal(
+  briefCards.find((card) => card.id === "pltr-put-115")?.optionLabel,
+  "PLTR 115P 2026-07-17",
+);
 
 console.log("ok - us stock holdings snapshot analytics");

@@ -12,7 +12,8 @@ assert.match(pageSource, /HoldingPanelLoader/);
 assert.doesNotMatch(pageSource, /@\/components\/holding-panel["']/);
 assert.match(loaderSource, /dynamic\(/);
 assert.match(loaderSource, /ssr:\s*false/);
-assert.match(appShellSource, /router\.prefetch\("\/holding"\)/);
+assert.match(appShellSource, /router\.prefetch\(item\.href\)/);
+assert.match(appShellSource, /item\.key === "holding"/);
 assert.match(appShellSource, /import\("@\/components\/holding-panel"\)/);
 
 console.log("ok - holding navigation loads panel asynchronously");

@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeUsStockHoldings,
+  getUsStockHoldingBriefCards,
   getUsStockHoldingGroups,
   getUsStockThemeAllocation,
   US_STOCK_HOLDING_SNAPSHOT,
+  type UsStockHoldingBriefCard,
   type UsStockHoldingPosition,
   type UsStockHoldingSnapshot,
 } from "@/lib/us-stock-holdings";
@@ -37,6 +39,14 @@ function formatUsd(value: number) {
   return new Intl.NumberFormat("en-US", {
     currency: "USD",
     maximumFractionDigits: 2,
+    style: "currency",
+  }).format(value);
+}
+
+function formatPreciseUsd(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 4,
     style: "currency",
   }).format(value);
 }
@@ -209,6 +219,127 @@ function SummaryMetric({
       </div>
       <div className="mt-2 text-xs text-muted">{detail}</div>
     </div>
+  );
+}
+
+function PositionBriefCell({
+  label,
+  value,
+  tone = "text-foreground",
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-medium text-muted">{label}</div>
+      <div className={`mt-1 truncate font-mono text-sm font-semibold ${tone}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function feeTone(value: number | null) {
+  if (value === null || value === 0) return "text-muted";
+  return value < 0 ? "text-danger" : "text-success";
+}
+
+function formatFee(value: number | null) {
+  return value === null ? "--" : formatSignedUsd(value);
+}
+
+function PositionBriefCards({ snapshot }: { snapshot: DisplaySnapshot }) {
+  const cards = getUsStockHoldingBriefCards(snapshot);
+
+  if (cards.length === 0) {
+    return (
+      <section className="flex min-h-[10rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel-strong p-4 text-sm text-muted">
+        暂无美股持仓速览
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">持仓速览</h3>
+          <p className="mt-1 text-xs text-muted">
+            按市值排序，快速查看数量、权重、成本和盈亏
+          </p>
+        </div>
+        <span className="rounded-md border border-line/70 bg-background/40 px-2 py-1 text-xs font-semibold text-muted">
+          {cards.length} 条
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+        {cards.map((card) => (
+          <PositionBriefCard key={card.id} card={card} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
+  const name = card.optionLabel ?? card.name;
+  const kindLabel = card.kind === "option" ? "Option" : "Equity";
+
+  return (
+    <article className="rounded-lg border border-line/70 bg-background/35 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className="truncate text-xl font-bold leading-tight text-foreground">
+              {card.symbol}
+            </h4>
+            <span className="rounded-md border border-line/60 bg-panel px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+              {kindLabel}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-xs text-muted">{name}</div>
+        </div>
+        <div className="shrink-0 text-right font-mono text-xl font-bold text-foreground">
+          {formatUsd(card.marketValue)}
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-3">
+        <PositionBriefCell
+          label="数量"
+          value={formatNumber(card.quantity, { maximumFractionDigits: 6 })}
+        />
+        <PositionBriefCell label="价格" value={formatPreciseUsd(card.currentPrice)} />
+        <PositionBriefCell label="成本" value={formatPreciseUsd(card.costBasis)} />
+        <PositionBriefCell
+          label="权重"
+          value={formatPercent(card.weightPercent)}
+        />
+        <PositionBriefCell
+          label="PnL"
+          value={formatSignedUsd(card.unrealizedPnl)}
+          tone={pnlTone(card.unrealizedPnl)}
+        />
+        <PositionBriefCell
+          label="费用"
+          value={formatFee(card.fee)}
+          tone={feeTone(card.fee)}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {[card.theme, ...card.tags].slice(0, 4).map((tag) => (
+          <span
+            key={`${card.id}-${tag}`}
+            className="rounded-md bg-panel px-1.5 py-0.5 text-[10px] font-semibold text-muted"
+          >
+            {tag}
+          </span>
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -775,6 +906,8 @@ export function USStockHoldingPanel() {
       </div>
 
       {isTiger ? <EquityCurve points={equityHistory} /> : null}
+
+      <PositionBriefCards snapshot={snapshot} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <PositionTreemap positions={snapshot.positions} />

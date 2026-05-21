@@ -46,6 +46,23 @@ export type UsStockHoldingAnalysis = {
   topThreeWeight: number;
 };
 
+export type UsStockHoldingBriefCard = {
+  id: string;
+  kind: UsStockHoldingKind;
+  name: string;
+  symbol: string;
+  quantity: number;
+  marketValue: number;
+  currentPrice: number;
+  costBasis: number;
+  unrealizedPnl: number;
+  weightPercent: number;
+  fee: number | null;
+  theme: string;
+  tags: string[];
+  optionLabel: string | null;
+};
+
 export type UsStockHoldingGroups = {
   equity: UsStockHoldingPosition[];
   option: UsStockHoldingPosition[];
@@ -53,6 +70,16 @@ export type UsStockHoldingGroups = {
 
 function money(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function percent(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function optionLabel(position: UsStockHoldingPosition) {
+  if (!position.option) return null;
+  const side = position.option.type === "PUT" ? "P" : "C";
+  return `${position.option.underlying} ${position.option.strike}${side} ${position.option.expiry}`;
 }
 
 export const US_STOCK_HOLDING_SNAPSHOT: UsStockHoldingSnapshot = {
@@ -292,6 +319,36 @@ export function getUsStockHoldingGroups(
       .filter((position) => position.kind === "option")
       .sort(byMarketValueDesc),
   };
+}
+
+export function getUsStockHoldingBriefCards(
+  snapshot: UsStockHoldingSnapshot,
+): UsStockHoldingBriefCard[] {
+  const positions = [...snapshot.positions].sort(byMarketValueDesc);
+  const fallbackTotal = positions.reduce(
+    (sum, position) => sum + position.marketValue,
+    0,
+  );
+  const totalMarketValue =
+    snapshot.reportedMarketValue > 0 ? snapshot.reportedMarketValue : fallbackTotal;
+
+  return positions.map((position) => ({
+    id: position.id,
+    kind: position.kind,
+    name: position.name,
+    symbol: position.symbol,
+    quantity: position.quantity,
+    marketValue: position.marketValue,
+    currentPrice: position.currentPrice,
+    costBasis: position.costBasis,
+    unrealizedPnl: position.unrealizedPnl,
+    weightPercent:
+      totalMarketValue > 0 ? percent((position.marketValue / totalMarketValue) * 100) : 0,
+    fee: null,
+    theme: position.theme,
+    tags: position.tags,
+    optionLabel: optionLabel(position),
+  }));
 }
 
 export function getUsStockThemeAllocation(positions: UsStockHoldingPosition[]) {

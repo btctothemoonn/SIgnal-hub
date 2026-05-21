@@ -10,6 +10,8 @@ assert.match(source, /USStockHoldingPanel/);
 assert.match(source, /US_STOCK_HOLDING_SNAPSHOT/);
 assert.match(source, /\/api\/holdings\/tiger/);
 assert.match(source, /EquityCurve/);
+assert.match(source, /PositionBriefCards/);
+assert.match(source, /getUsStockHoldingBriefCards/);
 assert.match(source, /PositionTreemap/);
 assert.match(source, /OptionRiskStrip/);
 assert.match(source, /HoldingDetailTable/);
