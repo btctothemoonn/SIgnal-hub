@@ -42,6 +42,24 @@ assert.equal(equity?.symbol, "ARM");
 assert.equal(equity?.quantity, 15);
 assert.equal(equity?.marketValue, 3808.88);
 assert.equal(equity?.unrealizedPnl, 137.71);
+assert.equal(equity?.theme, "Semiconductor");
+
+const nokEquity = normalizeTigerPosition({
+  symbol: "NOK",
+  secType: "STK",
+  market: "US",
+  currency: "USD",
+  position: 137,
+  marketValue: 1841.27,
+  latestPrice: 13.44,
+  averageCost: 14.5,
+  unrealizedPnl: -144.37,
+  name: "Nokia",
+});
+
+assert.equal(nokEquity?.kind, "equity");
+assert.equal(nokEquity?.symbol, "NOK");
+assert.equal(nokEquity?.theme, "Optical");
 
 const option = normalizeTigerPosition({
   symbol: "PLTR",

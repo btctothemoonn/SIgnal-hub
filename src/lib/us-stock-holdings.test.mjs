@@ -31,6 +31,7 @@ assert.equal(briefCards[0].symbol, "DRAM");
 assert.equal(briefCards[0].weightPercent, 37.79);
 assert.equal(briefCards[0].unrealizedPnlPercent, -1.72);
 assert.equal(briefCards[0].fee, null);
+assert.equal(briefCards.find((card) => card.symbol === "NOK")?.theme, "光通信");
 assert.equal(
   briefCards.find((card) => card.id === "pltr-put-115")?.optionLabel,
   "PLTR 115P 2026-07-17",
@@ -60,7 +61,7 @@ const tigerLikeSnapshot = {
   ],
 };
 const localizedCards = getUsStockHoldingBriefCards(tigerLikeSnapshot);
-assert.equal(localizedCards.find((card) => card.symbol === "ARM")?.theme, "AI 半导体");
+assert.equal(localizedCards.find((card) => card.symbol === "ARM")?.theme, "半导体");
 assert.equal(localizedCards.find((card) => card.symbol === "DRAM")?.theme, "存储链");
 assert.equal(
   localizedCards.find((card) => card.id === "pltr-put-live")?.theme,
@@ -70,7 +71,7 @@ assert.equal(
 const localizedAllocation = getUsStockThemeAllocation(tigerLikeSnapshot.positions);
 assert.deepEqual(
   localizedAllocation.map((item) => item.theme),
-  ["存储链", "AI 半导体", "期权保护"],
+  ["存储链", "半导体", "期权保护"],
 );
 
 console.log("ok - us stock holdings snapshot analytics");

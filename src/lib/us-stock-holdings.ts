@@ -84,7 +84,8 @@ function optionLabel(position: UsStockHoldingPosition) {
 }
 
 const THEME_DISPLAY_NAME: Record<string, string> = {
-  "AI semiconductor": "AI 半导体",
+  "AI semiconductor": "半导体",
+  Semiconductor: "半导体",
   "Memory chain": "存储链",
   Optical: "光通信",
   "Network equipment": "通信设备",
@@ -120,7 +121,7 @@ export const US_STOCK_HOLDING_SNAPSHOT: UsStockHoldingSnapshot = {
       currentPrice: 254.13,
       costBasis: 221.68,
       unrealizedPnl: 137.71,
-      theme: "AI 半导体",
+      theme: "半导体",
       tags: ["IP", "AI", "CPU"],
     },
     {
@@ -176,8 +177,8 @@ export const US_STOCK_HOLDING_SNAPSHOT: UsStockHoldingSnapshot = {
       currentPrice: 13.44,
       costBasis: 14.5,
       unrealizedPnl: -144.37,
-      theme: "通信设备",
-      tags: ["Network", "Infra"],
+      theme: "光通信",
+      tags: ["Optical", "Network"],
     },
     {
       id: "peng",

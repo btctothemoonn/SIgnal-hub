@@ -84,11 +84,11 @@ const TIGER_SDK_PACKAGE = "@tigeropenapi/tigeropen";
 
 const THEME_BY_SYMBOL: Record<string, { theme: string; tags: string[]; name?: string }> =
   {
-    ARM: { theme: "AI semiconductor", tags: ["AI", "CPU", "IP"] },
+    ARM: { theme: "Semiconductor", tags: ["Semiconductor", "CPU", "IP"] },
     DRAM: { theme: "Memory chain", tags: ["DRAM", "HBM", "ETF"] },
     LITE: { theme: "Optical", tags: ["Optical", "AI infra"] },
     MU: { theme: "Memory chain", tags: ["DRAM", "HBM", "Memory"], name: "Micron" },
-    NOK: { theme: "Network equipment", tags: ["Network", "Infra"], name: "Nokia" },
+    NOK: { theme: "Optical", tags: ["Optical", "Network"], name: "Nokia" },
     PENG: { theme: "AI server", tags: ["AI server", "Infra"] },
     PLTR: { theme: "Option hedge", tags: ["PUT", "PLTR"] },
     RDDT: { theme: "Social platform", tags: ["Social", "AI data"] },
