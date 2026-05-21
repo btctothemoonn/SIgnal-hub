@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "health:check": "node --experimental-strip-types --experimental-transform-types scripts/check-system-health.mjs",
     "telegram:setup": "node scripts/telegram-setup.mjs",
     "telegram:login": "node scripts/telegram-login.mjs",
     "telegram:send-code": "node scripts/telegram-send-code.mjs",

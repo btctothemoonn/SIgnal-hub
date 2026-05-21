@@ -4,30 +4,27 @@ import {
   getSystemHealthSnapshot,
   type SystemdServiceState,
 } from "@/lib/system-health";
+import { SIGNAL_HUB_SYSTEMD_SERVICES } from "@/lib/signal-hub-services";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const SERVICES = [
-  "signal-hub-web",
-  "signal-hub-telegram",
-  "signal-hub-x-hybrid",
-  "signal-hub-monitor985",
-  "signal-hub-stocks-cache",
-  "signal-hub-alpha-summary",
-  "signal-hub-tiger-holdings",
-];
-
-function systemctlIsActive(service: string): Promise<SystemdServiceState> {
+function systemctlIsActive({
+  label,
+  name,
+}: {
+  label: string;
+  name: string;
+}): Promise<SystemdServiceState> {
   return new Promise((resolve) => {
     execFile(
       "systemctl",
-      ["is-active", service],
+      ["is-active", name],
       { timeout: 1200 },
       (error, stdout, stderr) => {
         const activeState = stdout.trim() || (error ? "unknown" : "active");
         const detail = stderr.trim() || (error instanceof Error ? error.message : "");
-        resolve({ name: service, activeState, ...(detail ? { detail } : {}) });
+        resolve({ name, label, activeState, ...(detail ? { detail } : {}) });
       },
     );
   });
@@ -35,7 +32,7 @@ function systemctlIsActive(service: string): Promise<SystemdServiceState> {
 
 async function readSystemdServiceStates(): Promise<SystemdServiceState[]> {
   if (process.platform !== "linux") return [];
-  return Promise.all(SERVICES.map(systemctlIsActive));
+  return Promise.all(SIGNAL_HUB_SYSTEMD_SERVICES.map(systemctlIsActive));
 }
 
 export async function GET() {

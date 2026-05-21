@@ -10,6 +10,7 @@ import {
   getXPipelineLatestUpdatedAt,
   getXPipelineSnapshot,
 } from "./x-pipeline-store.ts";
+import { getSignalHubSystemdServiceLabel } from "./signal-hub-services.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type StocksSnapshotKind = "market" | "financial" | "catalysts";
@@ -35,6 +36,7 @@ export type SystemHealthSnapshot = {
 
 export type SystemdServiceState = {
   name: string;
+  label?: string;
   activeState: string;
   detail?: string;
 };
@@ -189,7 +191,7 @@ export function summarizeServiceState(state: SystemdServiceState): SystemHealthI
 
   return {
     id: `service-${state.name}`,
-    label: state.name,
+    label: state.label ?? getSignalHubSystemdServiceLabel(state.name),
     status,
     detail: [activeState, state.detail ?? ""].filter(Boolean).join(" · "),
     updatedAt: null,
@@ -226,7 +228,7 @@ function telegramHealthItem(now: Date): SystemHealthItem {
         : "ok";
     return {
       id: "telegram",
-      label: "Telegram采集",
+      label: "Telegram 采集",
       status,
       detail:
         snapshot.errors[0] ||
@@ -241,7 +243,7 @@ function telegramHealthItem(now: Date): SystemHealthItem {
       },
     };
   } catch (error) {
-    return healthErrorItem("telegram", "Telegram采集", error);
+    return healthErrorItem("telegram", "Telegram 采集", error);
   }
 }
 
@@ -258,7 +260,7 @@ function xHealthItem(now: Date): SystemHealthItem {
         : "ok";
     return {
       id: "x",
-      label: "X采集",
+      label: "X 采集",
       status,
       detail:
         snapshot.errors[0] ||
@@ -273,7 +275,7 @@ function xHealthItem(now: Date): SystemHealthItem {
       },
     };
   } catch (error) {
-    return healthErrorItem("x", "X采集", error);
+    return healthErrorItem("x", "X 采集", error);
   }
 }
 
@@ -285,7 +287,7 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
   return [
     summarizeCachedStocksSnapshot({
       id: "stocks-market",
-      label: "Stocks行情",
+      label: "Stocks 行情",
       kind: "market",
       snapshot: market,
       now,
@@ -293,7 +295,7 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
     }),
     summarizeCachedStocksSnapshot({
       id: "stocks-financial",
-      label: "Stocks财报",
+      label: "Stocks 财报",
       kind: "financial",
       snapshot: financial,
       now,
@@ -301,7 +303,7 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
     }),
     summarizeCachedStocksSnapshot({
       id: "stocks-catalysts",
-      label: "Stocks新闻/研报",
+      label: "Stocks 新闻/研报",
       kind: "catalysts",
       snapshot: catalysts,
       now,
@@ -493,8 +495,8 @@ export async function getSystemHealthSnapshot({
     telegramHealthItem(now),
     xHealthItem(now),
     ...stocksItems,
-    summaryHealthItem({ audience: "signals", label: "AI总结(信号)", env, now }),
-    summaryHealthItem({ audience: "stocks", label: "AI总结(Stocks)", env, now }),
+    summaryHealthItem({ audience: "signals", label: "AI 总结(信号)", env, now }),
+    summaryHealthItem({ audience: "stocks", label: "AI 总结(Stocks)", env, now }),
     tigerHealthItem(env, now),
     ...serviceStates.map(summarizeServiceState),
   ];

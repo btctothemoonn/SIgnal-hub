@@ -12,7 +12,7 @@ const now = new Date("2026-05-21T04:00:00.000Z");
 
 const freshMarket = summarizeCachedStocksSnapshot({
   id: "stocks-market",
-  label: "Stocks行情",
+  label: "Stocks 行情",
   kind: "market",
   snapshot: {
     generatedAt: "2026-05-21T03:58:00.000Z",
@@ -30,7 +30,7 @@ assert.equal(freshMarket.meta?.provider, "fmp");
 
 const staleCatalysts = summarizeCachedStocksSnapshot({
   id: "stocks-catalysts",
-  label: "Stocks新闻/研报",
+  label: "Stocks 新闻/研报",
   kind: "catalysts",
   snapshot: {
     generatedAt: "2026-05-21T02:30:00.000Z",
@@ -48,7 +48,7 @@ assert.match(staleCatalysts.detail, /stale/i);
 
 const missingFinancials = summarizeCachedStocksSnapshot({
   id: "stocks-financial",
-  label: "Stocks财报",
+  label: "Stocks 财报",
   kind: "financial",
   snapshot: null,
   now,
@@ -65,6 +65,7 @@ const inactiveService = summarizeServiceState({
 });
 
 assert.equal(inactiveService.status, "error");
+assert.equal(inactiveService.label, "Telegram 采集");
 assert.match(inactiveService.detail, /failed/);
 
 const snapshot = buildSystemHealthSnapshot({
