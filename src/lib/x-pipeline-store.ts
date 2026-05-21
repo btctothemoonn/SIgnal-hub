@@ -31,6 +31,8 @@ const MIN_EDITED_TWEET_REVISION_PREFIX_LENGTH = 48;
 const MIN_EDITED_TWEET_REVISION_PREFIX_RATIO = 0.45;
 const MIN_EDITED_TWEET_REVISION_EDGE_LENGTH = 20;
 const MIN_EDITED_TWEET_REVISION_EDGE_RATIO = 0.55;
+const SNAPSHOT_FEED_OVERFETCH_FACTOR = 5;
+const SNAPSHOT_FEED_FETCH_LIMIT = 2000;
 const COLLAPSIBLE_MONITOR985_EVENT_TYPES = new Set([
   "NEW_TWEET",
   "NEW_TWEET_REPLY",
@@ -232,6 +234,19 @@ function collapseEditedTweetRevisionRows(rows: DbRow[]): DbRow[] {
     kept.push(row);
   }
   return kept;
+}
+
+function normalizeSnapshotFeedLimit(limit: number) {
+  const parsed = Math.floor(Number(limit));
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function snapshotFeedFetchLimit(limit: number) {
+  if (limit <= 0) return 0;
+  return Math.min(
+    SNAPSHOT_FEED_FETCH_LIMIT,
+    Math.max(limit, limit * SNAPSHOT_FEED_OVERFETCH_FACTOR),
+  );
 }
 
 function jsonString(value: unknown): string {
@@ -1091,6 +1106,8 @@ export function getXPipelineSnapshot(
     since?: string | null;
   } = {},
 ): TwitterDashboardSnapshot {
+  const requestedLimit = normalizeSnapshotFeedLimit(limit);
+  const feedFetchLimit = snapshotFeedFetchLimit(requestedLimit);
   const watchAccounts = db
     .prepare("select * from x_accounts where enabled = 1 order by lower(username) asc")
     .all()
@@ -1103,13 +1120,19 @@ export function getXPipelineSnapshot(
     inner join x_accounts a on a.username_key = f.account_username_key
     where a.enabled = 1
       ${since ? "and f.created_at >= ?" : ""}
+    order by f.created_at desc, f.updated_at desc
+    limit ?
   `;
+  const feedRows =
+    feedFetchLimit > 0
+      ? (db
+          .prepare(feedSql)
+          .all(...(since ? [since, feedFetchLimit] : [feedFetchLimit])) as DbRow[])
+      : [];
   const feed = collapseEditedTweetRevisionRows(
-    (db.prepare(feedSql).all(...(since ? [since] : [])) as DbRow[]).sort(
-      compareFeedRowsByTime,
-    ),
+    feedRows.sort(compareFeedRowsByTime),
   )
-    .slice(0, limit)
+    .slice(0, requestedLimit)
     .map(toFeedItem);
 
   const health = db

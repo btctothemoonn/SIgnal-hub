@@ -21,12 +21,18 @@ function requestedLookbackDays(url: URL) {
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 30) : 7;
 }
 
+function requestedMaxPoints(url: URL) {
+  const parsed = Number(url.searchParams.get("maxPoints"));
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 240) : 120;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const marketDate = url.searchParams.get("marketDate")?.trim() || undefined;
   const snapshot = getStocksPerformanceSnapshot({
     tickers: requestedTickers(url),
     lookbackDays: requestedLookbackDays(url),
+    maxPoints: requestedMaxPoints(url),
     ...(marketDate ? { marketDate } : {}),
   });
   return NextResponse.json(snapshot);

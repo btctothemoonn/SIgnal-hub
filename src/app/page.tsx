@@ -1,6 +1,5 @@
 import { AppShell } from "@/components/app-shell";
 import { SignalsResponsiveLayout } from "@/components/signals-responsive-layout";
-import { getCached6551TwitterSnapshot } from "@/lib/6551-twitter";
 import { prepareTelegramSnapshotForClient } from "@/lib/telegram-client-snapshot";
 import { getTelegramPipelineSnapshot } from "@/lib/telegram-pipeline-store";
 import { getXPipelineSnapshot } from "@/lib/x-pipeline-store";
@@ -12,9 +11,7 @@ export default async function Home() {
   const pollXSnapshot = isXRestSnapshotMode();
   const [telegramSnapshot, xSnapshot] = await Promise.all([
     Promise.resolve(getTelegramPipelineSnapshot()),
-    pollXSnapshot
-      ? getCached6551TwitterSnapshot()
-      : Promise.resolve(getXPipelineSnapshot()),
+    Promise.resolve(getXPipelineSnapshot(0)),
   ]);
   return (
     <AppShell

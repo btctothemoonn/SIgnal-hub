@@ -291,7 +291,7 @@ export function AlphaResearchPage() {
         const response = await fetch(
           `/api/stocks-performance?tickers=${encodeURIComponent(
             performanceTickersKey,
-          )}&lookbackDays=7`,
+          )}&lookbackDays=7&maxPoints=120`,
           { cache: "no-store" },
         );
         if (!response.ok) {

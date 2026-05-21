@@ -148,6 +148,22 @@ assert.deepEqual(
 );
 assert.equal(multiDayNvda?.latestChangePct, 20);
 
+const downsampledPerformance = getStocksPerformanceSnapshot({
+  dbPath,
+  tickers: ["NVDA"],
+  marketDate: "2026-05-12",
+  lookbackDays: 7,
+  maxPoints: 2,
+});
+const downsampledNvda = downsampledPerformance.series.find(
+  (series) => series.ticker === "NVDA",
+);
+assert.deepEqual(
+  downsampledNvda?.points.map((point) => point.capturedAt),
+  [firstAt, thirdAt],
+);
+assert.equal(downsampledNvda?.latestChangePct, 20);
+
 rmSync(dbPath, { force: true });
 
 console.log("ok - stocks performance data");

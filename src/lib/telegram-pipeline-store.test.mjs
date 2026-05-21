@@ -4,6 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
 
+const telegramStoreSource = await readFile(
+  new URL("./telegram-pipeline-store.ts", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  telegramStoreSource,
+  /order by telegram_messages\.created_at desc,\s*telegram_messages\.message_id desc\s+limit \?/s,
+);
+
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "telegram-pipeline-store-test-"));
   const runtimeStorageSource = await readFile(
@@ -22,7 +32,7 @@ async function transpileToTemp() {
     "utf8",
   );
   const storeSource = (
-    await readFile(new URL("./telegram-pipeline-store.ts", import.meta.url), "utf8")
+    telegramStoreSource
   ).replace(
     'from "./telegram-pipeline-config.ts"',
     'from "./telegram-pipeline-config.mjs"',

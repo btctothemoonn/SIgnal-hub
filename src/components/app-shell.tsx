@@ -185,30 +185,6 @@ export function AppShell({
   };
 
   useEffect(() => {
-    const warmFrequentRoutes = () => {
-      router.prefetch("/holding");
-      router.prefetch("/settings");
-      void import("@/components/holding-panel");
-    };
-
-    const idleWindow = window as Window & {
-      requestIdleCallback?: (callback: () => void) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-
-    if (
-      typeof idleWindow.requestIdleCallback === "function" &&
-      typeof idleWindow.cancelIdleCallback === "function"
-    ) {
-      const idleId = idleWindow.requestIdleCallback(warmFrequentRoutes);
-      return () => idleWindow.cancelIdleCallback?.(idleId);
-    }
-
-    const timeoutId = window.setTimeout(warmFrequentRoutes, 500);
-    return () => window.clearTimeout(timeoutId);
-  }, [router]);
-
-  useEffect(() => {
     setOptimisticActiveNav(activeNav);
   }, [activeNav]);
 

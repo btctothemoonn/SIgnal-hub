@@ -55,6 +55,8 @@ type HealthInput = {
 
 const MIN_TELEGRAM_HEALTH_STALE_MS = 10 * 60_000;
 const TELEGRAM_HEALTH_STALE_INTERVALS = 3;
+const TELEGRAM_SNAPSHOT_FEED_OVERFETCH_FACTOR = 3;
+const TELEGRAM_SNAPSHOT_FEED_FETCH_LIMIT = 3000;
 
 let sharedDb: DatabaseSync | null = null;
 
@@ -191,6 +193,19 @@ function changedRows(result: unknown): number {
   }
   const changes = (result as { changes?: unknown }).changes;
   return typeof changes === "number" && Number.isFinite(changes) ? changes : 0;
+}
+
+function normalizeSnapshotFeedLimit(limit: number) {
+  const parsed = Math.floor(Number(limit));
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function snapshotFeedFetchLimit(limit: number) {
+  if (limit <= 0) return 0;
+  return Math.min(
+    TELEGRAM_SNAPSHOT_FEED_FETCH_LIMIT,
+    Math.max(limit, limit * TELEGRAM_SNAPSHOT_FEED_OVERFETCH_FACTOR),
+  );
 }
 
 export function openTelegramPipelineDb(path = getTelegramPipelineConfig().dbPath) {
@@ -652,6 +667,8 @@ export function getTelegramPipelineSnapshot(
     since?: string | null;
   } = {},
 ): TelegramDashboardSnapshot {
+  const requestedLimit = normalizeSnapshotFeedLimit(limit);
+  const feedFetchLimit = snapshotFeedFetchLimit(requestedLimit);
   const channels = db
     .prepare("select * from telegram_channels where enabled = 1 order by lower(ref) asc")
     .all()
@@ -668,11 +685,15 @@ export function getTelegramPipelineSnapshot(
         on telegram_channels.channel_id = telegram_messages.channel_id
       ${since ? "where telegram_messages.created_at >= ?" : ""}
       order by telegram_messages.created_at desc, telegram_messages.message_id desc
+      limit ?
     `;
 
-  const feed = db
-    .prepare(feedSql)
-    .all(...(since ? [since] : []))
+  const feedRows =
+    feedFetchLimit > 0
+      ? db.prepare(feedSql).all(...(since ? [since, feedFetchLimit] : [feedFetchLimit]))
+      : [];
+
+  const feed = feedRows
     .map(toFeedItem)
     .filter(
       (item) =>
@@ -683,7 +704,7 @@ export function getTelegramPipelineSnapshot(
           title: item.channelTitle,
         }),
     )
-    .slice(0, limit);
+    .slice(0, requestedLimit);
 
   const health = db
     .prepare("select * from telegram_health where scope = 'collector'")

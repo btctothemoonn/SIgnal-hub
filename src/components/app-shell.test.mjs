@@ -16,5 +16,7 @@ assert.match(source, /lg:hidden/);
 assert.match(source, /pb-20 lg:pb-0/);
 assert.match(source, /\{subtitle \? \(/);
 assert.match(source, /router\.prefetch\("\/settings"\)/);
+assert.doesNotMatch(source, /requestIdleCallback/);
+assert.doesNotMatch(source, /warmFrequentRoutes/);
 
 console.log("ok - app shell mobile command layout");

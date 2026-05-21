@@ -74,6 +74,30 @@ function percentChange(current: number, previous: number) {
   return roundPercent(((current - previous) / previous) * 100);
 }
 
+function normalizeMaxPoints(value: number | undefined) {
+  const parsed = Math.floor(Number(value ?? 120));
+  if (!Number.isFinite(parsed)) return 120;
+  return Math.max(2, Math.min(240, parsed));
+}
+
+function downsamplePoints<T>(points: T[], maxPoints: number): T[] {
+  if (points.length <= maxPoints) return points;
+
+  const lastIndex = points.length - 1;
+  const sampled: T[] = [];
+  let previousIndex = -1;
+
+  for (let index = 0; index < maxPoints; index += 1) {
+    const pointIndex = Math.round((index * lastIndex) / (maxPoints - 1));
+    if (pointIndex !== previousIndex) {
+      sampled.push(points[pointIndex]);
+      previousIndex = pointIndex;
+    }
+  }
+
+  return sampled;
+}
+
 function datePart(
   parts: Intl.DateTimeFormatPart[],
   type: Intl.DateTimeFormatPartTypes,
@@ -295,12 +319,14 @@ export function getStocksPerformanceSnapshot({
   tickers,
   marketDate = marketDateInNewYork(),
   lookbackDays = 1,
+  maxPoints,
   env = process.env,
   dbPath = stocksPerformanceDbPath(env),
 }: {
   tickers: string[];
   marketDate?: string;
   lookbackDays?: number;
+  maxPoints?: number;
   env?: EnvLike;
   dbPath?: string;
 }): StocksPerformanceSnapshot {
@@ -346,6 +372,7 @@ export function getStocksPerformanceSnapshot({
     `);
     const series: StocksPerformanceSeries[] = [];
     const missingTickers: string[] = [];
+    const normalizedMaxPoints = normalizeMaxPoints(maxPoints);
 
     for (const ticker of normalizedTickers) {
       const rows = select.all(ticker, ...marketDates) as StockQuoteSnapshotRow[];
@@ -364,7 +391,8 @@ export function getStocksPerformanceSnapshot({
         freshness: row.freshness,
         confidence: row.confidence,
       }));
-      const latest = points[points.length - 1];
+      const sampledPoints = downsamplePoints(points, normalizedMaxPoints);
+      const latest = sampledPoints[sampledPoints.length - 1];
       if (!latest) {
         missingTickers.push(ticker);
         continue;
@@ -375,7 +403,7 @@ export function getStocksPerformanceSnapshot({
         confidence: latest.confidence,
         latestPrice: latest.price,
         latestChangePct: latest.changePct,
-        points,
+        points: sampledPoints,
       });
     }
 

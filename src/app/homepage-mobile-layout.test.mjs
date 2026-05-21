@@ -8,6 +8,8 @@ const responsiveLayout = readFileSync(
 );
 
 assert.match(page, /import \{ SignalsResponsiveLayout \}/);
+assert.match(page, /getXPipelineSnapshot\(0/);
+assert.doesNotMatch(page, /getCached6551TwitterSnapshot/);
 assert.match(page, /mainClassName="[^"]*min-h-0[^"]*"/);
 assert.match(responsiveLayout, /data-mobile-signal-pager/);
 assert.match(responsiveLayout, /snap-x snap-mandatory/);

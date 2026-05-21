@@ -4,6 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
 
+const xStoreSource = await readFile(
+  new URL("./x-pipeline-store.ts", import.meta.url),
+  "utf8",
+);
+
+assert.match(xStoreSource, /SNAPSHOT_FEED_OVERFETCH_FACTOR\s*=\s*5/);
+assert.match(xStoreSource, /SNAPSHOT_FEED_FETCH_LIMIT\s*=\s*2000/);
+assert.match(
+  xStoreSource,
+  /order by f\.created_at desc,\s*f\.updated_at desc\s+limit \?/s,
+);
+
 async function transpileToTemp() {
   const dir = await mkdtemp(join(tmpdir(), "x-pipeline-store-test-"));
   const runtimeStorageSource = await readFile(
@@ -25,7 +37,7 @@ async function transpileToTemp() {
     "utf8",
   );
   const storeSource = (
-    await readFile(new URL("./x-pipeline-store.ts", import.meta.url), "utf8")
+    xStoreSource
   )
     .replace('from "./x-pipeline-config.ts"', 'from "./x-pipeline-config.mjs"')
     .replace('from "./x-api-usage.ts"', 'from "./x-api-usage.mjs"')
