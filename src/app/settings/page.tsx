@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { SystemHealthPanel } from "@/components/system-health-panel";
 
 type WatchItem = { ref: string; tags: string[] };
 
@@ -86,7 +87,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-type Kind = "telegram" | "twitter";
+type Kind = "telegram" | "twitter" | "health";
+type WatchKind = Exclude<Kind, "health">;
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -149,6 +151,7 @@ export default function SettingsPage() {
   const sections: Array<{ kind: Kind; title: string; count: number }> = [
     { kind: "telegram", title: "Telegram 频道", count: telegramItems.length },
     { kind: "twitter", title: "X 博主", count: twitterItems.length },
+    { kind: "health", title: "信息健康", count: 0 },
   ];
 
   return (
@@ -209,6 +212,8 @@ export default function SettingsPage() {
               <div className="rounded-lg border border-line/70 bg-panel-strong p-6 text-sm text-muted shadow-[0_24px_60px_-48px_rgba(38,31,27,0.55)]">
                 加载中...
               </div>
+            ) : activeKind === "health" ? (
+              <SystemHealthPanel />
             ) : activeKind === "telegram" ? (
               <WatchListPanel
                 key="telegram"
@@ -240,7 +245,7 @@ export default function SettingsPage() {
 }
 
 type WatchListPanelProps = {
-  kind: Kind;
+  kind: WatchKind;
   items: WatchItem[];
   busy: boolean;
   error: string | null;
