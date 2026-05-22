@@ -671,6 +671,46 @@ for (const update of [
     createdAt: "2026-05-17T11:43:05.000Z",
     text: "这是我问了AI的结果，忘记说Offloading了，难怪NAND价格爆炸😓😓\n\n1. 片上/板内通信不需要光\n\n2. 机柜间需要光通信",
   },
+  {
+    id: "quote-edit-1",
+    eventType: "NEW_TWEET_QUOTE",
+    queryLabel: "985monitor / NEW_TWEET_QUOTE",
+    createdAt: "2026-05-17T11:48:00.000Z",
+    text:
+      "Including ramen, sushi, matcha, Fuji apples, sweet persimmons and grapes, now there is a cat longevity device.\n\nJapan has changed the world. Without Japan, humanity would move backward by seventy years.\n\nCompared with that, what is the east doing?\n\nWinning again and again.\n\nhttps://x.com/0xsilver_time/status/2057405506092941754",
+    quotedTweet: {
+      id: "2057405506092941754",
+      text: "quoted cat longevity study",
+      createdAt: "2026-05-17T10:00:00.000Z",
+      username: "0xsilver_time",
+      displayName: "A9",
+      profileUrl: "https://x.com/0xsilver_time",
+      userAvatar: "https://cdn.example/a9.jpg",
+      tweetUrl: "https://x.com/0xsilver_time/status/2057405506092941754",
+      media: [],
+      relation: "quote",
+    },
+  },
+  {
+    id: "quote-edit-2",
+    eventType: "NEW_TWEET_QUOTE",
+    queryLabel: "985monitor / NEW_TWEET_QUOTE",
+    createdAt: "2026-05-17T11:49:00.000Z",
+    text:
+      "Excluding ramen, sushi, matcha, Fuji apples, sweet persimmons and grapes, now there is a cat longevity device.\n\nJapan has changed the world. Without Japan, humanity would move backward by seventy years.\n\nCompared with that, what exactly is the east doing?\n\nCopying, or winning.\n\nhttps://x.com/0xsilver_time/status/2057405506092941754",
+    quotedTweet: {
+      id: "2057405506092941754",
+      text: "quoted cat longevity study",
+      createdAt: "2026-05-17T10:00:00.000Z",
+      username: "0xsilver_time",
+      displayName: "A9",
+      profileUrl: "https://x.com/0xsilver_time",
+      userAvatar: "https://cdn.example/a9.jpg",
+      tweetUrl: "https://x.com/0xsilver_time/status/2057405506092941754",
+      media: [],
+      relation: "quote",
+    },
+  },
 ]) {
   upsertXPipelineRealtimeUpdate(
     {
@@ -686,6 +726,7 @@ for (const update of [
         text: update.text,
         createdAt: update.createdAt,
         tweetUrl: `https://x.com/bboczeng/status/${update.id}`,
+        quotedTweet: update.quotedTweet || editedTweetBase.quotedTweet,
         queryLabel: update.queryLabel || editedTweetBase.queryLabel,
       },
     },
@@ -695,7 +736,7 @@ for (const update of [
 
 assert.deepEqual(
   getXPipelineSnapshot(100, editDb).feed.map((item) => item.id),
-  ["cross-event-retweet", "short-edit-2", "separate", "edit-3"],
+  ["quote-edit-2", "cross-event-retweet", "short-edit-2", "separate", "edit-3"],
 );
 
 console.log("ok - x pipeline store builds local dashboard snapshots");

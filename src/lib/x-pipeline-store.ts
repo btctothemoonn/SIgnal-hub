@@ -31,6 +31,7 @@ const MIN_EDITED_TWEET_REVISION_PREFIX_LENGTH = 48;
 const MIN_EDITED_TWEET_REVISION_PREFIX_RATIO = 0.45;
 const MIN_EDITED_TWEET_REVISION_EDGE_LENGTH = 20;
 const MIN_EDITED_TWEET_REVISION_EDGE_RATIO = 0.55;
+const MIN_EDITED_TWEET_REVISION_REFERENCE_SIMILARITY = 0.58;
 const SNAPSHOT_FEED_OVERFETCH_FACTOR = 5;
 const SNAPSHOT_FEED_FETCH_LIMIT = 2000;
 const COLLAPSIBLE_MONITOR985_EVENT_TYPES = new Set([
@@ -144,6 +145,68 @@ function normalizeRevisionText(value: unknown): string {
     .toLowerCase();
 }
 
+function stripTweetStatusUrls(value: string): string {
+  return value.replace(
+    /https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/\s?#]+\/status\/\d+(?:[/?#][^\s]*)?/gi,
+    " ",
+  );
+}
+
+function tweetStatusIdsFromText(value: string): string[] {
+  const ids: string[] = [];
+  for (const match of value.matchAll(
+    /https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/\s?#]+\/status\/(\d+)/gi,
+  )) {
+    if (match[1]) ids.push(match[1]);
+  }
+  return ids;
+}
+
+function referencedTweetKey(row: DbRow): string {
+  const quotedTweet = parseQuotedTweet(row.quoted_tweet_json);
+  if (quotedTweet?.id) return `tweet:${quotedTweet.id}`;
+
+  const ownId = stringValue(row.id);
+  const ownUrlIds = new Set(tweetStatusIdsFromText(stringValue(row.tweet_url)));
+  for (const id of tweetStatusIdsFromText(stringValue(row.text))) {
+    if (id && id !== ownId && !ownUrlIds.has(id)) {
+      return `tweet:${id}`;
+    }
+  }
+  return "";
+}
+
+function revisionSimilarityText(value: string): string {
+  return stripTweetStatusUrls(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function characterGramSet(value: string): Set<string> {
+  if (!value) return new Set();
+  if (value.length <= 2) return new Set([value]);
+  const grams = new Set<string>();
+  for (let index = 0; index <= value.length - 2; index += 1) {
+    grams.add(value.slice(index, index + 2));
+  }
+  return grams;
+}
+
+function revisionTextSimilarity(left: string, right: string): number {
+  const leftText = revisionSimilarityText(left);
+  const rightText = revisionSimilarityText(right);
+  if (!leftText || !rightText) return 0;
+  if (leftText === rightText) return 1;
+
+  const leftGrams = characterGramSet(leftText);
+  const rightGrams = characterGramSet(rightText);
+  if (!leftGrams.size || !rightGrams.size) return 0;
+
+  let shared = 0;
+  for (const gram of leftGrams) {
+    if (rightGrams.has(gram)) shared += 1;
+  }
+  return (shared * 2) / (leftGrams.size + rightGrams.size);
+}
+
 function commonPrefixLength(left: string, right: string): number {
   const limit = Math.min(left.length, right.length);
   let index = 0;
@@ -204,6 +267,16 @@ function isLikelyEditedTweetRevision(newer: DbRow, older: DbRow): boolean {
   }
 
   if (newerText.includes(olderText) || olderText.includes(newerText)) {
+    return true;
+  }
+
+  const newerReferenceKey = referencedTweetKey(newer);
+  if (
+    newerReferenceKey &&
+    newerReferenceKey === referencedTweetKey(older) &&
+    revisionTextSimilarity(newerText, olderText) >=
+      MIN_EDITED_TWEET_REVISION_REFERENCE_SIMILARITY
+  ) {
     return true;
   }
 
