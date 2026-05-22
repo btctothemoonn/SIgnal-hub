@@ -10,10 +10,7 @@ import {
 } from "react";
 import {
   analyzeFuturesPositions,
-  analyzeSpotAllocation,
-  getHeatmapTileLayout,
 } from "@/lib/holding-analytics";
-import { formatUsdtPrice } from "@/lib/holding-display";
 import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
 import type {
   BinanceFuturesEquityPoint,
@@ -39,16 +36,6 @@ type SaveState = "idle" | "saving";
 type HoldingView = "us-stocks" | "binance";
 
 const HOLDING_SNAPSHOT_STORAGE_KEY = "signal-hub.binance-holding-snapshot.v1";
-const SPOT_PIE_COLORS = [
-  "#2f7a61",
-  "#3f6386",
-  "#9b6a26",
-  "#a64233",
-  "#806a9a",
-  "#4e7a75",
-  "#b76b3d",
-  "#9d5c8a",
-];
 
 function formatNumber(value: number, options: Intl.NumberFormatOptions = {}) {
   return new Intl.NumberFormat("en-US", {
@@ -84,6 +71,11 @@ function formatCompactUsd(value: number) {
 
 function formatPercent(value: number) {
   return `${formatNumber(value, { maximumFractionDigits: 1 })}%`;
+}
+
+function formatSignedPercent(value: number) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatPercent(value)}`;
 }
 
 function formatTime(raw: string | null) {
@@ -135,14 +127,6 @@ function biasLabelText(label: string) {
 
 function sideText(side: BinanceFuturesPosition["side"]) {
   return side === "LONG" ? "多头" : "空头";
-}
-
-function positionBias(position: BinanceFuturesPosition) {
-  if (position.side === "LONG" && position.unrealizedPnl > 0) return "盈利多头";
-  if (position.side === "SHORT" && position.unrealizedPnl > 0) return "盈利空头";
-  if (position.side === "LONG") return "多头风险";
-  if (position.side === "SHORT") return "空头风险";
-  return "中性";
 }
 
 function marginTypeText(marginType: string) {
@@ -331,54 +315,6 @@ function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[12rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel/50 px-4 py-8 text-sm text-muted">
       {children}
-    </div>
-  );
-}
-
-function MeterBar({
-  label,
-  leftLabel,
-  leftValue,
-  leftPercent,
-  rightLabel,
-  rightValue,
-}: {
-  label: string;
-  leftLabel: string;
-  leftValue: ReactNode;
-  leftPercent: number;
-  rightLabel: string;
-  rightValue: ReactNode;
-}) {
-  const boundedLeft = Math.max(0, Math.min(100, leftPercent));
-  const boundedRight = 100 - boundedLeft;
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-normal text-muted">
-        <span>{label}</span>
-        <span>{rightLabel}</span>
-      </div>
-      <div className="relative flex h-10 overflow-hidden rounded-md bg-line/60 shadow-[inset_0_0_0_1px_var(--line)]">
-        <div
-          className="bg-success"
-          style={{ width: `${boundedLeft}%` }}
-          aria-label={`${leftLabel} ${formatPercent(boundedLeft)}`}
-        />
-        <div
-          className="bg-danger"
-          style={{ width: `${boundedRight}%` }}
-          aria-label={`${rightLabel} ${formatPercent(boundedRight)}`}
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-between gap-3 px-3 text-xs font-bold leading-none text-white sm:text-sm">
-          <span className="min-w-0 truncate text-left drop-shadow">
-            {formatPercent(boundedLeft)} {leftLabel} {leftValue}
-          </span>
-          <span className="min-w-0 truncate text-right drop-shadow">
-            {formatPercent(boundedRight)} {rightLabel} {rightValue}
-          </span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -572,405 +508,329 @@ function FuturesEquityCurve({
   );
 }
 
-function FuturesHeatmap({
-  positions,
-  maxAbsNotional,
-}: {
-  positions: BinanceFuturesPosition[];
-  maxAbsNotional: number;
-}) {
-  if (positions.length === 0) {
-    return <EmptyState>暂无活跃合约持仓</EmptyState>;
+function baseAssetFromSymbol(symbol: string) {
+  return symbol.replace(/(USDT|USDC|BUSD|FDUSD|USD)$/i, "") || symbol;
+}
+
+function futuresPnlPercent(position: BinanceFuturesPosition) {
+  const costBasis = Math.abs(position.amount * position.entryPrice);
+  const fallbackBasis = Math.abs(position.notional);
+  const basis = costBasis > 0 ? costBasis : fallbackBasis;
+  return basis > 0 ? (position.unrealizedPnl / basis) * 100 : 0;
+}
+
+function spotSharePercent(balance: BinanceSpotBalance, totalUsdtValue: number) {
+  const value = balance.usdtValue ?? 0;
+  return totalUsdtValue > 0 ? (value / totalUsdtValue) * 100 : 0;
+}
+
+function assetLogoTone(asset: string) {
+  const normalized = asset.toUpperCase();
+  if (["BTC", "BNB", "SOL"].includes(normalized)) {
+    return "border-warning/25 bg-warning-soft text-warning";
   }
+  if (["ETH", "ARB", "OP", "LINK"].includes(normalized)) {
+    return "border-info/25 bg-info-soft text-info";
+  }
+  if (["USDT", "USDC", "FDUSD", "BUSD"].includes(normalized)) {
+    return "border-success/25 bg-success-soft text-success";
+  }
+  return "border-line bg-panel text-foreground";
+}
 
+function AssetLogo({ asset }: { asset: string }) {
   return (
-    <div className="grid min-h-[20rem] grid-flow-dense grid-cols-6 gap-1 overflow-hidden rounded-lg border border-line/70 bg-background/40 p-1 lg:grid-cols-8 xl:grid-cols-12">
-      {positions.map((position) => {
-        const absNotional = Math.abs(position.notional);
-        const layout = getHeatmapTileLayout({
-          absNotional,
-          maxAbsNotional,
-        });
-        const positive = position.unrealizedPnl >= 0;
-        const sideClass =
-          position.side === "LONG"
-            ? "border-success/25 bg-success/70"
-            : "border-danger/25 bg-danger/80";
-        const pnlClass = positive
-          ? "bg-white/20 text-white"
-          : "bg-black/25 text-white";
-
-        return (
-          <div
-            key={position.symbol}
-            className={[
-              "min-h-24 min-w-36 rounded-md border px-3 py-3 shadow-sm",
-              sideClass,
-              "text-white",
-            ].join(" ")}
-            style={{
-              gridColumn: `span ${layout.colSpan}`,
-              gridRow: `span ${layout.rowSpan}`,
-            }}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-bold">{position.symbol}</div>
-                <div className="mt-1 truncate font-mono text-[11px] font-semibold text-white/75">
-                  标记价 {formatUsdtPrice(position.markPrice)}
-                </div>
-              </div>
-              <div className="rounded bg-black/20 px-1.5 py-0.5 text-[10px] font-semibold">
-                {sideText(position.side)}
-              </div>
-            </div>
-            <div
-              className={[
-                "mt-3 inline-flex rounded px-1.5 py-0.5 text-lg font-bold leading-none",
-                positive ? "text-white" : "bg-white/90 text-danger shadow-sm",
-              ].join(" ")}
-            >
-              {formatCompactUsd(position.unrealizedPnl)}
-            </div>
-            <div
-              className={[
-                "mt-2 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold",
-                pnlClass,
-              ].join(" ")}
-            >
-              {positive ? "盈利" : "亏损"} / 未实现盈亏
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-2 text-xs font-semibold text-white/85">
-              <span>{formatCompactUsd(absNotional).replace("+", "")}</span>
-              <span>
-                {formatNumber(position.leverage, { maximumFractionDigits: 0 })}x
-              </span>
-            </div>
-          </div>
-        );
-      })}
+    <div
+      className={[
+        "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border font-mono text-base font-black uppercase shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+        assetLogoTone(asset),
+      ].join(" ")}
+    >
+      {asset.slice(0, 4)}
     </div>
   );
 }
 
-function FuturesDashboard({
-  snapshot,
-  equityHistory,
+function HoldingMetricCell({
+  label,
+  value,
+  detail,
+  tone = "text-foreground",
 }: {
-  snapshot: BinanceHoldingSnapshot;
-  equityHistory: BinanceFuturesEquityPoint[];
+  label: string;
+  value: ReactNode;
+  detail?: ReactNode;
+  tone?: string;
 }) {
+  return (
+    <div className="min-w-0 border-line/70 sm:border-l sm:pl-5">
+      <div className="text-xs font-semibold text-muted">{label}</div>
+      <div
+        className={[
+          "mt-1 truncate font-mono text-xl font-black leading-tight tracking-normal",
+          tone,
+        ].join(" ")}
+      >
+        {value}
+      </div>
+      {detail ? (
+        <div className="mt-1 truncate text-xs font-semibold text-muted">{detail}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function BinanceSummaryGrid({ snapshot }: { snapshot: BinanceHoldingSnapshot }) {
   const summary = snapshot.summary;
   const analytics = analyzeFuturesPositions({
     positions: snapshot.futuresPositions,
     summary,
   });
-  const accountModeLabel =
-    snapshot.accountMode === "portfolioMargin"
-      ? "统一账户 U本位合约"
-      : "U本位合约";
+  const spotTotal = snapshot.spotBalances.reduce(
+    (total, balance) => total + (balance.usdtValue ?? 0),
+    0,
+  );
+  const pnlPercent =
+    summary.futuresMarginBalance > 0
+      ? (summary.futuresUnrealizedPnl / summary.futuresMarginBalance) * 100
+      : 0;
 
   return (
-    <section className="overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
-            合约持仓分布
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-semibold leading-tight text-foreground">
-              {accountModeLabel}
-            </h3>
-            <span
-              className={[
-                "rounded-md border px-2 py-0.5 text-xs font-bold",
-                analytics.biasLabel.includes("Bullish")
-                  ? "border-success/30 bg-success-soft text-success"
-                  : analytics.biasLabel.includes("Bearish")
-                    ? "border-danger/30 bg-danger-soft text-danger"
-                    : "border-line bg-panel-strong text-muted",
-              ].join(" ")}
-            >
-              {biasLabelText(analytics.biasLabel)}
-            </span>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3 text-right sm:grid-cols-4">
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-normal text-muted">
-              账户权益
-            </div>
-            <div className="font-mono text-sm font-bold text-foreground">
-              {formatUsd(summary.futuresWalletBalance)}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-normal text-muted">
-              未实现盈亏
-            </div>
-            <div
-              className={`font-mono text-sm font-bold ${pnlTone(
-                summary.futuresUnrealizedPnl,
-              )}`}
-            >
-              {formatSignedUsd(summary.futuresUnrealizedPnl)}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-normal text-muted">
-              名义总额
-            </div>
-            <div className="font-mono text-sm font-bold text-foreground">
-              {formatUsd(summary.futuresGrossNotional)}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] font-semibold uppercase tracking-normal text-muted">
-              持仓数
-            </div>
-            <div className="font-mono text-sm font-bold text-foreground">
-              {summary.futuresPositionCount}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <FuturesEquityCurve snapshot={snapshot} history={equityHistory} />
-
-      <div className="grid xl:grid-cols-[minmax(22rem,0.85fr)_minmax(32rem,1.15fr)]">
-        <div className="space-y-5 border-b border-line/70 p-4 xl:border-b-0 xl:border-r">
-          <MeterBar
-            label="未实现盈亏"
-            leftLabel="盈利"
-            leftValue={formatCompactUsd(analytics.positivePnl).replace("+", "")}
-            leftPercent={analytics.profitShare}
-            rightLabel="亏损"
-            rightValue={formatCompactUsd(-analytics.negativePnlAbs)}
-          />
-          <MeterBar
-            label="名义金额"
-            leftLabel="多头"
-            leftValue={formatCompactUsd(summary.futuresLongNotional).replace("+", "")}
-            leftPercent={analytics.longShare}
-            rightLabel="空头"
-            rightValue={formatCompactUsd(summary.futuresShortNotional).replace("+", "")}
-          />
-          <div className="grid gap-2 sm:grid-cols-3">
-            <SummaryTile
-              label="净敞口"
-              value={formatSignedUsd(summary.futuresNetNotional)}
-              detail={biasLabelText(analytics.biasLabel)}
-              tone={biasTone(analytics.biasLabel)}
-            />
-            <SummaryTile
-              label="净敞口杠杆"
-              value={`${formatNumber(analytics.netExposureLeverage, {
-                maximumFractionDigits: 2,
-              })}x`}
-              detail="净敞口 / 保证金总额"
-            />
-            <SummaryTile
-              label="可用余额"
-              value={formatUsd(summary.futuresAvailableBalance)}
-              detail="账户余额"
-            />
-          </div>
-        </div>
-        <div className="p-4">
-          <FuturesHeatmap
-            positions={snapshot.futuresPositions}
-            maxAbsNotional={analytics.maxAbsNotional}
-          />
-        </div>
-      </div>
-    </section>
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <SummaryTile
+        label="合约权益"
+        value={formatUsd(summary.futuresMarginBalance)}
+        detail={`钱包 ${formatUsd(summary.futuresWalletBalance)}`}
+      />
+      <SummaryTile
+        label="未实现盈亏"
+        value={formatSignedUsd(summary.futuresUnrealizedPnl)}
+        detail={`占权益 ${formatSignedPercent(pnlPercent)}`}
+        tone={pnlTone(summary.futuresUnrealizedPnl)}
+      />
+      <SummaryTile
+        label="合约名义"
+        value={formatCompactUsd(summary.futuresGrossNotional).replace("+", "")}
+        detail={`${summary.futuresPositionCount} 条持仓`}
+      />
+      <SummaryTile
+        label="净敞口"
+        value={formatSignedUsd(summary.futuresNetNotional)}
+        detail={`${biasLabelText(analytics.biasLabel)} · ${formatNumber(
+          analytics.netExposureLeverage,
+          { maximumFractionDigits: 2 },
+        )}x`}
+        tone={biasTone(analytics.biasLabel)}
+      />
+      <SummaryTile
+        label="现货估值"
+        value={formatUsd(spotTotal)}
+        detail={`${snapshot.summary.spotAssetCount} 个币种`}
+      />
+    </div>
   );
 }
 
-function FuturesTable({ positions }: { positions: BinanceFuturesPosition[] }) {
+function FuturesPositionCards({
+  positions,
+}: {
+  positions: BinanceFuturesPosition[];
+}) {
   if (positions.length === 0) {
     return <EmptyState>暂无合约持仓</EmptyState>;
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
-      <table className="w-full min-w-[70rem] border-collapse text-left text-xs">
-        <thead className="border-b border-line/70 bg-panel-strong text-[11px] uppercase tracking-normal text-muted">
-          <tr>
-            <th className="px-3 py-2.5 font-semibold">交易对</th>
-            <th className="px-3 py-2.5 font-semibold">方向</th>
-            <th className="px-3 py-2.5 text-right font-semibold">杠杆</th>
-            <th className="px-3 py-2.5 text-right font-semibold">数量</th>
-            <th className="px-3 py-2.5 text-right font-semibold">名义金额</th>
-            <th className="px-3 py-2.5 text-right font-semibold">开仓价</th>
-            <th className="px-3 py-2.5 text-right font-semibold">标记价</th>
-            <th className="px-3 py-2.5 text-right font-semibold">强平价</th>
-            <th className="px-3 py-2.5 text-right font-semibold">未实现盈亏</th>
-            <th className="px-3 py-2.5 text-right font-semibold">倾向</th>
-            <th className="px-3 py-2.5 text-right font-semibold">保证金模式</th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((position) => (
-            <tr
-              key={position.symbol}
-              className={[
-                "border-b border-line/50 last:border-0 hover:bg-panel-strong/70",
-                position.unrealizedPnl >= 0
-                  ? "shadow-[inset_3px_0_0_var(--success)]"
-                  : "shadow-[inset_3px_0_0_var(--danger)]",
-              ].join(" ")}
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-black text-foreground">合约持仓</h3>
+        <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
+          {positions.length} 条
+        </span>
+      </div>
+      <div className="grid gap-3">
+        {positions.map((position) => {
+          const asset = baseAssetFromSymbol(position.symbol);
+          const absNotional = Math.abs(position.notional);
+          const pnlPercent = futuresPnlPercent(position);
+          const positive = position.unrealizedPnl >= 0;
+
+          return (
+            <article
+              key={`${position.symbol}-${position.side}`}
+              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
             >
-              <td className="px-3 py-3 font-semibold text-foreground">
-                {position.symbol}
-              </td>
-              <td className="px-3 py-3">
-                <span
-                  className={[
-                    "inline-flex min-w-14 justify-center rounded-md border px-2 py-1 text-[11px] font-semibold",
-                    position.side === "LONG"
-                      ? "border-success/30 bg-success-soft text-success"
-                      : "border-danger/30 bg-danger-soft text-danger",
-                  ].join(" ")}
-                >
-                  {sideText(position.side)}
-                </span>
-              </td>
-              <td className="px-3 py-3 text-right text-muted">
-                {formatNumber(position.leverage, { maximumFractionDigits: 0 })}x
-              </td>
-              <td className="px-3 py-3 text-right font-mono text-foreground">
-                {formatNumber(position.amount, { maximumFractionDigits: 6 })}
-              </td>
-              <td className="px-3 py-3 text-right font-mono text-foreground">
-                {formatUsd(Math.abs(position.notional))}
-              </td>
-              <td className="px-3 py-3 text-right font-mono text-muted">
-                {formatNumber(position.entryPrice)}
-              </td>
-              <td className="px-3 py-3 text-right font-mono text-muted">
-                {formatNumber(position.markPrice)}
-              </td>
-              <td className="px-3 py-3 text-right font-mono text-muted">
-                {position.liquidationPrice
-                  ? formatNumber(position.liquidationPrice)
-                  : "-"}
-              </td>
-              <td
-                className={`px-3 py-3 text-right font-mono font-semibold ${pnlTone(
-                  position.unrealizedPnl,
-                )}`}
-              >
-                {formatSignedUsd(position.unrealizedPnl)}
-              </td>
-              <td className={`px-3 py-3 text-right font-semibold ${pnlTone(position.unrealizedPnl)}`}>
-                {positionBias(position)}
-              </td>
-              <td className="px-3 py-3 text-right text-muted">
-                {marginTypeText(position.marginType)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              <div className="grid gap-4 xl:grid-cols-[minmax(15rem,1.1fr)_minmax(0,3.2fr)_minmax(11rem,0.9fr)] xl:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <AssetLogo asset={asset} />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
+                        {asset}
+                      </h4>
+                      <span
+                        className={[
+                          "rounded-md border px-2 py-0.5 text-xs font-bold",
+                          position.side === "LONG"
+                            ? "border-success/30 bg-success-soft text-success"
+                            : "border-danger/30 bg-danger-soft text-danger",
+                        ].join(" ")}
+                      >
+                        {sideText(position.side)}
+                      </span>
+                      <span className="rounded-md border border-line/70 bg-panel px-2 py-0.5 text-xs font-bold text-muted">
+                        {marginTypeText(position.marginType)}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate font-mono text-xs font-semibold text-muted">
+                      {position.symbol}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                  <HoldingMetricCell
+                    label="数量"
+                    value={formatNumber(Math.abs(position.amount), {
+                      maximumFractionDigits: 6,
+                    })}
+                    detail={`${formatNumber(position.leverage, {
+                      maximumFractionDigits: 0,
+                    })}x 杠杆`}
+                  />
+                  <HoldingMetricCell
+                    label="开仓价"
+                    value={formatUsd(position.entryPrice)}
+                    detail="成本"
+                  />
+                  <HoldingMetricCell
+                    label="标记价"
+                    value={formatUsd(position.markPrice)}
+                    detail="当前"
+                  />
+                  <HoldingMetricCell
+                    label="强平价"
+                    value={
+                      position.liquidationPrice > 0
+                        ? formatUsd(position.liquidationPrice)
+                        : "--"
+                    }
+                    detail="风险线"
+                  />
+                  <HoldingMetricCell
+                    label="盈亏"
+                    value={formatSignedUsd(position.unrealizedPnl)}
+                    detail={formatSignedPercent(pnlPercent)}
+                    tone={pnlTone(position.unrealizedPnl)}
+                  />
+                </div>
+
+                <div className="xl:text-right">
+                  <div className="text-xs font-semibold text-muted">名义金额</div>
+                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
+                    {formatUsd(absNotional)}
+                  </div>
+                  <div
+                    className={[
+                      "mt-1 text-xs font-bold",
+                      positive ? "text-success" : "text-danger",
+                    ].join(" ")}
+                  >
+                    {positive ? "浮盈中" : "浮亏中"}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-function SpotAllocationPanel({ balances }: { balances: BinanceSpotBalance[] }) {
-  if (balances.length === 0) {
+function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
+  const valuedBalances = [...balances]
+    .filter((balance) => (balance.usdtValue ?? 0) > 0)
+    .sort(
+      (left, right) =>
+        (right.usdtValue ?? 0) - (left.usdtValue ?? 0) ||
+        left.asset.localeCompare(right.asset),
+    );
+  const totalUsdtValue = valuedBalances.reduce(
+    (total, balance) => total + (balance.usdtValue ?? 0),
+    0,
+  );
+
+  if (valuedBalances.length === 0) {
     return <EmptyState>暂无估值超过 500 USDT 的现货资产</EmptyState>;
   }
 
-  const allocation = analyzeSpotAllocation(balances);
-  const gradient = allocation.slices
-    .reduce<{ cursor: number; stops: string[] }>(
-      (state, slice, index) => {
-        const start = state.cursor;
-        const end = start + slice.share;
-        const color = SPOT_PIE_COLORS[index % SPOT_PIE_COLORS.length];
-        return {
-          cursor: end,
-          stops: [...state.stops, `${color} ${start}% ${end}%`],
-        };
-      },
-      { cursor: 0, stops: [] },
-    )
-    .stops
-    .join(", ");
-
   return (
-    <div className="grid gap-4 rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <div className="flex items-center justify-center">
-        <div className="relative h-64 w-64 rounded-full border border-line/70 bg-line/40 p-3">
-          <div
-            className="h-full w-full rounded-full"
-            style={{
-              background: `conic-gradient(${gradient})`,
-            }}
-            aria-label="现货资产占比饼图"
-          />
-          <div className="absolute inset-16 flex flex-col items-center justify-center rounded-full border border-line/70 bg-panel-strong text-center shadow-[0_18px_36px_-30px_rgba(38,31,27,0.55)]">
-            <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
-              总估值
-            </div>
-            <div className="mt-1 font-mono text-lg font-bold text-foreground">
-              {formatUsd(allocation.totalUsdtValue)}
-            </div>
-            <div className="mt-1 text-xs text-muted">{balances.length} 个币种</div>
-          </div>
-        </div>
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-black text-foreground">现货资产</h3>
+        <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
+          {valuedBalances.length} 个币种
+        </span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[34rem] border-collapse text-left text-xs">
-          <thead className="border-b border-line/70 text-[11px] uppercase tracking-normal text-muted">
-            <tr>
-              <th className="px-2 py-2 font-semibold">币种</th>
-              <th className="px-2 py-2 text-right font-semibold">估值</th>
-              <th className="px-2 py-2 text-right font-semibold">占比</th>
-              <th className="px-2 py-2 text-right font-semibold">可用</th>
-              <th className="px-2 py-2 text-right font-semibold">冻结</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allocation.slices.map((slice, index) => {
-              const balance = balances.find((item) => item.asset === slice.asset);
-              return (
-                <tr
-                  key={slice.asset}
-                  className="border-b border-line/50 last:border-0 hover:bg-panel-strong/70"
-                >
-                  <td className="px-2 py-2.5 font-semibold text-foreground">
-                    <span
-                      className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
-                      style={{
-                        backgroundColor:
-                          SPOT_PIE_COLORS[index % SPOT_PIE_COLORS.length],
-                      }}
-                    />
-                    {slice.asset}
-                  </td>
-                  <td className="px-2 py-2.5 text-right font-mono font-semibold text-foreground">
-                    {formatUsd(slice.usdtValue)}
-                  </td>
-                  <td className="px-2 py-2.5 text-right font-mono text-muted">
-                    {formatPercent(slice.share)}
-                  </td>
-                  <td className="px-2 py-2.5 text-right font-mono text-muted">
-                    {formatNumber(balance?.free ?? 0, { maximumFractionDigits: 8 })}
-                  </td>
-                  <td className="px-2 py-2.5 text-right font-mono text-muted">
-                    {formatNumber(balance?.locked ?? 0, {
-                      maximumFractionDigits: 8,
-                    })}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="grid gap-3">
+        {valuedBalances.map((balance) => {
+          const value = balance.usdtValue ?? 0;
+          const share = spotSharePercent(balance, totalUsdtValue);
+
+          return (
+            <article
+              key={balance.asset}
+              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
+            >
+              <div className="grid gap-4 lg:grid-cols-[minmax(13rem,1fr)_minmax(0,2.7fr)_minmax(10rem,0.8fr)] lg:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <AssetLogo asset={balance.asset} />
+                  <div className="min-w-0">
+                    <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
+                      {balance.asset}
+                    </h4>
+                    <div className="mt-1 text-xs font-semibold text-muted">
+                      Binance Spot
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                  <HoldingMetricCell
+                    label="总数量"
+                    value={formatNumber(balance.total, { maximumFractionDigits: 8 })}
+                  />
+                  <HoldingMetricCell
+                    label="可用"
+                    value={formatNumber(balance.free, { maximumFractionDigits: 8 })}
+                  />
+                  <HoldingMetricCell
+                    label="冻结"
+                    value={formatNumber(balance.locked, { maximumFractionDigits: 8 })}
+                  />
+                  <HoldingMetricCell
+                    label="价格"
+                    value={balance.usdtPrice ? formatUsd(balance.usdtPrice) : "--"}
+                  />
+                  <HoldingMetricCell label="占比" value={formatPercent(share)} />
+                </div>
+
+                <div className="lg:text-right">
+                  <div className="text-xs font-semibold text-muted">估值</div>
+                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
+                    {formatUsd(value)}
+                  </div>
+                  <div className="mt-1 text-xs font-bold text-muted">
+                    现货资产占比
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1128,15 +988,18 @@ export function HoldingPanel() {
       {activeHoldingView === "us-stocks" ? <USStockHoldingPanel /> : null}
 
       {activeHoldingView === "binance" ? (
-        <>
-      <div className="flex flex-col gap-3 border-b border-line/70 pb-4 lg:flex-row lg:items-end lg:justify-between">
+        <section className="overflow-hidden rounded-2xl border border-line/70 bg-panel-strong shadow-[0_26px_90px_-70px_rgba(0,0,0,0.8)]">
+      <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-info">
             Binance
           </div>
           <h2 className="mt-1 text-2xl font-semibold leading-tight text-foreground">
-            持仓总览
+            Binance 持仓状况
           </h2>
+          <p className="mt-1 text-sm font-semibold text-muted">
+            实时跟踪 Binance 现货与合约表现，数据每 60 秒更新一次
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>现货 + {accountModeLabel}</span>
             <span className="h-1 w-1 rounded-full bg-line" />
@@ -1175,6 +1038,8 @@ export function HoldingPanel() {
         </div>
       </div>
 
+      <div className="space-y-4 p-4">
+
       {error ? (
         <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
           {error}
@@ -1208,7 +1073,15 @@ export function HoldingPanel() {
       ) : null}
 
       {snapshot ? (
-        <FuturesDashboard snapshot={snapshot} equityHistory={equityHistory} />
+        <div className="space-y-4">
+          <BinanceSummaryGrid snapshot={snapshot} />
+          <FuturesEquityCurve snapshot={snapshot} history={equityHistory} />
+          <FuturesPositionCards positions={snapshot.futuresPositions} />
+          <SpotBalanceCards balances={snapshot.spotBalances} />
+          <div className="rounded-xl border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
+            注：以上数据仅用于持仓观察；币安接口可能存在延迟，交易和风控以交易所账户为准。
+          </div>
+        </div>
       ) : null}
 
       {apiDialogOpen ? (
@@ -1292,31 +1165,8 @@ export function HoldingPanel() {
           </form>
         </div>
       ) : null}
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            合约持仓明细
-          </h3>
-          <span className="text-xs text-muted">
-            {snapshot?.futuresPositions.length ?? 0} 条
-          </span>
-        </div>
-        <FuturesTable positions={snapshot?.futuresPositions ?? []} />
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            现货资产分布（估值 &gt; 500 USDT）
-          </h3>
-          <span className="text-xs text-muted">
-            {snapshot?.spotBalances.length ?? 0} 个币种
-          </span>
-        </div>
-        <SpotAllocationPanel balances={snapshot?.spotBalances ?? []} />
-      </section>
-        </>
+      </div>
+        </section>
       ) : null}
     </div>
   );
