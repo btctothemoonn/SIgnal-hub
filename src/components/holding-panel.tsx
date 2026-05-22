@@ -704,7 +704,7 @@ function FuturesPositionCards({
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
                   <HoldingMetricCell
                     label="数量"
                     value={formatNumber(Math.abs(position.amount), {
@@ -950,6 +950,12 @@ function TrackedPositionCards({
                     value={formatSignedUsd(position.unrealizedPnl)}
                     detail={formatSignedPercent(position.roePercent)}
                     tone={pnlTone(position.unrealizedPnl)}
+                  />
+                  <HoldingMetricCell
+                    label="资金费"
+                    value={formatSignedUsd(-position.fundingAllTime)}
+                    detail="累计"
+                    tone={pnlTone(-position.fundingAllTime)}
                   />
                 </div>
 

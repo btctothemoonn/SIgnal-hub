@@ -18,6 +18,8 @@ assert.match(source, /跟踪账户/);
 assert.match(source, /Alex/);
 assert.match(source, /Hyperdash/);
 assert.match(source, /Hyperliquid/);
+assert.match(source, /资金费/);
+assert.match(source, /fundingAllTime/);
 assert.match(source, /Binance 持仓状况/);
 assert.match(source, /实时跟踪 Binance 现货与合约表现/);
 assert.match(source, /function FuturesPositionCards/);
