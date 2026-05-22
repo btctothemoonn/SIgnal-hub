@@ -36,6 +36,10 @@ import {
   toMonitor985XPipelineAccounts,
 } from "../src/lib/monitor985-watch-config.ts";
 import {
+  resolveMonitor985AcceptedAccounts,
+  shouldAcceptMonitor985Account,
+} from "../src/lib/monitor985-account-filter.ts";
+import {
   getMonitor985AccountSyncIntervalMs,
   shouldRefreshMonitor985Accounts,
 } from "../src/lib/monitor985-sync-policy.ts";
@@ -121,10 +125,6 @@ function getXTranslationTarget() {
   );
 }
 
-function accountKey(value) {
-  return String(value || "").trim().replace(/^@+/, "").toLowerCase();
-}
-
 function normalizeRuntimeConfig(raw) {
   const items = Array.isArray(raw?.twitterAccounts) ? raw.twitterAccounts : [];
   return {
@@ -160,19 +160,14 @@ async function refreshConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
   const localAccounts = getXPipelineConfiguredAccounts(runtimeConfig);
   const truthAccounts = getXPipelineConfiguredTruthAccounts();
-  let accounts = [...localAccounts, ...truthAccounts];
-  let source = "local";
+  let remoteAccounts = [];
 
   if (describeMonitor985AuthMode() !== "public") {
     try {
       const payload = await fetchJson("/api/watch-config");
-      const remoteAccounts = toMonitor985XPipelineAccounts(
+      remoteAccounts = toMonitor985XPipelineAccounts(
         parseMonitor985WatchConfig(payload),
       );
-      if (remoteAccounts.length > 0) {
-        accounts = [...remoteAccounts, ...truthAccounts];
-        source = "985";
-      }
     } catch (error) {
       log("monitor985_watch_config_sync_failed", {
         error: String(error),
@@ -181,15 +176,29 @@ async function refreshConfiguredAccounts() {
     }
   }
 
+  const { accounts, allowedAccountKeys, ignoredRemoteAccounts } =
+    resolveMonitor985AcceptedAccounts({
+      localAccounts,
+      truthAccounts,
+      remoteAccounts,
+    });
+
   for (const account of accounts) {
     upsertXPipelineAccount(account);
   }
   disableXPipelineAccountsExcept(accounts.map((account) => account.username));
+  if (ignoredRemoteAccounts.length > 0) {
+    log("monitor985_remote_accounts_ignored", {
+      count: ignoredRemoteAccounts.length,
+      sample: ignoredRemoteAccounts.slice(0, 5).map((account) => account.username),
+    });
+  }
   return {
     count: accounts.length,
     localCount: localAccounts.length,
-    source,
-    allowedAccountKeys: new Set(accounts.map((account) => accountKey(account.username))),
+    source: "local-site",
+    ignoredRemoteCount: ignoredRemoteAccounts.length,
+    allowedAccountKeys,
   };
 }
 
@@ -217,6 +226,7 @@ async function syncConfiguredAccounts(options = {}) {
       count: result.count,
       localCount: result.localCount,
       source: result.source,
+      ignoredRemoteCount: result.ignoredRemoteCount,
     },
     syncedAtMs: Date.now(),
   };
@@ -247,8 +257,7 @@ async function fetchJson(path) {
 }
 
 function shouldAcceptUpdate(update, allowedAccountKeys) {
-  if (getFilterMode() === "all") return true;
-  return allowedAccountKeys.has(accountKey(update.account));
+  return shouldAcceptMonitor985Account(update.account, allowedAccountKeys);
 }
 
 async function refreshMonitor985Update(update) {

@@ -57,6 +57,10 @@ import {
   toMonitor985XPipelineAccounts,
 } from "../src/lib/monitor985-watch-config.ts";
 import {
+  resolveMonitor985AcceptedAccounts,
+  shouldAcceptMonitor985Account,
+} from "../src/lib/monitor985-account-filter.ts";
+import {
   isFullTweetByIdCacheHit,
 } from "../src/lib/x-hybrid-tweet-cache.ts";
 import {
@@ -174,10 +178,6 @@ function stringValue(value) {
   return typeof value === "string" ? value : "";
 }
 
-function accountKey(value) {
-  return stringValue(value).trim().replace(/^@+/, "").toLowerCase();
-}
-
 function parseJsonObject(raw) {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -239,19 +239,14 @@ async function syncConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
   const localAccounts = getXPipelineConfiguredAccounts(runtimeConfig);
   const truthAccounts = getXPipelineConfiguredTruthAccounts();
-  let accounts = [...localAccounts, ...truthAccounts];
-  let source = "local";
+  let remoteAccounts = [];
 
   if (describeMonitor985AuthMode() !== "public") {
     try {
       const payload = await fetchMonitor985Json("/api/watch-config");
-      const remoteAccounts = toMonitor985XPipelineAccounts(
+      remoteAccounts = toMonitor985XPipelineAccounts(
         parseMonitor985WatchConfig(payload),
       );
-      if (remoteAccounts.length > 0) {
-        accounts = [...remoteAccounts, ...truthAccounts];
-        source = "985";
-      }
     } catch (error) {
       log("x_hybrid_watch_config_sync_failed", {
         error: String(error),
@@ -260,14 +255,28 @@ async function syncConfiguredAccounts() {
     }
   }
 
+  const { accounts, allowedAccountKeys, ignoredRemoteAccounts } =
+    resolveMonitor985AcceptedAccounts({
+      localAccounts,
+      truthAccounts,
+      remoteAccounts,
+    });
+
   for (const account of accounts) {
     upsertXPipelineAccount(account);
   }
   disableXPipelineAccountsExcept(accounts.map((account) => account.username));
+  if (ignoredRemoteAccounts.length > 0) {
+    log("x_hybrid_remote_accounts_ignored", {
+      count: ignoredRemoteAccounts.length,
+      sample: ignoredRemoteAccounts.slice(0, 5).map((account) => account.username),
+    });
+  }
   return {
     accounts,
-    source,
-    allowedAccountKeys: new Set(accounts.map((account) => accountKey(account.username))),
+    source: "local-site",
+    ignoredRemoteCount: ignoredRemoteAccounts.length,
+    allowedAccountKeys,
   };
 }
 
@@ -309,7 +318,10 @@ async function runMonitor985PreflightCatchup(allowedAccountKeys) {
 
   for (const rawEvent of events.slice().reverse()) {
     let update = normalizeMonitor985Event(rawEvent);
-    if (!update || !allowedAccountKeys.has(accountKey(update.account))) {
+    if (
+      !update ||
+      !shouldAcceptMonitor985Account(update.account, allowedAccountKeys)
+    ) {
       ignored += 1;
       continue;
     }
@@ -631,7 +643,7 @@ async function processRow(
     return false;
   }
 
-  if (!allowedAccountKeys.has(accountKey(candidate.username))) {
+  if (!shouldAcceptMonitor985Account(candidate.username, allowedAccountKeys)) {
     markXHybridSource({
       sourceId: id,
       status: "ignored",
