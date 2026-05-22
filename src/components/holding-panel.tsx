@@ -18,6 +18,10 @@ import type {
   BinanceHoldingSnapshot,
   BinanceSpotBalance,
 } from "@/lib/binance-holdings";
+import type {
+  TrackedHoldingPosition,
+  TrackedHoldingSnapshot,
+} from "@/lib/tracked-holdings";
 
 type BinanceHoldingResponse =
   | {
@@ -31,9 +35,16 @@ type BinanceCredentialResponse =
   | { success: true }
   | { success: false; error: string };
 
+type TrackedHoldingResponse =
+  | {
+      success: true;
+      snapshot: TrackedHoldingSnapshot;
+    }
+  | { success: false; error: string; upstreamStatus?: number };
+
 type LoadState = "idle" | "loading" | "refreshing" | "ready" | "error";
 type SaveState = "idle" | "saving";
-type HoldingView = "us-stocks" | "binance";
+type HoldingView = "us-stocks" | "binance" | "tracked-accounts";
 
 const HOLDING_SNAPSHOT_STORAGE_KEY = "signal-hub.binance-holding-snapshot.v1";
 
@@ -87,6 +98,11 @@ function formatTime(raw: string | null) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
+}
+
+function shortAddress(address: string) {
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function formatChartTime(raw: string) {
@@ -834,6 +850,263 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
   );
 }
 
+function trackedSideText(side: TrackedHoldingPosition["side"]) {
+  return side === "LONG" ? "多头" : "空头";
+}
+
+function trackedLeverageText(position: TrackedHoldingPosition) {
+  const type =
+    position.leverageType === "cross"
+      ? "全仓"
+      : position.leverageType === "isolated"
+        ? "逐仓"
+        : position.leverageType;
+  if (!position.leverageValue) return type || "n/a";
+  return `${type ? `${type} ` : ""}${formatNumber(position.leverageValue, {
+    maximumFractionDigits: 0,
+  })}x`;
+}
+
+function TrackedPositionCards({
+  positions,
+}: {
+  positions: TrackedHoldingPosition[];
+}) {
+  if (positions.length === 0) {
+    return <EmptyState>当前无公开合约持仓</EmptyState>;
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-black text-foreground">公开合约持仓</h3>
+        <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
+          {positions.length} 条
+        </span>
+      </div>
+      <div className="grid gap-3">
+        {positions.map((position) => {
+          const positive = position.unrealizedPnl >= 0;
+
+          return (
+            <article
+              key={`${position.coin}-${position.side}`}
+              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
+            >
+              <div className="grid gap-4 xl:grid-cols-[minmax(13rem,1fr)_minmax(0,3.1fr)_minmax(10rem,0.9fr)] xl:items-center">
+                <div className="flex min-w-0 items-center gap-3">
+                  <AssetLogo asset={position.coin} />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
+                        {position.coin}
+                      </h4>
+                      <span
+                        className={[
+                          "rounded-md border px-2 py-0.5 text-xs font-bold",
+                          position.side === "LONG"
+                            ? "border-success/30 bg-success-soft text-success"
+                            : "border-danger/30 bg-danger-soft text-danger",
+                        ].join(" ")}
+                      >
+                        {trackedSideText(position.side)}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate text-xs font-semibold text-muted">
+                      Hyperliquid Perps
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                  <HoldingMetricCell
+                    label="数量"
+                    value={formatNumber(Math.abs(position.size), {
+                      maximumFractionDigits: 6,
+                    })}
+                    detail={trackedLeverageText(position)}
+                  />
+                  <HoldingMetricCell
+                    label="开仓价"
+                    value={formatUsd(position.entryPrice)}
+                    detail="成本"
+                  />
+                  <HoldingMetricCell
+                    label="标记价"
+                    value={position.markPrice ? formatUsd(position.markPrice) : "--"}
+                    detail="当前"
+                  />
+                  <HoldingMetricCell
+                    label="强平价"
+                    value={
+                      position.liquidationPrice
+                        ? formatUsd(position.liquidationPrice)
+                        : "--"
+                    }
+                    detail="风险线"
+                  />
+                  <HoldingMetricCell
+                    label="盈亏"
+                    value={formatSignedUsd(position.unrealizedPnl)}
+                    detail={formatSignedPercent(position.roePercent)}
+                    tone={pnlTone(position.unrealizedPnl)}
+                  />
+                </div>
+
+                <div className="xl:text-right">
+                  <div className="text-xs font-semibold text-muted">名义金额</div>
+                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
+                    {formatUsd(position.notional)}
+                  </div>
+                  <div
+                    className={[
+                      "mt-1 text-xs font-bold",
+                      positive ? "text-success" : "text-danger",
+                    ].join(" ")}
+                  >
+                    {positive ? "浮盈中" : "浮亏中"}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function TrackedAccountsPanel({
+  snapshot,
+  error,
+  isBusy,
+  onRefresh,
+}: {
+  snapshot: TrackedHoldingSnapshot | null;
+  error: string | null;
+  isBusy: boolean;
+  onRefresh: () => void;
+}) {
+  const profile = snapshot?.profile ?? {
+    id: "alex",
+    name: "Alex",
+    source: "Hyperdash / Hyperliquid",
+    address: "0x87d76b68d81a3cec086e6c34afed49dbf378af8b",
+    externalUrl:
+      "https://hyperdash.com/explore/track/s7owivu6si4f0qkmzsbkj1mm?previewAddress=0x87d76b68d81a3cec086e6c34afed49dbf378af8b&previewFrom=tracking",
+  };
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-line/70 bg-panel-strong shadow-[0_26px_90px_-70px_rgba(0,0,0,0.8)]">
+      <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-normal text-info">
+            Tracked Accounts
+          </div>
+          <h2 className="mt-1 text-2xl font-semibold leading-tight text-foreground">
+            跟踪账户
+          </h2>
+          <p className="mt-1 text-sm font-semibold text-muted">
+            监控公开 Hyperliquid 地址持仓，第一版接入 Alex 的 Hyperdash 跟踪页。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span>{profile.name}</span>
+            <span className="h-1 w-1 rounded-full bg-line" />
+            <span>{profile.source}</span>
+            <span className="h-1 w-1 rounded-full bg-line" />
+            <span>{shortAddress(profile.address)}</span>
+            <span className="h-1 w-1 rounded-full bg-line" />
+            <span>更新 {formatTime(snapshot?.updatedAt ?? null)}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={profile.externalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong"
+          >
+            打开 Hyperdash
+          </a>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isBusy}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshIcon />
+            {isBusy ? "刷新中" : "刷新"}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-4 p-4">
+        {error ? (
+          <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+            {error}
+          </div>
+        ) : null}
+
+        {isBusy && !snapshot ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {["tracked-a", "tracked-b", "tracked-c", "tracked-d", "tracked-e"].map(
+              (key) => (
+                <div
+                  key={key}
+                  className="h-28 animate-pulse rounded-lg border border-line/70 bg-panel"
+                />
+              ),
+            )}
+          </div>
+        ) : null}
+
+        {snapshot ? (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+              <SummaryTile
+                label="账户权益"
+                value={formatUsd(snapshot.summary.accountValue)}
+                detail={`可提现 ${formatUsd(snapshot.summary.withdrawable)}`}
+              />
+              <SummaryTile
+                label="名义持仓"
+                value={formatUsd(snapshot.summary.totalNotional)}
+                detail={`${snapshot.summary.positionCount} 条公开持仓`}
+              />
+              <SummaryTile
+                label="未实现盈亏"
+                value={formatSignedUsd(snapshot.summary.unrealizedPnl)}
+                detail="公开合约汇总"
+                tone={pnlTone(snapshot.summary.unrealizedPnl)}
+              />
+              <SummaryTile
+                label="保证金占用"
+                value={formatUsd(snapshot.summary.totalMarginUsed)}
+                detail={`现金 ${formatUsd(snapshot.summary.totalRawUsd)}`}
+              />
+              <SummaryTile
+                label="多空名义"
+                value={`${formatCompactUsd(snapshot.summary.longNotional).replace(
+                  "+",
+                  "",
+                )} / ${formatCompactUsd(snapshot.summary.shortNotional).replace(
+                  "+",
+                  "",
+                )}`}
+                detail="多头 / 空头"
+              />
+            </div>
+            <TrackedPositionCards positions={snapshot.positions} />
+            <div className="rounded-xl border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
+              注：该模块读取公开地址数据，仅用于观察别人持仓变化，不代表可复制交易建议。
+            </div>
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function HoldingPanel() {
   const [activeHoldingView, setActiveHoldingView] =
     useState<HoldingView>("us-stocks");
@@ -851,6 +1124,11 @@ export function HoldingPanel() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [trackedSnapshot, setTrackedSnapshot] =
+    useState<TrackedHoldingSnapshot | null>(null);
+  const [trackedState, setTrackedState] = useState<LoadState>("idle");
+  const [trackedError, setTrackedError] = useState<string | null>(null);
+  const trackedAbortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     abortRef.current?.abort();
@@ -920,6 +1198,43 @@ export function HoldingPanel() {
     [apiKey, apiSecret, load],
   );
 
+  const loadTracked = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      trackedAbortRef.current?.abort();
+      const controller = new AbortController();
+      trackedAbortRef.current = controller;
+      setTrackedState((current) =>
+        current === "ready" ? "refreshing" : "loading",
+      );
+      setTrackedError(null);
+
+      try {
+        const response = await fetch(
+          `/api/holdings/tracked?profile=alex${force ? "&refresh=1" : ""}`,
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+        const payload = (await response.json()) as TrackedHoldingResponse;
+        if (!payload.success) {
+          throw new Error(payload.error || "跟踪账户数据刷新失败。");
+        }
+        setTrackedSnapshot(payload.snapshot);
+        setTrackedState("ready");
+      } catch (loadError) {
+        if (controller.signal.aborted) return;
+        setTrackedError(
+          loadError instanceof Error
+            ? loadError.message
+            : "跟踪账户数据刷新失败。",
+        );
+        setTrackedState("error");
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     if (activeHoldingView !== "binance") return;
     void load();
@@ -927,6 +1242,14 @@ export function HoldingPanel() {
       abortRef.current?.abort();
     };
   }, [activeHoldingView, load]);
+
+  useEffect(() => {
+    if (activeHoldingView !== "tracked-accounts") return;
+    void loadTracked();
+    return () => {
+      trackedAbortRef.current?.abort();
+    };
+  }, [activeHoldingView, loadTracked]);
 
   const isBusy = state === "loading" || state === "refreshing";
   const hasWarnings = Boolean(snapshot?.warnings.length);
@@ -960,10 +1283,11 @@ export function HoldingPanel() {
             持仓账户
           </h2>
         </div>
-        <div className="grid grid-cols-2 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[22rem]">
+        <div className="grid grid-cols-3 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[30rem]">
           {[
             { id: "us-stocks" as const, label: "美股证券" },
             { id: "binance" as const, label: "Binance" },
+            { id: "tracked-accounts" as const, label: "跟踪账户" },
           ].map((item) => {
             const selected = activeHoldingView === item.id;
             return (
@@ -986,6 +1310,15 @@ export function HoldingPanel() {
       </div>
 
       {activeHoldingView === "us-stocks" ? <USStockHoldingPanel /> : null}
+
+      {activeHoldingView === "tracked-accounts" ? (
+        <TrackedAccountsPanel
+          snapshot={trackedSnapshot}
+          error={trackedError}
+          isBusy={trackedState === "loading" || trackedState === "refreshing"}
+          onRefresh={() => void loadTracked({ force: true })}
+        />
+      ) : null}
 
       {activeHoldingView === "binance" ? (
         <section className="overflow-hidden rounded-2xl border border-line/70 bg-panel-strong shadow-[0_26px_90px_-70px_rgba(0,0,0,0.8)]">
