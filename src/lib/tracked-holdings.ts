@@ -3,6 +3,7 @@ export type TrackedHoldingProfile = {
   name: string;
   source: string;
   address: string;
+  dex?: string;
   externalUrl: string;
 };
 
@@ -17,6 +18,7 @@ export type TrackedHoldingPosition = {
   roePercent: number;
   liquidationPrice: number | null;
   marginUsed: number;
+  fundingAllTime: number;
   leverageType: string | null;
   leverageValue: number | null;
 };
@@ -56,6 +58,11 @@ type RawHyperliquidAssetPosition = {
     returnOnEquity?: unknown;
     liquidationPx?: unknown;
     marginUsed?: unknown;
+    cumFunding?: {
+      allTime?: unknown;
+      sinceOpen?: unknown;
+      sinceChange?: unknown;
+    };
     leverage?: RawHyperliquidLeverage;
   };
 };
@@ -93,6 +100,7 @@ export const TRACKED_HOLDING_PROFILES: TrackedHoldingProfile[] = [
     name: "Alex",
     source: "Hyperdash / Hyperliquid",
     address: "0x87d76b68d81a3cec086e6c34afed49dbf378af8b",
+    dex: "xyz",
     externalUrl:
       "https://hyperdash.com/explore/track/s7owivu6si4f0qkmzsbkj1mm?previewAddress=0x87d76b68d81a3cec086e6c34afed49dbf378af8b&previewFrom=tracking",
   },
@@ -128,11 +136,17 @@ function normalizeLeverage(raw: RawHyperliquidLeverage | undefined) {
   };
 }
 
+function normalizeCoin(raw: unknown): string {
+  const coin = toText(raw);
+  const [, displayCoin] = coin.split(":");
+  return displayCoin || coin;
+}
+
 function normalizePosition(raw: RawHyperliquidAssetPosition) {
   const position = raw.position;
   if (!position || typeof position !== "object") return null;
 
-  const coin = toText(position.coin);
+  const coin = normalizeCoin(position.coin);
   const size = toNumber(position.szi);
   const notional = Math.abs(toNumber(position.positionValue));
   if (!coin || size === 0 || notional <= 0) return null;
@@ -151,6 +165,7 @@ function normalizePosition(raw: RawHyperliquidAssetPosition) {
     roePercent: toNumber(position.returnOnEquity) * 100,
     liquidationPrice: toNumber(position.liquidationPx) || null,
     marginUsed: toNumber(position.marginUsed),
+    fundingAllTime: toNumber(position.cumFunding?.allTime),
     leverageType,
     leverageValue,
   };
@@ -223,15 +238,22 @@ export async function getTrackedHoldingSnapshot({
   now?: () => string;
 } = {}): Promise<TrackedHoldingSnapshot> {
   const profile = getProfile(profileId);
+  const requestBody: {
+    type: "clearinghouseState";
+    user: string;
+    dex?: string;
+  } = {
+    type: "clearinghouseState",
+    user: profile.address,
+  };
+  if (profile.dex) requestBody.dex = profile.dex;
+
   const response = await fetcher(getHyperliquidInfoUrl(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      type: "clearinghouseState",
-      user: profile.address,
-    }),
+    body: JSON.stringify(requestBody),
     cache: "no-store",
   });
 
