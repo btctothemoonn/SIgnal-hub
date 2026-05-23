@@ -69,7 +69,7 @@ export function SignalsResponsiveLayout({
 
   if (isDesktop) {
     return (
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.58fr)_minmax(22rem,0.82fr)] lg:items-start lg:gap-4 xl:grid-cols-[minmax(0,1.72fr)_minmax(24rem,0.72fr)]">
+      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.42fr)_minmax(26rem,0.95fr)] lg:items-start lg:gap-4 xl:grid-cols-[minmax(0,1.52fr)_minmax(30rem,0.88fr)]">
         <section id="signals" className="min-w-0">
           <UnifiedNewsPanel
             initialTelegramSnapshot={initialTelegramSnapshot}

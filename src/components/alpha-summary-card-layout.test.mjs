@@ -15,5 +15,6 @@ assert.match(cardSource, /showHeaderMeta \? \(/);
 assert.match(cardSource, /const summaryPeriodLabel =/);
 assert.match(cardSource, /data-alpha-summary-period/);
 assert.match(layoutSource, /showHeaderMeta=\{false\}/);
+assert.match(layoutSource, /minmax\(30rem,0\.88fr\)/);
 
 console.log("ok - alpha summary card can hide low-value header metadata");
