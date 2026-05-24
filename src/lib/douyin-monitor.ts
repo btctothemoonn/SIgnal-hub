@@ -574,6 +574,34 @@ function normalizeSummary(record: Record<string, unknown>): DouyinVideoSummary {
   };
 }
 
+function prioritizeResearchSummary(
+  summary: DouyinVideoSummary,
+  sourceText: string,
+): DouyinVideoSummary {
+  const priorityAssets = keywordAssets(
+    [
+      sourceText,
+      summary.coreView,
+      summary.assets.join("\n"),
+      summary.catalysts.join("\n"),
+    ].join("\n"),
+  );
+  const hasAShareContext = priorityAssets.some((asset) => asset.startsWith("A股:"));
+  return {
+    ...summary,
+    assets: uniqueStrings([...priorityAssets, ...summary.assets], 10),
+    catalysts: hasAShareContext
+      ? uniqueStrings(
+          [
+            "A股板块炒作逻辑：优先复核视频提到的催化、持续性和相关股票。",
+            ...summary.catalysts,
+          ],
+          8,
+        )
+      : summary.catalysts,
+  };
+}
+
 function getAiBaseUrl(env: EnvLike) {
   if (env.DEEPSEEK_API_KEY?.trim()) {
     return (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL).replace(
@@ -627,7 +655,10 @@ export function parseAiSummaryContent(content: string): DouyinVideoSummary {
       : cleanedBase;
   try {
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    return normalizeSummary({ ...parsed, status: "generated" });
+    return prioritizeResearchSummary(
+      normalizeSummary({ ...parsed, status: "generated" }),
+      cleanedBase,
+    );
   } catch {
     const coreMatch = cleanedBase.match(
       /["']?coreView["']?\s*[:：]\s*["“]?([^"\n,}]+)/i,
@@ -637,13 +668,16 @@ export function parseAiSummaryContent(content: string): DouyinVideoSummary {
         .replace(/[{}[\]",]/g, " ")
         .replace(/\s+/g, " "),
     );
-    return {
-      ...buildDouyinResearchSummary({
-        title: freeformText,
-        description: "",
-      }),
-      status: "generated",
-    };
+    return prioritizeResearchSummary(
+      {
+        ...buildDouyinResearchSummary({
+          title: freeformText,
+          description: "",
+        }),
+        status: "generated",
+      },
+      cleanedBase,
+    );
   }
 }
 

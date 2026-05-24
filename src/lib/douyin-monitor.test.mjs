@@ -152,6 +152,21 @@ assert.deepEqual(freeformAiSummary.assets.slice(0, 2), [
 ]);
 assert.match(freeformAiSummary.catalysts.join("\n"), /炒作逻辑/);
 
+const jsonAiSummary = parseAiSummaryContent(
+  JSON.stringify({
+    coreView: "内容有限：视频标题提及PCB和光模块板块分析，暗示存在预期差",
+    assets: ["PCB板块", "光模块板块"],
+    catalysts: ["内容有限：无法确认具体催化逻辑"],
+    risks: [],
+    followUps: [],
+  }),
+);
+assert.deepEqual(jsonAiSummary.assets.slice(0, 2), [
+  "A股: PCB/覆铜板",
+  "A股: CPO/光模块",
+]);
+assert.match(jsonAiSummary.catalysts[0], /A股板块炒作逻辑/);
+
 const dir = await mkdtemp(join(tmpdir(), "signal-hub-douyin-"));
 const db = new DatabaseSync(join(dir, "douyin.sqlite"));
 try {
