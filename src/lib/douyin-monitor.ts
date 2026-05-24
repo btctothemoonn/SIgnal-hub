@@ -18,7 +18,7 @@ export type DouyinVideoSummary = {
   error?: string | null;
 };
 
-export type DouyinVideoSource = "public_page" | "rsshub";
+export type DouyinVideoSource = "public_page" | "rsshub" | "tikhub";
 
 export type DouyinVideoRecord = {
   id: string;
@@ -68,6 +68,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_TIKHUB_BASE_URL = "https://api.tikhub.io";
+const DEFAULT_TIKHUB_USER_POSTS_PATH = "/api/v1/douyin/app/v3/fetch_user_post_videos";
 const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-chat";
 const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
@@ -213,6 +215,7 @@ function normalizeVideoRecord(
   record: Record<string, unknown>,
   creatorRef: string,
   fetchedAt: string,
+  source: DouyinVideoSource = "public_page",
 ): RawDouyinVideo | null {
   const id = firstString(
     record.aweme_id,
@@ -248,7 +251,7 @@ function normalizeVideoRecord(
     ),
     videoUrl: normalizeDouyinVideoUrl(videoUrl, normalizedId),
     coverUrl: extractCoverUrl(record) || null,
-    source: "public_page",
+    source,
     fetchedAt,
   };
 }
@@ -259,26 +262,27 @@ function collectVideoRecords(
   seen: Set<string>,
   creatorRef: string,
   fetchedAt: string,
+  source: DouyinVideoSource = "public_page",
   depth = 0,
 ) {
   if (depth > 12 || !value) return;
   if (Array.isArray(value)) {
     for (const item of value) {
-      collectVideoRecords(item, out, seen, creatorRef, fetchedAt, depth + 1);
+      collectVideoRecords(item, out, seen, creatorRef, fetchedAt, source, depth + 1);
     }
     return;
   }
   if (typeof value !== "object") return;
 
   const record = value as Record<string, unknown>;
-  const video = normalizeVideoRecord(record, creatorRef, fetchedAt);
+  const video = normalizeVideoRecord(record, creatorRef, fetchedAt, source);
   if (video && !seen.has(video.id)) {
     seen.add(video.id);
     out.push(video);
   }
 
   for (const child of Object.values(record)) {
-    collectVideoRecords(child, out, seen, creatorRef, fetchedAt, depth + 1);
+    collectVideoRecords(child, out, seen, creatorRef, fetchedAt, source, depth + 1);
   }
 }
 
@@ -436,6 +440,19 @@ export function parseDouyinRssFeed(
     });
   }
   return out;
+}
+
+export function parseTikhubDouyinVideos(
+  payload: unknown,
+  {
+    creatorRef,
+    fetchedAt = new Date().toISOString(),
+  }: { creatorRef: string; fetchedAt?: string },
+): RawDouyinVideo[] {
+  const out: RawDouyinVideo[] = [];
+  const seen = new Set<string>();
+  collectVideoRecords(payload, out, seen, creatorRef, fetchedAt, "tikhub");
+  return out.slice(0, 50);
 }
 
 function keywordAssets(text: string) {
@@ -682,7 +699,12 @@ function rowToVideo(row: DbRow): DouyinVideoRecord {
     publishedAt: stringValue(row.published_at) || null,
     videoUrl: stringValue(row.video_url),
     coverUrl: stringValue(row.cover_url) || null,
-    source: stringValue(row.source) === "rsshub" ? "rsshub" : "public_page",
+    source:
+      stringValue(row.source) === "rsshub"
+        ? "rsshub"
+        : stringValue(row.source) === "tikhub"
+          ? "tikhub"
+          : "public_page",
     fetchedAt: stringValue(row.fetched_at),
     firstSeenAt: stringValue(row.first_seen_at),
     updatedAt: stringValue(row.updated_at),
@@ -884,6 +906,86 @@ function resolveRssHubUrl(creatorRef: string, env: EnvLike) {
   return `${base.replace(/\/+$/, "")}/douyin/user/${encodeURIComponent(userId)}`;
 }
 
+function getTikhubApiKey(env: EnvLike) {
+  return env.DOUYIN_TIKHUB_API_KEY?.trim() || env.TIKHUB_API_KEY?.trim() || "";
+}
+
+function resolveTikhubUrl(creatorRef: string, env: EnvLike) {
+  const base = (env.DOUYIN_TIKHUB_BASE_URL?.trim() || DEFAULT_TIKHUB_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
+  const path = env.DOUYIN_TIKHUB_USER_POSTS_PATH?.trim() || DEFAULT_TIKHUB_USER_POSTS_PATH;
+  const url = new URL(`${base}${path.startsWith("/") ? path : `/${path}`}`);
+  url.searchParams.set("sec_user_id", extractDouyinUserId(creatorRef));
+  url.searchParams.set("max_cursor", "0");
+  url.searchParams.set(
+    "count",
+    String(Math.min(20, positiveInt(env.DOUYIN_FETCH_LIMIT, DEFAULT_FETCH_LIMIT))),
+  );
+  if (path.includes("/web/")) {
+    url.searchParams.set("filter_type", env.DOUYIN_TIKHUB_FILTER_TYPE?.trim() || "0");
+    const cookie = env.DOUYIN_COOKIE?.trim();
+    if (cookie) url.searchParams.set("cookie", cookie);
+  } else {
+    url.searchParams.set("sort_type", env.DOUYIN_TIKHUB_SORT_TYPE?.trim() || "0");
+  }
+  return url;
+}
+
+function tikhubErrorMessage(payload: unknown) {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)
+    : null;
+  if (!record) return "";
+  return firstString(
+    record.message,
+    record.msg,
+    record.detail,
+    objectAtPath(record, ["data", "message"]),
+    objectAtPath(record, ["data", "msg"]),
+  );
+}
+
+async function fetchDouyinTikhubVideos({
+  creatorRef,
+  env,
+  fetchedAt,
+}: {
+  creatorRef: string;
+  env: EnvLike;
+  fetchedAt: string;
+}) {
+  const apiKey = getTikhubApiKey(env);
+  if (!apiKey) {
+    throw new Error("DOUYIN_TIKHUB_API_KEY is not configured");
+  }
+  const response = await fetch(resolveTikhubUrl(creatorRef, env), {
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "User-Agent": "SignalHub/1.0 (+https://signal-hub.local)",
+    },
+    signal: AbortSignal.timeout(positiveInt(env.DOUYIN_FETCH_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
+  });
+  const payload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    throw new Error(`TikHub Douyin HTTP ${response.status}: ${tikhubErrorMessage(payload)}`);
+  }
+  const code =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? numberValue((payload as Record<string, unknown>).code)
+      : 0;
+  if (code && code !== 200) {
+    throw new Error(`TikHub Douyin API ${code}: ${tikhubErrorMessage(payload)}`);
+  }
+  return parseTikhubDouyinVideos(payload, { creatorRef, fetchedAt }).slice(
+    0,
+    positiveInt(env.DOUYIN_FETCH_LIMIT, DEFAULT_FETCH_LIMIT),
+  );
+}
+
 async function fetchDouyinRssHubVideos({
   creatorRef,
   env,
@@ -926,6 +1028,13 @@ export async function fetchDouyinCreatorVideos({
   env?: EnvLike;
   fetchedAt?: string;
 }): Promise<RawDouyinVideo[]> {
+  if (
+    env.DOUYIN_PROVIDER?.trim().toLowerCase() === "tikhub" ||
+    getTikhubApiKey(env)
+  ) {
+    return fetchDouyinTikhubVideos({ creatorRef, env, fetchedAt });
+  }
+
   if (
     env.DOUYIN_PROVIDER?.trim().toLowerCase() === "rsshub" ||
     env.DOUYIN_RSSHUB_BASE_URL?.trim()

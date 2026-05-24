@@ -13,6 +13,7 @@ const {
   isDouyinLoginWallHtml,
   listDouyinVideos,
   parseDouyinRssFeed,
+  parseTikhubDouyinVideos,
   upsertDouyinVideos,
 } = await import("./douyin-monitor.ts");
 
@@ -65,6 +66,32 @@ const rssVideos = parseDouyinRssFeed(
 assert.equal(rssVideos.length, 1);
 assert.equal(rssVideos[0].id, "745600002");
 assert.equal(rssVideos[0].source, "rsshub");
+
+const tikhubVideos = parseTikhubDouyinVideos(
+  {
+    code: 200,
+    data: {
+      aweme_list: [
+        {
+          aweme_id: "745600003",
+          desc: "HBM 涨价和 MU 财报观察",
+          create_time: 1770100000,
+          share_url: "https://www.douyin.com/video/745600003",
+          author: { nickname: "阿华" },
+          video: { cover: { url_list: ["https://example.test/tikhub-cover.jpg"] } },
+        },
+      ],
+    },
+  },
+  {
+    creatorRef: "MS4wLjABAAAA-test",
+    fetchedAt: "2026-05-24T08:02:00.000Z",
+  },
+);
+assert.equal(tikhubVideos.length, 1);
+assert.equal(tikhubVideos[0].id, "745600003");
+assert.equal(tikhubVideos[0].source, "tikhub");
+assert.equal(tikhubVideos[0].creatorName, "阿华");
 
 const summary = buildDouyinResearchSummary(videos[0]);
 assert.equal(summary.status, "limited");
