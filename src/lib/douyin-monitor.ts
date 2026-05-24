@@ -611,7 +611,7 @@ function getAiModel(env: EnvLike) {
   );
 }
 
-function parseAiSummaryContent(content: string): DouyinVideoSummary {
+export function parseAiSummaryContent(content: string): DouyinVideoSummary {
   const cleanedBase = content
     .trim()
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -625,8 +625,26 @@ function parseAiSummaryContent(content: string): DouyinVideoSummary {
     jsonStart >= 0 && jsonEnd > jsonStart
       ? cleanedBase.slice(jsonStart, jsonEnd + 1)
       : cleanedBase;
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-  return normalizeSummary({ ...parsed, status: "generated" });
+  try {
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    return normalizeSummary({ ...parsed, status: "generated" });
+  } catch {
+    const coreMatch = cleanedBase.match(
+      /["']?coreView["']?\s*[:：]\s*["“]?([^"\n,}]+)/i,
+    );
+    const freeformText = cleanText(
+      (coreMatch?.[1] || cleanedBase)
+        .replace(/[{}[\]",]/g, " ")
+        .replace(/\s+/g, " "),
+    );
+    return {
+      ...buildDouyinResearchSummary({
+        title: freeformText,
+        description: "",
+      }),
+      status: "generated",
+    };
+  }
 }
 
 async function requestDouyinAiSummary(

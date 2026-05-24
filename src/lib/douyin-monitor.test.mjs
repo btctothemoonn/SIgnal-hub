@@ -13,6 +13,7 @@ const {
   isDouyinAntiBotChallengeHtml,
   isDouyinLoginWallHtml,
   listDouyinVideos,
+  parseAiSummaryContent,
   parseDouyinRssFeed,
   parseTikhubDouyinVideos,
   upsertDouyinVideos,
@@ -140,6 +141,16 @@ assert.deepEqual(aShareSummary.assets.slice(0, 3), [
   "A股: 存储芯片",
 ]);
 assert.match(aShareSummary.catalysts.join("\n"), /炒作逻辑/);
+
+const freeformAiSummary = parseAiSummaryContent(
+  "核心观点：PCB 和 CPO 光模块继续发酵，A股炒作逻辑来自AI服务器高阶材料需求。",
+);
+assert.equal(freeformAiSummary.status, "generated");
+assert.deepEqual(freeformAiSummary.assets.slice(0, 2), [
+  "A股: PCB/覆铜板",
+  "A股: CPO/光模块",
+]);
+assert.match(freeformAiSummary.catalysts.join("\n"), /炒作逻辑/);
 
 const dir = await mkdtemp(join(tmpdir(), "signal-hub-douyin-"));
 const db = new DatabaseSync(join(dir, "douyin.sqlite"));
