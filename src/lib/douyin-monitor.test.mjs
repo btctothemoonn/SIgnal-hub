@@ -8,6 +8,7 @@ const {
   buildDouyinResearchSummary,
   collapseDouyinRefreshErrors,
   extractDouyinVideosFromHtml,
+  fetchDouyinCreatorVideos,
   initDouyinMonitorDb,
   isDouyinAntiBotChallengeHtml,
   isDouyinLoginWallHtml,
@@ -92,6 +93,31 @@ assert.equal(tikhubVideos.length, 1);
 assert.equal(tikhubVideos[0].id, "745600003");
 assert.equal(tikhubVideos[0].source, "tikhub");
 assert.equal(tikhubVideos[0].creatorName, "阿华");
+
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      detail: {
+        code: 402,
+        message_zh: "免费额度以及余额不足，此路由需要付费",
+        message: "Insufficient balance",
+      },
+    }),
+    { status: 402, headers: { "content-type": "application/json" } },
+  );
+await assert.rejects(
+  () =>
+    fetchDouyinCreatorVideos({
+      creatorRef: "MS4wLjABAAAA-test",
+      env: {
+        DOUYIN_PROVIDER: "tikhub",
+        DOUYIN_TIKHUB_API_KEY: "test-key",
+      },
+    }),
+  /免费额度以及余额不足/,
+);
+globalThis.fetch = originalFetch;
 
 const summary = buildDouyinResearchSummary(videos[0]);
 assert.equal(summary.status, "limited");

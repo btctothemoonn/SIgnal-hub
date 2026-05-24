@@ -939,9 +939,12 @@ function tikhubErrorMessage(payload: unknown) {
     : null;
   if (!record) return "";
   return firstString(
+    objectAtPath(record, ["detail", "message_zh"]),
+    objectAtPath(record, ["detail", "message"]),
     record.message,
     record.msg,
     record.detail,
+    objectAtPath(record, ["data", "message_zh"]),
     objectAtPath(record, ["data", "message"]),
     objectAtPath(record, ["data", "msg"]),
   );
