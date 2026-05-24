@@ -10,6 +10,7 @@ const {
   extractDouyinVideosFromHtml,
   initDouyinMonitorDb,
   isDouyinAntiBotChallengeHtml,
+  isDouyinLoginWallHtml,
   listDouyinVideos,
   parseDouyinRssFeed,
   upsertDouyinVideos,
@@ -52,6 +53,7 @@ assert.equal(
   ),
   true,
 );
+assert.equal(isDouyinLoginWallHtml("<div>看更多最新作品</div><button>登录</button>"), true);
 
 const rssVideos = parseDouyinRssFeed(
   `<?xml version="1.0"?><rss><channel><item><title><![CDATA[AI 光通信更新]]></title><link>https://www.douyin.com/video/745600002</link><description><![CDATA[NVDA CPO 观察]]></description><pubDate>Sun, 24 May 2026 08:00:00 GMT</pubDate></item></channel></rss>`,

@@ -356,6 +356,17 @@ export function isDouyinAntiBotChallengeHtml(html: string) {
   );
 }
 
+export function isDouyinLoginWallHtml(html: string) {
+  const text = decodeHtmlEntity(html).replace(/\s+/g, "");
+  return (
+    /看更多最新作品|登录查看更多|登录后查看更多|登录后查看/i.test(text) &&
+    /登录|login/i.test(text) &&
+    !/aweme_id|awemeId|RENDER_DATA|SIGI_STATE|__UNIVERSAL_DATA_FOR_REHYDRATION__/i.test(
+      html,
+    )
+  );
+}
+
 function stripCdata(value: string) {
   return value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
 }
@@ -923,15 +934,18 @@ export async function fetchDouyinCreatorVideos({
   }
 
   const url = resolveCreatorUrl(creatorRef);
+  const headers: Record<string, string> = {
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "User-Agent":
+      env.DOUYIN_USER_AGENT?.trim() ||
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 SignalHub/1.0",
+  };
+  const cookie = env.DOUYIN_COOKIE?.trim();
+  if (cookie) headers.Cookie = cookie;
   const response = await fetch(url, {
     cache: "no-store",
-    headers: {
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-      "User-Agent":
-        env.DOUYIN_USER_AGENT?.trim() ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 SignalHub/1.0",
-    },
+    headers,
     signal: AbortSignal.timeout(positiveInt(env.DOUYIN_FETCH_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
   });
   if (!response.ok) {
@@ -941,6 +955,13 @@ export async function fetchDouyinCreatorVideos({
   if (isDouyinAntiBotChallengeHtml(html)) {
     throw new Error(
       "Douyin returned an anti-bot signature challenge page. Static public-page fetch cannot read the video list; configure DOUYIN_RSSHUB_BASE_URL or a third-party provider.",
+    );
+  }
+  if (isDouyinLoginWallHtml(html)) {
+    throw new Error(
+      cookie
+        ? "Douyin still shows a login wall. DOUYIN_COOKIE may be expired or insufficient; use RSSHub or a third-party provider for stable monitoring."
+        : "Douyin requires login to view latest videos for this profile. Configure DOUYIN_COOKIE, RSSHub, or a third-party provider.",
     );
   }
   return extractDouyinVideosFromHtml(html, { creatorRef, fetchedAt }).slice(
