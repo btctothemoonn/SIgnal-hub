@@ -130,6 +130,17 @@ assert.match(summary.coreView, /AI 数据中心/);
 assert.ok(summary.assets.some((asset) => asset === "NVDA"));
 assert.ok(summary.followUps.length > 0);
 
+const aShareSummary = buildDouyinResearchSummary({
+  title: "PCB 覆铜板 CCL 和 CPO 光模块继续发酵，长鑫存储带动存储芯片炒作逻辑",
+  description: "",
+});
+assert.deepEqual(aShareSummary.assets.slice(0, 3), [
+  "A股: PCB/覆铜板",
+  "A股: CPO/光模块",
+  "A股: 存储芯片",
+]);
+assert.match(aShareSummary.catalysts.join("\n"), /炒作逻辑/);
+
 const dir = await mkdtemp(join(tmpdir(), "signal-hub-douyin-"));
 const db = new DatabaseSync(join(dir, "douyin.sqlite"));
 try {
@@ -145,10 +156,32 @@ try {
       fetchedAt: "2026-05-25T00:00:00.000Z",
     },
   ]);
+  upsertDouyinVideos(db, [
+    {
+      ...videos[0],
+      id: "before-cutoff",
+      title: "Before cutoff",
+      publishedAt: "2026-05-23T15:59:59.000Z",
+      fetchedAt: "2026-05-25T00:00:00.000Z",
+    },
+  ]);
+  upsertDouyinVideos(db, [
+    {
+      ...videos[0],
+      id: "after-cutoff",
+      title: "After cutoff",
+      publishedAt: "2026-05-23T16:00:00.000Z",
+      fetchedAt: "2026-05-25T00:00:00.000Z",
+    },
+  ]);
   const rows = listDouyinVideos(db, { limit: 10 });
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].id, "745600001");
-  assert.equal(rows[0].summary?.status, "limited");
+  assert.equal(rows.length, 4);
+  assert.equal(rows.find((row) => row.id === "745600001")?.summary?.status, "limited");
+  const filteredRows = listDouyinVideos(db, {
+    limit: 10,
+    minPublishedAt: "2026-05-24T00:00:00+08:00",
+  });
+  assert.deepEqual(filteredRows.map((row) => row.id), ["after-cutoff"]);
 } finally {
   db.close();
   await rm(dir, { recursive: true, force: true });

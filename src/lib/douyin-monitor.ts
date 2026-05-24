@@ -88,6 +88,13 @@ function positiveInt(raw: string | undefined, fallback: number) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeIsoDate(raw: string | undefined | null) {
+  const value = raw?.trim();
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
 function cleanText(value: string, maxChars = 900) {
   const normalized = value
     .replace(/\u0000/g, "")
@@ -485,10 +492,18 @@ export function parseTikhubDouyinVideos(
 
 function keywordAssets(text: string) {
   const upper = text.toUpperCase();
-  const assets = Array.from(upper.matchAll(/\$([A-Z]{1,6})(?=$|[^A-Z0-9])/g))
+  const tickerAssets = Array.from(upper.matchAll(/\$([A-Z]{1,6})(?=$|[^A-Z0-9])/g))
     .map((match) => match[1])
     .filter(Boolean);
-  const mapping: Array<[RegExp, string]> = [
+  const aShareMapping: Array<[RegExp, string]> = [
+    [/PCB|覆铜板|CCL|胜宏科技|沪电股份|生益科技|景旺电子|深南电路/i, "A股: PCB/覆铜板"],
+    [/CPO|光模块|光通信|新易盛|中际旭创|天孚通信|剑桥科技|太辰光/i, "A股: CPO/光模块"],
+    [/存储芯片|长鑫存储|兆易创新|香农芯创|佰维存储|江波龙|北京君正/i, "A股: 存储芯片"],
+    [/AI眼镜|消费电子|立讯精密|歌尔股份|蓝思科技/i, "A股: 消费电子"],
+    [/机器人|减速器|谐波|绿的谐波|中大力德|三花智控/i, "A股: 机器人"],
+    [/半导体|芯片|中芯国际|寒武纪|北方华创|韦尔股份|海光信息/i, "A股: 半导体"],
+  ];
+  const globalMapping: Array<[RegExp, string]> = [
     [/NVIDIA|英伟达|NVDA/i, "NVDA"],
     [/TSMC|台积电|TSM/i, "TSM"],
     [/AMD|超威/i, "AMD"],
@@ -500,10 +515,15 @@ function keywordAssets(text: string) {
     [/美股|NASDAQ|纳斯达克|标普/i, "美股"],
     [/BTC|BITCOIN|比特币/i, "BTC"],
   ];
-  for (const [pattern, asset] of mapping) {
-    if (pattern.test(text)) assets.push(asset);
+  const aShareAssets: string[] = [];
+  const globalAssets: string[] = [];
+  for (const [pattern, asset] of aShareMapping) {
+    if (pattern.test(text)) aShareAssets.push(asset);
   }
-  return uniqueStrings(assets, 10);
+  for (const [pattern, asset] of globalMapping) {
+    if (pattern.test(text)) globalAssets.push(asset);
+  }
+  return uniqueStrings([...aShareAssets, ...tickerAssets, ...globalAssets], 10);
 }
 
 export function buildDouyinResearchSummary(
@@ -511,11 +531,24 @@ export function buildDouyinResearchSummary(
 ): DouyinVideoSummary {
   const text = cleanText([video.title, video.description].filter(Boolean).join("\n"));
   const assets = keywordAssets(text);
+  const hasAShareContext = assets.some((asset) => asset.startsWith("A股:"));
+  const hasTradingLogic = /炒作|逻辑|发酵|预期差|催化|主线|题材|窗口|进攻|格局/.test(text);
   return {
     status: "limited",
-    coreView: text || "公开视频只暴露了有限标题/简介，暂无法提取完整观点。",
+    coreView: text
+      ? hasAShareContext
+        ? `A股/板块/逻辑：${text}`
+        : text
+      : "公开视频只暴露了有限标题/简介，暂无法提取完整观点。",
     assets,
-    catalysts: assets.length > 0 ? ["公开视频提到相关资产或产业链"] : [],
+    catalysts:
+      assets.length > 0
+        ? [
+            hasTradingLogic || hasAShareContext
+              ? "优先复核视频提到的A股板块炒作逻辑、催化和持续性。"
+              : "公开视频提到相关资产或产业链。",
+          ]
+        : [],
     risks: ["内容来自公开视频可见信息，缺少完整字幕时需要人工复核。"],
     followUps:
       assets.length > 0
@@ -607,6 +640,8 @@ async function requestDouyinAiSummary(
   const prompt = `
 你是中文投研助理。只基于下面这个抖音公开视频的标题/简介，提取投研信号。
 如果信息不足，必须写明“内容有限”，不要编造事实。
+摘要优先级必须是：1) 提到的A股具体股票/代码；2) A股板块/产业链；3) 炒作逻辑、催化和持续性；4) 风险点；5) 港美股/币圈等其它资产。
+如果标题/简介里出现PCB、覆铜板、CPO、光模块、存储芯片、长鑫存储、机器人、消费电子、半导体等A股线索，要放在 assets 和 catalysts 的最前面。
 
 视频:
 博主: ${video.creatorName}
@@ -615,9 +650,9 @@ async function requestDouyinAiSummary(
 
 只返回 JSON:
 {
-  "coreView": "核心观点，一句话",
-  "assets": ["相关资产/行业/公司"],
-  "catalysts": ["催化事件"],
+  "coreView": "核心观点，一句话；有A股线索时先写A股/板块/逻辑",
+  "assets": ["A股股票/代码或A股板块优先，其次其它资产"],
+  "catalysts": ["炒作逻辑/催化/持续性"],
   "risks": ["风险点"],
   "followUps": ["可跟踪事项"]
 }
@@ -821,21 +856,28 @@ export function upsertDouyinVideos(db: DatabaseSync, videos: RawDouyinVideo[]) {
 
 export function listDouyinVideos(
   db: DatabaseSync,
-  { limit = 50 }: { limit?: number } = {},
+  {
+    limit = 50,
+    minPublishedAt,
+  }: { limit?: number; minPublishedAt?: string | null } = {},
 ): DouyinVideoRecord[] {
   const boundedLimit = Math.max(1, Math.min(Math.trunc(limit), 200));
-  return (
-    db.prepare(`
+  const normalizedMinPublishedAt = normalizeIsoDate(minPublishedAt);
+  const query = `
       select *
       from douyin_videos
+      ${normalizedMinPublishedAt ? "where published_at is not null and published_at >= ?" : ""}
       order by
         case when published_at is null then 1 else 0 end asc,
         published_at desc,
         first_seen_at desc,
         updated_at desc
       limit ?
-    `).all(boundedLimit) as DbRow[]
-  ).map(rowToVideo);
+    `;
+  const rows = normalizedMinPublishedAt
+    ? (db.prepare(query).all(normalizedMinPublishedAt, boundedLimit) as DbRow[])
+    : (db.prepare(query).all(boundedLimit) as DbRow[]);
+  return rows.map(rowToVideo);
 }
 
 function writeRefreshLog(db: DatabaseSync, result: DouyinRefreshResult) {
@@ -1220,6 +1262,7 @@ export async function getDouyinSnapshot({
   try {
     const videos = listDouyinVideos(db, {
       limit: positiveInt(env.DOUYIN_SNAPSHOT_LIMIT, 80),
+      minPublishedAt: env.DOUYIN_MIN_PUBLISHED_AT,
     });
     const errors = refreshResults
       ? collapseDouyinRefreshErrors(refreshResults)

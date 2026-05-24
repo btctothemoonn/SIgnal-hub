@@ -79,11 +79,11 @@ function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
       </div>
       <div className="grid gap-2 text-xs">
         <div>
-          <div className="mb-1 font-semibold text-muted">相关资产</div>
+          <div className="mb-1 font-semibold text-muted">A股 / 板块 / 资产</div>
           <TagList items={summary.assets} />
         </div>
         <div>
-          <div className="mb-1 font-semibold text-muted">催化 / 跟踪</div>
+          <div className="mb-1 font-semibold text-muted">炒作逻辑 / 催化</div>
           <TagList items={[...summary.catalysts, ...summary.followUps].slice(0, 6)} />
         </div>
         <div>
@@ -100,7 +100,13 @@ function VideoCard({ video }: { video: DouyinVideoRecord }) {
     <article className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-52px_rgba(0,0,0,0.85)]">
       <div className="flex flex-col gap-4 lg:flex-row">
         {video.coverUrl ? (
-          <div className="aspect-video w-full shrink-0 overflow-hidden rounded-lg border border-line/70 bg-background/50 lg:w-56">
+          <a
+            href={video.videoUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`打开视频：${video.title}`}
+            className="aspect-video w-full shrink-0 overflow-hidden rounded-lg border border-line/70 bg-background/50 transition-colors hover:border-accent/45 lg:w-56"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={video.coverUrl}
@@ -108,7 +114,7 @@ function VideoCard({ video }: { video: DouyinVideoRecord }) {
               className="h-full w-full object-cover"
               loading="lazy"
             />
-          </div>
+          </a>
         ) : null}
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted">
@@ -128,7 +134,14 @@ function VideoCard({ video }: { video: DouyinVideoRecord }) {
             </a>
           </div>
           <h2 className="text-lg font-semibold leading-7 text-foreground">
-            {video.title}
+            <a
+              href={video.videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-accent hover:underline"
+            >
+              {video.title}
+            </a>
           </h2>
           {video.description && video.description !== video.title ? (
             <p className="mt-2 text-sm leading-6 text-muted">{video.description}</p>
