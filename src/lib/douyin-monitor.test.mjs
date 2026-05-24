@@ -6,9 +6,12 @@ import { DatabaseSync } from "node:sqlite";
 
 const {
   buildDouyinResearchSummary,
+  collapseDouyinRefreshErrors,
   extractDouyinVideosFromHtml,
   initDouyinMonitorDb,
+  isDouyinAntiBotChallengeHtml,
   listDouyinVideos,
+  parseDouyinRssFeed,
   upsertDouyinVideos,
 } = await import("./douyin-monitor.ts");
 
@@ -43,6 +46,24 @@ assert.equal(videos[0].creatorName, "投研样本");
 assert.match(videos[0].title, /AI 数据中心/);
 assert.equal(videos[0].coverUrl, "https://example.test/cover.jpg");
 
+assert.equal(
+  isDouyinAntiBotChallengeHtml(
+    '<html><script>window.byted_acrawler.init({aid:99999999});window.location.reload();</script></html>',
+  ),
+  true,
+);
+
+const rssVideos = parseDouyinRssFeed(
+  `<?xml version="1.0"?><rss><channel><item><title><![CDATA[AI 光通信更新]]></title><link>https://www.douyin.com/video/745600002</link><description><![CDATA[NVDA CPO 观察]]></description><pubDate>Sun, 24 May 2026 08:00:00 GMT</pubDate></item></channel></rss>`,
+  {
+    creatorRef: "rsshub:test",
+    fetchedAt: "2026-05-24T08:01:00.000Z",
+  },
+);
+assert.equal(rssVideos.length, 1);
+assert.equal(rssVideos[0].id, "745600002");
+assert.equal(rssVideos[0].source, "rsshub");
+
 const summary = buildDouyinResearchSummary(videos[0]);
 assert.equal(summary.status, "limited");
 assert.match(summary.coreView, /AI 数据中心/);
@@ -62,5 +83,28 @@ try {
   db.close();
   await rm(dir, { recursive: true, force: true });
 }
+
+const collapsed = collapseDouyinRefreshErrors([
+  {
+    creatorRef: "same",
+    creatorName: null,
+    status: "error",
+    fetchedAt: "2026-05-24T08:00:00.000Z",
+    inserted: 0,
+    videoCount: 0,
+    error: "old",
+  },
+  {
+    creatorRef: "same",
+    creatorName: null,
+    status: "error",
+    fetchedAt: "2026-05-24T09:00:00.000Z",
+    inserted: 0,
+    videoCount: 0,
+    error: "new",
+  },
+]);
+assert.equal(collapsed.length, 1);
+assert.equal(collapsed[0].error, "new");
 
 console.log("ok - douyin monitor parses, summarizes, and dedupes videos");

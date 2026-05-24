@@ -18,6 +18,8 @@ export type DouyinVideoSummary = {
   error?: string | null;
 };
 
+export type DouyinVideoSource = "public_page" | "rsshub";
+
 export type DouyinVideoRecord = {
   id: string;
   creatorRef: string;
@@ -27,7 +29,7 @@ export type DouyinVideoRecord = {
   publishedAt: string | null;
   videoUrl: string;
   coverUrl: string | null;
-  source: "public_page";
+  source: DouyinVideoSource;
   fetchedAt: string;
   firstSeenAt: string;
   updatedAt: string;
@@ -139,6 +141,8 @@ function decodeHtmlEntity(text: string) {
   return text
     .replace(/&quot;/g, '"')
     .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
@@ -339,6 +343,88 @@ export function extractDouyinVideosFromHtml(
   }
 
   return out.slice(0, 50);
+}
+
+export function isDouyinAntiBotChallengeHtml(html: string) {
+  return (
+    /byted_acrawler|__ac_nonce|__ac_signature|window\.location\.reload/i.test(
+      html,
+    ) &&
+    !/aweme_id|awemeId|RENDER_DATA|SIGI_STATE|__UNIVERSAL_DATA_FOR_REHYDRATION__/i.test(
+      html,
+    )
+  );
+}
+
+function stripCdata(value: string) {
+  return value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
+}
+
+function stripHtmlTags(value: string) {
+  return decodeHtmlEntity(value.replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstXmlTag(item: string, tag: string) {
+  const match = item.match(
+    new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"),
+  );
+  return match ? stripCdata(decodeHtmlEntity(match[1].trim())) : "";
+}
+
+function firstXmlAttribute(item: string, tag: string, attr: string) {
+  const match = item.match(new RegExp(`<${tag}\\b([^>]*)>`, "i"));
+  if (!match) return "";
+  const attrMatch = (match[1] ?? "").match(
+    new RegExp(`${attr}=["']([^"']+)["']`, "i"),
+  );
+  return attrMatch ? decodeHtmlEntity(attrMatch[1].trim()) : "";
+}
+
+function parseRssDate(raw: string) {
+  if (!raw) return null;
+  const date = new Date(raw);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function idFromDouyinLink(link: string, text: string) {
+  const match = link.match(/(?:video|note)\/(\d+)/i);
+  return match?.[1] || stableVideoId(link, text);
+}
+
+export function parseDouyinRssFeed(
+  xml: string,
+  {
+    creatorRef,
+    fetchedAt = new Date().toISOString(),
+  }: { creatorRef: string; fetchedAt?: string },
+): RawDouyinVideo[] {
+  const out: RawDouyinVideo[] = [];
+  for (const match of xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)) {
+    const item = match[0];
+    const title = cleanText(stripHtmlTags(firstXmlTag(item, "title")));
+    const link = firstXmlTag(item, "link");
+    const description = cleanText(stripHtmlTags(firstXmlTag(item, "description")));
+    if (!title && !description && !link) continue;
+    const id = idFromDouyinLink(link, [title, description].join("\n"));
+    out.push({
+      id,
+      creatorRef,
+      creatorName: firstXmlTag(item, "author") || creatorRef,
+      title: title || description || `Douyin video ${id}`,
+      description,
+      publishedAt: parseRssDate(firstXmlTag(item, "pubDate")),
+      videoUrl: link || `https://www.douyin.com/video/${id}`,
+      coverUrl: firstString(
+        firstXmlAttribute(item, "media:thumbnail", "url"),
+        firstXmlAttribute(item, "enclosure", "url"),
+      ) || null,
+      source: "rsshub",
+      fetchedAt,
+    });
+  }
+  return out;
 }
 
 function keywordAssets(text: string) {
@@ -585,7 +671,7 @@ function rowToVideo(row: DbRow): DouyinVideoRecord {
     publishedAt: stringValue(row.published_at) || null,
     videoUrl: stringValue(row.video_url),
     coverUrl: stringValue(row.cover_url) || null,
-    source: "public_page",
+    source: stringValue(row.source) === "rsshub" ? "rsshub" : "public_page",
     fetchedAt: stringValue(row.fetched_at),
     firstSeenAt: stringValue(row.first_seen_at),
     updatedAt: stringValue(row.updated_at),
@@ -704,13 +790,13 @@ function writeRefreshLog(db: DatabaseSync, result: DouyinRefreshResult) {
 }
 
 function listRefreshErrors(db: DatabaseSync): DouyinRefreshResult[] {
-  return (
+  const rows: DouyinRefreshResult[] = (
     db.prepare(`
       select creator_ref, creator_name, status, fetched_at, inserted, video_count, error
       from douyin_refresh_log
       where status != 'ok'
       order by fetched_at desc
-      limit 10
+      limit 30
     `).all() as DbRow[]
   ).map((row) => ({
     creatorRef: stringValue(row.creator_ref),
@@ -726,6 +812,28 @@ function listRefreshErrors(db: DatabaseSync): DouyinRefreshResult[] {
     videoCount: numberValue(row.video_count),
     error: stringValue(row.error) || null,
   }));
+  return collapseDouyinRefreshErrors(rows).slice(0, 10);
+}
+
+export function collapseDouyinRefreshErrors(
+  results: DouyinRefreshResult[],
+): DouyinRefreshResult[] {
+  const sorted = [...results]
+    .filter((result) => result.status !== "ok")
+    .sort((left, right) => {
+      const rightTime = Date.parse(right.fetchedAt) || 0;
+      const leftTime = Date.parse(left.fetchedAt) || 0;
+      return rightTime - leftTime;
+    });
+  const seen = new Set<string>();
+  const out: DouyinRefreshResult[] = [];
+  for (const result of sorted) {
+    const key = result.creatorRef.trim().toLowerCase() || result.creatorName || "unknown";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(result);
+  }
+  return out;
 }
 
 function latestRefreshAt(db: DatabaseSync) {
@@ -742,6 +850,62 @@ function resolveCreatorUrl(ref: string) {
   return `https://www.douyin.com/search/${encodeURIComponent(trimmed)}`;
 }
 
+function extractDouyinUserId(ref: string) {
+  const trimmed = ref.trim();
+  try {
+    const parsed = new URL(resolveCreatorUrl(trimmed));
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const userIndex = segments.findIndex((segment) => segment.toLowerCase() === "user");
+    if (userIndex >= 0 && segments[userIndex + 1]) {
+      return decodeURIComponent(segments[userIndex + 1]);
+    }
+    return segments.at(-1) ? decodeURIComponent(segments.at(-1) ?? "") : trimmed;
+  } catch {
+    return trimmed.replace(/^@/, "");
+  }
+}
+
+function resolveRssHubUrl(creatorRef: string, env: EnvLike) {
+  const base = env.DOUYIN_RSSHUB_BASE_URL?.trim();
+  if (!base) return null;
+  const userId = extractDouyinUserId(creatorRef);
+  if (!userId) return null;
+  return `${base.replace(/\/+$/, "")}/douyin/user/${encodeURIComponent(userId)}`;
+}
+
+async function fetchDouyinRssHubVideos({
+  creatorRef,
+  env,
+  fetchedAt,
+}: {
+  creatorRef: string;
+  env: EnvLike;
+  fetchedAt: string;
+}) {
+  const url = resolveRssHubUrl(creatorRef, env);
+  if (!url) {
+    throw new Error("DOUYIN_RSSHUB_BASE_URL is not configured");
+  }
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      Accept: "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.8",
+      "User-Agent":
+        env.DOUYIN_USER_AGENT?.trim() ||
+        "SignalHub/1.0 (+https://signal-hub.local)",
+    },
+    signal: AbortSignal.timeout(positiveInt(env.DOUYIN_FETCH_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
+  });
+  if (!response.ok) {
+    throw new Error(`Douyin RSSHub HTTP ${response.status}`);
+  }
+  const xml = await response.text();
+  return parseDouyinRssFeed(xml, { creatorRef, fetchedAt }).slice(
+    0,
+    positiveInt(env.DOUYIN_FETCH_LIMIT, DEFAULT_FETCH_LIMIT),
+  );
+}
+
 export async function fetchDouyinCreatorVideos({
   creatorRef,
   env = process.env,
@@ -751,6 +915,13 @@ export async function fetchDouyinCreatorVideos({
   env?: EnvLike;
   fetchedAt?: string;
 }): Promise<RawDouyinVideo[]> {
+  if (
+    env.DOUYIN_PROVIDER?.trim().toLowerCase() === "rsshub" ||
+    env.DOUYIN_RSSHUB_BASE_URL?.trim()
+  ) {
+    return fetchDouyinRssHubVideos({ creatorRef, env, fetchedAt });
+  }
+
   const url = resolveCreatorUrl(creatorRef);
   const response = await fetch(url, {
     cache: "no-store",
@@ -767,6 +938,11 @@ export async function fetchDouyinCreatorVideos({
     throw new Error(`Douyin public page HTTP ${response.status}`);
   }
   const html = await response.text();
+  if (isDouyinAntiBotChallengeHtml(html)) {
+    throw new Error(
+      "Douyin returned an anti-bot signature challenge page. Static public-page fetch cannot read the video list; configure DOUYIN_RSSHUB_BASE_URL or a third-party provider.",
+    );
+  }
   return extractDouyinVideosFromHtml(html, { creatorRef, fetchedAt }).slice(
     0,
     positiveInt(env.DOUYIN_FETCH_LIMIT, DEFAULT_FETCH_LIMIT),
@@ -845,7 +1021,7 @@ export async function refreshDouyinMonitor({
           error:
             videos.length > 0
               ? null
-              : "公开页面未暴露可解析视频，后续可切换第三方 API provider。",
+              : "公开页面未返回可解析视频；如果该博主主页被反爬保护，请配置 DOUYIN_RSSHUB_BASE_URL 或第三方 provider。",
         };
         writeRefreshLog(db, result);
         results.push(result);
@@ -883,7 +1059,7 @@ export async function getDouyinSnapshot({
       limit: positiveInt(env.DOUYIN_SNAPSHOT_LIMIT, 80),
     });
     const errors = refreshResults
-      ? refreshResults.filter((result) => result.status !== "ok")
+      ? collapseDouyinRefreshErrors(refreshResults)
       : listRefreshErrors(db);
     const configured = config.douyinCreators.length > 0;
     const hasError = errors.some((result) => result.status === "error");
