@@ -139,6 +139,20 @@ function parseStringArray(raw: unknown): string[] {
     .slice(0, 10);
 }
 
+function objectArrayAtPath(value: unknown, path: string[]): Record<string, unknown>[] {
+  let current = value;
+  for (const part of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return [];
+    current = (current as Record<string, unknown>)[part];
+  }
+  return Array.isArray(current)
+    ? current.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object" && !Array.isArray(item),
+      )
+    : [];
+}
+
 function decodeHtmlEntity(text: string) {
   return text
     .replace(/&quot;/g, '"')
@@ -451,7 +465,21 @@ export function parseTikhubDouyinVideos(
 ): RawDouyinVideo[] {
   const out: RawDouyinVideo[] = [];
   const seen = new Set<string>();
-  collectVideoRecords(payload, out, seen, creatorRef, fetchedAt, "tikhub");
+  const candidates = [
+    ...objectArrayAtPath(payload, ["data", "aweme_list"]),
+    ...objectArrayAtPath(payload, ["data", "aweme_detail", "aweme_list"]),
+    ...objectArrayAtPath(payload, ["aweme_list"]),
+  ];
+  for (const item of candidates) {
+    const video = normalizeVideoRecord(item, creatorRef, fetchedAt, "tikhub");
+    if (video && !seen.has(video.id)) {
+      seen.add(video.id);
+      out.push(video);
+    }
+  }
+  if (out.length === 0) {
+    collectVideoRecords(payload, out, seen, creatorRef, fetchedAt, "tikhub");
+  }
   return out.slice(0, 50);
 }
 

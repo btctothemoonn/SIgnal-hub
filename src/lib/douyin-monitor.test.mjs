@@ -72,6 +72,9 @@ const tikhubVideos = parseTikhubDouyinVideos(
   {
     code: 200,
     data: {
+      share_info: {
+        share_url: "https://www.iesdouyin.com/share/video/0000/",
+      },
       aweme_list: [
         {
           aweme_id: "745600003",
@@ -93,6 +96,8 @@ assert.equal(tikhubVideos.length, 1);
 assert.equal(tikhubVideos[0].id, "745600003");
 assert.equal(tikhubVideos[0].source, "tikhub");
 assert.equal(tikhubVideos[0].creatorName, "阿华");
+assert.equal(tikhubVideos[0].title, "HBM 涨价和 MU 财报观察");
+assert.equal(tikhubVideos[0].publishedAt, "2026-02-03T06:26:40.000Z");
 
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async () =>
