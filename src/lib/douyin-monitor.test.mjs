@@ -142,6 +142,16 @@ assert.deepEqual(aShareSummary.assets.slice(0, 3), [
 ]);
 assert.match(aShareSummary.catalysts.join("\n"), /炒作逻辑/);
 
+const aShareAliasSummary = buildDouyinResearchSummary({
+  title: "沪电继续受益PCB高阶化，光模块需求带动炒作逻辑",
+  description: "",
+});
+assert.deepEqual(aShareAliasSummary.assets.slice(0, 3), [
+  "A股: 沪电股份",
+  "A股: PCB/覆铜板",
+  "A股: CPO/光模块",
+]);
+
 const freeformAiSummary = parseAiSummaryContent(
   "核心观点：PCB 和 CPO 光模块继续发酵，A股炒作逻辑来自AI服务器高阶材料需求。",
 );
