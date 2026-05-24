@@ -8,17 +8,20 @@ export type RuntimeWatchItem = { ref: string; tags: string[] };
 export type RuntimeConfig = {
   telegramChannels: RuntimeWatchItem[];
   twitterAccounts: RuntimeWatchItem[];
+  douyinCreators: RuntimeWatchItem[];
 };
 
 type RawItem = string | { ref?: unknown; tags?: unknown } | null | undefined;
 type RawRuntimeConfig = {
   telegramChannels?: unknown;
   twitterAccounts?: unknown;
+  douyinCreators?: unknown;
 };
 
 const emptyConfig: RuntimeConfig = {
   telegramChannels: [],
   twitterAccounts: [],
+  douyinCreators: [],
 };
 
 let cache: RuntimeConfig | null = null;
@@ -73,6 +76,7 @@ function normalize(raw: RawRuntimeConfig | null | undefined): RuntimeConfig {
   return {
     telegramChannels: sanitizeWatchList(raw.telegramChannels),
     twitterAccounts: sanitizeWatchList(raw.twitterAccounts),
+    douyinCreators: sanitizeWatchList(raw.douyinCreators),
   };
 }
 
@@ -278,5 +282,40 @@ export async function setTwitterAccountTags(
   return mutate((current) => ({
     ...current,
     twitterAccounts: setItemTags(current.twitterAccounts, username, tags),
+  }));
+}
+
+export async function addDouyinCreator(ref: string): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    douyinCreators: addItem(current.douyinCreators, ref),
+  }));
+}
+
+export async function addDouyinCreators(
+  refs: string[],
+): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    douyinCreators: addItems(current.douyinCreators, refs),
+  }));
+}
+
+export async function removeDouyinCreator(
+  ref: string,
+): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    douyinCreators: removeItem(current.douyinCreators, ref),
+  }));
+}
+
+export async function setDouyinCreatorTags(
+  ref: string,
+  tags: string[],
+): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    douyinCreators: setItemTags(current.douyinCreators, ref, tags),
   }));
 }

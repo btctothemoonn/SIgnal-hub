@@ -9,6 +9,7 @@ export type AppShellNavKey =
   | "signals"
   | "holding"
   | "stocks"
+  | "douyin"
   | "settings";
 
 export type AppShellStatusPill = {
@@ -22,6 +23,7 @@ const shellNavItems = [
   { key: "signals", label: "信号", href: "/", icon: "signals" },
   { key: "holding", label: "Holding", href: "/holding", icon: "wallet" },
   { key: "stocks", label: "STOCKS", href: "/stocks", icon: "spark" },
+  { key: "douyin", label: "抖音", href: "/douyin", icon: "video" },
   { key: "settings", label: "设置", href: "/settings", icon: "settings" },
 ] as const;
 
@@ -79,6 +81,15 @@ function ShellGlyph({ icon }: { icon: ShellIcon }) {
         <path d="m14.9 14.9 2.8 2.8" />
         <path d="m17.7 6.3-2.8 2.8" />
         <path d="m9.1 14.9-2.8 2.8" />
+      </svg>
+    );
+  }
+
+  if (icon === "video") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="5" width="16" height="14" rx="2.5" />
+        <path d="m10 9 5 3-5 3Z" />
       </svg>
     );
   }
@@ -277,7 +288,7 @@ export function AppShell({
         aria-label="Mobile primary navigation"
         className="fixed bottom-0 left-0 right-0 z-50 border-t border-line/70 bg-panel-strong/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 shadow-[0_-18px_45px_-36px_rgba(0,0,0,0.8)] backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
+        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
           {shellNavItems.map((item) => {
             const active = item.key === optimisticActiveNav;
             return (

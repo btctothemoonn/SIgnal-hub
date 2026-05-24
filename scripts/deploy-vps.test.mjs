@@ -10,5 +10,6 @@ assert.match(source, /systemctl restart/);
 assert.match(source, /signal-hub-web/);
 assert.match(source, /signal-hub-stocks-cache/);
 assert.match(source, /signal-hub-tiger-holdings/);
+assert.match(source, /signal-hub-douyin/);
 
 console.log("ok - vps deploy script contract");

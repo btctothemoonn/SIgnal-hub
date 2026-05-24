@@ -197,6 +197,7 @@ try {
     Stop-ManagedNodeProcess -Name "signal-hub-monitor985"
     Stop-ManagedNodeProcess -Name "signal-hub-alpha-summary"
     Stop-ManagedNodeProcess -Name "signal-hub-stocks-cache"
+    Stop-ManagedNodeProcess -Name "signal-hub-douyin"
     Write-Host "Local background workers are disabled. Use -WithWorkers only for deliberate local worker testing."
   } else {
     Start-ManagedNodeProcess `
@@ -241,6 +242,16 @@ try {
         -RestartExisting
     } else {
       Write-Host "signal-hub-stocks-cache disabled (STOCKS_CACHE_PREWARM_ENABLED=false)"
+    }
+
+    $douyinWorkerEnabled = Get-ProjectEnvValue "DOUYIN_WORKER_ENABLED"
+    if (-not $douyinWorkerEnabled -or (Test-EnvEnabled $douyinWorkerEnabled)) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-douyin" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\douyin-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "signal-hub-douyin disabled (DOUYIN_WORKER_ENABLED=false)"
     }
   }
 

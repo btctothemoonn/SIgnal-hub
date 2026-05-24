@@ -9,6 +9,7 @@ type WatchItem = { ref: string; tags: string[] };
 type RuntimeConfig = {
   telegramChannels: WatchItem[];
   twitterAccounts: WatchItem[];
+  douyinCreators: WatchItem[];
 };
 
 type SyncResult = { username: string; warning: string | null };
@@ -24,6 +25,7 @@ type ApiResponse = {
 const emptyConfig: RuntimeConfig = {
   telegramChannels: [],
   twitterAccounts: [],
+  douyinCreators: [],
 };
 
 async function callSettings(body: unknown): Promise<ApiResponse> {
@@ -87,7 +89,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-type Kind = "telegram" | "twitter" | "health";
+type Kind = "telegram" | "twitter" | "douyin" | "health";
 type WatchKind = Exclude<Kind, "health">;
 
 export default function SettingsPage() {
@@ -147,10 +149,12 @@ export default function SettingsPage() {
 
   const telegramItems = config.telegramChannels;
   const twitterItems = config.twitterAccounts;
+  const douyinItems = config.douyinCreators;
 
   const sections: Array<{ kind: Kind; title: string; count: number }> = [
     { kind: "telegram", title: "Telegram 频道", count: telegramItems.length },
     { kind: "twitter", title: "X 博主", count: twitterItems.length },
+    { kind: "douyin", title: "抖音博主", count: douyinItems.length },
     { kind: "health", title: "信息健康", count: 0 },
   ];
 
@@ -225,6 +229,17 @@ export default function SettingsPage() {
                 syncResults={null}
                 handleAction={handleAction}
               />
+            ) : activeKind === "douyin" ? (
+              <WatchListPanel
+                key="douyin"
+                kind="douyin"
+                items={douyinItems}
+                busy={busy}
+                error={error}
+                warning={warning}
+                syncResults={null}
+                handleAction={handleAction}
+              />
             ) : (
               <WatchListPanel
                 key="twitter"
@@ -268,12 +283,25 @@ function WatchListPanel({
   const [batchInput, setBatchInput] = useState("");
   const [batchOpen, setBatchOpen] = useState(false);
 
-  const label = kind === "telegram" ? "Telegram 频道" : "X 博主";
+  const label =
+    kind === "telegram"
+      ? "Telegram 频道"
+      : kind === "twitter"
+        ? "X 博主"
+        : "抖音博主";
   const placeholder =
-    kind === "telegram" ? "@channel 或 t.me/..." : "elonmusk";
+    kind === "telegram"
+      ? "@channel 或 t.me/..."
+      : kind === "twitter"
+        ? "elonmusk"
+        : "抖音主页链接 / sec_uid";
   const displayName = (ref: string) => (kind === "twitter" ? `@${ref}` : ref);
   const copyAllLabel =
-    kind === "telegram" ? "\u590d\u5236\u9891\u9053\u6e05\u5355" : "\u590d\u5236 X \u6e05\u5355";
+    kind === "telegram"
+      ? "\u590d\u5236\u9891\u9053\u6e05\u5355"
+      : kind === "twitter"
+        ? "\u590d\u5236 X \u6e05\u5355"
+        : "复制抖音清单";
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -293,7 +321,9 @@ function WatchListPanel({
     const body =
       kind === "telegram"
         ? { action: "telegram.add", ref: cleaned }
-        : { action: "twitter.add", username: cleaned };
+        : kind === "twitter"
+          ? { action: "twitter.add", username: cleaned }
+          : { action: "douyin.add", ref: cleaned };
     const result = await handleAction(body);
     if (result.success) setSingleInput("");
   }
@@ -306,7 +336,9 @@ function WatchListPanel({
     const body =
       kind === "telegram"
         ? { action: "telegram.batchAdd", refs: cleaned }
-        : { action: "twitter.batchAdd", usernames: cleaned };
+        : kind === "twitter"
+          ? { action: "twitter.batchAdd", usernames: cleaned }
+          : { action: "douyin.batchAdd", refs: cleaned };
     const result = await handleAction(body);
     if (result.success) {
       setBatchInput("");
@@ -318,7 +350,9 @@ function WatchListPanel({
     const body =
       kind === "telegram"
         ? { action: "telegram.remove", ref }
-        : { action: "twitter.remove", username: ref };
+        : kind === "twitter"
+          ? { action: "twitter.remove", username: ref }
+          : { action: "douyin.remove", ref };
     await handleAction(body);
   }
 
@@ -326,7 +360,9 @@ function WatchListPanel({
     const body =
       kind === "telegram"
         ? { action: "telegram.setTags", ref, tags }
-        : { action: "twitter.setTags", username: ref, tags };
+        : kind === "twitter"
+          ? { action: "twitter.setTags", username: ref, tags }
+          : { action: "douyin.setTags", ref, tags };
     await handleAction(body);
   }
 
@@ -401,7 +437,9 @@ function WatchListPanel({
             placeholder={
               kind === "telegram"
                 ? "多个频道用逗号/换行分隔\n@channel1, @channel2\n@channel3"
-                : "多个账号用逗号/换行分隔\nelonmusk, VitalikButerin\ncz_binance"
+                : kind === "twitter"
+                  ? "多个账号用逗号/换行分隔\nelonmusk, VitalikButerin\ncz_binance"
+                  : "多个抖音博主主页链接用逗号/换行分隔\nhttps://www.douyin.com/user/..."
             }
             className="w-full resize-y rounded-lg border border-line/70 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
           />
@@ -472,7 +510,9 @@ function WatchListPanel({
       <p className="mt-5 text-xs leading-5 text-muted">
         {kind === "telegram"
           ? "Telegram 频道保存后立即热更新下一次抓取。"
-          : "X 账号保存时会调用 6551 watch 接口订阅实时事件(消耗 token 额度);已存在的订阅会被忽略。"}
+          : kind === "twitter"
+            ? "X 账号保存时会调用 6551 watch 接口订阅实时事件(消耗 token 额度);已存在的订阅会被忽略。"
+            : "抖音博主保存后由后台 worker 低频抓取公开视频，只展示在独立抖音板块。"}
       </p>
     </div>
   );

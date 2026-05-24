@@ -29,6 +29,15 @@ try {
     first.telegramChannels.map((item) => item.ref),
     ["old_channel"],
   );
+  assert.deepEqual(first.douyinCreators, []);
+
+  const withDouyin = await runtimeConfig.addDouyinCreator(
+    "https://www.douyin.com/user/MS4wLjABAAAAcreator",
+  );
+  assert.deepEqual(
+    withDouyin.douyinCreators.map((item) => item.ref),
+    ["https://www.douyin.com/user/MS4wLjABAAAAcreator"],
+  );
 
   await new Promise((resolve) => setTimeout(resolve, 20));
   await writeFile(
@@ -36,6 +45,7 @@ try {
     JSON.stringify({
       telegramChannels: ["new_channel"],
       twitterAccounts: [{ ref: "new_x", tags: ["watch"] }],
+      douyinCreators: [{ ref: "douyin_author", tags: ["stocks"] }],
     }),
     "utf8",
   );
@@ -45,6 +55,9 @@ try {
     second.telegramChannels.map((item) => item.ref),
     ["new_channel"],
   );
+  assert.deepEqual(second.douyinCreators, [
+    { ref: "douyin_author", tags: ["stocks"] },
+  ]);
   assert.deepEqual(runtimeConfig.getCachedRuntimeConfig(), second);
 } finally {
   process.chdir(originalCwd);

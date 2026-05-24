@@ -1,0 +1,912 @@
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { loadRuntimeConfig, type RuntimeWatchItem } from "./runtime-config.ts";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
+
+type EnvLike = Record<string, string | undefined>;
+type DbRow = Record<string, unknown>;
+
+export type DouyinVideoSummary = {
+  status: "generated" | "limited" | "error";
+  coreView: string;
+  assets: string[];
+  catalysts: string[];
+  risks: string[];
+  followUps: string[];
+  error?: string | null;
+};
+
+export type DouyinVideoRecord = {
+  id: string;
+  creatorRef: string;
+  creatorName: string;
+  title: string;
+  description: string;
+  publishedAt: string | null;
+  videoUrl: string;
+  coverUrl: string | null;
+  source: "public_page";
+  fetchedAt: string;
+  firstSeenAt: string;
+  updatedAt: string;
+  summary: DouyinVideoSummary | null;
+  summaryStatus: DouyinVideoSummary["status"] | "pending";
+  error: string | null;
+};
+
+export type DouyinRefreshResult = {
+  creatorRef: string;
+  creatorName: string | null;
+  status: "ok" | "empty" | "error";
+  fetchedAt: string;
+  inserted: number;
+  videoCount: number;
+  error: string | null;
+};
+
+export type DouyinSnapshot = {
+  success: boolean;
+  configured: boolean;
+  status: "empty" | "ok" | "partial" | "error";
+  generatedAt: string;
+  lastUpdatedAt: string | null;
+  creators: RuntimeWatchItem[];
+  videos: DouyinVideoRecord[];
+  errors: DouyinRefreshResult[];
+};
+
+type RawDouyinVideo = Omit<DouyinVideoRecord, "firstSeenAt" | "updatedAt" | "summary" | "summaryStatus" | "error">;
+
+const DEFAULT_DOUYIN_DB = "douyin-monitor.sqlite";
+const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_FETCH_LIMIT = 12;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
+const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-chat";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function positiveInt(raw: string | undefined, fallback: number) {
+  const parsed = Number(raw?.trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function cleanText(value: string, maxChars = 900) {
+  const normalized = value
+    .replace(/\u0000/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return normalized.length > maxChars
+    ? `${normalized.slice(0, maxChars).trim()}...`
+    : normalized;
+}
+
+function uniqueStrings(values: string[], max = 12) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = cleanText(value, 80);
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function parseJsonObject(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonArray(raw: unknown): unknown[] {
+  if (!Array.isArray(raw)) return [];
+  return raw;
+}
+
+function parseStringArray(raw: unknown): string[] {
+  return parseJsonArray(raw)
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+function decodeHtmlEntity(text: string) {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function maybeDecodeURIComponent(text: string) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function objectAtPath(record: Record<string, unknown>, path: string[]) {
+  let value: unknown = record;
+  for (const part of path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    value = (value as Record<string, unknown>)[part];
+  }
+  return value;
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (Array.isArray(value)) {
+      const found = firstString(...value);
+      if (found) return found;
+    }
+  }
+  return "";
+}
+
+function dateFromUnixSeconds(value: unknown): string | null {
+  const seconds = numberValue(value);
+  if (!seconds) return null;
+  const ms = seconds > 10_000_000_000 ? seconds : seconds * 1000;
+  const date = new Date(ms);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function stableVideoId(videoUrl: string, text: string) {
+  return createHash("sha1")
+    .update(`${videoUrl}\n${text}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function normalizeDouyinVideoUrl(raw: string, id: string) {
+  if (raw.startsWith("http")) return raw;
+  if (id) return `https://www.douyin.com/video/${id}`;
+  return raw;
+}
+
+function extractCoverUrl(record: Record<string, unknown>) {
+  return firstString(
+    objectAtPath(record, ["video", "cover", "url_list"]),
+    objectAtPath(record, ["video", "origin_cover", "url_list"]),
+    objectAtPath(record, ["cover", "url_list"]),
+    objectAtPath(record, ["cover"]),
+    objectAtPath(record, ["image", "url_list"]),
+  );
+}
+
+function normalizeVideoRecord(
+  record: Record<string, unknown>,
+  creatorRef: string,
+  fetchedAt: string,
+): RawDouyinVideo | null {
+  const id = firstString(
+    record.aweme_id,
+    record.awemeId,
+    record.item_id,
+    record.itemId,
+    record.id,
+  );
+  const desc = cleanText(firstString(record.desc, record.title, record.caption));
+  const videoUrl = normalizeDouyinVideoUrl(
+    firstString(record.share_url, record.shareUrl, record.url),
+    id,
+  );
+  if (!id && !videoUrl) return null;
+  if (!desc && !videoUrl.includes("/video/")) return null;
+
+  const normalizedId = id || stableVideoId(videoUrl, desc);
+  const creatorName = firstString(
+    objectAtPath(record, ["author", "nickname"]),
+    objectAtPath(record, ["author", "name"]),
+    objectAtPath(record, ["user", "nickname"]),
+    creatorRef,
+  );
+
+  return {
+    id: normalizedId,
+    creatorRef,
+    creatorName: creatorName || creatorRef,
+    title: desc || `Douyin video ${normalizedId}`,
+    description: desc,
+    publishedAt: dateFromUnixSeconds(
+      record.create_time ?? record.createTime ?? record.publish_time,
+    ),
+    videoUrl: normalizeDouyinVideoUrl(videoUrl, normalizedId),
+    coverUrl: extractCoverUrl(record) || null,
+    source: "public_page",
+    fetchedAt,
+  };
+}
+
+function collectVideoRecords(
+  value: unknown,
+  out: RawDouyinVideo[],
+  seen: Set<string>,
+  creatorRef: string,
+  fetchedAt: string,
+  depth = 0,
+) {
+  if (depth > 12 || !value) return;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectVideoRecords(item, out, seen, creatorRef, fetchedAt, depth + 1);
+    }
+    return;
+  }
+  if (typeof value !== "object") return;
+
+  const record = value as Record<string, unknown>;
+  const video = normalizeVideoRecord(record, creatorRef, fetchedAt);
+  if (video && !seen.has(video.id)) {
+    seen.add(video.id);
+    out.push(video);
+  }
+
+  for (const child of Object.values(record)) {
+    collectVideoRecords(child, out, seen, creatorRef, fetchedAt, depth + 1);
+  }
+}
+
+function extractJsonScripts(html: string) {
+  const scripts: string[] = [];
+  for (const match of html.matchAll(
+    /<script[^>]+id=["'](?:RENDER_DATA|SIGI_STATE|__UNIVERSAL_DATA_FOR_REHYDRATION__)["'][^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    const content = decodeHtmlEntity(match[1] ?? "").trim();
+    if (!content) continue;
+    scripts.push(maybeDecodeURIComponent(content));
+    scripts.push(content);
+  }
+  return scripts;
+}
+
+function extractRegexVideos(html: string, creatorRef: string, fetchedAt: string) {
+  const out: RawDouyinVideo[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(
+    /https?:\\?\/\\?\/(?:www\.)?douyin\.com\\?\/video\\?\/(\d+)/gi,
+  )) {
+    const id = match[1];
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      creatorRef,
+      creatorName: creatorRef,
+      title: `Douyin video ${id}`,
+      description: "",
+      publishedAt: null,
+      videoUrl: `https://www.douyin.com/video/${id}`,
+      coverUrl: null,
+      source: "public_page",
+      fetchedAt,
+    });
+  }
+  return out;
+}
+
+export function extractDouyinVideosFromHtml(
+  html: string,
+  {
+    creatorRef,
+    fetchedAt = new Date().toISOString(),
+  }: { creatorRef: string; fetchedAt?: string },
+): RawDouyinVideo[] {
+  const out: RawDouyinVideo[] = [];
+  const seen = new Set<string>();
+
+  for (const script of extractJsonScripts(html)) {
+    const parsed = parseJsonObject(script);
+    if (!parsed) continue;
+    collectVideoRecords(parsed, out, seen, creatorRef, fetchedAt);
+  }
+
+  for (const video of extractRegexVideos(html, creatorRef, fetchedAt)) {
+    if (seen.has(video.id)) continue;
+    seen.add(video.id);
+    out.push(video);
+  }
+
+  return out.slice(0, 50);
+}
+
+function keywordAssets(text: string) {
+  const upper = text.toUpperCase();
+  const assets = Array.from(upper.matchAll(/\$([A-Z]{1,6})(?=$|[^A-Z0-9])/g))
+    .map((match) => match[1])
+    .filter(Boolean);
+  const mapping: Array<[RegExp, string]> = [
+    [/NVIDIA|英伟达|NVDA/i, "NVDA"],
+    [/TSMC|台积电|TSM/i, "TSM"],
+    [/AMD|超威/i, "AMD"],
+    [/MICRON|美光|MU/i, "MU"],
+    [/ARM/i, "ARM"],
+    [/光通信|CPO|LITE|COHR|AAOI/i, "光通信"],
+    [/数据中心|AI\s*SERVER|算力/i, "AI 数据中心"],
+    [/储存|存储|DRAM|HBM|NAND|SSD/i, "存储链"],
+    [/美股|NASDAQ|纳斯达克|标普/i, "美股"],
+    [/BTC|BITCOIN|比特币/i, "BTC"],
+  ];
+  for (const [pattern, asset] of mapping) {
+    if (pattern.test(text)) assets.push(asset);
+  }
+  return uniqueStrings(assets, 10);
+}
+
+export function buildDouyinResearchSummary(
+  video: Pick<DouyinVideoRecord, "title" | "description">,
+): DouyinVideoSummary {
+  const text = cleanText([video.title, video.description].filter(Boolean).join("\n"));
+  const assets = keywordAssets(text);
+  return {
+    status: "limited",
+    coreView: text || "公开视频只暴露了有限标题/简介，暂无法提取完整观点。",
+    assets,
+    catalysts: assets.length > 0 ? ["公开视频提到相关资产或产业链"] : [],
+    risks: ["内容来自公开视频可见信息，缺少完整字幕时需要人工复核。"],
+    followUps:
+      assets.length > 0
+        ? assets.map((asset) => `跟踪 ${asset} 后续价格、新闻和财报验证。`)
+        : ["等待下一次抓取或补充第三方 API 获取完整文案。"],
+  };
+}
+
+function normalizeSummary(record: Record<string, unknown>): DouyinVideoSummary {
+  const fallback = buildDouyinResearchSummary({
+    title: stringValue(record.coreView),
+    description: "",
+  });
+  const status = stringValue(record.status);
+  return {
+    status: status === "generated" ? "generated" : fallback.status,
+    coreView: stringValue(record.coreView) || fallback.coreView,
+    assets: uniqueStrings(parseStringArray(record.assets), 10),
+    catalysts: uniqueStrings(parseStringArray(record.catalysts), 8),
+    risks: uniqueStrings(parseStringArray(record.risks), 8),
+    followUps: uniqueStrings(parseStringArray(record.followUps), 8),
+    error: typeof record.error === "string" ? record.error : null,
+  };
+}
+
+function getAiBaseUrl(env: EnvLike) {
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    return (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+  }
+  return (
+    env.AI_SUMMARY_BASE_URL?.trim() ||
+    env.OPENAI_BASE_URL?.trim() ||
+    env.MINIMAX_BASE_URL?.trim() ||
+    (env.MINIMAX_API_KEY?.trim() ? DEFAULT_MINIMAX_BASE_URL : DEFAULT_OPENAI_BASE_URL)
+  ).replace(/\/+$/, "");
+}
+
+function getAiApiKey(env: EnvLike) {
+  return (
+    env.DEEPSEEK_API_KEY?.trim() ||
+    env.MINIMAX_API_KEY?.trim() ||
+    env.AI_SUMMARY_API_KEY?.trim() ||
+    env.OPENAI_API_KEY?.trim() ||
+    ""
+  );
+}
+
+function getAiModel(env: EnvLike) {
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    return env.DEEPSEEK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL;
+  }
+  return (
+    env.DOUYIN_AI_MODEL?.trim() ||
+    env.AI_SUMMARY_MODEL?.trim() ||
+    env.OPENAI_MODEL?.trim() ||
+    (env.MINIMAX_API_KEY?.trim() ? DEFAULT_MINIMAX_MODEL : DEFAULT_OPENAI_MODEL)
+  );
+}
+
+function parseAiSummaryContent(content: string): DouyinVideoSummary {
+  const cleanedBase = content
+    .trim()
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const jsonStart = cleanedBase.indexOf("{");
+  const jsonEnd = cleanedBase.lastIndexOf("}");
+  const cleaned =
+    jsonStart >= 0 && jsonEnd > jsonStart
+      ? cleanedBase.slice(jsonStart, jsonEnd + 1)
+      : cleanedBase;
+  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  return normalizeSummary({ ...parsed, status: "generated" });
+}
+
+async function requestDouyinAiSummary(
+  video: RawDouyinVideo,
+  env: EnvLike,
+): Promise<DouyinVideoSummary> {
+  const apiKey = getAiApiKey(env);
+  if (!apiKey) return buildDouyinResearchSummary(video);
+
+  const baseUrl = getAiBaseUrl(env);
+  const prompt = `
+你是中文投研助理。只基于下面这个抖音公开视频的标题/简介，提取投研信号。
+如果信息不足，必须写明“内容有限”，不要编造事实。
+
+视频:
+博主: ${video.creatorName}
+标题/简介: ${video.description || video.title}
+链接: ${video.videoUrl}
+
+只返回 JSON:
+{
+  "coreView": "核心观点，一句话",
+  "assets": ["相关资产/行业/公司"],
+  "catalysts": ["催化事件"],
+  "risks": ["风险点"],
+  "followUps": ["可跟踪事项"]
+}
+`.trim();
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: getAiModel(env),
+      messages: [
+        {
+          role: "system",
+          content: "你输出简洁、可复核的中文投研摘要，只使用用户给出的信息。",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+      response_format: baseUrl.includes("minimax") ? undefined : { type: "json_object" },
+    }),
+    signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 30_000)),
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!response.ok) {
+    const error = payload.error as Record<string, unknown> | undefined;
+    throw new Error(stringValue(error?.message) || `Douyin AI HTTP ${response.status}`);
+  }
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const first = choices[0] as Record<string, unknown> | undefined;
+  const message = first?.message as Record<string, unknown> | undefined;
+  const content = stringValue(message?.content);
+  if (!content) throw new Error("Douyin AI summary returned empty content");
+  return parseAiSummaryContent(content);
+}
+
+export function getDouyinDbPath(env: EnvLike = process.env) {
+  return (
+    env.DOUYIN_MONITOR_DB?.trim() ||
+    getRuntimeDataPath(env, DEFAULT_DOUYIN_DB)
+  );
+}
+
+export function getDouyinWorkerIntervalMs(env: EnvLike = process.env) {
+  return positiveInt(env.DOUYIN_WORKER_INTERVAL_MS, DEFAULT_REFRESH_INTERVAL_MS);
+}
+
+export function initDouyinMonitorDb(db: DatabaseSync) {
+  db.exec("pragma journal_mode = wal");
+  db.exec("pragma synchronous = normal");
+  db.exec("pragma busy_timeout = 5000");
+  db.exec(`
+    create table if not exists douyin_videos (
+      id text primary key,
+      creator_ref text not null,
+      creator_name text not null,
+      title text not null,
+      description text not null,
+      published_at text,
+      video_url text not null,
+      cover_url text,
+      source text not null,
+      fetched_at text not null,
+      first_seen_at text not null,
+      updated_at text not null,
+      summary_json text,
+      summary_status text not null default 'pending',
+      error text
+    )
+  `);
+  db.exec(`
+    create table if not exists douyin_refresh_log (
+      id integer primary key autoincrement,
+      creator_ref text not null,
+      creator_name text,
+      status text not null,
+      fetched_at text not null,
+      inserted integer not null default 0,
+      video_count integer not null default 0,
+      error text
+    )
+  `);
+}
+
+function openDouyinDb(path = getDouyinDbPath()) {
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  initDouyinMonitorDb(db);
+  return db;
+}
+
+function parseStoredSummary(raw: unknown): DouyinVideoSummary | null {
+  const parsed = parseJsonObject(raw);
+  return parsed ? normalizeSummary(parsed) : null;
+}
+
+function rowToVideo(row: DbRow): DouyinVideoRecord {
+  return {
+    id: stringValue(row.id),
+    creatorRef: stringValue(row.creator_ref),
+    creatorName: stringValue(row.creator_name),
+    title: stringValue(row.title),
+    description: stringValue(row.description),
+    publishedAt: stringValue(row.published_at) || null,
+    videoUrl: stringValue(row.video_url),
+    coverUrl: stringValue(row.cover_url) || null,
+    source: "public_page",
+    fetchedAt: stringValue(row.fetched_at),
+    firstSeenAt: stringValue(row.first_seen_at),
+    updatedAt: stringValue(row.updated_at),
+    summary: parseStoredSummary(row.summary_json),
+    summaryStatus:
+      stringValue(row.summary_status) === "generated" ||
+      stringValue(row.summary_status) === "limited" ||
+      stringValue(row.summary_status) === "error"
+        ? (stringValue(row.summary_status) as DouyinVideoRecord["summaryStatus"])
+        : "pending",
+    error: stringValue(row.error) || null,
+  };
+}
+
+export function upsertDouyinVideos(db: DatabaseSync, videos: RawDouyinVideo[]) {
+  let inserted = 0;
+  const select = db.prepare("select * from douyin_videos where id = ?");
+  const insert = db.prepare(`
+    insert into douyin_videos (
+      id, creator_ref, creator_name, title, description, published_at,
+      video_url, cover_url, source, fetched_at, first_seen_at, updated_at,
+      summary_json, summary_status, error
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const update = db.prepare(`
+    update douyin_videos
+    set creator_ref = ?, creator_name = ?, title = ?, description = ?,
+        published_at = ?, video_url = ?, cover_url = ?, source = ?,
+        fetched_at = ?, updated_at = ?
+    where id = ?
+  `);
+
+  for (const video of videos) {
+    const existing = select.get(video.id);
+    const summary = buildDouyinResearchSummary(video);
+    const now = video.fetchedAt || new Date().toISOString();
+    if (!existing) {
+      insert.run(
+        video.id,
+        video.creatorRef,
+        video.creatorName,
+        video.title,
+        video.description,
+        video.publishedAt,
+        video.videoUrl,
+        video.coverUrl,
+        video.source,
+        video.fetchedAt,
+        now,
+        now,
+        JSON.stringify(summary),
+        summary.status,
+        null,
+      );
+      inserted += 1;
+      continue;
+    }
+
+    const current = rowToVideo(existing);
+    const changed =
+      current.creatorRef !== video.creatorRef ||
+      current.creatorName !== video.creatorName ||
+      current.title !== video.title ||
+      current.description !== video.description ||
+      current.publishedAt !== video.publishedAt ||
+      current.videoUrl !== video.videoUrl ||
+      current.coverUrl !== video.coverUrl;
+    if (changed) {
+      update.run(
+        video.creatorRef,
+        video.creatorName,
+        video.title,
+        video.description,
+        video.publishedAt,
+        video.videoUrl,
+        video.coverUrl,
+        video.source,
+        video.fetchedAt,
+        now,
+        video.id,
+      );
+    }
+  }
+  return inserted;
+}
+
+export function listDouyinVideos(
+  db: DatabaseSync,
+  { limit = 50 }: { limit?: number } = {},
+): DouyinVideoRecord[] {
+  const boundedLimit = Math.max(1, Math.min(Math.trunc(limit), 200));
+  return (
+    db.prepare(`
+      select *
+      from douyin_videos
+      order by coalesce(published_at, first_seen_at) desc, updated_at desc
+      limit ?
+    `).all(boundedLimit) as DbRow[]
+  ).map(rowToVideo);
+}
+
+function writeRefreshLog(db: DatabaseSync, result: DouyinRefreshResult) {
+  db.prepare(`
+    insert into douyin_refresh_log (
+      creator_ref, creator_name, status, fetched_at, inserted, video_count, error
+    ) values (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    result.creatorRef,
+    result.creatorName,
+    result.status,
+    result.fetchedAt,
+    result.inserted,
+    result.videoCount,
+    result.error,
+  );
+}
+
+function listRefreshErrors(db: DatabaseSync): DouyinRefreshResult[] {
+  return (
+    db.prepare(`
+      select creator_ref, creator_name, status, fetched_at, inserted, video_count, error
+      from douyin_refresh_log
+      where status != 'ok'
+      order by fetched_at desc
+      limit 10
+    `).all() as DbRow[]
+  ).map((row) => ({
+    creatorRef: stringValue(row.creator_ref),
+    creatorName: stringValue(row.creator_name) || null,
+    status:
+      stringValue(row.status) === "empty"
+        ? "empty"
+        : stringValue(row.status) === "error"
+          ? "error"
+          : "ok",
+    fetchedAt: stringValue(row.fetched_at),
+    inserted: numberValue(row.inserted),
+    videoCount: numberValue(row.video_count),
+    error: stringValue(row.error) || null,
+  }));
+}
+
+function latestRefreshAt(db: DatabaseSync) {
+  const row = db
+    .prepare("select fetched_at from douyin_refresh_log order by fetched_at desc limit 1")
+    .get();
+  return row ? stringValue(row.fetched_at) || null : null;
+}
+
+function resolveCreatorUrl(ref: string) {
+  const trimmed = ref.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^MS4wLj/i.test(trimmed)) return `https://www.douyin.com/user/${trimmed}`;
+  return `https://www.douyin.com/search/${encodeURIComponent(trimmed)}`;
+}
+
+export async function fetchDouyinCreatorVideos({
+  creatorRef,
+  env = process.env,
+  fetchedAt = new Date().toISOString(),
+}: {
+  creatorRef: string;
+  env?: EnvLike;
+  fetchedAt?: string;
+}): Promise<RawDouyinVideo[]> {
+  const url = resolveCreatorUrl(creatorRef);
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "User-Agent":
+        env.DOUYIN_USER_AGENT?.trim() ||
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 SignalHub/1.0",
+    },
+    signal: AbortSignal.timeout(positiveInt(env.DOUYIN_FETCH_TIMEOUT_MS, DEFAULT_TIMEOUT_MS)),
+  });
+  if (!response.ok) {
+    throw new Error(`Douyin public page HTTP ${response.status}`);
+  }
+  const html = await response.text();
+  return extractDouyinVideosFromHtml(html, { creatorRef, fetchedAt }).slice(
+    0,
+    positiveInt(env.DOUYIN_FETCH_LIMIT, DEFAULT_FETCH_LIMIT),
+  );
+}
+
+async function summarizeVideosWithAi(
+  db: DatabaseSync,
+  videos: RawDouyinVideo[],
+  env: EnvLike,
+) {
+  if (env.DOUYIN_AI_SUMMARY_ENABLED?.trim().toLowerCase() === "false") return;
+  const update = db.prepare(`
+    update douyin_videos
+    set summary_json = ?, summary_status = ?, error = ?, updated_at = ?
+    where id = ?
+  `);
+  for (const video of videos.slice(0, positiveInt(env.DOUYIN_AI_SUMMARY_LIMIT, 6))) {
+    try {
+      const summary = await requestDouyinAiSummary(video, env);
+      update.run(
+        JSON.stringify(summary),
+        summary.status,
+        summary.error ?? null,
+        new Date().toISOString(),
+        video.id,
+      );
+    } catch (error) {
+      const fallback = {
+        ...buildDouyinResearchSummary(video),
+        status: "error" as const,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      update.run(
+        JSON.stringify(fallback),
+        fallback.status,
+        fallback.error,
+        new Date().toISOString(),
+        video.id,
+      );
+    }
+  }
+}
+
+export async function refreshDouyinMonitor({
+  env = process.env,
+  creators,
+}: {
+  env?: EnvLike;
+  creators?: RuntimeWatchItem[];
+} = {}): Promise<DouyinSnapshot> {
+  const config = await loadRuntimeConfig();
+  const activeCreators = (creators ?? config.douyinCreators).filter((item) =>
+    item.ref.trim(),
+  );
+  const db = openDouyinDb(getDouyinDbPath(env));
+  const results: DouyinRefreshResult[] = [];
+  try {
+    for (const creator of activeCreators) {
+      const fetchedAt = new Date().toISOString();
+      try {
+        const videos = await fetchDouyinCreatorVideos({
+          creatorRef: creator.ref,
+          env,
+          fetchedAt,
+        });
+        const inserted = upsertDouyinVideos(db, videos);
+        await summarizeVideosWithAi(db, videos, env);
+        const result: DouyinRefreshResult = {
+          creatorRef: creator.ref,
+          creatorName: videos[0]?.creatorName ?? null,
+          status: videos.length > 0 ? "ok" : "empty",
+          fetchedAt,
+          inserted,
+          videoCount: videos.length,
+          error:
+            videos.length > 0
+              ? null
+              : "公开页面未暴露可解析视频，后续可切换第三方 API provider。",
+        };
+        writeRefreshLog(db, result);
+        results.push(result);
+      } catch (error) {
+        const result: DouyinRefreshResult = {
+          creatorRef: creator.ref,
+          creatorName: null,
+          status: "error",
+          fetchedAt,
+          inserted: 0,
+          videoCount: 0,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        writeRefreshLog(db, result);
+        results.push(result);
+      }
+    }
+  } finally {
+    db.close();
+  }
+  return getDouyinSnapshot({ env, refreshResults: results });
+}
+
+export async function getDouyinSnapshot({
+  env = process.env,
+  refreshResults,
+}: {
+  env?: EnvLike;
+  refreshResults?: DouyinRefreshResult[];
+} = {}): Promise<DouyinSnapshot> {
+  const config = await loadRuntimeConfig();
+  const db = openDouyinDb(getDouyinDbPath(env));
+  try {
+    const videos = listDouyinVideos(db, {
+      limit: positiveInt(env.DOUYIN_SNAPSHOT_LIMIT, 80),
+    });
+    const errors = refreshResults
+      ? refreshResults.filter((result) => result.status !== "ok")
+      : listRefreshErrors(db);
+    const configured = config.douyinCreators.length > 0;
+    const hasError = errors.some((result) => result.status === "error");
+    const hasOk = videos.length > 0;
+    return {
+      success: true,
+      configured,
+      status: !configured
+        ? "empty"
+        : hasOk && hasError
+          ? "partial"
+          : hasError
+            ? "error"
+            : hasOk
+              ? "ok"
+              : "empty",
+      generatedAt: new Date().toISOString(),
+      lastUpdatedAt: latestRefreshAt(db),
+      creators: config.douyinCreators,
+      videos,
+      errors,
+    };
+  } finally {
+    db.close();
+  }
+}

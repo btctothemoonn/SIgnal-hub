@@ -16,6 +16,10 @@ assert.match(source, /lg:hidden/);
 assert.match(source, /pb-20 lg:pb-0/);
 assert.match(source, /\{subtitle \? \(/);
 assert.match(source, /router\.prefetch\("\/settings"\)/);
+assert.match(source, /label: "抖音"/);
+assert.match(source, /href: "\/douyin"/);
+assert.match(source, /"douyin"/);
+assert.match(source, /grid-cols-5/);
 assert.doesNotMatch(source, /requestIdleCallback/);
 assert.doesNotMatch(source, /warmFrequentRoutes/);
 

@@ -27,7 +27,9 @@
     "stocks:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs",
     "stocks:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs --once",
     "tiger:holdings": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs",
-    "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once"
+    "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once",
+    "douyin:worker": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs",
+    "douyin:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs --once"
   },
   "dependencies": {
     "@tigeropenapi/tigeropen": "^0.4.0",

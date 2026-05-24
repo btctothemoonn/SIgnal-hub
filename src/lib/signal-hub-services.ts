@@ -48,6 +48,12 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
     category: "holding",
     required: true,
   },
+  {
+    name: "signal-hub-douyin",
+    label: "抖音采集",
+    category: "collector",
+    required: true,
+  },
 ];
 
 export function getSignalHubSystemdServiceNames() {
