@@ -828,7 +828,11 @@ export function listDouyinVideos(
     db.prepare(`
       select *
       from douyin_videos
-      order by coalesce(published_at, first_seen_at) desc, updated_at desc
+      order by
+        case when published_at is null then 1 else 0 end asc,
+        published_at desc,
+        first_seen_at desc,
+        updated_at desc
       limit ?
     `).all(boundedLimit) as DbRow[]
   ).map(rowToVideo);
@@ -855,9 +859,8 @@ function listRefreshErrors(db: DatabaseSync): DouyinRefreshResult[] {
     db.prepare(`
       select creator_ref, creator_name, status, fetched_at, inserted, video_count, error
       from douyin_refresh_log
-      where status != 'ok'
       order by fetched_at desc
-      limit 30
+      limit 100
     `).all() as DbRow[]
   ).map((row) => ({
     creatorRef: stringValue(row.creator_ref),
@@ -880,7 +883,6 @@ export function collapseDouyinRefreshErrors(
   results: DouyinRefreshResult[],
 ): DouyinRefreshResult[] {
   const sorted = [...results]
-    .filter((result) => result.status !== "ok")
     .sort((left, right) => {
       const rightTime = Date.parse(right.fetchedAt) || 0;
       const leftTime = Date.parse(left.fetchedAt) || 0;
@@ -892,7 +894,7 @@ export function collapseDouyinRefreshErrors(
     const key = result.creatorRef.trim().toLowerCase() || result.creatorName || "unknown";
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(result);
+    if (result.status !== "ok") out.push(result);
   }
   return out;
 }

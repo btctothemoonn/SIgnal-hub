@@ -136,8 +136,18 @@ try {
   initDouyinMonitorDb(db);
   assert.equal(upsertDouyinVideos(db, videos), 1);
   assert.equal(upsertDouyinVideos(db, videos), 0);
+  upsertDouyinVideos(db, [
+    {
+      ...videos[0],
+      id: "no-published-time",
+      title: "Missing publish time",
+      publishedAt: null,
+      fetchedAt: "2026-05-25T00:00:00.000Z",
+    },
+  ]);
   const rows = listDouyinVideos(db, { limit: 10 });
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].id, "745600001");
   assert.equal(rows[0].summary?.status, "limited");
 } finally {
   db.close();
@@ -166,5 +176,26 @@ const collapsed = collapseDouyinRefreshErrors([
 ]);
 assert.equal(collapsed.length, 1);
 assert.equal(collapsed[0].error, "new");
+const suppressedByOk = collapseDouyinRefreshErrors([
+  {
+    creatorRef: "same",
+    creatorName: null,
+    status: "error",
+    fetchedAt: "2026-05-24T08:00:00.000Z",
+    inserted: 0,
+    videoCount: 0,
+    error: "old",
+  },
+  {
+    creatorRef: "same",
+    creatorName: null,
+    status: "ok",
+    fetchedAt: "2026-05-24T10:00:00.000Z",
+    inserted: 1,
+    videoCount: 1,
+    error: null,
+  },
+]);
+assert.equal(suppressedByOk.length, 0);
 
 console.log("ok - douyin monitor parses, summarizes, and dedupes videos");
