@@ -522,6 +522,8 @@ function keywordAssets(text: string) {
     [/储存|存储|DRAM|HBM|NAND|SSD/i, "存储链"],
     [/美股|NASDAQ|纳斯达克|标普/i, "美股"],
     [/BTC|BITCOIN|比特币/i, "BTC"],
+    [/GOOGLE|谷歌|GOOGL|GOOG|TPU|AI\s*ASIC|博通|BROADCOM|AVGO/i, "谷歌TPU/AI ASIC产业链"],
+    [/BROADCOM|博通|AVGO/i, "AVGO"],
   ];
   const aShareAssets: string[] = [];
   const globalAssets: string[] = [];
@@ -541,6 +543,11 @@ function inferRecommendationReasons(text: string, assets: string[]) {
   if (/沪电|PCB|覆铜板|CCL|高阶PCB|A股: PCB\/覆铜板/i.test(combined)) {
     reasons.push(
       "可见文本推断：博主看好/推荐的核心是AI服务器、交换机和光模块需求拉动高阶PCB、覆铜板等链条景气。",
+    );
+  }
+  if (/谷歌|GOOGLE|GOOGL|GOOG|TPU|AI\s*ASIC|博通|BROADCOM|AVGO/i.test(combined)) {
+    reasons.push(
+      "谷歌TPU/AI ASIC产业链逻辑：谷歌自研AI芯片放量带动博通ASIC、先进封装、服务器PCB和高速互联需求，相关A股需验证是否进入供应链或受益于同类订单外溢。",
     );
   }
   if (/沪电|沪电股份/i.test(combined)) {
@@ -761,6 +768,7 @@ async function requestDouyinAiSummary(
 摘要优先级必须是：1) 提到的A股具体股票/代码；2) A股板块/产业链；3) 炒作逻辑、催化和持续性；4) 风险点；5) 港美股/币圈等其它资产。
 如果标题/简介里出现PCB、覆铜板、CPO、光模块、存储芯片、长鑫存储、机器人、消费电子、半导体等A股线索，要放在 assets 和 catalysts 的最前面。
 注意识别A股简称，例如：沪电=沪电股份，胜宏=胜宏科技，生益=生益科技，深南=深南电路，中际=中际旭创，天孚=天孚通信。
+注意识别谷歌产业链，例如：谷歌/Google/GOOGL/GOOG/TPU/AI ASIC/博通/Broadcom/AVGO，并说明它与PCB、光模块、服务器和高速互联链条的关系。
 必须解释“为什么博主推荐/看好这个股票或板块”：产业逻辑、公司受益环节、催化、预期差、验证点分别是什么；如果可见文本没有给出足够依据，要明确写“内容有限”。
 
 视频:

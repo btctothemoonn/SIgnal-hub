@@ -153,6 +153,18 @@ assert.deepEqual(aShareAliasSummary.assets.slice(0, 3), [
 ]);
 assert.match(aShareAliasSummary.recommendationReasons.join("\n"), /AI服务器|高阶PCB|光模块/);
 
+const googleChainSummary = buildDouyinResearchSummary({
+  title: "谷歌TPU放量，博通ASIC和沪电PCB供应链受益",
+  description: "",
+});
+assert.deepEqual(googleChainSummary.assets.slice(0, 4), [
+  "A股: 沪电股份",
+  "A股: PCB/覆铜板",
+  "谷歌TPU/AI ASIC产业链",
+  "AVGO",
+]);
+assert.match(googleChainSummary.recommendationReasons.join("\n"), /谷歌|TPU|ASIC|博通|PCB/);
+
 const freeformAiSummary = parseAiSummaryContent(
   "核心观点：PCB 和 CPO 光模块继续发酵，A股炒作逻辑来自AI服务器高阶材料需求。",
 );
