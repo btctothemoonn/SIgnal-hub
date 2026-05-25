@@ -151,6 +151,7 @@ assert.deepEqual(aShareAliasSummary.assets.slice(0, 3), [
   "A股: PCB/覆铜板",
   "A股: CPO/光模块",
 ]);
+assert.match(aShareAliasSummary.recommendationReasons.join("\n"), /AI服务器|高阶PCB|光模块/);
 
 const freeformAiSummary = parseAiSummaryContent(
   "核心观点：PCB 和 CPO 光模块继续发酵，A股炒作逻辑来自AI服务器高阶材料需求。",
@@ -166,6 +167,7 @@ const jsonAiSummary = parseAiSummaryContent(
   JSON.stringify({
     coreView: "内容有限：视频标题提及PCB和光模块板块分析，暗示存在预期差",
     assets: ["PCB板块", "光模块板块"],
+    recommendationReasons: ["博主认为AI服务器需求会带动高阶PCB订单"],
     catalysts: ["内容有限：无法确认具体催化逻辑"],
     risks: [],
     followUps: [],
@@ -176,6 +178,7 @@ assert.deepEqual(jsonAiSummary.assets.slice(0, 2), [
   "A股: CPO/光模块",
 ]);
 assert.match(jsonAiSummary.catalysts[0], /A股板块炒作逻辑/);
+assert.match(jsonAiSummary.recommendationReasons.join("\n"), /AI服务器|高阶PCB|光模块/);
 
 const dir = await mkdtemp(join(tmpdir(), "signal-hub-douyin-"));
 const db = new DatabaseSync(join(dir, "douyin.sqlite"));

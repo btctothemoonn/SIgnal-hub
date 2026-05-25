@@ -50,6 +50,20 @@ function TagList({ items }: { items: string[] }) {
   );
 }
 
+function DetailList({ items }: { items: string[] }) {
+  if (items.length === 0) return <p className="text-xs text-muted">n/a</p>;
+  return (
+    <ul className="space-y-1.5 text-sm leading-6 text-foreground">
+      {items.slice(0, 5).map((item) => (
+        <li key={item} className="flex gap-2">
+          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
   if (!summary) {
     return (
@@ -73,6 +87,12 @@ function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
           </span>
         </div>
         <p className="text-sm leading-6 text-foreground">{summary.coreView}</p>
+        <div className="mt-3 rounded-md border border-line/60 bg-panel/45 p-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+            为什么推荐 / 看好
+          </div>
+          <DetailList items={summary.recommendationReasons} />
+        </div>
         {summary.error ? (
           <p className="mt-2 text-xs text-danger">{summary.error}</p>
         ) : null}

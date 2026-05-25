@@ -12,6 +12,7 @@ export type DouyinVideoSummary = {
   status: "generated" | "limited" | "error";
   coreView: string;
   assets: string[];
+  recommendationReasons: string[];
   catalysts: string[];
   risks: string[];
   followUps: string[];
@@ -533,6 +534,38 @@ function keywordAssets(text: string) {
   return uniqueStrings([...aShareAssets, ...tickerAssets, ...globalAssets], 10);
 }
 
+function inferRecommendationReasons(text: string, assets: string[]) {
+  const reasons: string[] = [];
+  const assetText = assets.join("\n");
+  const combined = [text, assetText].join("\n");
+  if (/沪电|PCB|覆铜板|CCL|高阶PCB|A股: PCB\/覆铜板/i.test(combined)) {
+    reasons.push(
+      "可见文本推断：博主看好/推荐的核心是AI服务器、交换机和光模块需求拉动高阶PCB、覆铜板等链条景气。",
+    );
+  }
+  if (/沪电|沪电股份/i.test(combined)) {
+    reasons.push(
+      "沪电股份被归入高阶PCB受益链条，后续要验证服务器/交换机/光模块PCB订单、产能释放和毛利率变化。",
+    );
+  }
+  if (/CPO|光模块|光通信|中际旭创|新易盛|天孚通信/i.test(combined)) {
+    reasons.push(
+      "光模块/CPO逻辑来自AI算力扩张和高速互联升级，市场关注订单持续性、价格弹性和上游PCB材料配套。",
+    );
+  }
+  if (/存储芯片|长鑫存储|DRAM|HBM|NAND|SSD/i.test(combined)) {
+    reasons.push(
+      "存储链逻辑来自涨价、AI服务器存储需求和国产替代，需跟踪报价、库存周期和相关公司订单兑现。",
+    );
+  }
+  if (reasons.length === 0 && assets.length > 0) {
+    reasons.push(
+      "内容有限：可见文本只提到相关资产，未给出完整推荐理由，需要结合视频口播、字幕或后续资料复核。",
+    );
+  }
+  return uniqueStrings(reasons, 6);
+}
+
 export function buildDouyinResearchSummary(
   video: Pick<DouyinVideoRecord, "title" | "description">,
 ): DouyinVideoSummary {
@@ -548,6 +581,7 @@ export function buildDouyinResearchSummary(
         : text
       : "公开视频只暴露了有限标题/简介，暂无法提取完整观点。",
     assets,
+    recommendationReasons: inferRecommendationReasons(text, assets),
     catalysts:
       assets.length > 0
         ? [
@@ -570,10 +604,20 @@ function normalizeSummary(record: Record<string, unknown>): DouyinVideoSummary {
     description: "",
   });
   const status = stringValue(record.status);
+  const recommendationReasons = uniqueStrings(
+    [
+      ...parseStringArray(record.recommendationReasons),
+      ...parseStringArray(record.reasons),
+      ...parseStringArray(record.thesis),
+    ],
+    8,
+  );
   return {
     status: status === "generated" ? "generated" : fallback.status,
     coreView: stringValue(record.coreView) || fallback.coreView,
     assets: uniqueStrings(parseStringArray(record.assets), 10),
+    recommendationReasons:
+      recommendationReasons.length > 0 ? recommendationReasons : fallback.recommendationReasons,
     catalysts: uniqueStrings(parseStringArray(record.catalysts), 8),
     risks: uniqueStrings(parseStringArray(record.risks), 8),
     followUps: uniqueStrings(parseStringArray(record.followUps), 8),
@@ -590,13 +634,28 @@ function prioritizeResearchSummary(
       sourceText,
       summary.coreView,
       summary.assets.join("\n"),
+      summary.recommendationReasons.join("\n"),
       summary.catalysts.join("\n"),
     ].join("\n"),
   );
   const hasAShareContext = priorityAssets.some((asset) => asset.startsWith("A股:"));
+  const recommendationReasons = inferRecommendationReasons(
+    [
+      sourceText,
+      summary.coreView,
+      summary.assets.join("\n"),
+      summary.recommendationReasons.join("\n"),
+      summary.catalysts.join("\n"),
+    ].join("\n"),
+    priorityAssets,
+  );
   return {
     ...summary,
     assets: uniqueStrings([...priorityAssets, ...summary.assets], 10),
+    recommendationReasons: uniqueStrings(
+      [...recommendationReasons, ...summary.recommendationReasons],
+      8,
+    ),
     catalysts: hasAShareContext
       ? uniqueStrings(
           [
@@ -702,6 +761,7 @@ async function requestDouyinAiSummary(
 摘要优先级必须是：1) 提到的A股具体股票/代码；2) A股板块/产业链；3) 炒作逻辑、催化和持续性；4) 风险点；5) 港美股/币圈等其它资产。
 如果标题/简介里出现PCB、覆铜板、CPO、光模块、存储芯片、长鑫存储、机器人、消费电子、半导体等A股线索，要放在 assets 和 catalysts 的最前面。
 注意识别A股简称，例如：沪电=沪电股份，胜宏=胜宏科技，生益=生益科技，深南=深南电路，中际=中际旭创，天孚=天孚通信。
+必须解释“为什么博主推荐/看好这个股票或板块”：产业逻辑、公司受益环节、催化、预期差、验证点分别是什么；如果可见文本没有给出足够依据，要明确写“内容有限”。
 
 视频:
 博主: ${video.creatorName}
@@ -712,6 +772,7 @@ async function requestDouyinAiSummary(
 {
   "coreView": "核心观点，一句话；有A股线索时先写A股/板块/逻辑",
   "assets": ["A股股票/代码或A股板块优先，其次其它资产"],
+  "recommendationReasons": ["为什么推荐/看好：产业逻辑、公司受益环节、预期差、验证点；不能编造"],
   "catalysts": ["炒作逻辑/催化/持续性"],
   "risks": ["风险点"],
   "followUps": ["可跟踪事项"]
