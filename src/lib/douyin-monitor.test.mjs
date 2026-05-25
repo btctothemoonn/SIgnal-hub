@@ -80,6 +80,12 @@ const tikhubVideos = parseTikhubDouyinVideos(
         {
           aweme_id: "745600003",
           desc: "HBM 涨价和 MU 财报观察",
+          chapter_abstract:
+            "HBM 与谷歌TPU需求共振，重点跟踪博通ASIC、服务器PCB和高速互联供应链。",
+          chapter_list: [
+            { desc: "谷歌的TPU需求" },
+            { desc_for_search: "博通ASIC与PCB供应链" },
+          ],
           create_time: 1770100000,
           share_url: "https://www.douyin.com/video/745600003",
           author: { nickname: "阿华" },
@@ -98,6 +104,9 @@ assert.equal(tikhubVideos[0].id, "745600003");
 assert.equal(tikhubVideos[0].source, "tikhub");
 assert.equal(tikhubVideos[0].creatorName, "阿华");
 assert.equal(tikhubVideos[0].title, "HBM 涨价和 MU 财报观察");
+assert.match(tikhubVideos[0].description, /章节摘要/);
+assert.match(tikhubVideos[0].description, /谷歌TPU需求/);
+assert.match(tikhubVideos[0].description, /博通ASIC与PCB供应链/);
 assert.equal(tikhubVideos[0].publishedAt, "2026-02-03T06:26:40.000Z");
 
 const originalFetch = globalThis.fetch;

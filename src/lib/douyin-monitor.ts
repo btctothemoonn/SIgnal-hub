@@ -233,6 +233,34 @@ function extractCoverUrl(record: Record<string, unknown>) {
   );
 }
 
+function uniqueTextParts(values: string[], max = 12) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = cleanText(value, 500);
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+function extractTikhubResearchDescription(record: Record<string, unknown>, desc: string) {
+  const chapterAbstract = firstString(record.chapter_abstract);
+  const chapterItems = objectArrayAtPath(record, ["chapter_list"])
+    .map((item) => firstString(item.desc, item.desc_for_search))
+    .filter(Boolean);
+  const parts = uniqueTextParts([
+    desc,
+    chapterAbstract ? `章节摘要：${chapterAbstract}` : "",
+    chapterItems.length > 0 ? `章节：${chapterItems.join("；")}` : "",
+  ]);
+  return cleanText(parts.join("\n"), 1800);
+}
+
 function normalizeVideoRecord(
   record: Record<string, unknown>,
   creatorRef: string,
@@ -247,6 +275,8 @@ function normalizeVideoRecord(
     record.id,
   );
   const desc = cleanText(firstString(record.desc, record.title, record.caption));
+  const description =
+    source === "tikhub" ? extractTikhubResearchDescription(record, desc) : desc;
   const videoUrl = normalizeDouyinVideoUrl(
     firstString(record.share_url, record.shareUrl, record.url),
     id,
@@ -267,7 +297,7 @@ function normalizeVideoRecord(
     creatorRef,
     creatorName: creatorName || creatorRef,
     title: desc || `Douyin video ${normalizedId}`,
-    description: desc,
+    description,
     publishedAt: dateFromUnixSeconds(
       record.create_time ?? record.createTime ?? record.publish_time,
     ),
@@ -576,7 +606,7 @@ function inferRecommendationReasons(text: string, assets: string[]) {
 export function buildDouyinResearchSummary(
   video: Pick<DouyinVideoRecord, "title" | "description">,
 ): DouyinVideoSummary {
-  const text = cleanText([video.title, video.description].filter(Boolean).join("\n"));
+  const text = cleanText([video.title, video.description].filter(Boolean).join("\n"), 1800);
   const assets = keywordAssets(text);
   const hasAShareContext = assets.some((asset) => asset.startsWith("A股:"));
   const hasTradingLogic = /炒作|逻辑|发酵|预期差|催化|主线|题材|窗口|进攻|格局/.test(text);
@@ -773,7 +803,7 @@ async function requestDouyinAiSummary(
 
 视频:
 博主: ${video.creatorName}
-标题/简介: ${video.description || video.title}
+标题/简介/章节摘要: ${video.description || video.title}
 链接: ${video.videoUrl}
 
 只返回 JSON:
