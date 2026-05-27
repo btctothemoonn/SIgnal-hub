@@ -1488,7 +1488,14 @@ export async function fetchPatreonSubscriptionItems({
       key: cacheKey,
       now: Date.now(),
     });
-    if (cached) return cached;
+    if (cached) {
+      return useHistory && cached.items.length > 0
+        ? {
+            ...cached,
+            items: mergePatreonHistoryItems({ env, items: cached.items }),
+          }
+        : cached;
+    }
   }
 
   try {
