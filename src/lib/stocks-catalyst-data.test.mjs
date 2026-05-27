@@ -265,6 +265,23 @@ assert.equal(storageSubscriptionSnapshot.catalysts.MU[0].sourceRole, "subscripti
 assert.equal(storageSubscriptionSnapshot.catalysts.SNDK[0].sourceRole, "subscription");
 assert.equal(storageSubscriptionSnapshot.catalysts.WDC[0].sourceRole, "subscription");
 
+const subscriptionHistorySnapshot = buildStocksCatalystSnapshotFromItems({
+  stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+  items: Array.from({ length: 8 }, (_, index) => ({
+    id: `patreon:nvda-history-${index}`,
+    source: "Patreon",
+    sourceRole: "subscription",
+    author: "bboczeng",
+    createdAt: `2026-05-${String(10 + index).padStart(2, "0")}T12:00:00.000Z`,
+    text: `NVDA subscriber history note ${index} mentions AI demand.`,
+    translation: null,
+    link: `https://www.patreon.com/posts/nvda-history-${index}`,
+    tickers: ["NVDA"],
+  })),
+  generatedAt: "2026-05-20T12:00:00.000Z",
+});
+assert.equal(subscriptionHistorySnapshot.catalysts.NVDA.length, 8);
+
 const sourceItems = [
   {
     id: "polygon:article-1",

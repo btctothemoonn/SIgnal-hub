@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ALPHA_RESEARCH_STOCKS } from "./alpha-research-pool.ts";
 import {
@@ -628,6 +628,75 @@ const patreonDetailSubscription = await fetchPatreonSubscriptionItems({
 assert.equal(patreonDetailSubscription.items.length, 1);
 assert.equal(patreonDetailCalls.length, 2);
 assert.ok(patreonDetailSubscription.items[0].text.includes("Full subscriber note"));
+
+const patreonHistoryPath = join(
+  process.cwd(),
+  ".signal-hub",
+  `stocks-patreon-history-test-${process.pid}.json`,
+);
+rmSync(patreonHistoryPath, { force: true });
+const patreonHistoryPages = [
+  `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        posts: [
+          {
+            id: "history-old",
+            title: "Old NVDA subscriber note",
+            url: "https://www.patreon.com/posts/history-old",
+            published_at: "2026-05-10T12:00:00.000Z",
+            excerpt: "NVDA older history should remain available.",
+          },
+        ],
+      },
+    },
+  })}</script></html>`,
+  `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: {
+      pageProps: {
+        posts: [
+          {
+            id: "history-new",
+            title: "New NVDA subscriber note",
+            url: "https://www.patreon.com/posts/history-new",
+            published_at: "2026-05-13T12:00:00.000Z",
+            excerpt: "NVDA new history should be merged with older posts.",
+          },
+        ],
+      },
+    },
+  })}</script></html>`,
+];
+let patreonHistoryCall = 0;
+try {
+  const historyEnv = {
+    STOCKS_PATREON_ENABLED: "true",
+    STOCKS_PATREON_URL: "https://www.patreon.com/c/bboczeng/posts",
+    STOCKS_PATREON_COOKIE: "session_id=secret; patreon_device_id=device",
+    STOCKS_PATREON_CACHE_MS: "0",
+    STOCKS_PATREON_HISTORY_PATH: patreonHistoryPath,
+  };
+  await fetchPatreonSubscriptionItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    fetchImpl: async () =>
+      new Response(patreonHistoryPages[patreonHistoryCall++], { status: 200 }),
+    env: historyEnv,
+  });
+  const secondHistoryFetch = await fetchPatreonSubscriptionItems({
+    stocks: ALPHA_RESEARCH_STOCKS.filter((stock) => stock.ticker === "NVDA"),
+    fetchImpl: async () =>
+      new Response(patreonHistoryPages[patreonHistoryCall++], { status: 200 }),
+    env: historyEnv,
+  });
+  assert.deepEqual(
+    secondHistoryFetch.items.map((item) => item.id),
+    ["patreon:history-new", "patreon:history-old"],
+  );
+  const historyFile = JSON.parse(readFileSync(patreonHistoryPath, "utf8"));
+  assert.equal(historyFile.items.length, 2);
+} finally {
+  rmSync(patreonHistoryPath, { force: true });
+}
 
 const publicPatreonCalls = [];
 const publicPatreonSubscription = await fetchPatreonSubscriptionItems({

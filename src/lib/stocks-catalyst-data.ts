@@ -931,7 +931,12 @@ export function buildStocksCatalystSnapshotFromItems({
   }
 
   for (const [ticker, tickerCatalysts] of Object.entries(catalysts)) {
-    catalysts[ticker] = tickerCatalysts.slice(0, 5);
+    const limit = tickerCatalysts.some(
+      (catalyst) => catalyst.sourceRole === "subscription",
+    )
+      ? 25
+      : 5;
+    catalysts[ticker] = tickerCatalysts.slice(0, limit);
   }
 
   return {

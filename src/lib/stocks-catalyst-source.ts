@@ -21,6 +21,7 @@ import {
   getProviderApiKeys,
   pickProviderApiKey,
 } from "./provider-api-keys.ts";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 import { getTelegramPipelineSnapshot } from "./telegram-pipeline-store.ts";
 import { getXPipelineSnapshot } from "./x-pipeline-store.ts";
 import { translateText, type TranslationNote } from "./translate.ts";
@@ -740,6 +741,131 @@ function readExternalNewsFileCache(env: EnvLike): ExternalCatalystCacheFile {
   }
 }
 
+type PatreonHistoryFile = {
+  version: 1;
+  updatedAt: string;
+  items: StocksCatalystSourceItem[];
+};
+
+function configuredPatreonHistoryPath(env: EnvLike) {
+  return env.STOCKS_PATREON_HISTORY_PATH?.trim() ?? "";
+}
+
+function patreonHistoryPath(env: EnvLike) {
+  const configured = configuredPatreonHistoryPath(env);
+  return configured
+    ? resolve(configured)
+    : getRuntimeDataPath(env, "stocks-patreon-history.json");
+}
+
+function patreonHistoryLimit(env: EnvLike) {
+  return positiveInt(env.STOCKS_PATREON_HISTORY_LIMIT, 200, 1000);
+}
+
+function isPatreonSubscriptionItem(
+  item: unknown,
+): item is StocksCatalystSourceItem {
+  return (
+    Boolean(item) &&
+    typeof item === "object" &&
+    !Array.isArray(item) &&
+    (item as StocksCatalystSourceItem).source === "Patreon" &&
+    (item as StocksCatalystSourceItem).sourceRole === "subscription" &&
+    typeof (item as StocksCatalystSourceItem).id === "string" &&
+    typeof (item as StocksCatalystSourceItem).createdAt === "string"
+  );
+}
+
+function patreonHistoryItemKey(item: StocksCatalystSourceItem) {
+  return item.link || item.id;
+}
+
+function sortPatreonHistoryItems(items: StocksCatalystSourceItem[]) {
+  return [...items].sort((left, right) => {
+    const dateDiff =
+      (Date.parse(right.createdAt) || 0) - (Date.parse(left.createdAt) || 0);
+    if (dateDiff !== 0) return dateDiff;
+    return patreonHistoryItemKey(left).localeCompare(
+      patreonHistoryItemKey(right),
+    );
+  });
+}
+
+function readPatreonItemsFromLegacyCache(
+  env: EnvLike,
+): StocksCatalystSourceItem[] {
+  if (configuredPatreonHistoryPath(env)) return [];
+  if (env.STOCKS_PATREON_HISTORY_SEED_LEGACY_CACHE?.trim() !== "true") {
+    return [];
+  }
+  const items: StocksCatalystSourceItem[] = [];
+  for (const [key, entry] of Object.entries(readExternalNewsFileCache(env))) {
+    if (!key.startsWith("patreon-v1|")) continue;
+    for (const item of entry.result?.items ?? []) {
+      if (isPatreonSubscriptionItem(item)) items.push(item);
+    }
+  }
+  return sortPatreonHistoryItems(items);
+}
+
+function readPatreonHistoryItems(env: EnvLike): StocksCatalystSourceItem[] {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(patreonHistoryPath(env), "utf8"),
+    ) as Partial<PatreonHistoryFile>;
+    return sortPatreonHistoryItems(
+      (Array.isArray(parsed.items) ? parsed.items : []).filter(
+        isPatreonSubscriptionItem,
+      ),
+    );
+  } catch {
+    return readPatreonItemsFromLegacyCache(env);
+  }
+}
+
+function writePatreonHistoryItems(
+  env: EnvLike,
+  items: StocksCatalystSourceItem[],
+) {
+  try {
+    const historyPath = patreonHistoryPath(env);
+    mkdirSync(dirname(historyPath), { recursive: true });
+    writeFileSync(
+      historyPath,
+      JSON.stringify({
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        items,
+      } satisfies PatreonHistoryFile),
+      "utf8",
+    );
+  } catch {}
+}
+
+function mergePatreonHistoryItems({
+  env,
+  items,
+}: {
+  env: EnvLike;
+  items: StocksCatalystSourceItem[];
+}) {
+  const merged = new Map<string, StocksCatalystSourceItem>();
+  for (const item of readPatreonHistoryItems(env)) {
+    merged.set(patreonHistoryItemKey(item), item);
+  }
+  for (const item of items) {
+    if (isPatreonSubscriptionItem(item)) {
+      merged.set(patreonHistoryItemKey(item), item);
+    }
+  }
+  const next = sortPatreonHistoryItems([...merged.values()]).slice(
+    0,
+    patreonHistoryLimit(env),
+  );
+  writePatreonHistoryItems(env, next);
+  return next;
+}
+
 function writeExternalNewsFileCache(
   env: EnvLike,
   key: string,
@@ -1354,6 +1480,8 @@ export async function fetchPatreonSubscriptionItems({
 
   const cacheMs = patreonCacheMs(env);
   const cacheKey = patreonCacheKey({ stocks, env });
+  const useHistory =
+    fetchImpl === fetch || Boolean(configuredPatreonHistoryPath(env));
   if (fetchImpl === fetch && cacheMs > 0) {
     const cached = readCachedExternalNewsResult({
       env,
@@ -1395,8 +1523,21 @@ export async function fetchPatreonSubscriptionItems({
       fetchImpl,
       creatorName,
     });
-    const items = detailResult.items;
-    if (items.length === 0 && fetchImpl === fetch && cacheMs > 0) {
+    const latestItems = detailResult.items;
+    if (latestItems.length === 0 && useHistory) {
+      const historyItems = readPatreonHistoryItems(env);
+      if (historyItems.length > 0) {
+        return {
+          items: historyItems,
+          errors: [
+            "Patreon: no subscription posts parsed",
+            `history: using Patreon subscription history (${historyItems.length} items)`,
+            ...detailResult.errors,
+          ],
+        };
+      }
+    }
+    if (latestItems.length === 0 && fetchImpl === fetch && cacheMs > 0) {
       const stale = readStaleExternalNewsResult({
         env,
         key: cacheKey,
@@ -1412,6 +1553,10 @@ export async function fetchPatreonSubscriptionItems({
         };
       }
     }
+    const items =
+      latestItems.length > 0 && useHistory
+        ? mergePatreonHistoryItems({ env, items: latestItems })
+        : latestItems;
     const result = {
       items,
       errors:
@@ -1429,6 +1574,7 @@ export async function fetchPatreonSubscriptionItems({
     }
     return result;
   } catch (error) {
+    const message = errorMessage(error);
     if (fetchImpl === fetch && cacheMs > 0) {
       const stale = readStaleExternalNewsResult({
         env,
@@ -1439,15 +1585,30 @@ export async function fetchPatreonSubscriptionItems({
         return {
           items: stale.items,
           errors: [
-            `Patreon: ${errorMessage(error)}`,
+            `Patreon: ${message}`,
             `cache: using stale Patreon subscription cache (${stale.items.length} items)`,
+          ],
+        };
+      }
+    }
+    if (
+      useHistory &&
+      !message.startsWith("unsupported Patreon proxy protocol")
+    ) {
+      const historyItems = readPatreonHistoryItems(env);
+      if (historyItems.length > 0) {
+        return {
+          items: historyItems,
+          errors: [
+            `Patreon: ${message}`,
+            `history: using Patreon subscription history (${historyItems.length} items)`,
           ],
         };
       }
     }
     return {
       items: [],
-      errors: [`Patreon: ${errorMessage(error)}`],
+      errors: [`Patreon: ${message}`],
     };
   }
 }
