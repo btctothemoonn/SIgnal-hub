@@ -4,6 +4,7 @@ import {
   getAlphaSummaryDbPath,
   getAlphaSummaryBaseUrl,
   getAlphaSummaryModel,
+  getAlphaSummaryProviderCandidates,
   getAlphaSummaryPeriod,
   isDeepSeekBaseUrl,
   isMiniMaxBaseUrl,
@@ -43,6 +44,28 @@ assert.equal(
     AI_SUMMARY_MODEL: "chatgpt/gpt-5.2-instant",
   }),
   "deepseek-v4-flash",
+);
+assert.deepEqual(
+  getAlphaSummaryProviderCandidates({
+    AI_SUMMARY_API_KEY: "minimax-key",
+    AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+    AI_SUMMARY_MODEL: "MiniMax-M2.7",
+    AI_SUMMARY_FALLBACK_API_KEY: "deepseek-key",
+    AI_SUMMARY_FALLBACK_BASE_URL: "https://api.deepseek.com",
+    AI_SUMMARY_FALLBACK_MODEL: "deepseek-v4-flash",
+  }).map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
+  [
+    {
+      id: "minimax",
+      baseUrl: "https://api.minimaxi.com/v1",
+      model: "MiniMax-M2.7",
+    },
+    {
+      id: "deepseek",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+    },
+  ],
 );
 assert.match(getAlphaSummaryDbPath({}, "signals"), /signal-summary\.sqlite$/);
 assert.match(getAlphaSummaryDbPath({}, "stocks"), /stocks-summary\.sqlite$/);

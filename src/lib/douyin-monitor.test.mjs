@@ -16,6 +16,7 @@ const {
   parseAiSummaryContent,
   parseDouyinRssFeed,
   parseTikhubDouyinVideos,
+  selectDouyinVideosNeedingAiSummary,
   upsertDouyinVideos,
 } = await import("./douyin-monitor.ts");
 
@@ -205,8 +206,38 @@ const dir = await mkdtemp(join(tmpdir(), "signal-hub-douyin-"));
 const db = new DatabaseSync(join(dir, "douyin.sqlite"));
 try {
   initDouyinMonitorDb(db);
+  assert.deepEqual(
+    selectDouyinVideosNeedingAiSummary(db, videos, {}).map((video) => video.id),
+    ["745600001"],
+  );
   assert.equal(upsertDouyinVideos(db, videos), 1);
+  assert.deepEqual(selectDouyinVideosNeedingAiSummary(db, videos, {}), []);
   assert.equal(upsertDouyinVideos(db, videos), 0);
+  const changedVideos = [
+    {
+      ...videos[0],
+      description: `${videos[0].description}\nnew chapter`,
+    },
+  ];
+  assert.deepEqual(
+    selectDouyinVideosNeedingAiSummary(db, changedVideos, {}).map((video) => video.id),
+    ["745600001"],
+  );
+  assert.equal(upsertDouyinVideos(db, changedVideos), 0);
+  assert.deepEqual(selectDouyinVideosNeedingAiSummary(db, changedVideos, {}), []);
+  db.prepare(
+    "update douyin_videos set summary_status = 'error', error = 'quota exhausted' where id = ?",
+  ).run("745600001");
+  assert.deepEqual(selectDouyinVideosNeedingAiSummary(db, changedVideos, {}), []);
+  assert.deepEqual(
+    selectDouyinVideosNeedingAiSummary(db, changedVideos, {
+      DOUYIN_AI_RETRY_ERRORS: "true",
+    }).map((video) => video.id),
+    ["745600001"],
+  );
+  db.prepare(
+    "update douyin_videos set summary_status = 'limited', error = null where id = ?",
+  ).run("745600001");
   upsertDouyinVideos(db, [
     {
       ...videos[0],

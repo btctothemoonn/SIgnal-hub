@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import {
+  runWithAiProviderFallback,
+  type AiProviderConfig,
+} from "./ai-provider-fallback.ts";
 import { loadRuntimeConfig, type RuntimeWatchItem } from "./runtime-config.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
@@ -742,6 +746,47 @@ function getAiModel(env: EnvLike) {
   );
 }
 
+function getAiProviderId(baseUrl: string) {
+  return baseUrl.includes("minimax")
+    ? "minimax"
+    : baseUrl.includes("deepseek")
+      ? "deepseek"
+      : "openai-compatible";
+}
+
+function getDouyinAiProviderCandidates(env: EnvLike): AiProviderConfig[] {
+  const baseUrl = getAiBaseUrl(env);
+  const primary: AiProviderConfig = {
+    id: getAiProviderId(baseUrl),
+    baseUrl,
+    apiKey: getAiApiKey(env),
+    model: getAiModel(env),
+  };
+  const fallbackApiKey = env.AI_SUMMARY_FALLBACK_API_KEY?.trim() || "";
+  const fallbackBaseUrl = (
+    env.AI_SUMMARY_FALLBACK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL
+  ).replace(/\/+$/, "");
+  const fallback: AiProviderConfig = {
+    id: getAiProviderId(fallbackBaseUrl),
+    baseUrl: fallbackBaseUrl,
+    apiKey: fallbackApiKey,
+    model: env.AI_SUMMARY_FALLBACK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL,
+  };
+  const providers = primary.apiKey ? [primary] : [];
+  if (
+    fallback.apiKey &&
+    !providers.some(
+      (provider) =>
+        provider.baseUrl === fallback.baseUrl &&
+        provider.apiKey === fallback.apiKey &&
+        provider.model === fallback.model,
+    )
+  ) {
+    providers.push(fallback);
+  }
+  return providers;
+}
+
 export function parseAiSummaryContent(content: string): DouyinVideoSummary {
   const cleanedBase = content
     .trim()
@@ -788,10 +833,9 @@ async function requestDouyinAiSummary(
   video: RawDouyinVideo,
   env: EnvLike,
 ): Promise<DouyinVideoSummary> {
-  const apiKey = getAiApiKey(env);
-  if (!apiKey) return buildDouyinResearchSummary(video);
+  const providers = getDouyinAiProviderCandidates(env);
+  if (providers.length === 0) return buildDouyinResearchSummary(video);
 
-  const baseUrl = getAiBaseUrl(env);
   const prompt = `
 你是中文投研助理。只基于下面这个抖音公开视频的标题/简介，提取投研信号。
 如果信息不足，必须写明“内容有限”，不要编造事实。
@@ -817,38 +861,52 @@ async function requestDouyinAiSummary(
 }
 `.trim();
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: getAiModel(env),
-      messages: [
+  const result = await runWithAiProviderFallback({
+    providers,
+    cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
+    request: async (provider) => {
+      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
         {
           role: "system",
           content: "你输出简洁、可复核的中文投研摘要，只使用用户给出的信息。",
         },
         { role: "user", content: prompt },
-      ],
-      temperature: 0.2,
-      response_format: baseUrl.includes("minimax") ? undefined : { type: "json_object" },
-    }),
-    signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 30_000)),
-  });
+          ],
+          temperature: 0.2,
+          response_format: provider.baseUrl.includes("minimax")
+            ? undefined
+            : { type: "json_object" },
+        }),
+        signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 30_000)),
+      });
 
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    const error = payload.error as Record<string, unknown> | undefined;
-    throw new Error(stringValue(error?.message) || `Douyin AI HTTP ${response.status}`);
-  }
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  const first = choices[0] as Record<string, unknown> | undefined;
-  const message = first?.message as Record<string, unknown> | undefined;
-  const content = stringValue(message?.content);
-  if (!content) throw new Error("Douyin AI summary returned empty content");
-  return parseAiSummaryContent(content);
+      const payload = (await response.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      if (!response.ok) {
+        const error = payload.error as Record<string, unknown> | undefined;
+        throw new Error(
+          stringValue(error?.message) || `Douyin AI HTTP ${response.status}`,
+        );
+      }
+      const choices = Array.isArray(payload.choices) ? payload.choices : [];
+      const first = choices[0] as Record<string, unknown> | undefined;
+      const message = first?.message as Record<string, unknown> | undefined;
+      const content = stringValue(message?.content);
+      if (!content) throw new Error("Douyin AI summary returned empty content");
+      return parseAiSummaryContent(content);
+    },
+  });
+  return result.value;
 }
 
 export function getDouyinDbPath(env: EnvLike = process.env) {
@@ -941,6 +999,39 @@ function rowToVideo(row: DbRow): DouyinVideoRecord {
   };
 }
 
+function hasDouyinVideoContentChanged(
+  current: DouyinVideoRecord,
+  video: RawDouyinVideo,
+) {
+  return (
+    current.creatorRef !== video.creatorRef ||
+    current.creatorName !== video.creatorName ||
+    current.title !== video.title ||
+    current.description !== video.description ||
+    current.publishedAt !== video.publishedAt ||
+    current.videoUrl !== video.videoUrl ||
+    current.coverUrl !== video.coverUrl
+  );
+}
+
+export function selectDouyinVideosNeedingAiSummary(
+  db: DatabaseSync,
+  videos: RawDouyinVideo[],
+  env: EnvLike = process.env,
+) {
+  const select = db.prepare("select * from douyin_videos where id = ?");
+  const retryErrors = env.DOUYIN_AI_RETRY_ERRORS?.trim().toLowerCase() === "true";
+  return videos.filter((video) => {
+    const existing = select.get(video.id);
+    if (!existing) return true;
+    const current = rowToVideo(existing);
+    return (
+      hasDouyinVideoContentChanged(current, video) ||
+      (retryErrors && current.summaryStatus === "error")
+    );
+  });
+}
+
 export function upsertDouyinVideos(db: DatabaseSync, videos: RawDouyinVideo[]) {
   let inserted = 0;
   const select = db.prepare("select * from douyin_videos where id = ?");
@@ -986,14 +1077,7 @@ export function upsertDouyinVideos(db: DatabaseSync, videos: RawDouyinVideo[]) {
     }
 
     const current = rowToVideo(existing);
-    const changed =
-      current.creatorRef !== video.creatorRef ||
-      current.creatorName !== video.creatorName ||
-      current.title !== video.title ||
-      current.description !== video.description ||
-      current.publishedAt !== video.publishedAt ||
-      current.videoUrl !== video.videoUrl ||
-      current.coverUrl !== video.coverUrl;
+    const changed = hasDouyinVideoContentChanged(current, video);
     if (changed) {
       update.run(
         video.creatorRef,
@@ -1373,8 +1457,9 @@ export async function refreshDouyinMonitor({
           env,
           fetchedAt,
         });
+        const summaryCandidates = selectDouyinVideosNeedingAiSummary(db, videos, env);
         const inserted = upsertDouyinVideos(db, videos);
-        await summarizeVideosWithAi(db, videos, env);
+        await summarizeVideosWithAi(db, summaryCandidates, env);
         const result: DouyinRefreshResult = {
           creatorRef: creator.ref,
           creatorName: videos[0]?.creatorName ?? null,

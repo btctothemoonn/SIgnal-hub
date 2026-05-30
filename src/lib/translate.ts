@@ -402,13 +402,7 @@ async function translateWithProviders(
   text: string,
   targetLanguage: string,
 ): Promise<TranslationNote | null> {
-  const defaultProviders = getMiniMaxTranslationApiKey()
-    ? "minimax,google,mymemory"
-    : "google,mymemory";
-  const providers = (process.env.TRANSLATION_PROVIDERS || defaultProviders)
-    .split(",")
-    .map((provider) => provider.trim().toLowerCase())
-    .filter(Boolean);
+  const providers = getTranslationProviderNames();
 
   for (const provider of providers) {
     try {
@@ -429,6 +423,16 @@ async function translateWithProviders(
   }
 
   return null;
+}
+
+export function getTranslationProviderNames() {
+  const defaultProviders = getMiniMaxTranslationApiKey()
+    ? "google,minimax,mymemory"
+    : "google,mymemory";
+  return (process.env.TRANSLATION_PROVIDERS || defaultProviders)
+    .split(",")
+    .map((provider) => provider.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export async function translateText(

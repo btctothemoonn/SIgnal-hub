@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  getAvailableAiProviders,
+  runWithAiProviderFallback,
+  type AiProviderConfig,
+} from "./ai-provider-fallback.ts";
+import {
   ALPHA_RESEARCH_STOCKS,
   ALPHA_RESEARCH_STOCK_UNIVERSE,
 } from "./alpha-research-pool.ts";
@@ -517,6 +522,56 @@ function getAlphaSummaryApiKey(env: EnvLike = process.env) {
     env.OPENAI_API_KEY?.trim() ||
     ""
   );
+}
+
+function getAiProviderId(baseUrl: string) {
+  return isMiniMaxBaseUrl(baseUrl)
+    ? "minimax"
+    : isDeepSeekBaseUrl(baseUrl)
+      ? "deepseek"
+      : "openai-compatible";
+}
+
+export function getAlphaSummaryProviderCandidates(
+  env: EnvLike = process.env,
+): AiProviderConfig[] {
+  const baseUrl = getAlphaSummaryBaseUrl(env);
+  const primary: AiProviderConfig = {
+    id: getAiProviderId(baseUrl),
+    baseUrl,
+    apiKey: getAlphaSummaryApiKey(env),
+    model: getAlphaSummaryModel(env),
+  };
+  const fallbackApiKey = env.AI_SUMMARY_FALLBACK_API_KEY?.trim() || "";
+  const fallbackBaseUrl = (
+    env.AI_SUMMARY_FALLBACK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL
+  ).replace(/\/+$/, "");
+  const fallback: AiProviderConfig = {
+    id: getAiProviderId(fallbackBaseUrl),
+    baseUrl: fallbackBaseUrl,
+    apiKey: fallbackApiKey,
+    model:
+      env.AI_SUMMARY_FALLBACK_MODEL?.trim() ||
+      (isDeepSeekBaseUrl(fallbackBaseUrl) ? DEFAULT_DEEPSEEK_MODEL : DEFAULT_MODEL),
+  };
+  const providers = primary.apiKey ? [primary] : [];
+  if (
+    fallback.apiKey &&
+    !providers.some(
+      (provider) =>
+        provider.baseUrl === fallback.baseUrl &&
+        provider.apiKey === fallback.apiKey &&
+        provider.model === fallback.model,
+    )
+  ) {
+    providers.push(fallback);
+  }
+  return providers;
+}
+
+function getPreferredAlphaSummaryProvider(env: EnvLike = process.env) {
+  const providers = getAlphaSummaryProviderCandidates(env);
+  return getAvailableAiProviders(providers)[0] ?? providers[0] ?? null;
 }
 
 export function getAlphaSummaryDbPath(
@@ -1143,53 +1198,64 @@ async function requestAiSummary({
 }: {
   prompt: string;
   env: EnvLike;
-}): Promise<AlphaSummaryContent> {
-  const apiKey = getAlphaSummaryApiKey(env);
-  const baseUrl = getAlphaSummaryBaseUrl(env);
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+}): Promise<{ summary: AlphaSummaryContent; provider: AiProviderConfig }> {
+  const result = await runWithAiProviderFallback({
+    providers: getAlphaSummaryProviderCandidates(env),
+    cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
+    request: async (provider) => {
+      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [
+            {
+              role: "system",
+              content:
+                "You produce concise Chinese market intelligence summaries from supplied messages only.",
+            },
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+          temperature: 0.2,
+          ...(isMiniMaxBaseUrl(provider.baseUrl)
+            ? {}
+            : { response_format: { type: "json_object" } }),
+        }),
+        signal: AbortSignal.timeout(positiveInt(env.AI_SUMMARY_TIMEOUT_MS, 60_000)),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      if (!response.ok) {
+        const message =
+          typeof payload.error === "object" && payload.error && "message" in payload.error
+            ? String((payload.error as Record<string, unknown>).message)
+            : `AI summary HTTP ${response.status}`;
+        throw new Error(message);
+      }
+
+      const choices = Array.isArray(payload.choices) ? payload.choices : [];
+      const first = choices[0] as Record<string, unknown> | undefined;
+      const message = first?.message as Record<string, unknown> | undefined;
+      const content = typeof message?.content === "string" ? message.content : "";
+      if (!content) {
+        throw new Error("AI summary returned empty content");
+      }
+      return parseAlphaSummaryContent(content);
     },
-    body: JSON.stringify({
-      model: getAlphaSummaryModel(env),
-      messages: [
-        {
-          role: "system",
-          content:
-            "You produce concise Chinese market intelligence summaries from supplied messages only.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.2,
-      ...(isMiniMaxBaseUrl(baseUrl)
-        ? {}
-        : { response_format: { type: "json_object" } }),
-    }),
-    signal: AbortSignal.timeout(positiveInt(env.AI_SUMMARY_TIMEOUT_MS, 60_000)),
   });
-
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    const message =
-      typeof payload.error === "object" && payload.error && "message" in payload.error
-        ? String((payload.error as Record<string, unknown>).message)
-        : `AI summary HTTP ${response.status}`;
-    throw new Error(message);
-  }
-
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  const first = choices[0] as Record<string, unknown> | undefined;
-  const message = first?.message as Record<string, unknown> | undefined;
-  const content = typeof message?.content === "string" ? message.content : "";
-  if (!content) {
-    throw new Error("AI summary returned empty content");
-  }
-  return parseAlphaSummaryContent(content);
+  return {
+    summary: result.value,
+    provider: result.provider,
+  };
 }
 
 export async function getOrCreateAlphaSummary({
@@ -1213,7 +1279,8 @@ export async function getOrCreateAlphaSummary({
     scope: normalizedScope,
     audience: normalizedAudience,
   });
-  const model = getAlphaSummaryModel(env);
+  const providers = getAlphaSummaryProviderCandidates(env);
+  const model = getPreferredAlphaSummaryProvider(env)?.model ?? getAlphaSummaryModel(env);
   const db = openAlphaSummaryDb(getAlphaSummaryDbPath(env, normalizedAudience));
   try {
     const cached = readCachedSummary(period.key, db);
@@ -1237,7 +1304,7 @@ export async function getOrCreateAlphaSummary({
       return {
         success: true,
         status: "empty",
-        configured: Boolean(getAlphaSummaryApiKey(env)),
+        configured: providers.length > 0,
         period,
         generatedAt: null,
         model,
@@ -1248,7 +1315,7 @@ export async function getOrCreateAlphaSummary({
       };
     }
 
-    if (!getAlphaSummaryApiKey(env)) {
+    if (providers.length === 0) {
       return {
         success: false,
         status: "needs_key",
@@ -1265,7 +1332,7 @@ export async function getOrCreateAlphaSummary({
     }
 
     try {
-      const summary = await requestAiSummary({
+      const { summary, provider } = await requestAiSummary({
         prompt: buildAlphaSummaryPrompt({ period, items }),
         env,
       });
@@ -1275,7 +1342,7 @@ export async function getOrCreateAlphaSummary({
         configured: true,
         period,
         generatedAt: new Date().toISOString(),
-        model,
+        model: provider.model,
         itemCount: items.length,
         sourceCounts,
         summary,
