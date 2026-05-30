@@ -885,7 +885,7 @@ async function requestDouyinAiSummary(
             ? undefined
             : { type: "json_object" },
         }),
-        signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 30_000)),
+        signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 60_000)),
       });
 
       const payload = (await response.json().catch(() => ({}))) as Record<
