@@ -1170,6 +1170,13 @@ ${sourceText}
 `.trim();
 }
 
+function repairCommonAiJsonIssues(content: string) {
+  return content
+    .replace(/,\s*([}\]])/g, "$1")
+    .replace(/"\s*\n\s*"/g, '",\n"')
+    .replace(/([}\]])\s*\n\s*"/g, '$1,\n"');
+}
+
 export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
   const cleanedBase = content
     .trim()
@@ -1184,7 +1191,12 @@ export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
     jsonStart >= 0 && jsonEnd > jsonStart
       ? cleanedBase.slice(jsonStart, jsonEnd + 1)
       : cleanedBase;
-  const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    parsed = JSON.parse(repairCommonAiJsonIssues(cleaned)) as Record<string, unknown>;
+  }
   const normalized = normalizeAlphaSummaryRecord(parsed);
   if (!normalized) {
     throw new Error("AI summary missing author groups");

@@ -25,6 +25,12 @@ const providers = [
 ];
 
 assert.equal(isQuotaExhaustedError(quotaError), true);
+assert.equal(
+  isQuotaExhaustedError(
+    "Token Plan is intended for interactive usage. Current request volume is high. (2062)",
+  ),
+  true,
+);
 resetAiProviderCircuitBreakers();
 
 const firstCalls = [];

@@ -10,6 +10,7 @@ import {
   isMiniMaxBaseUrl,
   isStockSummaryRelevantItem,
   normalizeAlphaSummaryAudience,
+  parseAlphaSummaryContent,
   shouldReuseCachedAlphaSummary,
 } from "./alpha-summary.ts";
 
@@ -73,6 +74,21 @@ assert.notEqual(
   getAlphaSummaryDbPath({}, "signals"),
   getAlphaSummaryDbPath({}, "stocks"),
 );
+const repairedSummary = parseAlphaSummaryContent(`{
+  "headline": "summary",
+  "authors": [{
+    "name": "@analyst",
+    "sourceCount": 2,
+    "coreView": "view",
+    "alpha": ["first"
+      "second"],
+    "watch": []
+  }],
+  "consensus": [],
+  "risks": [],
+  "watchlist": [],
+}`);
+assert.deepEqual(repairedSummary.authors[0].alpha, ["first", "second"]);
 
 const reusableCachePeriod = getAlphaSummaryPeriod({ now });
 assert.equal(

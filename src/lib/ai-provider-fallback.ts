@@ -21,7 +21,7 @@ function asTimestamp(now: Date | number) {
 }
 
 export function isQuotaExhaustedError(error: unknown) {
-  return /usage limit exceeded|weekly usage limit reached|quota exceeded|insufficient (?:balance|credits?)|credit balance|额度|限额/i.test(
+  return /usage limit exceeded|weekly usage limit reached|quota exceeded|insufficient (?:balance|credits?)|credit balance|额度|限额|\(2062\)/i.test(
     errorMessage(error),
   );
 }
