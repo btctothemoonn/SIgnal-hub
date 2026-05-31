@@ -106,6 +106,7 @@ assert.equal(
   true,
 );
 assert.equal(shouldTranslateText("@WhitePeach 인사말 궁금...!"), true);
+assert.equal(shouldTranslateText("@WhitePeach 인사말 젤"), true);
 assert.equal(
   isUsefulTranslation(
     "@WhitePeach 인사말 궁금...!",

@@ -79,7 +79,8 @@ export function shouldTranslateText(text: string): boolean {
     .replace(/\$[A-Za-z][A-Za-z0-9_]{1,15}\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (semantic.length < 6) {
+  const minimumSemanticLength = /\p{Script=Hangul}/u.test(semantic) ? 3 : 6;
+  if (semantic.length < minimumSemanticLength) {
     return false;
   }
 
