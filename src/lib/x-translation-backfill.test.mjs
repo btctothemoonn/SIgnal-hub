@@ -224,4 +224,62 @@ const ensured = await backfill.ensureXFeedItemTranslation({
 assert.ok(ensured.translation?.text.startsWith("译文 Main text"));
 assert.ok(ensured.quotedTweet?.translation?.text.startsWith("译文 Is it a buy"));
 
+store.upsertXPipelineRealtimeUpdate(
+  {
+    eventType: "NEW_TWEET_REPLY",
+    account: "Serenity",
+    displayName: "Serenity",
+    createdAt: "2026-05-20T10:02:00.000Z",
+    profileUrl: "https://x.com/Serenity",
+    remark: "",
+    feedItem: {
+      id: "korean-quoted-tweet",
+      text: "\u4e2d\u6587\u4e3b\u6587\u5df2\u7ecf\u53ef\u8bfb",
+      createdAt: "2026-05-20T10:02:00.000Z",
+      username: "Serenity",
+      displayName: "Serenity",
+      profileUrl: "https://x.com/Serenity",
+      userAvatar: "",
+      tweetUrl: "https://x.com/Serenity/status/korean-quoted-tweet",
+      hashtags: [],
+      likes: 0,
+      retweets: 0,
+      replies: 0,
+      quotes: 0,
+      views: 0,
+      media: [],
+      quotedTweet: {
+        id: "korean-quote",
+        text: "\uc544 \uc194\uc9c1\ud788 \uc774\ub534 \uac78 \ubcf4\ub294 \uac74 Low IQ \uc778\uc99d\ud558\ub294 \uac70 \uc544\ub2cc\uac00",
+        createdAt: "2026-05-20T09:59:00.000Z",
+        username: "WhitePeach",
+        displayName: "WhitePeach",
+        profileUrl: "https://x.com/WhitePeach",
+        userAvatar: "",
+        tweetUrl: "https://x.com/WhitePeach/status/korean-quote",
+        media: [],
+        translation: null,
+        relation: "reply",
+      },
+      origin: "watch",
+      queryLabel: "985monitor / NEW_TWEET_REPLY",
+      translation: null,
+    },
+  },
+  db,
+);
+
+const koreanStats = await backfill.backfillMissingXTranslations({
+  db,
+  limit: 10,
+  targetLanguage: "zh-CN",
+  cacheNamespace: "test",
+  retryCooldownMs: 0,
+});
+assert.equal(koreanStats.checked, 1);
+assert.equal(koreanStats.translated, 1);
+const koreanItem = store.getXPipelineFeedItem("korean-quoted-tweet", db);
+assert.equal(koreanItem?.translation, null);
+assert.ok(koreanItem?.quotedTweet?.translation?.text.startsWith("\u8bd1\u6587 "));
+
 console.log("ok - x translation backfill repairs missing and partial X translations");

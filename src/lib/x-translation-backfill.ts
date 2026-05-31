@@ -6,6 +6,7 @@ import {
 } from "./translate.ts";
 import {
   getXPipelineDb,
+  getXPipelineFeedItem,
   listXPipelineTranslationCandidates,
   setXPipelineFeedTranslation,
 } from "./x-pipeline-store.ts";
@@ -140,9 +141,22 @@ export async function backfillMissingXTranslations(
     inFlightTranslationIds.add(candidate.id);
     stats.attempted += 1;
     try {
-      const translation = await translateXText(candidate.text, options);
-      if (translation) {
-        setXPipelineFeedTranslation(candidate.id, translation, db);
+      const feedItem = getXPipelineFeedItem(candidate.id, db);
+      const translatedFeedItem = feedItem
+        ? await ensureXFeedItemTranslation(feedItem, options)
+        : null;
+      if (
+        translatedFeedItem &&
+        feedItem &&
+        (translatedFeedItem.translation !== feedItem.translation ||
+          translatedFeedItem.quotedTweet !== feedItem.quotedTweet)
+      ) {
+        setXPipelineFeedTranslation(
+          candidate.id,
+          translatedFeedItem.translation,
+          db,
+          translatedFeedItem.quotedTweet,
+        );
         failedTranslationCooldowns.delete(candidate.id);
         stats.translated += 1;
       } else {

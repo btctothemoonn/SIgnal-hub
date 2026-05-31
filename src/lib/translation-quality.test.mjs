@@ -105,5 +105,13 @@ assert.equal(
   ),
   true,
 );
+assert.equal(shouldTranslateText("@WhitePeach 인사말 궁금...!"), true);
+assert.equal(
+  isUsefulTranslation(
+    "@WhitePeach 인사말 궁금...!",
+    note("@WhitePeach 想知道问候语……！"),
+  ),
+  true,
+);
 
 console.log("ok - translation quality suppresses redundant translations");

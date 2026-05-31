@@ -94,7 +94,7 @@ export function shouldTranslateText(text: string): boolean {
     return false;
   }
 
-  return /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Greek}]/u.test(
+  return /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Greek}\p{Script=Hangul}]/u.test(
     semantic,
   );
 }

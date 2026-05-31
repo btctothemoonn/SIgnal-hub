@@ -981,13 +981,14 @@ export function listXPipelineTranslationCandidates(
   return db
     .prepare(
       `
-      select id, text, translation_json
+      select id, text, quoted_tweet_json, translation_json
       from x_feed
       where trim(text) != ''
         and (
           translation_json is null
           or translation_json like '%"provider":"985monitor"%'
           or translation_json like '%"provider": "985monitor"%'
+          or quoted_tweet_json is not null
         )
       order by created_at desc, updated_at desc
       limit ?
@@ -996,9 +997,13 @@ export function listXPipelineTranslationCandidates(
     .all(scanLimit)
     .filter((row) => {
       const text = stringValue(row.text);
+      const quotedTweet = parseQuotedTweet(row.quoted_tweet_json);
       return (
-        shouldTranslateText(text) &&
-        !isUsefulTranslation(text, parseTranslation(row.translation_json))
+        (shouldTranslateText(text) &&
+          !isUsefulTranslation(text, parseTranslation(row.translation_json))) ||
+        (Boolean(quotedTweet?.text?.trim()) &&
+          shouldTranslateText(quotedTweet?.text ?? "") &&
+          !isUsefulTranslation(quotedTweet?.text ?? "", quotedTweet?.translation))
       );
     })
     .slice(0, limit)
@@ -1012,7 +1017,25 @@ export function setXPipelineFeedTranslation(
   id: string,
   translation: TranslationNote | null,
   db = getXPipelineDb(),
+  quotedTweet?: TwitterQuotedTweet | null,
 ) {
+  if (quotedTweet !== undefined) {
+    if (quotedTweet && isCompleteQuotedTweet(quotedTweet)) {
+      upsertXPipelineQuotedTweet(quotedTweet, db);
+    }
+    run(
+      db.prepare(`
+        update x_feed
+        set translation_json = ?, quoted_tweet_json = ?, updated_at = ?
+        where id = ?
+      `),
+      translation ? jsonString(translation) : null,
+      quotedTweet ? jsonString(quotedTweet) : null,
+      nowIso(),
+      id,
+    );
+    return;
+  }
   run(
     db.prepare(`
       update x_feed
