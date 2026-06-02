@@ -5,8 +5,10 @@ import {
   Fragment,
   memo,
   startTransition,
+  useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -36,6 +38,11 @@ import {
   getSignalFeedRangeLimit,
   type SignalFeedRange,
 } from "@/lib/signal-feed-range";
+import {
+  calculateSignalFeedScrollDelta,
+  parseSignalFeedReadingAnchor,
+  type SignalFeedReadingAnchor,
+} from "@/lib/signal-feed-reading-position";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
 import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
 import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
@@ -53,6 +60,8 @@ const MAX_X_NEWS_ITEMS = 200;
 const SNAPSHOT_REFRESH_MS = 30000;
 const SIGNAL_FEED_AUTHOR_FAVORITES_KEY =
   "signal-hub:signal-feed-author-favorites";
+const SIGNAL_FEED_READING_ANCHOR_KEY =
+  "signal-hub:signal-feed-reading-anchor";
 
 function readSignalFeedAuthorFavorites() {
   if (typeof window === "undefined") return new Set<string>();
@@ -623,6 +632,12 @@ export function UnifiedNewsPanel({
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const authorMenuRef = useRef<HTMLDivElement | null>(null);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const stagedReadingPositionRef = useRef<SignalFeedReadingAnchor | null>(null);
+  const readingAnchorFrameRef = useRef<number | null>(null);
+  const [readingPositionStatus, setReadingPositionStatus] = useState<string | null>(
+    null,
+  );
   const [telegramRefreshBusy, setTelegramRefreshBusy] = useState(false);
   const [telegramManualStatus, setTelegramManualStatus] = useState<string | null>(null);
   const [xUsageBusy, setXUsageBusy] = useState(false);
@@ -637,6 +652,131 @@ export function UnifiedNewsPanel({
     telegram: new Set(initialTelegramSnapshot.feed.map((item) => item.id)),
     x: new Set(initialXSnapshot.feed.map((item) => item.id)),
   }));
+
+  const findTimelineItem = useCallback((itemId: string) => {
+    const timeline = timelineRef.current;
+    if (!timeline) return null;
+
+    return (
+      [...timeline.querySelectorAll<HTMLElement>("[data-signal-feed-item-id]")].find(
+        (item) => item.dataset.signalFeedItemId === itemId,
+      ) || null
+    );
+  }, []);
+
+  const timelineUsesInternalScroll = useCallback(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return false;
+
+    const overflowY = window.getComputedStyle(timeline).overflowY;
+    return (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      timeline.scrollHeight > timeline.clientHeight + 1
+    );
+  }, []);
+
+  const captureVisibleReadingAnchor = useCallback(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return null;
+
+    const boundaryTop = timelineUsesInternalScroll()
+      ? timeline.getBoundingClientRect().top
+      : 0;
+    const items = timeline.querySelectorAll<HTMLElement>(
+      "[data-signal-feed-item-id]",
+    );
+    for (const item of items) {
+      const rect = item.getBoundingClientRect();
+      if (rect.bottom <= boundaryTop + 1 || rect.top >= window.innerHeight) {
+        continue;
+      }
+
+      const itemId = item.dataset.signalFeedItemId;
+      if (!itemId) return null;
+      return {
+        itemId,
+        viewportTop: rect.top,
+        savedAt: new Date().toISOString(),
+      } satisfies SignalFeedReadingAnchor;
+    }
+
+    return null;
+  }, [timelineUsesInternalScroll]);
+
+  const persistVisibleReadingAnchor = useCallback(() => {
+    const anchor = captureVisibleReadingAnchor();
+    if (!anchor) return null;
+
+    try {
+      window.localStorage.setItem(
+        SIGNAL_FEED_READING_ANCHOR_KEY,
+        JSON.stringify(anchor),
+      );
+    } catch {
+      return null;
+    }
+    return anchor;
+  }, [captureVisibleReadingAnchor]);
+
+  const stageReadingPositionCompensation = useCallback(() => {
+    const anchor = persistVisibleReadingAnchor();
+    if (anchor) stagedReadingPositionRef.current = anchor;
+  }, [persistVisibleReadingAnchor]);
+
+  const scrollReadingViewportBy = useCallback(
+    (top: number) => {
+      if (timelineUsesInternalScroll()) {
+        timelineRef.current?.scrollBy({ top });
+        return;
+      }
+
+      window.scrollBy({ top });
+    },
+    [timelineUsesInternalScroll],
+  );
+
+  const restoreStagedReadingPosition = useCallback(() => {
+    const anchor = stagedReadingPositionRef.current;
+    if (!anchor) return;
+    stagedReadingPositionRef.current = null;
+
+    window.requestAnimationFrame(() => {
+      const item = findTimelineItem(anchor.itemId);
+      if (!item) return;
+
+      const delta = calculateSignalFeedScrollDelta(
+        anchor.viewportTop,
+        item.getBoundingClientRect().top,
+      );
+      if (Math.abs(delta) < 1) return;
+      scrollReadingViewportBy(delta);
+    });
+  }, [findTimelineItem, scrollReadingViewportBy]);
+
+  const returnToSavedReadingPosition = useCallback(() => {
+    let anchor: SignalFeedReadingAnchor | null = null;
+    try {
+      anchor = parseSignalFeedReadingAnchor(
+        window.localStorage.getItem(SIGNAL_FEED_READING_ANCHOR_KEY),
+      );
+    } catch {
+      setReadingPositionStatus("当前浏览器无法保存阅读位置");
+      return;
+    }
+    if (!anchor) {
+      setReadingPositionStatus("暂无上次阅读位置");
+      return;
+    }
+
+    const item = findTimelineItem(anchor.itemId);
+    if (!item) {
+      setReadingPositionStatus("上次阅读内容不在当前列表");
+      return;
+    }
+
+    item.scrollIntoView({ behavior: "smooth", block: "center" });
+    setReadingPositionStatus("已返回上次阅读位置");
+  }, [findTimelineItem]);
 
   useEffect(() => {
     setPortalRoot(document.body);
@@ -838,6 +978,35 @@ export function UnifiedNewsPanel({
 
   const deferredFeed = filteredFeed;
 
+  useLayoutEffect(() => {
+    restoreStagedReadingPosition();
+  }, [deferredFeed, restoreStagedReadingPosition]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+
+    const scheduleAnchorSave = () => {
+      if (readingAnchorFrameRef.current !== null) return;
+      readingAnchorFrameRef.current = window.requestAnimationFrame(() => {
+        readingAnchorFrameRef.current = null;
+        persistVisibleReadingAnchor();
+      });
+    };
+
+    timeline.addEventListener("scroll", scheduleAnchorSave, { passive: true });
+    window.addEventListener("scroll", scheduleAnchorSave, { passive: true });
+    scheduleAnchorSave();
+    return () => {
+      timeline.removeEventListener("scroll", scheduleAnchorSave);
+      window.removeEventListener("scroll", scheduleAnchorSave);
+      if (readingAnchorFrameRef.current !== null) {
+        window.cancelAnimationFrame(readingAnchorFrameRef.current);
+        readingAnchorFrameRef.current = null;
+      }
+    };
+  }, [persistVisibleReadingAnchor]);
+
   const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef(false);
 
@@ -880,6 +1049,7 @@ export function UnifiedNewsPanel({
         return;
       }
 
+      stageReadingPositionCompensation();
       startTransition(() => {
         const [telegramResult, xResult] = results;
         if (telegramResult.status === "fulfilled") {
@@ -957,6 +1127,7 @@ export function UnifiedNewsPanel({
           return;
         }
 
+        stageReadingPositionCompensation();
         startTransition(() => {
           setXSnapshot((current) =>
             mergeTwitterSnapshot(
@@ -998,6 +1169,7 @@ export function UnifiedNewsPanel({
         return;
       }
 
+      stageReadingPositionCompensation();
       startTransition(() => {
         setTelegramSnapshot((current) =>
           mergeTelegramSnapshot(
@@ -1061,6 +1233,7 @@ export function UnifiedNewsPanel({
     initialXSnapshot.status,
     feedRange,
     pollXSnapshot,
+    stageReadingPositionCompensation,
   ]);
 
   const mergedErrors = Array.from(
@@ -1104,6 +1277,7 @@ export function UnifiedNewsPanel({
     setTelegramManualStatus("TG 刷新中...");
     try {
       const snapshot = await requestTelegramSnapshot({ range: feedRange });
+      stageReadingPositionCompensation();
       startTransition(() => {
         setTelegramSnapshot((current) =>
           feedRange === DEFAULT_SIGNAL_FEED_RANGE
@@ -1168,6 +1342,7 @@ export function UnifiedNewsPanel({
         throw new Error(payload.error || `985 refresh failed (${response.status})`);
       }
       const snapshot = await requestXSnapshot({ range: feedRange });
+      stageReadingPositionCompensation();
       startTransition(() => {
         setXSnapshot((current) => {
           const merged =
@@ -1219,6 +1394,7 @@ export function UnifiedNewsPanel({
         throw new Error(payload.error || `hybrid backfill failed (${response.status})`);
       }
       const snapshot = await requestXSnapshot({ range: feedRange });
+      stageReadingPositionCompensation();
       startTransition(() => {
         setXSnapshot((current) => {
           const merged =
@@ -1278,6 +1454,7 @@ export function UnifiedNewsPanel({
         if (!payload.running) {
           const snapshot = await requestXSnapshot({ range: feedRange });
           if (!isActive) return;
+          stageReadingPositionCompensation();
           startTransition(() => {
             setXSnapshot((current) =>
               feedRange === DEFAULT_SIGNAL_FEED_RANGE
@@ -1301,7 +1478,7 @@ export function UnifiedNewsPanel({
       isActive = false;
       window.clearInterval(timer);
     };
-  }, [xCatchupRunning, feedRange]);
+  }, [xCatchupRunning, feedRange, stageReadingPositionCompensation]);
 
   return (
     <section
@@ -1531,6 +1708,18 @@ export function UnifiedNewsPanel({
 
         <div className="border-t border-line/40 px-3 py-2 text-[11px] text-muted">
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+            <button
+              type="button"
+              onClick={returnToSavedReadingPosition}
+              className="order-[-40] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground"
+            >
+              返回上次阅读
+            </button>
+            {readingPositionStatus ? (
+              <span className="max-w-[16rem] truncate text-muted">
+                {readingPositionStatus}
+              </span>
+            ) : null}
             <span
               className={`inline-flex items-center gap-1 rounded-md border border-line/60 bg-panel-strong px-2 py-1 font-medium ${
                 telegramSnapshot.status === "live"
@@ -1650,6 +1839,8 @@ export function UnifiedNewsPanel({
 
       {/* Timeline */}
       <div
+        ref={timelineRef}
+        data-signal-feed-timeline
         className={`min-h-0 space-y-2.5 bg-background/70 p-2 sm:p-3 ${
           rail ? "lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" : ""
         }`}
@@ -1671,10 +1862,12 @@ export function UnifiedNewsPanel({
             return (
               <article
                 key={item.id}
+                data-signal-feed-item-id={item.id}
                 role="button"
                 tabIndex={0}
                 onClick={() => {
                   if (window.getSelection()?.toString()) return;
+                  persistVisibleReadingAnchor();
                   setReadItems((current) => {
                     const next = new Set(current);
                     next.add(item.id);
@@ -1684,6 +1877,7 @@ export function UnifiedNewsPanel({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
+                    persistVisibleReadingAnchor();
                     setReadItems((current) => {
                       const next = new Set(current);
                       next.add(item.id);
