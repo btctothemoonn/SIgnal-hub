@@ -16,6 +16,7 @@
 # local Codex tooling/state
 /.codex-tools/
 /.superpowers/
+/.worktrees/
 
 # next.js
 /.next/
