@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { SignalFeedFloatingNavigation } from "@/components/signal-feed-floating-navigation";
 import {
   Fragment,
   memo,
@@ -638,6 +639,8 @@ export function UnifiedNewsPanel({
   const [readingPositionStatus, setReadingPositionStatus] = useState<string | null>(
     null,
   );
+  const [hasScrolledAwayFromLatest, setHasScrolledAwayFromLatest] =
+    useState(false);
   const [telegramRefreshBusy, setTelegramRefreshBusy] = useState(false);
   const [telegramManualStatus, setTelegramManualStatus] = useState<string | null>(null);
   const [xUsageBusy, setXUsageBusy] = useState(false);
@@ -673,6 +676,45 @@ export function UnifiedNewsPanel({
       (overflowY === "auto" || overflowY === "scroll") &&
       timeline.scrollHeight > timeline.clientHeight + 1
     );
+  }, []);
+
+  const updateReadingNavigationState = useCallback(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+
+    if (timelineUsesInternalScroll()) {
+      setHasScrolledAwayFromLatest(timeline.scrollTop > 24);
+      return;
+    }
+
+    const first = timeline.querySelector<HTMLElement>(
+      "[data-signal-feed-item-id]",
+    );
+    setHasScrolledAwayFromLatest(
+      first ? first.getBoundingClientRect().top < 0 : false,
+    );
+  }, [timelineUsesInternalScroll]);
+
+  const scrollToLatestSignal = useCallback(() => {
+    const first = timelineRef.current?.querySelector<HTMLElement>(
+      "[data-signal-feed-item-id]",
+    );
+    if (!first) return;
+
+    first.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHasScrolledAwayFromLatest(false);
+  }, []);
+
+  const scrollToOldestSignal = useCallback(() => {
+    const items = timelineRef.current?.querySelectorAll<HTMLElement>(
+      "[data-signal-feed-item-id]",
+    );
+    if (!items?.length) return;
+
+    items.item(items.length - 1).scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
   }, []);
 
   const captureVisibleReadingAnchor = useCallback(() => {
@@ -892,6 +934,14 @@ export function UnifiedNewsPanel({
       truth: truthNew,
     };
   }, [telegramSnapshot.feed, xSnapshot.feed, seenIds]);
+  const activeTabNewCount =
+    activeTab === "telegram"
+      ? newCounts.telegram
+      : activeTab === "x"
+        ? newCounts.x
+        : activeTab === "truth"
+          ? newCounts.truth
+          : newCounts.all;
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
@@ -990,6 +1040,7 @@ export function UnifiedNewsPanel({
       if (readingAnchorFrameRef.current !== null) return;
       readingAnchorFrameRef.current = window.requestAnimationFrame(() => {
         readingAnchorFrameRef.current = null;
+        updateReadingNavigationState();
         persistVisibleReadingAnchor();
       });
     };
@@ -1005,7 +1056,7 @@ export function UnifiedNewsPanel({
         readingAnchorFrameRef.current = null;
       }
     };
-  }, [persistVisibleReadingAnchor]);
+  }, [persistVisibleReadingAnchor, updateReadingNavigationState]);
 
   const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef(false);
@@ -1484,7 +1535,7 @@ export function UnifiedNewsPanel({
     <section
       data-mobile-command-feed
       className={[
-        "min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel/95 shadow-[0_24px_60px_-50px_rgba(0,0,0,0.65)]",
+        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel/95 shadow-[0_24px_60px_-50px_rgba(0,0,0,0.65)]",
         rail
           ? "lg:sticky lg:top-[5.25rem] lg:flex lg:h-[calc(100vh-6rem)] lg:min-h-0 lg:flex-col"
           : "",
@@ -1836,6 +1887,14 @@ export function UnifiedNewsPanel({
           </p>
         </div>
       ) : null}
+
+      <SignalFeedFloatingNavigation
+        showLatest={hasScrolledAwayFromLatest}
+        newCount={activeTabNewCount}
+        onLatest={scrollToLatestSignal}
+        onSaved={returnToSavedReadingPosition}
+        onOldest={scrollToOldestSignal}
+      />
 
       {/* Timeline */}
       <div
