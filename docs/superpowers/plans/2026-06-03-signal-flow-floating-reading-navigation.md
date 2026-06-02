@@ -176,4 +176,3 @@ Expected: PASS.
 - [ ] **Step 3: Merge, push, and deploy**
 
 Merge the feature branch into `main`, push `main`, run `scripts/deploy-vps.sh` on the VPS, and verify the deployed commit plus service health.
-
