@@ -17,4 +17,13 @@ assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(displayUsername,\s*twee
 assert.match(source, /title:\s*tweet\.quotedTweet\.displayName\s*\|\|/);
 assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(\s*tweet\.quotedTweet\.username\.replace/);
 
+const mainMediaIndex = source.indexOf("{/* Media */}");
+const quotedTweetIndex = source.indexOf("{/* Quoted tweet */}");
+assert.ok(mainMediaIndex >= 0, "main media block should exist");
+assert.ok(quotedTweetIndex >= 0, "quoted tweet block should exist");
+assert.ok(
+  mainMediaIndex < quotedTweetIndex,
+  "main tweet media should render before the quoted tweet card",
+);
+
 console.log("ok - unified news panel keeps 300 telegram items without expanding all feed");

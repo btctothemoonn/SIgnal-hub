@@ -2015,6 +2015,30 @@ export function UnifiedNewsPanel({
                     </div>
                   ) : null}
 
+                  {/* Media */}
+                  {item.media ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLightboxMedia(item.media);
+                      }}
+                      className="mt-2.5 block w-full overflow-hidden rounded-lg border border-line/50 bg-background/35 text-left"
+                      aria-label={`查看${item.media.label || "图片"}大图`}
+                    >
+                      <Image
+                        src={item.media.previewUrl}
+                        alt={item.media.label}
+                        width={mediaViewport.width}
+                        height={mediaViewport.height}
+                        unoptimized
+                        className={`block h-auto w-full cursor-zoom-in object-contain transition-opacity hover:opacity-95 ${
+                          rail ? "max-h-[14rem]" : "max-h-[20rem]"
+                        }`}
+                      />
+                    </button>
+                  ) : null}
+
                   {/* Quoted tweet */}
                   {item.quotedTweet ? (
                     <div className="mt-2.5 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2">
@@ -2128,30 +2152,6 @@ export function UnifiedNewsPanel({
                         </button>
                       ) : null}
                     </div>
-                  ) : null}
-
-                  {/* Media */}
-                  {item.media ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLightboxMedia(item.media);
-                      }}
-                      className="mt-2.5 block w-full overflow-hidden rounded-lg border border-line/50 bg-background/35 text-left"
-                      aria-label={`查看${item.media.label || "图片"}大图`}
-                    >
-                      <Image
-                        src={item.media.previewUrl}
-                        alt={item.media.label}
-                        width={mediaViewport.width}
-                        height={mediaViewport.height}
-                        unoptimized
-                        className={`block h-auto w-full cursor-zoom-in object-contain transition-opacity hover:opacity-95 ${
-                          rail ? "max-h-[14rem]" : "max-h-[20rem]"
-                        }`}
-                      />
-                    </button>
                   ) : null}
 
                   {/* Chips row */}
