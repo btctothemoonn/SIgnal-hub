@@ -89,6 +89,18 @@ export type XHybridAccountFetchStatus = {
   isCoolingDown: boolean;
 };
 
+export type XHybridTweetFetchStateInput = {
+  tweetId: string;
+  status: "success" | "low_quality" | "empty" | "error";
+  detail: string;
+  fetchedAt?: string;
+};
+
+export type XHybridTweetFetchState = XHybridTweetFetchStateInput & {
+  fetchedAt: string;
+  updatedAt: string;
+};
+
 let sharedDb: DatabaseSync | null = null;
 
 function nowIso() {
@@ -583,6 +595,14 @@ export function initXPipelineDb(db: DatabaseSync) {
       updated_at text not null
     );
 
+    create table if not exists x_hybrid_tweet_fetches (
+      tweet_id text primary key,
+      status text not null,
+      detail text not null default '',
+      fetched_at text not null,
+      updated_at text not null
+    );
+
     create table if not exists x_api_usage_daily (
       date_key text primary key,
       time_zone text not null,
@@ -682,6 +702,99 @@ export function markXHybridAccountFetched(
     fetchedAt,
     nowIso(),
   );
+}
+
+export function getXHybridTweetFetchState(
+  tweetId: string,
+  db = getXPipelineDb(),
+): XHybridTweetFetchState | null {
+  const row = db
+    .prepare("select * from x_hybrid_tweet_fetches where tweet_id = ?")
+    .get(tweetId);
+  if (!row) return null;
+  return {
+    tweetId: stringValue(row.tweet_id),
+    status: stringValue(row.status) as XHybridTweetFetchState["status"],
+    detail: stringValue(row.detail),
+    fetchedAt: stringValue(row.fetched_at),
+    updatedAt: stringValue(row.updated_at),
+  };
+}
+
+export function markXHybridTweetFetch(
+  input: XHybridTweetFetchStateInput,
+  db = getXPipelineDb(),
+) {
+  const fetchedAt = input.fetchedAt || nowIso();
+  run(
+    db.prepare(`
+      insert into x_hybrid_tweet_fetches(tweet_id, status, detail, fetched_at, updated_at)
+      values (?, ?, ?, ?, ?)
+      on conflict(tweet_id) do update set
+        status = excluded.status,
+        detail = excluded.detail,
+        fetched_at = excluded.fetched_at,
+        updated_at = excluded.updated_at
+    `),
+    input.tweetId,
+    input.status,
+    input.detail,
+    fetchedAt,
+    fetchedAt,
+  );
+}
+
+export function getXHybridTweetFetchDecision(
+  tweetId: string,
+  options: {
+    db?: DatabaseSync;
+    now?: Date;
+    successCooldownMs?: number;
+    lowQualityCooldownMs?: number;
+    emptyCooldownMs?: number;
+    errorCooldownMs?: number;
+  } = {},
+): {
+  allowed: boolean;
+  reason:
+    | "no-history"
+    | "success-cooldown"
+    | "low-quality-cooldown"
+    | "empty-cooldown"
+    | "error-cooldown"
+    | "cooldown-expired";
+  state: XHybridTweetFetchState | null;
+} {
+  const state = getXHybridTweetFetchState(tweetId, options.db);
+  if (!state) {
+    return { allowed: true, reason: "no-history", state: null };
+  }
+  const nowMs = options.now?.getTime() ?? Date.now();
+  const fetchedMs = Date.parse(state.fetchedAt);
+  const cooldownMs =
+    state.status === "success"
+      ? options.successCooldownMs ?? 6 * 60 * 60_000
+      : state.status === "low_quality"
+        ? options.lowQualityCooldownMs ?? 6 * 60 * 60_000
+        : state.status === "empty"
+          ? options.emptyCooldownMs ?? 60 * 60_000
+          : options.errorCooldownMs ?? 30 * 60_000;
+  const active = Number.isFinite(fetchedMs) && nowMs < fetchedMs + cooldownMs;
+  if (active) {
+    return {
+      allowed: false,
+      reason:
+        state.status === "success"
+          ? "success-cooldown"
+          : state.status === "low_quality"
+            ? "low-quality-cooldown"
+            : state.status === "empty"
+              ? "empty-cooldown"
+              : "error-cooldown",
+      state,
+    };
+  }
+  return { allowed: true, reason: "cooldown-expired", state };
 }
 
 export function getXHybridSourceStatus(

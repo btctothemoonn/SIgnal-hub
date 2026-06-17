@@ -64,11 +64,12 @@ import {
   isFullTweetByIdCacheHit,
 } from "../src/lib/x-hybrid-tweet-cache.ts";
 import {
+  guardedTweetByIdFetch,
+} from "../src/lib/x-hybrid-tweet-fetch.ts";
+import {
   resolveHybridQuotedTweet,
 } from "../src/lib/x-hybrid-quoted-tweet.ts";
-import {
-  reserveXApiPoints,
-} from "../src/lib/x-api-usage.ts";
+import { reserveXApiPoints } from "../src/lib/x-api-usage.ts";
 import {
   getXHybridAccountFetchStatus,
   getXPipelineFeedItem,
@@ -502,49 +503,55 @@ async function enrichCandidate(
       };
     }
 
-    const reservation = reserveXApiPoints({
-      kind: "tweet_by_id",
+    const fetchResult = await guardedTweetByIdFetch({
+      tweetId: candidate.tweetId,
       detail: `tweet-id ${candidate.tweetId}`,
+      fetchTweetById: get6551TwitterTweetById,
     });
-    if (!reservation.allowed) {
+    if (fetchResult.status === "blocked") {
       return {
         feedItem: await translateXFeedItem(makeSyntheticFeedItem(candidate)),
         status: "pending",
-        detail: `${reservation.reason}; authorization required`,
+        detail: `${fetchResult.detail}; authorization required`,
         queryLabel: "Telegram trigger / pending",
       };
     }
-
-    try {
-      const tweet = await get6551TwitterTweetById(candidate.tweetId);
-      if (tweet) {
-        return {
-          feedItem: tweet,
-          status: "enriched",
-          detail: `tweet-id ${candidate.tweetId}`,
-          queryLabel: "Telegram trigger / full",
-        };
-      }
-    } catch (error) {
-      if (isRetryableXHybridFetchError(error)) {
-        return {
-          feedItem: await translateXFeedItem(makeSyntheticFeedItem(candidate)),
-          status: "pending",
-          detail: `tweet-id fetch rate limited for ${candidate.tweetId}: ${String(error)}`,
-          queryLabel: "Telegram trigger / pending",
-        };
-      }
+    if (fetchResult.status === "cooldown") {
       return {
         feedItem: await translateXFeedItem(makeSyntheticFeedItem(candidate)),
-        status: "fallback",
-        detail: `tweet-id fetch failed for ${candidate.tweetId}: ${String(error)}`,
+        status: "cooldown",
+        detail: fetchResult.detail,
+        queryLabel: "Telegram trigger / cooldown",
       };
     }
-
+    if (fetchResult.status === "success" && fetchResult.tweet) {
+      return {
+        feedItem: fetchResult.tweet,
+        status: "enriched",
+        detail: fetchResult.detail,
+        queryLabel: "Telegram trigger / full",
+      };
+    }
+    if (fetchResult.status === "low_quality" && fetchResult.tweet) {
+      return {
+        feedItem: fetchResult.tweet,
+        status: "fallback",
+        detail: fetchResult.detail,
+        queryLabel: "Telegram trigger / partial",
+      };
+    }
+    if (fetchResult.status === "error" && isRetryableXHybridFetchError(fetchResult.detail)) {
+      return {
+        feedItem: await translateXFeedItem(makeSyntheticFeedItem(candidate)),
+        status: "pending",
+        detail: fetchResult.detail,
+        queryLabel: "Telegram trigger / pending",
+      };
+    }
     return {
       feedItem: await translateXFeedItem(makeSyntheticFeedItem(candidate)),
       status: "fallback",
-      detail: `tweet-id fetch returned empty for ${candidate.tweetId}`,
+      detail: fetchResult.detail,
     };
   }
 

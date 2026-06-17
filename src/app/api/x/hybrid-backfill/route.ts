@@ -30,6 +30,7 @@ import {
   upsertXPipelineRealtimeUpdate,
 } from "@/lib/x-pipeline-store";
 import { resolveHybridQuotedTweet } from "@/lib/x-hybrid-quoted-tweet";
+import { guardedTweetByIdFetch } from "@/lib/x-hybrid-tweet-fetch";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -357,29 +358,45 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const reservation = reserveXApiPoints({
-      kind: "tweet_by_id",
+    const fetchResult = await guardedTweetByIdFetch({
+      tweetId,
       detail: `hybrid-backfill ${tweetId}`,
+      fetchTweetById: get6551TwitterTweetById,
     });
-    if (!reservation.allowed) {
+    if (fetchResult.status === "blocked") {
       markXHybridSource({
         sourceId: ready.item.sourceId,
         status: "pending",
-        detail: `${reservation.reason}; authorization required`,
+        detail: `${fetchResult.detail}; authorization required`,
         tweetId,
       });
       break;
     }
-    stats.pointsReserved += reservation.points;
+    stats.pointsReserved += fetchResult.pointsReserved;
+    if (fetchResult.status === "cooldown") {
+      markXHybridSource({
+        sourceId: ready.item.sourceId,
+        status: "cooldown",
+        detail: fetchResult.detail,
+        tweetId,
+      });
+      stats.samples.push({
+        username: candidate.username,
+        tweetId,
+        status: "cooldown",
+        detail: fetchResult.detail,
+      });
+      continue;
+    }
 
     try {
-      const tweet = await get6551TwitterTweetById(tweetId);
+      const tweet = fetchResult.tweet;
       if (!tweet) {
         stats.failed += 1;
         markXHybridSource({
           sourceId: ready.item.sourceId,
           status: "fallback",
-          detail: `tweet-id fetch returned empty for ${tweetId}`,
+          detail: fetchResult.detail,
           tweetId,
         });
         continue;
@@ -407,7 +424,7 @@ export async function POST(request: Request) {
 
       const feedItem = {
         ...quotedResult.feedItem,
-        queryLabel: "Telegram trigger / full",
+        queryLabel: fetchResult.status === "low_quality" ? "Telegram trigger / partial" : "Telegram trigger / full",
       };
       upsertXPipelineRealtimeUpdate({
         eventType: "TG_HYBRID",
@@ -420,15 +437,19 @@ export async function POST(request: Request) {
       });
       markXHybridSource({
         sourceId: ready.item.sourceId,
-        status: "enriched",
-        detail: `tweet-id ${tweetId}`,
+        status: fetchResult.status === "low_quality" ? "fallback" : "enriched",
+        detail: fetchResult.detail,
         tweetId,
       });
-      stats.enriched += 1;
+      if (fetchResult.status === "low_quality") {
+        stats.failed += 1;
+      } else {
+        stats.enriched += 1;
+      }
       stats.samples.push({
         username: feedItem.username,
         tweetId: feedItem.id,
-        status: "enriched",
+        status: fetchResult.status === "low_quality" ? "low_quality" : "enriched",
         detail:
           quotedResult.status === "fetched"
             ? `${feedItem.text.slice(0, 80)} / quoted fetched ${quotedResult.quotedTweetId}`
