@@ -71,6 +71,38 @@ assert.equal(isCompleteHybridQuotedTweet(quoted({ text: "quoted text" })), true)
 assert.equal(
   isCompleteHybridQuotedTweet(
     quoted({
+      text: "As he said, he is fully aware of the legal and regulatory risks. Yet a shell called @Aster_DEX was created that appears to copy the @HyperliquidX model and",
+    }),
+  ),
+  false,
+);
+assert.equal(
+  isCompleteHybridQuotedTweet(
+    quoted({
+      text: "PCB 这块主要看沪电、胜宏、生益",
+    }),
+  ),
+  true,
+);
+assert.equal(
+  isCompleteHybridQuotedTweet(
+    quoted({
+      text: "This matters because",
+    }),
+  ),
+  false,
+);
+assert.equal(
+  isCompleteHybridQuotedTweet(
+    quoted({
+      text: "He said \"the move is just getting",
+    }),
+  ),
+  false,
+);
+assert.equal(
+  isCompleteHybridQuotedTweet(
+    quoted({
       text: "truncated quoted text... https://x.com/quoted/status/2",
     }),
   ),
