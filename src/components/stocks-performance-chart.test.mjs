@@ -6,9 +6,9 @@ const source = readFileSync(
   "utf8",
 );
 
-assert.match(source, /今日相对涨跌幅/);
-assert.match(source, /基准为今天第一条本地缓存价/);
-assert.match(source, /aria-label="今日股票相对涨跌幅对比图"/);
+assert.match(source, /研究池以来相对涨跌幅/);
+assert.match(source, /基准起点 .* 的首条本地缓存价/);
+assert.match(source, /aria-label="研究池以来股票相对涨跌幅对比图"/);
 assert.match(source, /formatSignedPercent\(labelPoint\.changePct\)/);
 assert.match(source, /compact\?: boolean/);
 assert.match(source, /labelMode\?: "inline" \| "ranked-list"/);

@@ -23,7 +23,7 @@ assert.match(source, /行情\/财报\/新闻优先，TG\/X 补充信号/);
 assert.match(source, /订阅研报/);
 assert.match(source, /setActiveTab\("research"\)/);
 assert.match(source, /\/api\/stocks-performance\?tickers=/);
-assert.match(source, /lookbackDays=7/);
+assert.match(source, /startDate=/);
 assert.match(source, /performanceTickersKey/);
 assert.match(source, /activeSectorId=\{selectedSector\?\.id/);
 assert.match(source, /onSelectSector=\{\(sectorId\) =>/);

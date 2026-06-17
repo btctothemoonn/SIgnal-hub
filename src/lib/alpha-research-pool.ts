@@ -1,4 +1,5 @@
 export const ALPHA_RESEARCH_DEFAULT_TICKER = "NVDA";
+export const ALPHA_RESEARCH_POOL_TRACKING_START_DATE = "2026-05-06";
 
 export type AlphaResearchSectorId =
   | "semiconductors"

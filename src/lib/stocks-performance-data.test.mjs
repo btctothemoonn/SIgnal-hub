@@ -148,6 +148,98 @@ assert.deepEqual(
 );
 assert.equal(multiDayNvda?.latestChangePct, 20);
 
+recordStocksPerformanceSnapshot({
+  dbPath,
+  snapshot: {
+    generatedAt: "2026-05-06T14:30:00.000Z",
+    source: "live",
+    provider: "finnhub",
+    freshness: "realtime",
+    fallbackUsed: false,
+    trace: [],
+    errors: [],
+    quotes: {
+      NVDA: quote("NVDA", 90, "2026-05-06T14:30:00.000Z"),
+      AMD: quote("AMD", 40, "2026-05-06T14:30:00.000Z"),
+    },
+  },
+});
+recordStocksPerformanceSnapshot({
+  dbPath,
+  snapshot: {
+    generatedAt: "2026-05-07T14:30:00.000Z",
+    source: "live",
+    provider: "finnhub",
+    freshness: "realtime",
+    fallbackUsed: false,
+    trace: [],
+    errors: [],
+    quotes: {
+      NVDA: quote("NVDA", 95, "2026-05-07T14:30:00.000Z"),
+      AMD: quote("AMD", 42, "2026-05-07T14:30:00.000Z"),
+    },
+  },
+});
+recordStocksPerformanceSnapshot({
+  dbPath,
+  snapshot: {
+    generatedAt: "2026-05-08T14:30:00.000Z",
+    source: "live",
+    provider: "finnhub",
+    freshness: "realtime",
+    fallbackUsed: false,
+    trace: [],
+    errors: [],
+    quotes: {
+      NVDA: quote("NVDA", 98, "2026-05-08T14:30:00.000Z"),
+      AMD: quote("AMD", 44, "2026-05-08T14:30:00.000Z"),
+    },
+  },
+});
+recordStocksPerformanceSnapshot({
+  dbPath,
+  snapshot: {
+    generatedAt: "2026-05-09T14:30:00.000Z",
+    source: "live",
+    provider: "finnhub",
+    freshness: "realtime",
+    fallbackUsed: false,
+    trace: [],
+    errors: [],
+    quotes: {
+      NVDA: quote("NVDA", 105, "2026-05-09T14:30:00.000Z"),
+      AMD: quote("AMD", 43, "2026-05-09T14:30:00.000Z"),
+    },
+  },
+});
+
+const fullWindowPerformance = getStocksPerformanceSnapshot({
+  dbPath,
+  tickers: ["NVDA", "AMD"],
+  marketDate: "2026-05-12",
+  startDate: "2026-05-06",
+});
+
+assert.equal(fullWindowPerformance.marketDate, "2026-05-06 → 2026-05-12");
+assert.deepEqual(fullWindowPerformance.marketDates, [
+  "2026-05-06",
+  "2026-05-07",
+  "2026-05-08",
+  "2026-05-09",
+  "2026-05-11",
+  "2026-05-12",
+]);
+assert.equal(
+  fullWindowPerformance.series.find((series) => series.ticker === "NVDA")?.points[0]
+    ?.marketDate,
+  "2026-05-06",
+);
+assert.equal(
+  fullWindowPerformance.series.find((series) => series.ticker === "AMD")?.points[0]
+    ?.marketDate,
+  "2026-05-06",
+);
+
 const downsampledPerformance = getStocksPerformanceSnapshot({
   dbPath,
   tickers: ["NVDA"],
@@ -160,9 +252,9 @@ const downsampledNvda = downsampledPerformance.series.find(
 );
 assert.deepEqual(
   downsampledNvda?.points.map((point) => point.capturedAt),
-  [firstAt, thirdAt],
+  ["2026-05-06T14:30:00.000Z", thirdAt],
 );
-assert.equal(downsampledNvda?.latestChangePct, 20);
+assert.equal(downsampledNvda?.latestChangePct, 33.33);
 
 rmSync(dbPath, { force: true });
 

@@ -7,9 +7,10 @@ import {
   useState,
   type PointerEvent,
 } from "react";
-import type {
-  AlphaResearchSector,
-  AlphaResearchStock,
+import {
+  ALPHA_RESEARCH_POOL_TRACKING_START_DATE,
+  type AlphaResearchSector,
+  type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
 import { packChartLabelPositions } from "@/lib/chart-label-layout";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
@@ -317,9 +318,9 @@ export function StocksPerformanceChart({
       <div className="flex flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-start lg:gap-3">
           <div className="w-full min-w-0 lg:w-auto lg:min-w-[12rem]">
-            <h2 className="text-sm font-semibold text-white">今日相对涨跌幅</h2>
+            <h2 className="text-sm font-semibold text-white">研究池以来相对涨跌幅</h2>
             <p className="mt-1 text-xs text-slate-300">
-              {tickers.join(", ")} · 基准为今天第一条本地缓存价
+              {tickers.join(", ")} · 基准起点 {ALPHA_RESEARCH_POOL_TRACKING_START_DATE} 的首条本地缓存价
             </p>
           </div>
           <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-md border border-white/10 bg-white/5 p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
@@ -411,7 +412,7 @@ export function StocksPerformanceChart({
             ref={chartSvgRef}
             viewBox={compact ? "0 0 720 220" : "0 0 720 260"}
             role="img"
-            aria-label="今日股票相对涨跌幅对比图"
+            aria-label="研究池以来股票相对涨跌幅对比图"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

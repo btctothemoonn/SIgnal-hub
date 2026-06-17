@@ -255,6 +255,34 @@ function recentCachedMarketDates({
     .reverse();
 }
 
+function cachedMarketDatesFromStartDate({
+  db,
+  tickers,
+  marketDate,
+  startDate,
+}: {
+  db: DatabaseSync;
+  tickers: string[];
+  marketDate: string;
+  startDate: string;
+}) {
+  if (tickers.length === 0) return [];
+  const placeholders = queryPlaceholders(tickers.length);
+  return (
+    db
+      .prepare(
+        `SELECT market_date
+         FROM stock_quote_snapshots
+         WHERE ticker IN (${placeholders})
+           AND market_date >= ?
+           AND market_date <= ?
+         GROUP BY market_date
+         ORDER BY market_date ASC`,
+      )
+      .all(...tickers, startDate, marketDate) as MarketDateRow[]
+  ).map((row) => row.market_date);
+}
+
 function formatMarketDateLabel(marketDates: string[], fallback: string) {
   if (marketDates.length === 0) return fallback;
   const first = marketDates[0];
@@ -319,6 +347,7 @@ export function getStocksPerformanceSnapshot({
   tickers,
   marketDate = marketDateInNewYork(),
   lookbackDays = 1,
+  startDate,
   maxPoints,
   env = process.env,
   dbPath = stocksPerformanceDbPath(env),
@@ -326,6 +355,7 @@ export function getStocksPerformanceSnapshot({
   tickers: string[];
   marketDate?: string;
   lookbackDays?: number;
+  startDate?: string;
   maxPoints?: number;
   env?: EnvLike;
   dbPath?: string;
@@ -335,12 +365,23 @@ export function getStocksPerformanceSnapshot({
   );
   const db = openStocksPerformanceDb(dbPath);
   try {
+    const normalizedStartDate =
+      typeof startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(startDate)
+        ? startDate
+        : null;
     const requestedLookbackDays = Math.max(
       1,
       Math.min(30, Math.floor(lookbackDays)),
     );
     const resolvedMarketDates =
-      requestedLookbackDays > 1
+      normalizedStartDate
+        ? cachedMarketDatesFromStartDate({
+            db,
+            tickers: normalizedTickers,
+            marketDate,
+            startDate: normalizedStartDate,
+          })
+        : requestedLookbackDays > 1
         ? recentCachedMarketDates({
             db,
             tickers: normalizedTickers,
@@ -359,11 +400,13 @@ export function getStocksPerformanceSnapshot({
     const marketDates =
       resolvedMarketDates.length > 0 ? resolvedMarketDates : [resolvedMarketDate];
     const errors =
-      resolvedMarketDate === marketDate
+      normalizedStartDate
         ? []
-        : [
-            `No performance cache for ${marketDate}; using latest cached market date ${resolvedMarketDate}.`,
-          ];
+        : resolvedMarketDate === marketDate
+          ? []
+          : [
+              `No performance cache for ${marketDate}; using latest cached market date ${resolvedMarketDate}.`,
+            ];
     const select = db.prepare(`
       SELECT ticker, market_date, captured_at, price, provider, freshness, confidence
       FROM stock_quote_snapshots

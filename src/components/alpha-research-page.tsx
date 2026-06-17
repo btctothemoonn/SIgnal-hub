@@ -6,6 +6,7 @@ import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
 import {
   ALPHA_RESEARCH_DEFAULT_TICKER,
+  ALPHA_RESEARCH_POOL_TRACKING_START_DATE,
   ALPHA_RESEARCH_SECTORS,
   ALPHA_RESEARCH_STOCKS,
 } from "@/lib/alpha-research-pool";
@@ -291,7 +292,7 @@ export function AlphaResearchPage() {
         const response = await fetch(
           `/api/stocks-performance?tickers=${encodeURIComponent(
             performanceTickersKey,
-          )}&lookbackDays=7&maxPoints=120`,
+          )}&startDate=${ALPHA_RESEARCH_POOL_TRACKING_START_DATE}&maxPoints=240`,
           { cache: "no-store" },
         );
         if (!response.ok) {
