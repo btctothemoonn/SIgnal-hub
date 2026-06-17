@@ -71,6 +71,14 @@ assert.equal(isCompleteHybridQuotedTweet(quoted({ text: "quoted text" })), true)
 assert.equal(
   isCompleteHybridQuotedTweet(
     quoted({
+      text: "truncated quoted text... https://x.com/quoted/status/2",
+    }),
+  ),
+  false,
+);
+assert.equal(
+  isCompleteHybridQuotedTweet(
+    quoted({
       relation: "reply",
       media: [
         {
@@ -103,6 +111,28 @@ assert.deepEqual(toQuotedTweet(feedItem()).text, "main tweet");
   assert.equal(result.status, "complete");
   assert.equal(result.feedItem.quotedTweet.text, "embedded quote");
   assert.equal(d.saved[0].text, "embedded quote");
+}
+
+{
+  const fetched = feedItem({
+    id: "2",
+    text: "fetched full quoted text with the missing tail restored",
+  });
+  const d = deps({ fetchTweetById: async () => fetched });
+  const result = await resolveHybridQuotedTweet(
+    feedItem({
+      quotedTweet: quoted({
+        text: "fetched full quoted text... https://x.com/quoted/status/2",
+      }),
+    }),
+    d,
+  );
+  assert.equal(result.status, "fetched");
+  assert.equal(
+    result.feedItem.quotedTweet.text,
+    "fetched full quoted text with the missing tail restored",
+  );
+  assert.equal(d.saved[0].text, "fetched full quoted text with the missing tail restored");
 }
 
 {

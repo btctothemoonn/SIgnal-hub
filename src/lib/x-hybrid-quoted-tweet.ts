@@ -47,12 +47,21 @@ export function toQuotedTweet(
   };
 }
 
+function hasTruncationMarker(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    /\.\.\.\s*(?:https?:\/\/\S+)?$/i.test(trimmed) ||
+    /…\s*(?:https?:\/\/\S+)?$/i.test(trimmed)
+  );
+}
+
 export function isCompleteHybridQuotedTweet(
   quotedTweet: TwitterQuotedTweet | null | undefined,
 ): boolean {
+  const text = quotedTweet?.text?.trim() ?? "";
   return Boolean(
     quotedTweet?.id &&
-      (quotedTweet.text.trim() || (quotedTweet.media?.length ?? 0) > 0),
+      ((text && !hasTruncationMarker(text)) || (quotedTweet.media?.length ?? 0) > 0),
   );
 }
 
