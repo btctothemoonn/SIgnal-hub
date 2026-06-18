@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import {
   mergeFullTweetIntoMonitor985Update,
+  resolveMonitor985FullTweet,
   shouldRefreshMonitor985FeedItem,
 } from "./monitor985-enrichment.ts";
+import { initXPipelineDb, upsertXPipelineRealtimeUpdate } from "./x-pipeline-store.ts";
 
 function feedItem(overrides = {}) {
   return {
@@ -92,5 +95,50 @@ assert.equal(
     .text,
   update().feedItem.text,
 );
+
+const db = new DatabaseSync(":memory:");
+initXPipelineDb(db);
+upsertXPipelineRealtimeUpdate(
+  {
+    ...update(),
+    feedItem: fullTweet,
+  },
+  db,
+);
+
+let fetchCalls = 0;
+const cachedResolved = await resolveMonitor985FullTweet(feedItem(), {
+  getFeedItem: (id, targetDb = db) => {
+    const rows = targetDb.prepare("select * from x_feed where id = ?").all(id);
+    if (rows.length === 0) return null;
+    return fullTweet;
+  },
+  fetchTweetById: async () => {
+    fetchCalls += 1;
+    return fullTweet;
+  },
+  db,
+});
+assert.equal(cachedResolved?.text, fullTweet.text);
+assert.equal(fetchCalls, 0);
+
+const firstFetched = await resolveMonitor985FullTweet(feedItem({ id: "repeat-id" }), {
+  getFeedItem: () => null,
+  fetchTweetById: async () => {
+    fetchCalls += 1;
+    return { ...fullTweet, id: "repeat-id", tweetUrl: "https://x.com/x/status/repeat-id" };
+  },
+  db,
+});
+assert.equal(firstFetched?.id, "repeat-id");
+
+const secondFetched = await resolveMonitor985FullTweet(feedItem({ id: "repeat-id" }), {
+  getFeedItem: () => null,
+  fetchTweetById: async () => {
+    throw new Error("should not refetch within cooldown");
+  },
+  db,
+});
+assert.equal(secondFetched, null);
 
 console.log("ok - 985monitor enrichment refreshes truncated tweet text");

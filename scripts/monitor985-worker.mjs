@@ -5,6 +5,7 @@ import {
 } from "../src/lib/6551-twitter.ts";
 import {
   mergeFullTweetIntoMonitor985Update,
+  resolveMonitor985FullTweet,
   shouldRefreshMonitor985FeedItem,
 } from "../src/lib/monitor985-enrichment.ts";
 import {
@@ -14,6 +15,7 @@ import {
 import { isMonitor985Enabled } from "../src/lib/x-pipeline-config.ts";
 import {
   disableXPipelineAccountsExcept,
+  getXPipelineFeedItem,
   setXPipelineHealth,
   upsertXPipelineAccount,
   upsertXPipelineRealtimeUpdate,
@@ -263,7 +265,11 @@ function shouldAcceptUpdate(update, allowedAccountKeys) {
 async function refreshMonitor985Update(update) {
   if (!shouldRefreshMonitor985FeedItem(update.feedItem)) return update;
   try {
-    const fullTweet = await get6551TwitterTweetById(update.feedItem.id);
+    const fullTweet = await resolveMonitor985FullTweet(update.feedItem, {
+      getFeedItem: getXPipelineFeedItem,
+      fetchTweetById: get6551TwitterTweetById,
+      log,
+    });
     const merged = mergeFullTweetIntoMonitor985Update(update, fullTweet);
     if (merged !== update) {
       log("monitor985_full_tweet_refreshed", {

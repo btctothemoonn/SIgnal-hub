@@ -45,6 +45,7 @@ import {
 } from "../src/lib/monitor985.ts";
 import {
   mergeFullTweetIntoMonitor985Update,
+  resolveMonitor985FullTweet,
   shouldRefreshMonitor985FeedItem,
 } from "../src/lib/monitor985-enrichment.ts";
 import {
@@ -328,9 +329,14 @@ async function runMonitor985PreflightCatchup(allowedAccountKeys) {
     }
     if (shouldRefreshMonitor985FeedItem(update.feedItem)) {
       try {
+        const fullTweet = await resolveMonitor985FullTweet(update.feedItem, {
+          getFeedItem: getXPipelineFeedItem,
+          fetchTweetById: get6551TwitterTweetById,
+          log,
+        });
         update = mergeFullTweetIntoMonitor985Update(
           update,
-          await get6551TwitterTweetById(update.feedItem.id),
+          fullTweet,
         );
       } catch (error) {
         log("x_hybrid_monitor985_full_tweet_refresh_failed", {
