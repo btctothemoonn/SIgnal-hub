@@ -15,6 +15,7 @@ const expectedTickers = [
   "TSM",
   "ASML",
   "AMD",
+  "ARM",
   "INTC",
   "AVGO",
   "LRCX",
@@ -52,6 +53,11 @@ assert.equal(ALPHA_RESEARCH_DEFAULT_TICKER, "NVDA");
 assert.equal(getDefaultAlphaResearchStock().ticker, "NVDA");
 assert.equal(getAlphaResearchStockByTicker("nvda")?.ticker, "NVDA");
 assert.equal(getAlphaResearchStockByTicker("missing"), null);
+
+const armStock = getAlphaResearchStockByTicker("ARM");
+assert.ok(armStock, "ARM profile missing");
+assert.equal(armStock.sectorId, "semiconductors");
+assert.ok(armStock.businessTags.includes("CPU IP"));
 
 const intelStock = getAlphaResearchStockByTicker("INTC");
 assert.ok(intelStock, "INTC profile missing");
