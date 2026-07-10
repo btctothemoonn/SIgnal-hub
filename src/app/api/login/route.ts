@@ -7,6 +7,12 @@ import {
   normalizeAdminNextPath,
   verifyAdminPassword,
 } from "@/lib/admin-auth";
+import {
+  checkLoginRateLimit,
+  clearLoginFailures,
+  getLoginClientKey,
+  recordLoginFailure,
+} from "@/lib/login-rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -41,15 +47,22 @@ function loginRedirectUrl(request: Request, error: "config" | "invalid", nextPat
 export async function POST(request: Request) {
   const formData = await request.formData();
   const nextPath = normalizeAdminNextPath(formText(formData.get("next")));
+  const clientKey = getLoginClientKey(request);
 
   if (!isAdminAuthConfigured()) {
     return NextResponse.redirect(loginRedirectUrl(request, "config", nextPath), 303);
   }
 
-  if (!verifyAdminPassword(formData.get("password"))) {
+  if (!checkLoginRateLimit(clientKey).allowed) {
     return NextResponse.redirect(loginRedirectUrl(request, "invalid", nextPath), 303);
   }
 
+  if (!verifyAdminPassword(formData.get("password"))) {
+    recordLoginFailure(clientKey);
+    return NextResponse.redirect(loginRedirectUrl(request, "invalid", nextPath), 303);
+  }
+
+  clearLoginFailures(clientKey);
   const response = NextResponse.redirect(redirectUrl(request, nextPath), 303);
   response.cookies.set(
     ADMIN_SESSION_COOKIE,
