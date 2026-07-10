@@ -6,7 +6,8 @@ const source = readFileSync(new URL("./deploy-vps.sh", import.meta.url), "utf8")
 assert.match(source, /set -euo pipefail/);
 assert.match(source, /git pull --ff-only origin/);
 assert.match(source, /node_modules\/next\/dist\/bin\/next build/);
-const installIndex = source.indexOf('"$PNPM_BIN" install --frozen-lockfile');
+const installCommand = '"$PNPM_BIN" install --frozen-lockfile --ignore-scripts';
+const installIndex = source.indexOf(installCommand);
 const testIndex = source.indexOf('"$NODE_BIN" scripts/run-tests.mjs');
 const lintIndex = source.indexOf('"$NODE_BIN" node_modules/eslint/bin/eslint.js .');
 const buildIndex = source.indexOf('"$NODE_BIN" node_modules/next/dist/bin/next build');
