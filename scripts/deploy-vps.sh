@@ -8,6 +8,8 @@ NODE_BIN="${SIGNAL_HUB_NODE_BIN:-/usr/bin/node}"
 cd "$APP_DIR"
 
 git pull --ff-only origin "$BRANCH"
+"$NODE_BIN" scripts/run-tests.mjs
+"$NODE_BIN" node_modules/eslint/bin/eslint.js .
 "$NODE_BIN" node_modules/next/dist/bin/next build
 
 if ! systemctl list-unit-files --type=service | grep -q '^signal-hub-douyin.service'; then

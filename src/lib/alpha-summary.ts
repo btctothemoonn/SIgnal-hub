@@ -1288,8 +1288,7 @@ export function runAlphaSummarySingleFlight<T>(
   if (existing) return existing;
 
   const created = factory();
-  let run: Promise<T>;
-  run = created.finally(() => {
+  const run = created.finally(() => {
     if (alphaSummaryFlights.get(key) === run) {
       alphaSummaryFlights.delete(key);
     }

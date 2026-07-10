@@ -15,7 +15,10 @@ assert.match(component, /scrollTo\(\{/);
 assert.match(component, /snap-x snap-mandatory/);
 assert.match(component, /onScroll=\{handleMobileScroll\}/);
 assert.match(component, /aria-pressed=\{activeMobilePanel === panel\.id\}/);
-assert.match(component, /lg:grid-cols-\[minmax\(0,1\.58fr\)_minmax\(22rem,0\.82fr\)\]/);
+assert.match(
+  component,
+  /lg:grid-cols-\[minmax\(0,1\.42fr\)_minmax\(26rem,0\.95fr\)\]/,
+);
 assert.match(page, /import \{ SignalsResponsiveLayout \}/);
 assert.match(page, /<SignalsResponsiveLayout/);
 assert.doesNotMatch(page, /<UnifiedNewsPanel/);
