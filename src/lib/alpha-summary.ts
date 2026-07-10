@@ -1270,19 +1270,41 @@ async function requestAiSummary({
   };
 }
 
-export async function getOrCreateAlphaSummary({
-  force = false,
-  now = new Date(),
-  env = process.env,
-  scope = "12h",
-  audience = "signals",
-}: {
+export type AlphaSummaryRequest = {
   force?: boolean;
   now?: Date;
   env?: EnvLike;
   scope?: AlphaSummaryScope;
   audience?: AlphaSummaryAudience;
-} = {}): Promise<AlphaSummarySnapshot> {
+};
+
+const alphaSummaryFlights = new Map<string, Promise<unknown>>();
+
+export function runAlphaSummarySingleFlight<T>(
+  key: string,
+  factory: () => Promise<T>,
+): Promise<T> {
+  const existing = alphaSummaryFlights.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+
+  const created = factory();
+  let run: Promise<T>;
+  run = created.finally(() => {
+    if (alphaSummaryFlights.get(key) === run) {
+      alphaSummaryFlights.delete(key);
+    }
+  });
+  alphaSummaryFlights.set(key, run);
+  return run;
+}
+
+async function getOrCreateAlphaSummaryInternal({
+  force = false,
+  now = new Date(),
+  env = process.env,
+  scope = "12h",
+  audience = "signals",
+}: AlphaSummaryRequest = {}): Promise<AlphaSummarySnapshot> {
   const normalizedScope = normalizeAlphaSummaryScope(scope);
   const normalizedAudience = normalizeAlphaSummaryAudience(audience);
   const period = getAlphaSummaryPeriod({
@@ -1381,4 +1403,14 @@ export async function getOrCreateAlphaSummary({
   } finally {
     db.close();
   }
+}
+
+export function getOrCreateAlphaSummary(
+  request: AlphaSummaryRequest = {},
+): Promise<AlphaSummarySnapshot> {
+  const scope = normalizeAlphaSummaryScope(request.scope);
+  const audience = normalizeAlphaSummaryAudience(request.audience);
+  return runAlphaSummarySingleFlight(`${audience}:${scope}`, () =>
+    getOrCreateAlphaSummaryInternal({ ...request, scope, audience }),
+  );
 }

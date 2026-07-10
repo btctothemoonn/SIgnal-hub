@@ -7,7 +7,6 @@ import type {
   AlphaSummarySnapshot,
 } from "@/lib/alpha-summary";
 
-const AUTO_GENERATE_INTERVAL_MS = 30 * 60 * 1000;
 const POLL_INTERVAL_MS = 10 * 60 * 1000;
 const MIN_MANUAL_BUSY_MS = 700;
 const SUMMARY_SCOPES: {
@@ -15,7 +14,6 @@ const SUMMARY_SCOPES: {
   label: string;
   title: string;
   emptyWindow: string;
-  autoMs: number;
   pollMs: number;
 }[] = [
   {
@@ -23,7 +21,6 @@ const SUMMARY_SCOPES: {
     label: "12h",
     title: "短线消息总结",
     emptyWindow: "最近 12 小时",
-    autoMs: AUTO_GENERATE_INTERVAL_MS,
     pollMs: POLL_INTERVAL_MS,
   },
   {
@@ -31,7 +28,6 @@ const SUMMARY_SCOPES: {
     label: "24h",
     title: "24 小时消息总结",
     emptyWindow: "最近 24 小时",
-    autoMs: 60 * 60 * 1000,
     pollMs: 15 * 60 * 1000,
   },
   {
@@ -39,7 +35,6 @@ const SUMMARY_SCOPES: {
     label: "3天",
     title: "近 3 天趋势总结",
     emptyWindow: "近 3 天",
-    autoMs: 4 * 60 * 60 * 1000,
     pollMs: 30 * 60 * 1000,
   },
   {
@@ -47,7 +42,6 @@ const SUMMARY_SCOPES: {
     label: "7天",
     title: "近 7 天趋势总结",
     emptyWindow: "近 7 天",
-    autoMs: 24 * 60 * 60 * 1000,
     pollMs: 60 * 60 * 1000,
   },
 ];
@@ -195,12 +189,8 @@ export function AlphaSummaryCard({
     const pollTimer = window.setInterval(() => {
       void loadSummary(false, scope);
     }, activeScope.pollMs);
-    const generateTimer = window.setInterval(() => {
-      void loadSummary(true, scope);
-    }, activeScope.autoMs);
     return () => {
       window.clearInterval(pollTimer);
-      window.clearInterval(generateTimer);
     };
   }, [loadSummary, scope]);
 
