@@ -13,9 +13,11 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import type {
   TelegramChannelWatch,
   TelegramDashboardSnapshot,
@@ -31,6 +33,7 @@ import { isUsefulTranslation } from "@/lib/translation-quality";
 import {
   ALL_SIGNAL_FEED_AUTHOR_FILTER,
   buildSignalFeedAuthorOptions,
+  effectiveSignalFeedAuthorFilter,
   matchesSignalFeedAuthorFilter,
 } from "@/lib/signal-feed-author-filter";
 import {
@@ -64,28 +67,16 @@ const SIGNAL_FEED_AUTHOR_FAVORITES_KEY =
 const SIGNAL_FEED_READING_ANCHOR_KEY =
   "signal-hub:signal-feed-reading-anchor";
 
-function readSignalFeedAuthorFavorites() {
-  if (typeof window === "undefined") return new Set<string>();
-
-  try {
-    const raw = window.localStorage.getItem(SIGNAL_FEED_AUTHOR_FAVORITES_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    if (!Array.isArray(parsed)) return new Set<string>();
-
-    return new Set(
-      parsed.filter((value): value is string => typeof value === "string"),
-    );
-  } catch {
-    return new Set<string>();
-  }
+function subscribeDocumentBody() {
+  return () => {};
 }
 
-function writeSignalFeedAuthorFavorites(favorites: Set<string>) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(
-    SIGNAL_FEED_AUTHOR_FAVORITES_KEY,
-    JSON.stringify([...favorites]),
-  );
+function getDocumentBody() {
+  return typeof document === "undefined" ? null : document.body;
+}
+
+function getServerDocumentBody() {
+  return null;
 }
 
 type UnifiedTranslation = {
@@ -625,13 +616,27 @@ export function UnifiedNewsPanel({
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState(ALL_SIGNAL_FEED_AUTHOR_FILTER);
-  const [authorFavorites, setAuthorFavorites] = useState<Set<string>>(
-    new Set(),
+  const [storedAuthorFavorites, setStoredAuthorFavorites] =
+    useBrowserJsonCache<unknown>(SIGNAL_FEED_AUTHOR_FAVORITES_KEY);
+  const authorFavorites = useMemo(
+    () =>
+      new Set(
+        Array.isArray(storedAuthorFavorites)
+          ? storedAuthorFavorites.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [],
+      ),
+    [storedAuthorFavorites],
   );
   const [authorMenuOpen, setAuthorMenuOpen] = useState(false);
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
-  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+  const portalRoot = useSyncExternalStore(
+    subscribeDocumentBody,
+    getDocumentBody,
+    getServerDocumentBody,
+  );
   const authorMenuRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const stagedReadingPositionRef = useRef<SignalFeedReadingAnchor | null>(null);
@@ -821,14 +826,6 @@ export function UnifiedNewsPanel({
   }, [findTimelineItem]);
 
   useEffect(() => {
-    setPortalRoot(document.body);
-  }, []);
-
-  useEffect(() => {
-    setAuthorFavorites(readSignalFeedAuthorFavorites());
-  }, []);
-
-  useEffect(() => {
     if (!lightboxMedia) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setLightboxMedia(null);
@@ -868,47 +865,56 @@ export function UnifiedNewsPanel({
   }, [authorMenuOpen]);
 
   useEffect(() => {
-    setSeenIds((current) => {
-      const sources: Array<"telegram" | "x"> =
-        activeTab === "all"
-          ? ["telegram", "x"]
-          : activeTab === "telegram"
-            ? ["telegram"]
-            : activeTab === "x" || activeTab === "truth"
-              ? ["x"]
-            : [];
-      if (sources.length === 0) return current;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
 
-      const nextSets = {
-        telegram: current.telegram,
-        x: current.x,
-      };
-      let changed = false;
-      for (const source of sources) {
-        const feed =
-          source === "telegram"
-            ? telegramSnapshot.feed
-            : xSnapshot.feed.filter((item) =>
-                activeTab === "truth"
-                  ? classifyXFeedSource(item) === "truth"
-                  : activeTab === "x"
-                    ? isMergedXSignalSource(classifyXFeedSource(item))
-                    : true,
-              );
-        let nextSet: Set<string> | null = null;
-        for (const item of feed) {
-          if (!current[source].has(item.id)) {
-            if (!nextSet) nextSet = new Set(current[source]);
-            nextSet.add(item.id);
+      setSeenIds((current) => {
+        const sources: Array<"telegram" | "x"> =
+          activeTab === "all"
+            ? ["telegram", "x"]
+            : activeTab === "telegram"
+              ? ["telegram"]
+              : activeTab === "x" || activeTab === "truth"
+                ? ["x"]
+              : [];
+        if (sources.length === 0) return current;
+
+        const nextSets = {
+          telegram: current.telegram,
+          x: current.x,
+        };
+        let changed = false;
+        for (const source of sources) {
+          const feed =
+            source === "telegram"
+              ? telegramSnapshot.feed
+              : xSnapshot.feed.filter((item) =>
+                  activeTab === "truth"
+                    ? classifyXFeedSource(item) === "truth"
+                    : activeTab === "x"
+                      ? isMergedXSignalSource(classifyXFeedSource(item))
+                      : true,
+                );
+          let nextSet: Set<string> | null = null;
+          for (const item of feed) {
+            if (!current[source].has(item.id)) {
+              if (!nextSet) nextSet = new Set(current[source]);
+              nextSet.add(item.id);
+            }
+          }
+          if (nextSet) {
+            nextSets[source] = nextSet;
+            changed = true;
           }
         }
-        if (nextSet) {
-          nextSets[source] = nextSet;
-          changed = true;
-        }
-      }
-      return changed ? nextSets : current;
+        return changed ? nextSets : current;
+      });
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, telegramSnapshot.feed, xSnapshot.feed]);
 
   const newCounts = useMemo(() => {
@@ -957,12 +963,10 @@ export function UnifiedNewsPanel({
       ),
     [unifiedFeed, activeTab],
   );
-
-  useEffect(() => {
-    if (authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER) return;
-    if (authorFilterOptions.some((option) => option.value === authorFilter)) return;
-    setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
-  }, [authorFilter, authorFilterOptions]);
+  const effectiveAuthorFilter = effectiveSignalFeedAuthorFilter(
+    authorFilter,
+    authorFilterOptions,
+  );
 
   const sortedAuthorFilterOptions = useMemo(
     () =>
@@ -976,9 +980,9 @@ export function UnifiedNewsPanel({
   );
 
   const selectedAuthorLabel =
-    authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
+    effectiveAuthorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
       ? "全部博主 / 频道"
-      : authorFilterOptions.find((option) => option.value === authorFilter)
+      : authorFilterOptions.find((option) => option.value === effectiveAuthorFilter)
           ?.label || "全部博主 / 频道";
 
   const favoriteAuthorCount = authorFilterOptions.reduce(
@@ -987,16 +991,18 @@ export function UnifiedNewsPanel({
   );
 
   const toggleAuthorFavorite = (value: string) => {
-    setAuthorFavorites((current) => {
-      const next = new Set(current);
-      if (next.has(value)) {
-        next.delete(value);
-      } else {
-        next.add(value);
-      }
-      writeSignalFeedAuthorFavorites(next);
-      return next;
-    });
+    const next = new Set(authorFavorites);
+    if (next.has(value)) {
+      next.delete(value);
+    } else {
+      next.add(value);
+    }
+    setStoredAuthorFavorites([...next]);
+  };
+
+  const selectActiveTab = (tab: FeedTab) => {
+    setActiveTab(tab);
+    setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
   };
 
   const filteredFeed = useMemo(() => {
@@ -1009,7 +1015,7 @@ export function UnifiedNewsPanel({
         return false;
       }
 
-      if (!matchesSignalFeedAuthorFilter(item, authorFilter)) {
+      if (!matchesSignalFeedAuthorFilter(item, effectiveAuthorFilter)) {
         return false;
       }
 
@@ -1024,7 +1030,13 @@ export function UnifiedNewsPanel({
       );
     });
     return limitNewsItems(matching, feedLimitForTab(activeTab, feedRange));
-  }, [unifiedFeed, activeTab, authorFilter, deferredSearchQuery, feedRange]);
+  }, [
+    unifiedFeed,
+    activeTab,
+    effectiveAuthorFilter,
+    deferredSearchQuery,
+    feedRange,
+  ]);
 
   const deferredFeed = filteredFeed;
 
@@ -1556,7 +1568,7 @@ export function UnifiedNewsPanel({
 
             <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border border-line/70 bg-background/35 p-1 xl:w-[34rem] xl:overflow-visible">
               <button
-                onClick={() => setActiveTab("all")}
+                onClick={() => selectActiveTab("all")}
                 className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                   activeTab === "all"
                     ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
@@ -1580,7 +1592,7 @@ export function UnifiedNewsPanel({
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => selectActiveTab(tab.id)}
                     className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                       activeTab === tab.id
                         ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
@@ -1671,7 +1683,7 @@ export function UnifiedNewsPanel({
                       setAuthorMenuOpen(false);
                     }}
                     className={`flex h-8 w-full items-center justify-between rounded-md px-2 text-left text-xs font-semibold transition-colors ${
-                      authorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
+                      effectiveAuthorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
                         ? "bg-foreground text-background"
                         : "text-muted hover:bg-background/70 hover:text-foreground"
                     }`}
@@ -1686,7 +1698,7 @@ export function UnifiedNewsPanel({
                   ) : null}
                   {sortedAuthorFilterOptions.length > 0 ? (
                     sortedAuthorFilterOptions.map((option) => {
-                      const isActive = option.value === authorFilter;
+                      const isActive = option.value === effectiveAuthorFilter;
                       const isFavorite = authorFavorites.has(option.value);
                       return (
                         <div

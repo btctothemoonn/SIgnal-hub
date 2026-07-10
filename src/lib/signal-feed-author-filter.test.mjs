@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   ALL_SIGNAL_FEED_AUTHOR_FILTER,
   buildSignalFeedAuthorOptions,
+  effectiveSignalFeedAuthorFilter,
   matchesSignalFeedAuthorFilter,
 } from "./signal-feed-author-filter.ts";
 
@@ -57,5 +58,17 @@ assert.equal(matchesSignalFeedAuthorFilter(items[0], "telegram:au_trading"), tru
 assert.equal(matchesSignalFeedAuthorFilter(items[2], "x:_forab"), true);
 assert.equal(matchesSignalFeedAuthorFilter(items[3], "x:_forab"), true);
 assert.equal(matchesSignalFeedAuthorFilter(items[2], "x:watcherguru"), false);
+assert.equal(
+  effectiveSignalFeedAuthorFilter("x:missing", [{ value: "x:known" }]),
+  ALL_SIGNAL_FEED_AUTHOR_FILTER,
+);
+assert.equal(
+  effectiveSignalFeedAuthorFilter("x:known", [{ value: "x:known" }]),
+  "x:known",
+);
+assert.equal(
+  effectiveSignalFeedAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER, []),
+  ALL_SIGNAL_FEED_AUTHOR_FILTER,
+);
 
 console.log("ok - signal feed author filter options");

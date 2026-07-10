@@ -16,6 +16,22 @@ assert.match(source, /title:\s*tweet\.displayName\s*\|\|\s*`@\${displayUsername}
 assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(displayUsername,\s*tweet\.queryLabel\)/);
 assert.match(source, /title:\s*tweet\.quotedTweet\.displayName\s*\|\|/);
 assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(\s*tweet\.quotedTweet\.username\.replace/);
+assert.match(source, /useBrowserJsonCache/);
+assert.match(source, /useSyncExternalStore/);
+assert.match(source, /effectiveSignalFeedAuthorFilter/);
+assert.match(source, /queueMicrotask/);
+assert.match(source, /let cancelled = false/);
+assert.match(source, /cancelled = true/);
+assert.doesNotMatch(source, /setPortalRoot/);
+assert.doesNotMatch(source, /setAuthorFavorites/);
+assert.doesNotMatch(
+  source,
+  /if \(authorFilterOptions\.some\([\s\S]*?setAuthorFilter\(ALL_SIGNAL_FEED_AUTHOR_FILTER\);/,
+);
+assert.match(
+  source,
+  /const selectActiveTab = \(tab: FeedTab\) => \{\s*setActiveTab\(tab\);\s*setAuthorFilter\(ALL_SIGNAL_FEED_AUTHOR_FILTER\);\s*\};/,
+);
 
 const mainMediaIndex = source.indexOf("{/* Media */}");
 const quotedTweetIndex = source.indexOf("{/* Quoted tweet */}");

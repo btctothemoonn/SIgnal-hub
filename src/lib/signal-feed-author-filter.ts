@@ -68,6 +68,16 @@ export function buildSignalFeedAuthorOptions(
   );
 }
 
+export function effectiveSignalFeedAuthorFilter(
+  filter: string,
+  options: Pick<SignalFeedAuthorOption, "value">[],
+) {
+  if (filter === ALL_SIGNAL_FEED_AUTHOR_FILTER) return filter;
+  return options.some((option) => option.value === filter)
+    ? filter
+    : ALL_SIGNAL_FEED_AUTHOR_FILTER;
+}
+
 export function matchesSignalFeedAuthorFilter(
   item: SignalFeedAuthorFilterItem,
   filter: string,
