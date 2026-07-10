@@ -8,6 +8,36 @@ import {
   getStocksCatalystSnapshot,
 } from "./stocks-catalyst-source.ts";
 
+const runtimeStorageSource = readFileSync(
+  new URL("./runtime-storage.ts", import.meta.url),
+  "utf8",
+);
+const source = readFileSync(
+  new URL("./stocks-catalyst-source.ts", import.meta.url),
+  "utf8",
+);
+const externalNewsCachePathSource =
+  source.match(/function externalNewsCachePath\([\s\S]*?\n}\n/)?.[0] ?? "";
+const patreonHistoryPathSource =
+  source.match(/function patreonHistoryPath\([\s\S]*?\n}\n/)?.[0] ?? "";
+
+assert.match(
+  runtimeStorageSource,
+  /join\(\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*process\.cwd\(\),\s*"\.signal-hub"\)/,
+);
+assert.match(
+  externalNewsCachePathSource,
+  /resolve\(\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*configured\)/,
+);
+assert.match(
+  externalNewsCachePathSource,
+  /resolve\(\s*\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*process\.cwd\(\),\s*"\.signal-hub",\s*"stocks-catalysts-cache\.json",?\s*\)/,
+);
+assert.match(
+  patreonHistoryPathSource,
+  /resolve\(\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*configured\)/,
+);
+
 const fetchImpl = async (url) => {
   assert.ok(String(url).includes("feeds.finance.yahoo.com"));
   return new Response(

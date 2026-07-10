@@ -13,7 +13,7 @@ export function getRuntimeStorageRoot(env: EnvLike = process.env) {
 
   return isVercelRuntime(env)
     ? join(tmpdir(), "signal-hub")
-    : join(process.cwd(), ".signal-hub");
+    : join(/* turbopackIgnore: true */ process.cwd(), ".signal-hub");
 }
 
 export function getRuntimeDataPath(

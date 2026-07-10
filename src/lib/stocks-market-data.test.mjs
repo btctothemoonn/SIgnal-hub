@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -28,6 +28,24 @@ import {
   parseYahooChartCandles,
   parseYahooQuoteRows,
 } from "./stocks-market-data.ts";
+
+const source = readFileSync(
+  new URL("./stocks-market-data.ts", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  source,
+  /readFile\(\s*\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*marketCachePath\(env\)/,
+);
+assert.match(
+  source,
+  /dirname\(\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*cachePath\)/,
+);
+assert.match(
+  source,
+  /writeFile\(\s*\/\*\s*turbopackIgnore:\s*true\s*\*\/\s*cachePath/,
+);
 
 const quotePayload = {
   quoteResponse: {

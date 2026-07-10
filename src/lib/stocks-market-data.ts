@@ -1094,7 +1094,10 @@ async function readStocksMarketCache({
   if (cacheMs <= 0) return null;
   try {
     const fs = await import("node:fs/promises");
-    const raw = await fs.readFile(marketCachePath(env), "utf8");
+    const raw = await fs.readFile(
+      /* turbopackIgnore: true */ marketCachePath(env),
+      "utf8",
+    );
     const snapshot = asRecord(JSON.parse(raw));
     if (snapshot.provider !== provider || snapshot.source !== "live") {
       return null;
@@ -1144,8 +1147,14 @@ async function writeStocksMarketCache({
       import("node:path"),
     ]);
     const cachePath = marketCachePath(env);
-    await fs.mkdir(path.dirname(cachePath), { recursive: true });
-    await fs.writeFile(cachePath, JSON.stringify(snapshot), "utf8");
+    await fs.mkdir(path.dirname(/* turbopackIgnore: true */ cachePath), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      /* turbopackIgnore: true */ cachePath,
+      JSON.stringify(snapshot),
+      "utf8",
+    );
   } catch {
     // Cache writes are best-effort; market fetches should not fail because of disk IO.
   }

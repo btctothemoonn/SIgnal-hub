@@ -727,8 +727,12 @@ function patreonCacheKey({
 function externalNewsCachePath(env: EnvLike) {
   const configured = env.STOCKS_NEWS_CACHE_PATH?.trim();
   return configured
-    ? resolve(configured)
-    : resolve(process.cwd(), ".signal-hub", "stocks-catalysts-cache.json");
+    ? resolve(/* turbopackIgnore: true */ configured)
+    : resolve(
+        /* turbopackIgnore: true */ process.cwd(),
+        ".signal-hub",
+        "stocks-catalysts-cache.json",
+      );
 }
 
 function readExternalNewsFileCache(env: EnvLike): ExternalCatalystCacheFile {
@@ -754,7 +758,7 @@ function configuredPatreonHistoryPath(env: EnvLike) {
 function patreonHistoryPath(env: EnvLike) {
   const configured = configuredPatreonHistoryPath(env);
   return configured
-    ? resolve(configured)
+    ? resolve(/* turbopackIgnore: true */ configured)
     : getRuntimeDataPath(env, "stocks-patreon-history.json");
 }
 
