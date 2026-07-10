@@ -4,10 +4,12 @@ set -euo pipefail
 APP_DIR="${SIGNAL_HUB_APP_DIR:-/home/ubuntu/signal-hub}"
 BRANCH="${SIGNAL_HUB_BRANCH:-main}"
 NODE_BIN="${SIGNAL_HUB_NODE_BIN:-/usr/bin/node}"
+PNPM_BIN="${SIGNAL_HUB_PNPM_BIN:-/usr/bin/pnpm}"
 
 cd "$APP_DIR"
 
 git pull --ff-only origin "$BRANCH"
+CI=true "$PNPM_BIN" install --frozen-lockfile
 "$NODE_BIN" scripts/run-tests.mjs
 "$NODE_BIN" node_modules/eslint/bin/eslint.js .
 "$NODE_BIN" node_modules/next/dist/bin/next build
