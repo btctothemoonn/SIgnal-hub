@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   buildAlphaSummaryPrompt,
   getAlphaSummaryDbPath,
@@ -13,6 +14,9 @@ import {
   parseAlphaSummaryContent,
   shouldReuseCachedAlphaSummary,
 } from "./alpha-summary.ts";
+
+const source = readFileSync(new URL("./alpha-summary.ts", import.meta.url), "utf8");
+assert.doesNotMatch(source, /function shanghaiLocalToUtcIso/);
 
 const now = new Date("2026-05-07T04:00:00.000Z");
 

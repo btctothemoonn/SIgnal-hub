@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   ALPHA_RESEARCH_STOCKS,
   getAlphaResearchStockByTicker,
@@ -13,6 +14,12 @@ import {
   parseFmpFinancialStatement,
   parseYahooFinancialStatement,
 } from "./stocks-financial-data.ts";
+
+const source = readFileSync(
+  new URL("./stocks-financial-data.ts", import.meta.url),
+  "utf8",
+);
+assert.doesNotMatch(source, /function fmpApiKey\(/);
 
 const yahooPayload = {
   quoteSummary: {

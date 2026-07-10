@@ -164,10 +164,6 @@ function fmpApiKeys(env: EnvLike) {
   ]);
 }
 
-function fmpApiKey(env: EnvLike) {
-  return pickProviderApiKey(fmpApiKeys(env), 0);
-}
-
 function alphaVantageApiKey(env: EnvLike) {
   return (
     env.STOCKS_ALPHA_VANTAGE_API_KEY?.trim() ||

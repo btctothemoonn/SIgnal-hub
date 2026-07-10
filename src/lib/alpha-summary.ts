@@ -652,15 +652,6 @@ function pad2(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function shanghaiLocalToUtcIso(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-) {
-  return new Date(Date.UTC(year, month - 1, day, hour - 8, 0, 0, 0)).toISOString();
-}
-
 function periodKeyForAudience(
   audience: AlphaSummaryAudience,
   periodKey: string,

@@ -9,6 +9,7 @@ import type {
   TelegramRealtimeStatus,
   TelegramRealtimeUpdate,
 } from "@/lib/telegram-channels";
+import { shouldRefreshTelegramSnapshot } from "@/lib/telegram-refresh-policy";
 import { shouldSkipTelegramChannelTranslation } from "@/lib/telegram-translation-policy";
 
 const MAX_LIVE_FEED_ITEMS = 100;
@@ -213,8 +214,12 @@ export function TelegramLivePanel({ initialSnapshot }: Props) {
     makeInitialStreamStatus(initialSnapshot),
   );
   const deferredFeed = useDeferredValue(snapshot.feed);
-  const lastRefreshAtRef = useRef(Date.now());
+  const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef(false);
+
+  useEffect(() => {
+    lastRefreshAtRef.current = Date.now();
+  }, []);
 
   useEffect(() => {
     if (!initialSnapshot.isConfigured) {
@@ -226,7 +231,7 @@ export function TelegramLivePanel({ initialSnapshot }: Props) {
       if (refreshInFlightRef.current) {
         return;
       }
-      if (Date.now() - lastRefreshAtRef.current < 60000) {
+      if (!shouldRefreshTelegramSnapshot(lastRefreshAtRef.current, Date.now())) {
         return;
       }
       refreshInFlightRef.current = true;
