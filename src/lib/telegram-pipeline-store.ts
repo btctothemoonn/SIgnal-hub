@@ -669,13 +669,33 @@ export function getTelegramPipelineSnapshot(
 ): TelegramDashboardSnapshot {
   const requestedLimit = normalizeSnapshotFeedLimit(limit);
   const feedFetchLimit = snapshotFeedFetchLimit(requestedLimit);
-  const channels = db
+  const enabledChannelRows = db
     .prepare("select * from telegram_channels where enabled = 1 order by lower(ref) asc")
-    .all()
-    .map(toChannelWatch)
-    .filter((channel) => !isTelegramXSourceChannel(channel));
+    .all() as DbRow[];
+  const enabledChannels = enabledChannelRows.map(toChannelWatch);
+  const hiddenChannelIds = enabledChannels
+    .filter((channel) => isTelegramXSourceChannel(channel))
+    .map((channel) => channel.channelId)
+    .filter(Boolean);
+  const channels = enabledChannels.filter(
+    (channel) => !isTelegramXSourceChannel(channel),
+  );
 
   const since = nullableString(options.since);
+  const feedPredicates: string[] = [];
+  const feedBindings: DbValue[] = [];
+  if (hiddenChannelIds.length > 0) {
+    feedPredicates.push(
+      `telegram_messages.channel_id not in (${hiddenChannelIds.map(() => "?").join(", ")})`,
+    );
+    feedBindings.push(...hiddenChannelIds);
+  }
+  if (since) {
+    feedPredicates.push("telegram_messages.created_at >= ?");
+    feedBindings.push(since);
+  }
+  const feedWhere =
+    feedPredicates.length > 0 ? `where ${feedPredicates.join(" and ")}` : "";
   const feedSql = `
       select
         telegram_messages.*,
@@ -683,14 +703,14 @@ export function getTelegramPipelineSnapshot(
       from telegram_messages
       left join telegram_channels
         on telegram_channels.channel_id = telegram_messages.channel_id
-      ${since ? "where telegram_messages.created_at >= ?" : ""}
+      ${feedWhere}
       order by telegram_messages.created_at desc, telegram_messages.message_id desc
       limit ?
     `;
 
   const feedRows =
     feedFetchLimit > 0
-      ? db.prepare(feedSql).all(...(since ? [since, feedFetchLimit] : [feedFetchLimit]))
+      ? db.prepare(feedSql).all(...feedBindings, feedFetchLimit)
       : [];
 
   const feed = feedRows
