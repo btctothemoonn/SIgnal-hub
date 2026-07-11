@@ -40,6 +40,9 @@ await test("app shell gives sidebar navigation immediate optimistic feedback", (
     /pendingNav\?\.origin === activeNav \? pendingNav\.target : activeNav/,
   );
   assert.match(appShell, /setPendingNav\(\{ origin: activeNav, target \}\)/);
+  assert.match(appShell, /window\.clearTimeout\(pendingNavTimerRef\.current\)/);
+  assert.match(appShell, /window\.setTimeout\(\(\) => \{/);
+  assert.match(appShell, /setPendingNav\(null\)/);
   assert.match(appShell, /onPointerDown=\{\(\) => \{/);
   assert.match(appShell, /onActivate\(item\.key\);/);
   assert.match(appShell, /onWarm\?\.\(item\);/);

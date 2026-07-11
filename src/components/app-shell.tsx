@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export type AppShellNavKey =
@@ -33,6 +33,7 @@ const primaryShellNavItems = shellNavItems.filter(
 const settingsShellNavItem = shellNavItems.find(
   (item) => item.key === "settings",
 );
+const NAV_PENDING_TIMEOUT_MS = 1_500;
 
 type ShellIcon = (typeof shellNavItems)[number]["icon"] | "logout";
 
@@ -185,12 +186,29 @@ export function AppShell({
     origin: AppShellNavKey;
     target: AppShellNavKey;
   } | null>(null);
+  const pendingNavTimerRef = useRef<number | null>(null);
   const displayedActiveNav =
     pendingNav?.origin === activeNav ? pendingNav.target : activeNav;
 
   const setPendingNavigation = (target: AppShellNavKey) => {
+    if (pendingNavTimerRef.current !== null) {
+      window.clearTimeout(pendingNavTimerRef.current);
+    }
     setPendingNav({ origin: activeNav, target });
+    pendingNavTimerRef.current = window.setTimeout(() => {
+      pendingNavTimerRef.current = null;
+      setPendingNav(null);
+    }, NAV_PENDING_TIMEOUT_MS);
   };
+
+  useEffect(
+    () => () => {
+      if (pendingNavTimerRef.current !== null) {
+        window.clearTimeout(pendingNavTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const warmRoute = (item: (typeof shellNavItems)[number]) => {
     router.prefetch(item.href);

@@ -25,6 +25,10 @@ assert.doesNotMatch(source, /warmFrequentRoutes/);
 assert.match(source, /const \[pendingNav, setPendingNav\] = useState/);
 assert.match(source, /pendingNav\?\.origin === activeNav \? pendingNav\.target : activeNav/);
 assert.match(source, /setPendingNav\(\{ origin: activeNav, target \}\)/);
+assert.match(source, /window\.clearTimeout\(pendingNavTimerRef\.current\)/);
+assert.match(source, /window\.setTimeout\(\(\) => \{/);
+assert.match(source, /setPendingNav\(null\)/);
+assert.match(source, /NAV_PENDING_TIMEOUT_MS/);
 assert.doesNotMatch(source, /setOptimisticActiveNav\(activeNav\)/);
 
 console.log("ok - app shell mobile command layout");
