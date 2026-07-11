@@ -32,7 +32,10 @@ The first release removes known dependency advisories and the Turbopack whole-pr
 
 ### Dependency Overrides
 
-Add narrow `pnpm.overrides` entries in `package.json`:
+Add narrow `overrides` entries in `pnpm-workspace.yaml`, which is the
+authoritative pnpm override source for installs. Keep the matching
+`package.json` declarations as package metadata for the existing focused
+contract:
 
 - `postcss: 8.5.16`
 - `ip-address: 10.2.0`
@@ -80,7 +83,13 @@ Polling effects remain responsible for subscriptions and timers. State changes h
 
 ### AI Summary Scope State
 
-Split scope-specific summary state into a keyed child boundary. Changing `12h`, `24h`, `3d`, or `7d` remounts only the summary result state, not the entire navigation card. Cached polling and manual regeneration behavior remain unchanged.
+Keep the AI summary header and scope tabs stable in `AlphaSummaryCard`. The
+parent owns scope-indexed records for the selected snapshot, busy state, manual
+message, in-flight request set, poll lifecycle, and abort controllers. The
+presentational `AlphaSummaryScopeResult` receives the current scope and matching
+record values without a React `key`, so scope changes do not remount the tabs or
+the result shell. Cached polling and manual regeneration behavior remain
+unchanged, and old or aborted responses cannot update the wrong scope.
 
 ### Holding And Health Loaders
 
@@ -108,6 +117,9 @@ Remove the AppShell effect that mirrors `activeNav` into optimistic state. Repre
 - Production build succeeds.
 - Signal Flow tests cover new-item counts, author filtering/favorites, and reading-position stability.
 - Stocks tests cover initial cached display, sector changes, and polling refreshes.
+- AI summary tests cover stable parent-owned tabs/header, unkeyed
+  presentational scope result rendering, scope-record isolation, no synchronous
+  reset effect, GET polling, manual POST regeneration, and abort cleanup.
 - Holding and health tests cover initial load, refresh, abort, and failure states.
 - Manual VPS smoke tests confirm Signal Flow, Stocks, Holding, settings health, and AI summary scope switching.
 

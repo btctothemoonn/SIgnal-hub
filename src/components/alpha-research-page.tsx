@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
+import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
   ALPHA_RESEARCH_DEFAULT_TICKER,
   ALPHA_RESEARCH_POOL_TRACKING_START_DATE,
@@ -57,24 +58,10 @@ function performanceSnapshotCacheKey(tickersKey: string) {
   )}`;
 }
 
-function readCachedSnapshot<T>(key: string): T | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSnapshot<T>(key: string, snapshot: T) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(snapshot));
-  } catch {
-    // Ignore storage quota/private-mode failures; live state still updates.
-  }
-}
+type KeyedPerformanceSnapshot = {
+  cacheKey: string;
+  snapshot: StocksPerformanceSnapshot;
+};
 
 function hasPerformanceSeries(snapshot: StocksPerformanceSnapshot | null) {
   return (snapshot?.series ?? []).some((series) => series.points.length > 0);
@@ -112,18 +99,31 @@ export function AlphaResearchPage() {
   const [selectedTicker, setSelectedTicker] = useState(
     ALPHA_RESEARCH_DEFAULT_TICKER,
   );
-  const [marketSnapshot, setMarketSnapshot] =
+  const [liveMarketSnapshot, setLiveMarketSnapshot] =
     useState<StocksMarketSnapshot | null>(null);
   const [marketError, setMarketError] = useState<string | null>(null);
-  const [financialSnapshot, setFinancialSnapshot] =
+  const [liveFinancialSnapshot, setLiveFinancialSnapshot] =
     useState<StocksFinancialSnapshot | null>(null);
   const [financialError, setFinancialError] = useState<string | null>(null);
-  const [catalystSnapshot, setCatalystSnapshot] =
+  const [liveCatalystSnapshot, setLiveCatalystSnapshot] =
     useState<StocksCatalystSnapshot | null>(null);
   const [catalystError, setCatalystError] = useState<string | null>(null);
-  const [performanceSnapshot, setPerformanceSnapshot] =
-    useState<StocksPerformanceSnapshot | null>(null);
+  const [livePerformanceSnapshot, setLivePerformanceSnapshot] =
+    useState<KeyedPerformanceSnapshot | null>(null);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
+  const [cachedMarketSnapshot, writeMarketSnapshotCache] =
+    useBrowserJsonCache<StocksMarketSnapshot>(STOCKS_MARKET_SNAPSHOT_CACHE_KEY);
+  const [cachedFinancialSnapshot, writeFinancialSnapshotCache] =
+    useBrowserJsonCache<StocksFinancialSnapshot>(
+      STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
+    );
+  const [cachedCatalystSnapshot, writeCatalystSnapshotCache] =
+    useBrowserJsonCache<StocksCatalystSnapshot>(
+      STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
+    );
+  const marketSnapshot = liveMarketSnapshot ?? cachedMarketSnapshot;
+  const financialSnapshot = liveFinancialSnapshot ?? cachedFinancialSnapshot;
+  const catalystSnapshot = liveCatalystSnapshot ?? cachedCatalystSnapshot;
   const stocks = useMemo(() => {
     const withMarket = mergeStocksMarketSnapshot(
       ALPHA_RESEARCH_STOCKS,
@@ -156,6 +156,15 @@ export function AlphaResearchPage() {
   const performanceTickers = selectedSector?.tickers ?? [];
   const performanceTickersKey = performanceTickers.join(",");
   const performanceCacheKey = performanceSnapshotCacheKey(performanceTickersKey);
+  const [cachedPerformanceSnapshot, writePerformanceSnapshotCache] =
+    useBrowserJsonCache<StocksPerformanceSnapshot>(performanceCacheKey);
+  const performanceSnapshot =
+    livePerformanceSnapshot?.cacheKey === performanceCacheKey &&
+    hasPerformanceSeries(livePerformanceSnapshot.snapshot)
+      ? livePerformanceSnapshot.snapshot
+      : hasPerformanceSeries(cachedPerformanceSnapshot)
+        ? cachedPerformanceSnapshot
+        : null;
   const marketStatus =
     marketSnapshot?.source === "live"
       ? "Live 行情"
@@ -245,13 +254,6 @@ export function AlphaResearchPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setMarketSnapshot(
-      (current) =>
-        current ??
-        readCachedSnapshot<StocksMarketSnapshot>(
-          STOCKS_MARKET_SNAPSHOT_CACHE_KEY,
-        ),
-    );
     async function loadMarketData() {
       try {
         setMarketError(null);
@@ -263,8 +265,8 @@ export function AlphaResearchPage() {
         }
         const snapshot = (await response.json()) as StocksMarketSnapshot;
         if (!cancelled) {
-          setMarketSnapshot(snapshot);
-          writeCachedSnapshot(STOCKS_MARKET_SNAPSHOT_CACHE_KEY, snapshot);
+          setLiveMarketSnapshot(snapshot);
+          writeMarketSnapshotCache(snapshot);
           setMarketError(null);
         }
       } catch (error) {
@@ -279,13 +281,11 @@ export function AlphaResearchPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [writeMarketSnapshotCache]);
 
   useEffect(() => {
     let cancelled = false;
     const cacheKey = performanceCacheKey;
-    const cached = readCachedSnapshot<StocksPerformanceSnapshot>(cacheKey);
-    setPerformanceSnapshot(hasPerformanceSeries(cached) ? cached : null);
     async function loadPerformanceData() {
       try {
         setPerformanceError(null);
@@ -301,8 +301,8 @@ export function AlphaResearchPage() {
         const snapshot = (await response.json()) as StocksPerformanceSnapshot;
         if (!cancelled) {
           if (hasPerformanceSeries(snapshot)) {
-            setPerformanceSnapshot(snapshot);
-            writeCachedSnapshot(cacheKey, snapshot);
+            setLivePerformanceSnapshot({ cacheKey, snapshot });
+            writePerformanceSnapshotCache(snapshot);
           }
           setPerformanceError(snapshot.errors[0] ?? null);
         }
@@ -320,17 +320,15 @@ export function AlphaResearchPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [marketSnapshot?.generatedAt, performanceCacheKey, performanceTickersKey]);
+  }, [
+    marketSnapshot?.generatedAt,
+    performanceCacheKey,
+    performanceTickersKey,
+    writePerformanceSnapshotCache,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
-    setFinancialSnapshot(
-      (current) =>
-        current ??
-        readCachedSnapshot<StocksFinancialSnapshot>(
-          STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
-        ),
-    );
     async function loadFinancialData() {
       try {
         setFinancialError(null);
@@ -342,8 +340,8 @@ export function AlphaResearchPage() {
         }
         const snapshot = (await response.json()) as StocksFinancialSnapshot;
         if (!cancelled) {
-          setFinancialSnapshot(snapshot);
-          writeCachedSnapshot(STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY, snapshot);
+          setLiveFinancialSnapshot(snapshot);
+          writeFinancialSnapshotCache(snapshot);
           setFinancialError(null);
         }
       } catch (error) {
@@ -360,17 +358,10 @@ export function AlphaResearchPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [writeFinancialSnapshotCache]);
 
   useEffect(() => {
     let cancelled = false;
-    setCatalystSnapshot(
-      (current) =>
-        current ??
-        readCachedSnapshot<StocksCatalystSnapshot>(
-          STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
-        ),
-    );
     async function loadCatalystData() {
       try {
         setCatalystError(null);
@@ -382,8 +373,8 @@ export function AlphaResearchPage() {
         }
         const snapshot = (await response.json()) as StocksCatalystSnapshot;
         if (!cancelled) {
-          setCatalystSnapshot(snapshot);
-          writeCachedSnapshot(STOCKS_CATALYST_SNAPSHOT_CACHE_KEY, snapshot);
+          setLiveCatalystSnapshot(snapshot);
+          writeCatalystSnapshotCache(snapshot);
           setCatalystError(null);
         }
       } catch (error) {
@@ -400,7 +391,7 @@ export function AlphaResearchPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [writeCatalystSnapshotCache]);
 
   return (
     <div className="grid min-h-0 gap-4">

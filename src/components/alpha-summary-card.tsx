@@ -55,6 +55,14 @@ type AlphaSummaryCardProps = {
   showHeaderMeta?: boolean;
 };
 
+type AlphaSummaryScopeResultProps = {
+  audience: AlphaSummaryAudience;
+  compact: boolean;
+  scope: AlphaSummaryScope;
+  snapshot: AlphaSummarySnapshot | null;
+  manualMessage: string | null;
+};
+
 function formatTime(raw: string | null) {
   if (!raw) return "n/a";
   const date = new Date(raw);
@@ -115,110 +123,17 @@ function manualResultMessage(snapshot: AlphaSummarySnapshot, label: string) {
   return `已刷新：${formatTime(snapshot.generatedAt)}`;
 }
 
-export function AlphaSummaryCard({
-  audience = "signals",
-  compact = false,
-  className = "",
-  deskLabel = "Signals AI",
-  endpoint = "/api/alpha-summary",
-  showHeaderMeta = true,
-}: AlphaSummaryCardProps) {
-  const [scope, setScope] = useState<AlphaSummaryScope>("12h");
-  const [snapshot, setSnapshot] = useState<AlphaSummarySnapshot | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [manualMessage, setManualMessage] = useState<string | null>(null);
-  const scopeRef = useRef<AlphaSummaryScope>("12h");
-  const requestsInFlight = useRef<Set<AlphaSummaryScope>>(new Set());
-
-  useEffect(() => {
-    scopeRef.current = scope;
-  }, [scope]);
-
-  const loadSummary = useCallback(async (force = false, targetScope: AlphaSummaryScope) => {
-    if (requestsInFlight.current.has(targetScope)) return;
-    requestsInFlight.current.add(targetScope);
-    const startedAt = Date.now();
-    const activeScope = scopeConfig(targetScope);
-    if (force) {
-      setManualMessage(`正在重新生成${activeScope.label}总结...`);
-    }
-    setBusy(true);
-    try {
-      const params = new URLSearchParams({ scope: targetScope });
-      if (audience !== "signals") params.set("audience", audience);
-      const response = await fetch(`${endpoint}?${params.toString()}`, {
-        method: force ? "POST" : "GET",
-        headers: force ? { "Content-Type": "application/json" } : undefined,
-        body: force
-          ? JSON.stringify({ force: true, scope: targetScope, audience })
-          : undefined,
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as AlphaSummarySnapshot;
-      if (scopeRef.current === targetScope) {
-        setSnapshot(payload);
-        if (force) {
-          setManualMessage(manualResultMessage(payload, activeScope.label));
-        }
-      }
-    } catch (error) {
-      if (force && scopeRef.current === targetScope) {
-        setManualMessage(
-          `请求失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    } finally {
-      if (force) {
-        const waitMs = MIN_MANUAL_BUSY_MS - (Date.now() - startedAt);
-        if (waitMs > 0) {
-          await new Promise((resolve) => window.setTimeout(resolve, waitMs));
-        }
-      }
-      requestsInFlight.current.delete(targetScope);
-      if (scopeRef.current === targetScope) {
-        setBusy(false);
-      }
-    }
-  }, [audience, endpoint]);
-
-  useEffect(() => {
-    const activeScope = scopeConfig(scope);
-    setSnapshot(null);
-    setManualMessage(null);
-    void loadSummary(false, scope);
-    const pollTimer = window.setInterval(() => {
-      void loadSummary(false, scope);
-    }, activeScope.pollMs);
-    return () => {
-      window.clearInterval(pollTimer);
-    };
-  }, [loadSummary, scope]);
-
+function AlphaSummaryScopeResult({
+  audience,
+  compact,
+  scope,
+  snapshot,
+  manualMessage,
+}: AlphaSummaryScopeResultProps) {
   const summary = snapshot?.summary ?? null;
   const isProblem =
     snapshot?.status === "needs_key" || snapshot?.status === "error";
-  const activeScope = scopeConfig(scope);
   const activeScopeTitle = scopeTitle(scope, audience);
-  const summaryPeriodLabel = snapshot?.period.label ?? activeScope.emptyWindow;
-  const metaItems = snapshot
-    ? [
-        { label: "窗口", value: snapshot.period.label },
-        { label: "模型", value: snapshot.model },
-        {
-          label: "来源",
-          value:
-            audience === "stocks"
-              ? `${snapshot.itemCount} 条 · Stocks ${snapshot.sourceCounts.stocks ?? 0} / TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`
-              : `${snapshot.itemCount} 条 · TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`,
-        },
-        { label: "更新", value: formatTime(snapshot.generatedAt) },
-      ]
-    : [
-        { label: "窗口", value: activeScope.emptyWindow },
-        { label: "模型", value: "AI" },
-        { label: "来源", value: "读取中" },
-        { label: "更新", value: "n/a" },
-      ];
 
   const insightGridClass = compact
     ? "grid gap-3"
@@ -226,91 +141,7 @@ export function AlphaSummaryCard({
   const authorsGridClass = compact ? "grid gap-3" : "grid gap-4 2xl:grid-cols-2";
 
   return (
-    <section
-      className={[
-        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] pointer-events-auto",
-        className,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <div className="border-b border-line/60 bg-panel-strong/72 px-4 py-3 sm:px-5">
-        <div
-          className={`flex flex-col gap-2 ${
-            compact ? "" : "xl:flex-row xl:items-center xl:justify-between"
-          }`}
-        >
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            {showHeaderMeta ? (
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="rounded-md border border-line/70 bg-background/45 px-2 py-1 text-[11px] font-semibold uppercase text-muted">
-                  {deskLabel}
-                </span>
-                <span
-                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusTone(snapshot)}`}
-                >
-                  {statusLabel(snapshot)}
-                </span>
-                {metaItems.map((item) => (
-                  <span
-                    key={item.label}
-                    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted"
-                  >
-                    <span className="shrink-0">{item.label}</span>
-                    <span className="min-w-0 truncate font-medium text-foreground">
-                      {item.value}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <div
-                data-alpha-summary-period
-                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted sm:w-fit"
-              >
-                <span className="shrink-0">周期</span>
-                <span className="min-w-0 truncate font-medium text-foreground">
-                  {summaryPeriodLabel}
-                </span>
-              </div>
-            )}
-
-            <div className="grid w-full grid-cols-4 gap-0.5 rounded-md border border-line/70 bg-background/40 p-0.5 sm:max-w-sm">
-              {SUMMARY_SCOPES.map((item) => {
-                const selected = item.id === scope;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setScope(item.id)}
-                    className={`h-7 rounded-md px-1.5 text-[11px] font-semibold transition-colors ${
-                      selected
-                        ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
-                        : "text-muted hover:bg-panel hover:text-foreground"
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className={compact ? "grid" : ""}>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void loadSummary(true, scope)}
-              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-line/70 bg-foreground px-3 text-xs font-semibold text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)] transition-colors hover:bg-accent disabled:opacity-60"
-            >
-              {busy ? "生成中..." : "重新生成"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="px-4 py-4 sm:px-5">
+    <div className="px-4 py-4 sm:px-5">
         {manualMessage ? (
           <p
             className={`mb-4 rounded-lg border px-3 py-2 text-xs leading-5 ${
@@ -477,7 +308,256 @@ export function AlphaSummaryCard({
             </p>
           </div>
         )}
+    </div>
+  );
+}
+
+export function AlphaSummaryCard({
+  audience = "signals",
+  compact = false,
+  className = "",
+  deskLabel = "Signals AI",
+  endpoint = "/api/alpha-summary",
+  showHeaderMeta = true,
+}: AlphaSummaryCardProps) {
+  const [scope, setScope] = useState<AlphaSummaryScope>("12h");
+  const [snapshotRecord, setSnapshotRecord] = useState<{
+    scope: AlphaSummaryScope;
+    snapshot: AlphaSummarySnapshot;
+  } | null>(null);
+  const [busyScope, setBusyScope] = useState<AlphaSummaryScope | null>(null);
+  const [manualMessageRecord, setManualMessageRecord] = useState<{
+    scope: AlphaSummaryScope;
+    message: string;
+  } | null>(null);
+  const requestsInFlight = useRef<Set<AlphaSummaryScope>>(new Set());
+  const abortControllers = useRef<Map<AlphaSummaryScope, Set<AbortController>>>(
+    new Map(),
+  );
+  const snapshot =
+    snapshotRecord?.scope === scope ? snapshotRecord.snapshot : null;
+  const manualMessage =
+    manualMessageRecord?.scope === scope ? manualMessageRecord.message : null;
+  const activeScope = scopeConfig(scope);
+  const summaryPeriodLabel = snapshot?.period.label ?? activeScope.emptyWindow;
+  const metaItems = snapshot
+    ? [
+        { label: "窗口", value: snapshot.period.label },
+        { label: "模型", value: snapshot.model },
+        {
+          label: "来源",
+          value:
+            audience === "stocks"
+              ? `${snapshot.itemCount} 条 · Stocks ${snapshot.sourceCounts.stocks ?? 0} / TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`
+              : `${snapshot.itemCount} 条 · TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`,
+        },
+        { label: "更新", value: formatTime(snapshot.generatedAt) },
+      ]
+    : [
+        { label: "窗口", value: activeScope.emptyWindow },
+        { label: "模型", value: "AI" },
+        { label: "来源", value: "读取中" },
+        { label: "更新", value: "n/a" },
+      ];
+
+  const loadSummary = useCallback(
+    async (force = false, targetScope: AlphaSummaryScope) => {
+      if (requestsInFlight.current.has(targetScope)) return;
+      requestsInFlight.current.add(targetScope);
+      const controller = new AbortController();
+      const scopedControllers =
+        abortControllers.current.get(targetScope) ?? new Set<AbortController>();
+      scopedControllers.add(controller);
+      abortControllers.current.set(targetScope, scopedControllers);
+      const startedAt = Date.now();
+      const targetScopeConfig = scopeConfig(targetScope);
+      const manualProgressMessage = `正在重新生成${targetScopeConfig.label}总结...`;
+      if (force) {
+        setManualMessageRecord({
+          scope: targetScope,
+          message: manualProgressMessage,
+        });
+      }
+      setBusyScope(targetScope);
+      try {
+        const params = new URLSearchParams({ scope: targetScope });
+        if (audience !== "signals") params.set("audience", audience);
+        const response = await fetch(`${endpoint}?${params.toString()}`, {
+          method: force ? "POST" : "GET",
+          headers: force ? { "Content-Type": "application/json" } : undefined,
+          body: force
+            ? JSON.stringify({ force: true, scope: targetScope, audience })
+            : undefined,
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as AlphaSummarySnapshot;
+        if (!controller.signal.aborted && scope === targetScope) {
+          setSnapshotRecord({ scope: targetScope, snapshot: payload });
+          if (force) {
+            setManualMessageRecord({
+              scope: targetScope,
+              message: manualResultMessage(payload, targetScopeConfig.label),
+            });
+          }
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          if (force) {
+            setManualMessageRecord((current) =>
+              current?.scope === targetScope &&
+              current.message === manualProgressMessage
+                ? null
+                : current,
+            );
+          }
+          return;
+        }
+        if (force && !controller.signal.aborted && scope === targetScope) {
+          setManualMessageRecord({
+            scope: targetScope,
+            message: `请求失败：${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          });
+        }
+      } finally {
+        if (force && !controller.signal.aborted) {
+          const waitMs = MIN_MANUAL_BUSY_MS - (Date.now() - startedAt);
+          if (waitMs > 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+          }
+        }
+        requestsInFlight.current.delete(targetScope);
+        const currentScopedControllers =
+          abortControllers.current.get(targetScope);
+        currentScopedControllers?.delete(controller);
+        if (currentScopedControllers?.size === 0) {
+          abortControllers.current.delete(targetScope);
+        }
+        setBusyScope((current) => (current === targetScope ? null : current));
+      }
+    },
+    [audience, endpoint, scope],
+  );
+
+  useEffect(() => {
+    const controllers = abortControllers.current;
+    const inFlightScopes = requestsInFlight.current;
+    const loadTimer = window.setTimeout(() => {
+      void loadSummary(false, scope);
+    }, 0);
+    const pollTimer = window.setInterval(() => {
+      void loadSummary(false, scope);
+    }, activeScope.pollMs);
+    return () => {
+      window.clearTimeout(loadTimer);
+      window.clearInterval(pollTimer);
+      controllers.forEach((scopedControllers) => {
+        scopedControllers.forEach((controller) => {
+          controller.abort();
+        });
+      });
+      controllers.clear();
+      inFlightScopes.clear();
+    };
+  }, [activeScope.pollMs, loadSummary, scope]);
+
+  const scopeTabs = (
+    <div className="grid w-full grid-cols-4 gap-0.5 rounded-md border border-line/70 bg-background/40 p-0.5 sm:max-w-sm">
+      {SUMMARY_SCOPES.map((item) => {
+        const selected = item.id === scope;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => setScope(item.id)}
+            className={`h-7 rounded-md px-1.5 text-[11px] font-semibold transition-colors ${
+              selected
+                ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                : "text-muted hover:bg-panel hover:text-foreground"
+            }`}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <section
+      className={[
+        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] pointer-events-auto",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="border-b border-line/60 bg-panel-strong/72 px-4 py-3 sm:px-5">
+        <div
+          className={`flex flex-col gap-2 ${
+            compact ? "" : "xl:flex-row xl:items-center xl:justify-between"
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            {showHeaderMeta ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="rounded-md border border-line/70 bg-background/45 px-2 py-1 text-[11px] font-semibold uppercase text-muted">
+                  {deskLabel}
+                </span>
+                <span
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusTone(snapshot)}`}
+                >
+                  {statusLabel(snapshot)}
+                </span>
+                {metaItems.map((item) => (
+                  <span
+                    key={item.label}
+                    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted"
+                  >
+                    <span className="shrink-0">{item.label}</span>
+                    <span className="min-w-0 truncate font-medium text-foreground">
+                      {item.value}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div
+                data-alpha-summary-period
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-line/60 bg-panel px-2 py-1 text-[11px] text-muted sm:w-fit"
+              >
+                <span className="shrink-0">周期</span>
+                <span className="min-w-0 truncate font-medium text-foreground">
+                  {summaryPeriodLabel}
+                </span>
+              </div>
+            )}
+
+            {scopeTabs}
+          </div>
+
+          <div className={compact ? "grid" : ""}>
+            <button
+              type="button"
+              disabled={busyScope === scope}
+              onClick={() => void loadSummary(true, scope)}
+              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-line/70 bg-foreground px-3 text-xs font-semibold text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)] transition-colors hover:bg-accent disabled:opacity-60"
+            >
+              {busyScope === scope ? "生成中..." : "重新生成"}
+            </button>
+          </div>
+        </div>
       </div>
+      <AlphaSummaryScopeResult
+        audience={audience}
+        compact={compact}
+        scope={scope}
+        snapshot={snapshot}
+        manualMessage={manualMessage}
+      />
     </section>
   );
 }

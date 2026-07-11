@@ -4,7 +4,7 @@
 
 **Goal:** Remove the remaining dependency, build-tracing, and React lint warnings without reducing Signal Hub functionality.
 
-**Architecture:** Release 2A applies narrow transitive dependency overrides, marks runtime-only cache paths for Turbopack, and removes low-risk lint findings. Release 2B introduces a hydration-safe browser storage boundary and replaces synchronous effect repairs with cached snapshots, keyed state boundaries, derived state, or scheduled request lifecycles.
+**Architecture:** Release 2A applies narrow transitive dependency overrides, marks runtime-only cache paths for Turbopack, and removes low-risk lint findings. Release 2B introduces a hydration-safe browser storage boundary and replaces synchronous effect repairs with cached snapshots, parent-owned scope records, derived state, or scheduled request lifecycles.
 
 **Tech Stack:** Next.js 16.2.6, React 19.2.4, TypeScript, pnpm 11, Node test scripts, ESLint 9, systemd on Ubuntu 24.04.
 
@@ -25,6 +25,7 @@
 **Files:**
 - Create: `scripts/dependency-overrides.test.mjs`
 - Modify: `package.json`
+- Modify: `pnpm-workspace.yaml`
 - Modify: `pnpm-lock.yaml`
 
 **Interfaces:**
@@ -40,9 +41,14 @@ import { readFileSync } from "node:fs";
 const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
+const workspace = readFileSync(
+  new URL("../pnpm-workspace.yaml", import.meta.url),
+  "utf8",
+);
 
 assert.equal(pkg.pnpm?.overrides?.postcss, "8.5.16");
 assert.equal(pkg.pnpm?.overrides?.["ip-address"], "10.2.0");
+assert.match(workspace, /(?:^|\n)overrides:\r?\n  postcss: 8\.5\.16\r?\n  ip-address: 10\.2\.0(?:\r?\n|$)/);
 console.log("ok - production dependency overrides are pinned");
 ```
 
@@ -50,18 +56,20 @@ console.log("ok - production dependency overrides are pinned");
 
 Run: `node scripts/dependency-overrides.test.mjs`
 
-Expected: FAIL because `package.json` has no `pnpm.overrides` block.
+Expected: FAIL because `pnpm-workspace.yaml` has no authoritative `overrides` block yet.
 
 - [ ] **Step 3: Add the exact overrides**
 
-```json
-"pnpm": {
-  "overrides": {
-    "postcss": "8.5.16",
-    "ip-address": "10.2.0"
-  }
-}
+Add the authoritative pnpm overrides to `pnpm-workspace.yaml`:
+
+```yaml
+overrides:
+  postcss: 8.5.16
+  ip-address: 10.2.0
 ```
+
+Keep the matching `package.json` `pnpm.overrides` declarations for the focused
+contract and package metadata.
 
 - [ ] **Step 4: Regenerate the lockfile without running package scripts**
 
@@ -86,7 +94,7 @@ Run: `node scripts/dependency-overrides.test.mjs`
 Expected: PASS.
 
 ```bash
-git add package.json pnpm-lock.yaml scripts/dependency-overrides.test.mjs
+git add package.json pnpm-workspace.yaml pnpm-lock.yaml scripts/dependency-overrides.test.mjs
 git commit -m "security: override vulnerable transitive dependencies"
 ```
 
@@ -399,16 +407,18 @@ git commit -m "perf: replace signal flow repair effects"
 
 **Interfaces:**
 - Consumes: `useBrowserJsonCache<T>` from Task 5.
-- Produces: cached Stocks display without synchronous effect state writes and a keyed summary result boundary per scope.
+- Produces: cached Stocks display without synchronous effect state writes and parent-owned AI summary records keyed by `AlphaSummaryScope`.
 
 - [ ] **Step 1: Add failing component contracts**
 
-Require AlphaResearchPage to consume `useBrowserJsonCache`, prohibit cache-loading `setMarketSnapshot`, `setFinancialSnapshot`, and `setCatalystSnapshot` calls at effect entry, and require a keyed scope result component in AlphaSummaryCard.
+Require AlphaResearchPage to consume `useBrowserJsonCache`, prohibit cache-loading `setMarketSnapshot`, `setFinancialSnapshot`, and `setCatalystSnapshot` calls at effect entry, and require parent-owned scope records plus an unkeyed presentational `AlphaSummaryScopeResult`.
 
 ```js
 assert.match(source, /useBrowserJsonCache/);
 assert.doesNotMatch(source, /useEffect\(\(\) => \{[\s\S]*?setMarketSnapshot\(/);
-assert.match(summarySource, /key=\{scope\}/);
+assert.doesNotMatch(summarySource, /<AlphaSummaryScopeResult[\s\S]*?key=\{scope\}/);
+assert.match(summarySource, /useState<\{\s*scope: AlphaSummaryScope;\s*snapshot: AlphaSummarySnapshot;/);
+assert.match(summarySource, /useRef<Set<AlphaSummaryScope>>/);
 assert.doesNotMatch(summarySource, /setSnapshot\(null\)/);
 ```
 
@@ -428,23 +438,27 @@ Use the hook for market, financial, catalyst, and performance cache keys. Keep l
 
 Polling effects perform fetches and timer subscription only. Preserve 5-minute, 30-minute, and 2-minute intervals exactly.
 
-- [ ] **Step 4: Split the summary scope result boundary**
+- [ ] **Step 4: Refactor summary scope records**
 
-Keep scope tabs in `AlphaSummaryCard`. Move `snapshot`, `busy`, `manualMessage`, request tracking, GET polling, and POST regeneration into:
+Keep scope tabs and the header shell in `AlphaSummaryCard`. Keep `snapshot`,
+`busy`, `manualMessage`, request tracking, GET polling, POST regeneration, and
+abort controllers in parent-owned records keyed by `AlphaSummaryScope`:
 
 ```ts
-function AlphaSummaryScopeResult({
-  scope,
-  audience,
-  endpoint,
-  compact,
-  showHeaderMeta,
-}: AlphaSummaryScopeResultProps) {
-  // Scope-local request and display state.
-}
+const [snapshotRecord, setSnapshotRecord] = useState<{
+  scope: AlphaSummaryScope;
+  snapshot: AlphaSummarySnapshot;
+} | null>(null);
+const requestsInFlight = useRef<Set<AlphaSummaryScope>>(new Set());
+const snapshot = snapshotRecord?.scope === scope ? snapshotRecord.snapshot : null;
 ```
 
-Render it with `<AlphaSummaryScopeResult key={scope} scope={scope} ... />`. The child fetches once on mount and starts the existing scope-specific poll interval without resetting state in an effect.
+Render the result with `<AlphaSummaryScopeResult scope={scope} ... />` and no
+React `key`. The child is presentational only: it receives the current scope and
+matching snapshot/manual message values. Parent fetch completion must validate
+that the response still belongs to the current scope before mutating visible
+state, abort unmounted requests silently, preserve manual busy timing, and avoid
+synchronous reset effects.
 
 - [ ] **Step 5: Run focused tests and ESLint**
 
