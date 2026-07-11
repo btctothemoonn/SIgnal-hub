@@ -33,12 +33,15 @@ The first release removes known dependency advisories and the Turbopack whole-pr
 ### Dependency Overrides
 
 Add narrow `overrides` entries in `pnpm-workspace.yaml`, which is the
-authoritative pnpm override source for installs. Keep the matching
-`package.json` declarations as package metadata for the existing focused
-contract:
+authoritative pnpm 11 override source for installs. Do not duplicate them in
+`package.json.pnpm`, because pnpm 11 ignores that field and warns on every
+command:
 
 - `postcss: 8.5.16`
 - `ip-address: 10.2.0`
+
+If later audits require toolchain overrides, scope incompatible major versions
+to their direct consumer rather than forcing one version globally.
 
 These versions contain the upstream fixes while preserving the existing direct dependency versions for Next.js and Telegram. The lockfile is regenerated and the actual resolved graph is verified with `pnpm why` and `pnpm audit --prod`.
 

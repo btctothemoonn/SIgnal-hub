@@ -4,5 +4,5 @@ ignoredBuiltDependencies:
 overrides:
   postcss: 8.5.16
   ip-address: 10.2.0
-  brace-expansion: 1.1.13
+  "minimatch@3.1.5>brace-expansion": 1.1.13
   js-yaml: 4.3.0
