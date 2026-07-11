@@ -29,5 +29,9 @@ assert.match(source, /现货资产/);
 assert.doesNotMatch(source, /<FuturesHeatmap/);
 assert.doesNotMatch(source, /<FuturesTable/);
 assert.doesNotMatch(source, /<SpotAllocationPanel/);
+assert.match(source, /window\.setTimeout\(\(\) => void load\(\), 0\)/);
+assert.match(source, /window\.setTimeout\(\(\) => void loadTracked\(\), 0\)/);
+assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*void load\(\)/);
+assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*void loadTracked\(\)/);
 
 console.log("ok - holding panel optimized Binance contract");

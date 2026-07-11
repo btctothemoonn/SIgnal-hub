@@ -74,9 +74,12 @@ export function SystemHealthPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 60_000);
-    return () => window.clearInterval(timer);
+    const initialTimer = window.setTimeout(() => void load(), 0);
+    const intervalTimer = window.setInterval(() => void load(), 60_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(intervalTimer);
+    };
   }, [load]);
 
   const grouped = useMemo(() => {

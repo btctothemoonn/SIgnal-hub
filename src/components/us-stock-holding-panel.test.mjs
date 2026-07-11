@@ -24,5 +24,7 @@ assert.doesNotMatch(source, /<ThemeAllocation/);
 assert.doesNotMatch(source, /主题暴露/);
 assert.doesNotMatch(source, /<PositionTreemap/);
 assert.doesNotMatch(source, /<HoldingDetailTable/);
+assert.match(source, /window\.setTimeout\(\(\) => void loadTiger\(\), 0\)/);
+assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*void loadTiger\(\)/);
 
 console.log("ok - us stock holding panel tiger contract");

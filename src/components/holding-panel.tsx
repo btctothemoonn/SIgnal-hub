@@ -1243,16 +1243,18 @@ export function HoldingPanel() {
 
   useEffect(() => {
     if (activeHoldingView !== "binance") return;
-    void load();
+    const timer = window.setTimeout(() => void load(), 0);
     return () => {
+      window.clearTimeout(timer);
       abortRef.current?.abort();
     };
   }, [activeHoldingView, load]);
 
   useEffect(() => {
     if (activeHoldingView !== "tracked-accounts") return;
-    void loadTracked();
+    const timer = window.setTimeout(() => void loadTracked(), 0);
     return () => {
+      window.clearTimeout(timer);
       trackedAbortRef.current?.abort();
     };
   }, [activeHoldingView, loadTracked]);

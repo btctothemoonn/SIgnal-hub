@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export type AppShellNavKey =
@@ -181,8 +181,16 @@ export function AppShell({
   mainClassName?: string;
 }) {
   const router = useRouter();
-  const [optimisticActiveNav, setOptimisticActiveNav] =
-    useState<AppShellNavKey>(activeNav);
+  const [pendingNav, setPendingNav] = useState<{
+    origin: AppShellNavKey;
+    target: AppShellNavKey;
+  } | null>(null);
+  const displayedActiveNav =
+    pendingNav?.origin === activeNav ? pendingNav.target : activeNav;
+
+  const setPendingNavigation = (target: AppShellNavKey) => {
+    setPendingNav({ origin: activeNav, target });
+  };
 
   const warmRoute = (item: (typeof shellNavItems)[number]) => {
     router.prefetch(item.href);
@@ -194,10 +202,6 @@ export function AppShell({
   const warmSettingsRoute = () => {
     router.prefetch("/settings");
   };
-
-  useEffect(() => {
-    setOptimisticActiveNav(activeNav);
-  }, [activeNav]);
 
   return (
     <div
@@ -214,8 +218,8 @@ export function AppShell({
               <ShellNavItem
                 key={item.key}
                 item={item}
-                active={item.key === optimisticActiveNav}
-                onActivate={setOptimisticActiveNav}
+                active={item.key === displayedActiveNav}
+                onActivate={setPendingNavigation}
                 onWarm={warmRoute}
               />
             ))}
@@ -224,8 +228,8 @@ export function AppShell({
             <div className="w-full">
               <ShellNavItem
                 item={settingsShellNavItem}
-                active={optimisticActiveNav === "settings"}
-                onActivate={setOptimisticActiveNav}
+                active={displayedActiveNav === "settings"}
+                onActivate={setPendingNavigation}
                 onWarm={warmRoute}
               />
             </div>
@@ -290,14 +294,14 @@ export function AppShell({
       >
         <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
           {shellNavItems.map((item) => {
-            const active = item.key === optimisticActiveNav;
+            const active = item.key === displayedActiveNav;
             return (
               <Link
                 key={item.key}
                 href={item.href}
                 title={item.label}
                 aria-label={item.label}
-                onClick={() => setOptimisticActiveNav(item.key)}
+                onClick={() => setPendingNavigation(item.key)}
                 onFocus={() => warmRoute(item)}
                 onPointerDown={() => warmRoute(item)}
                 onPointerEnter={() => warmRoute(item)}

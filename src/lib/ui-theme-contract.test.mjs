@@ -34,7 +34,12 @@ await test("app shell exposes the redesigned accent navigation and serif identit
 
 await test("app shell gives sidebar navigation immediate optimistic feedback", () => {
   assert.match(appShell, /"use client";/);
-  assert.match(appShell, /useState<AppShellNavKey>\(activeNav\)/);
+  assert.match(appShell, /const \[pendingNav, setPendingNav\] = useState/);
+  assert.match(
+    appShell,
+    /pendingNav\?\.origin === activeNav \? pendingNav\.target : activeNav/,
+  );
+  assert.match(appShell, /setPendingNav\(\{ origin: activeNav, target \}\)/);
   assert.match(appShell, /onPointerDown=\{\(\) => \{/);
   assert.match(appShell, /onActivate\(item\.key\);/);
   assert.match(appShell, /onWarm\?\.\(item\);/);

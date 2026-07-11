@@ -22,5 +22,9 @@ assert.match(source, /"douyin"/);
 assert.match(source, /grid-cols-5/);
 assert.doesNotMatch(source, /requestIdleCallback/);
 assert.doesNotMatch(source, /warmFrequentRoutes/);
+assert.match(source, /const \[pendingNav, setPendingNav\] = useState/);
+assert.match(source, /pendingNav\?\.origin === activeNav \? pendingNav\.target : activeNav/);
+assert.match(source, /setPendingNav\(\{ origin: activeNav, target \}\)/);
+assert.doesNotMatch(source, /setOptimisticActiveNav\(activeNav\)/);
 
 console.log("ok - app shell mobile command layout");

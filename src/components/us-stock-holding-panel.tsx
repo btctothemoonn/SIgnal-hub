@@ -528,8 +528,11 @@ export function USStockHoldingPanel() {
   }, []);
 
   useEffect(() => {
-    void loadTiger();
-    return () => abortRef.current?.abort();
+    const timer = window.setTimeout(() => void loadTiger(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      abortRef.current?.abort();
+    };
   }, [loadTiger]);
 
   const analysis = analyzeUsStockHoldings(snapshot.positions, snapshot);
