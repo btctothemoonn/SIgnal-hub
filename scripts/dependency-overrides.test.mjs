@@ -9,7 +9,9 @@ const workspace = readFileSync(
   "utf8",
 );
 
-assert.equal(pkg.pnpm?.overrides?.postcss, "8.5.16");
-assert.equal(pkg.pnpm?.overrides?.["ip-address"], "10.2.0");
-assert.match(workspace, /(?:^|\n)overrides:\r?\n  postcss: 8\.5\.16\r?\n  ip-address: 10\.2\.0(?:\r?\n|$)/);
+assert.equal(pkg.pnpm, undefined);
+assert.match(
+  workspace,
+  /(?:^|\n)overrides:\r?\n  postcss: 8\.5\.16\r?\n  ip-address: 10\.2\.0\r?\n  brace-expansion: 1\.1\.13\r?\n  js-yaml: 4\.3\.0(?:\r?\n|$)/,
+);
 console.log("ok - production dependency overrides are pinned");
