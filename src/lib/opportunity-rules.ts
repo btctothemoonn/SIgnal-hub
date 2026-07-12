@@ -30,13 +30,13 @@ export function clusterOpportunityItems(items: OpportunitySourceItem[]) {
       candidate.market === item.market &&
       candidate.eventType === item.eventType &&
       candidate.assetKeys.join(",") === assets.join(",") &&
-      Math.abs(Date.parse(item.publishedAt) - Date.parse(candidate.lastSeenAt)) <= 6 * 60 * 60 * 1000 &&
-      candidate.evidence.some((entry) => textJaccardSimilarity(entry.translation || entry.text, item.translation || item.text) >= 0.45),
+      Math.abs(Date.parse(item.publishedAt) - Date.parse(candidate.firstSeenAt)) <= 6 * 60 * 60 * 1000 &&
+      candidate.evidence.every((entry) => textJaccardSimilarity(entry.translation || entry.text, item.translation || item.text) >= 0.45),
     );
     if (!current) {
       const fingerprint = createHash("sha256").update(normalizeOpportunityText(item.translation || item.text)).digest("hex").slice(0, 12);
       clusters.push({
-        canonicalKey: `${item.market}:${item.eventType}:${assets.join(",")}:${item.publishedAt.slice(0, 10)}:${fingerprint}`,
+        canonicalKey: `${item.market}:${item.eventType}:${assets.join(",")}:${formatOpportunityDateKey(new Date(item.publishedAt), "Asia/Shanghai")}:${fingerprint}`,
         market: item.market,
         assetKeys: assets,
         eventType: item.eventType,
