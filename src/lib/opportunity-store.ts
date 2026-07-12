@@ -97,8 +97,15 @@ function clampLimit(limit: number) {
 
 function redactedExcerpt(text: string) {
   return text
-    .replace(/\b(?:api[_-]?key|secret|token|password|authorization)\s*(?:[:=]\s*|\s+)[^\s,;]+/gi, "$1[redacted]")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .replace(
+      /(["']?(?:api[_-]?key|secret|token|password|authorization)["']?\s*:\s*)(["'])(?:\\.|(?!\2)[\s\S])*?\2/gi,
+      "$1$2[redacted]$2",
+    )
+    .replace(
+      /(\b(?:api[_-]?key|secret|token|password|authorization)\b\s*(?:=|:)\s*)(?!Bearer\s+\[redacted\])(?:["'][^"']*["']|[^\s,;}\]]+)/gi,
+      "$1[redacted]",
+    )
     .replace(/\b(?:sk|pk|ghp)_[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
     .replace(/\s+/g, " ")
     .trim()
@@ -394,7 +401,7 @@ export function selectUnselectedDailyOpportunities(
       WHERE selected_at IS NULL AND final_score >= ? AND status != 'expired'
       ORDER BY final_score DESC, updated_at DESC
       LIMIT ?
-    `).all(clampScore(options.threshold), remaining);
+    `).all(Math.max(75, clampScore(options.threshold)), remaining);
     const update = db.prepare("UPDATE opportunity_clusters SET selected_at = ?, updated_at = ? WHERE id = ?");
     for (const row of rows) update.run(options.selectedAt, options.selectedAt, row.id);
     return rows.map((row) => numberValue(row.id));

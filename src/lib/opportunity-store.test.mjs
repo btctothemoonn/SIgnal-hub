@@ -69,13 +69,31 @@ upsertOpportunityEvidence(db, clusterId, {
   originalUrl: "https://patreon.example.com/private-1",
   assetKeys: ["NVDA"],
 });
+upsertOpportunityEvidence(db, clusterId, {
+  id: "news:secret-forms",
+  sourceType: "news",
+  sourceName: "wire",
+  publishedAt: "2026-07-12T01:02:00.000Z",
+  text: 'API payload {"apiKey":"json-secret-value"} token=equals-secret-value Authorization: Bearer bearer-secret-value',
+  translation: null,
+  originalUrl: "https://example.com/secrets",
+  assetKeys: ["NVDA"],
+});
 
 assert.equal(
   Number(db.prepare("select count(*) as count from opportunity_evidence where cluster_id = ?").get(clusterId).count),
-  2,
+  3,
 );
 const updatedEvidence = db.prepare("select text_excerpt from opportunity_evidence where source_type = 'x'").get();
 assert.doesNotMatch(updatedEvidence.text_excerpt, /visible-secret/);
+const redactedEvidence = db.prepare("select text_excerpt from opportunity_evidence where source_id = 'news:secret-forms'").get();
+assert.equal(
+  redactedEvidence.text_excerpt,
+  'API payload {"apiKey":"[redacted]"} token=[redacted] Authorization: Bearer [redacted]',
+);
+for (const secret of ["json-secret-value", "equals-secret-value", "bearer-secret-value"]) {
+  assert.doesNotMatch(redactedEvidence.text_excerpt, new RegExp(secret));
+}
 const privateEvidence = db.prepare("select text_excerpt from opportunity_evidence where source_type = 'patreon'").get();
 assert.equal(privateEvidence.text_excerpt, "Private Patreon evidence available.");
 
@@ -123,10 +141,32 @@ assert.deepEqual(
   }),
   [clusterId],
 );
+const lowScoreClusterId = upsertOpportunityCluster(db, {
+  canonicalKey: "us:order:AMD:2026-07-12T01",
+  market: "us",
+  eventType: "order",
+  assetKeys: ["AMD"],
+  firstSeenAt: "2026-07-12T01:20:00.000Z",
+  lastSeenAt: "2026-07-12T01:20:00.000Z",
+  ruleScore: 74,
+});
+assert.deepEqual(
+  selectUnselectedDailyOpportunities(db, {
+    dateKey: "2026-07-12",
+    threshold: 0,
+    limit: 10,
+    selectedAt: "2026-07-12T02:10:00.000Z",
+  }),
+  [],
+);
+assert.equal(
+  db.prepare("select selected_at from opportunity_clusters where id = ?").get(lowScoreClusterId).selected_at,
+  null,
+);
 
 const rows = listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 1000 });
 assert.equal(rows.length, 1);
-assert.equal(rows[0].evidence.length, 2);
+assert.equal(rows[0].evidence.length, 3);
 assert.equal(rows[0].evidence[0].textExcerpt, "Private Patreon evidence available.");
 assert.equal(rows[0].followed, true);
 assert.equal(rows[0].finalScore, 100);
