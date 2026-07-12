@@ -200,7 +200,7 @@ function isBinanceHoldingSnapshot(
   );
 }
 
-async function readPersistedBinanceHoldingSnapshot(): Promise<BinanceHoldingSnapshot | null> {
+export async function readPersistedBinanceHoldingSnapshot(): Promise<BinanceHoldingSnapshot | null> {
   try {
     const content = await readFile(BINANCE_HOLDINGS_SNAPSHOT_CACHE_PATH, "utf-8");
     const parsed = JSON.parse(content) as PersistedBinanceHoldingSnapshot;

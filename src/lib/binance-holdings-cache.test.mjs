@@ -3,6 +3,7 @@ import {
   createBinanceHoldingSnapshotCache,
   mergeBinanceFuturesEquityHistory,
   getBinanceHoldingSnapshotCacheTtlMs,
+  readPersistedBinanceHoldingSnapshot,
 } from "./binance-holdings-cache.ts";
 
 function buildSnapshot(updatedAt, marginBalance = 0) {
@@ -162,6 +163,12 @@ assert.equal(
     BINANCE_HOLDINGS_CACHE_TTL_MS: "-1",
   }),
   15000,
+);
+
+const persistedSnapshot = await readPersistedBinanceHoldingSnapshot();
+assert.ok(
+  persistedSnapshot === null || persistedSnapshot.exchange === "binance",
+  "persisted snapshot reader returns only a validated local cache snapshot",
 );
 
 console.log("ok - binance holdings cache");
