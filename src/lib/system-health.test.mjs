@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -84,6 +84,24 @@ assert.equal(systemHealthStatusRank("warning") < systemHealthStatusRank("error")
 
 const opportunityDirectory = mkdtempSync(join(tmpdir(), "opportunity-health-"));
 const opportunityDbPath = join(opportunityDirectory, "opportunities.sqlite");
+const missingOpportunityHealth = opportunityHealthItem(
+  { OPPORTUNITY_DB: join(opportunityDirectory, "missing.sqlite") },
+  now,
+);
+assert.equal(missingOpportunityHealth.status, "warning");
+assert.equal(missingOpportunityHealth.stale, true);
+assert.match(missingOpportunityHealth.detail, /cache missing/i);
+
+const unreadableOpportunityDbPath = join(opportunityDirectory, "unreadable.sqlite");
+writeFileSync(unreadableOpportunityDbPath, "not a sqlite database");
+const unreadableOpportunityHealth = opportunityHealthItem(
+  { OPPORTUNITY_DB: unreadableOpportunityDbPath },
+  now,
+);
+assert.equal(unreadableOpportunityHealth.status, "warning");
+assert.equal(unreadableOpportunityHealth.stale, true);
+assert.match(unreadableOpportunityHealth.detail, /cache missing/i);
+
 const opportunityDb = new DatabaseSync(opportunityDbPath);
 opportunityDb.exec(`
   CREATE TABLE opportunity_worker_state (
@@ -146,6 +164,52 @@ try {
   assert.equal(recoveredHealth.status, "warning");
   assert.equal(recoveredHealth.stale, true);
   assert.match(recoveredHealth.detail, /OpportunityAiUnavailable/);
+
+  const deepseekDb = new DatabaseSync(opportunityDbPath);
+  deepseekDb.prepare(`
+    UPDATE opportunity_worker_state
+    SET state_value = ?, updated_at = ?
+    WHERE state_key = 'last_cycle'
+  `).run(
+    JSON.stringify({
+      lastSuccessAt: "2026-05-21T03:45:00.000Z",
+      lastError: null,
+      candidateCount: 8,
+      evaluatedCount: 3,
+      selectedToday: 2,
+      provider: "deepseek",
+      model: "deepseek-chat",
+    }),
+    "2026-05-21T03:45:00.000Z",
+  );
+  deepseekDb.close();
+  const deepseekHealth = opportunityHealthItem({ OPPORTUNITY_DB: opportunityDbPath }, now);
+  assert.equal(deepseekHealth.status, "warning");
+  assert.equal(deepseekHealth.stale, false);
+  assert.equal(deepseekHealth.meta?.provider, "deepseek");
+
+  const ruleOnlyDb = new DatabaseSync(opportunityDbPath);
+  ruleOnlyDb.prepare(`
+    UPDATE opportunity_worker_state
+    SET state_value = ?, updated_at = ?
+    WHERE state_key = 'last_cycle'
+  `).run(
+    JSON.stringify({
+      lastSuccessAt: "2026-05-21T03:50:00.000Z",
+      lastError: null,
+      candidateCount: 8,
+      evaluatedCount: 0,
+      selectedToday: 2,
+      provider: null,
+      model: null,
+    }),
+    "2026-05-21T03:50:00.000Z",
+  );
+  ruleOnlyDb.close();
+  const ruleOnlyHealth = opportunityHealthItem({ OPPORTUNITY_DB: opportunityDbPath }, now);
+  assert.equal(ruleOnlyHealth.status, "warning");
+  assert.equal(ruleOnlyHealth.stale, false);
+  assert.match(ruleOnlyHealth.detail, /rule-only/);
 
   const failedDb = new DatabaseSync(opportunityDbPath);
   failedDb.prepare(`
