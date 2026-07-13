@@ -62,11 +62,13 @@ export async function runWithAiProviderFallback<T>({
   request,
   now = Date.now(),
   cooldownMs = DEFAULT_COOLDOWN_MS,
+  shouldFallback = isQuotaExhaustedError,
 }: {
   providers: AiProviderConfig[];
   request: (provider: AiProviderConfig) => Promise<T>;
   now?: Date | number;
   cooldownMs?: number;
+  shouldFallback?: (error: unknown) => boolean;
 }): Promise<{ value: T; provider: AiProviderConfig }> {
   const candidates = getAvailableAiProviders(providers, now);
   if (candidates.length === 0) {
@@ -83,7 +85,7 @@ export async function runWithAiProviderFallback<T>({
       };
     } catch (error) {
       lastError = error;
-      if (!isQuotaExhaustedError(error)) {
+      if (!shouldFallback(error)) {
         throw error;
       }
       blockedUntilByProvider.set(

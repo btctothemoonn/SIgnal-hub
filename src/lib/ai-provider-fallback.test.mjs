@@ -90,4 +90,19 @@ await assert.rejects(
   /invalid JSON response/,
 );
 
+resetAiProviderCircuitBreakers();
+let retryableAttempts = 0;
+const retryableResult = await runWithAiProviderFallback({
+  providers,
+  shouldFallback: (error) => /HTTP 500/.test(String(error)),
+  request: async (provider) => {
+    retryableAttempts += 1;
+    if (provider.id === "minimax") throw new Error("HTTP 500");
+    return "fallback-ok";
+  },
+});
+assert.equal(retryableResult.value, "fallback-ok");
+assert.equal(retryableResult.provider.id, "deepseek");
+assert.equal(retryableAttempts, 2);
+
 console.log("ok - AI provider fallback circuit breaker");
