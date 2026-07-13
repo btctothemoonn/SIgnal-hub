@@ -154,20 +154,23 @@ function stableCatalystId({
   ticker,
   publishedAt,
   link,
-  text,
+  category,
 }: {
   sourceType: string;
   source: string;
   ticker: string;
   publishedAt: string;
   link: string;
-  text: string;
+  category: string;
 }) {
   if (link) return `${sourceType}:${ticker}:${link}`;
-  const contentHash = createHash("sha256")
-    .update(`${source}\n${ticker}\n${publishedAt}\n${text.toLowerCase().replace(/\s+/g, " ").trim()}`)
+  const metadataHash = createHash("sha256")
+    .update(
+      [sourceType, source.trim().toLowerCase(), ticker, publishedAt, category]
+        .join("\n"),
+    )
     .digest("hex");
-  return `${sourceType}:${source}:${ticker}:${publishedAt}:${contentHash}`;
+  return `${sourceType}:${source}:${ticker}:${publishedAt}:${metadataHash}`;
 }
 
 function isPositiveHoldingAmount(value: unknown) {
@@ -280,7 +283,7 @@ export function normalizeCatalystOpportunityItems(
             ticker: normalizedTicker,
             publishedAt,
             link: originalUrl,
-            text,
+            category: nonEmptyString(catalyst.type).toLowerCase() || "other",
           }),
           sourceType,
           sourceName: nonEmptyString(catalyst.author) || source,

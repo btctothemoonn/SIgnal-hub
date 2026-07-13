@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   getOpportunityWorkerIntervalMs,
+  getOpportunityProviderTelemetryFromError,
   runOpportunityCycle,
 } from "../src/lib/opportunity-worker.ts";
 
@@ -69,6 +70,7 @@ async function runCycle(reason) {
       reason,
       durationMs: Date.now() - startedAt,
       errorClass: errorClass(error),
+      providerTelemetry: getOpportunityProviderTelemetryFromError(error),
     });
     return false;
   } finally {

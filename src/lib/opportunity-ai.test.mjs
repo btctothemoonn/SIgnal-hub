@@ -257,6 +257,28 @@ for (const field of ["thesis", "reasons", "risks", "invalidation"]) {
   );
 }
 
+const unlinkedEvidenceCandidate = {
+  ...candidate,
+  evidence: [
+    evidence({ id: "x:no-link", originalUrl: "javascript:alert(1)" }),
+    evidence({ id: "x:linked", originalUrl: "https://example.com/public" }),
+  ],
+};
+const claimsCitingUnlinkedEvidence = {
+  ...validOpportunity,
+  thesis: claim("Q3 order", ["x:no-link"]),
+  reasons: [claim("confirmed order", ["x:linked"])],
+  risks: [claim("delivery", ["x:linked"])],
+  invalidation: [claim("order cancelled", ["x:linked"])],
+};
+assert.throws(
+  () => validateOpportunityAiBatch(
+    { opportunities: [claimsCitingUnlinkedEvidence] },
+    [{ candidate: unlinkedEvidenceCandidate, ruleScore: 70 }],
+  ),
+  /linkable|url|evidence/i,
+);
+
 const directProviders = getOpportunityProviderCandidates({
   MINIMAX_API_KEY: " minimax-test ",
   MINIMAX_BASE_URL: "https://minimax.example/v1/",

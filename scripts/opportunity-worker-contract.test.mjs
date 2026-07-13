@@ -27,6 +27,7 @@ assert.match(script, /getOpportunityWorkerIntervalMs/);
 assert.match(script, /already_running/);
 assert.match(script, /evaluatedThisCycle/);
 assert.match(script, /providerTelemetry/);
+assert.match(script, /opportunity\.cycle\.error[\s\S]*providerTelemetry/);
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "opportunity-worker-"));
 const dbPath = join(temporaryDirectory, "opportunities.sqlite");

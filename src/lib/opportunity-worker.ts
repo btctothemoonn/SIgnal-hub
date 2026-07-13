@@ -147,6 +147,34 @@ function providerTelemetryValue(value: unknown): OpportunityProviderTelemetry {
   return { minimax: counters("minimax"), deepseek: counters("deepseek") };
 }
 
+type OpportunityCycleError = Error & {
+  opportunityProviderTelemetry?: OpportunityProviderTelemetry;
+};
+
+export function getOpportunityProviderTelemetryFromError(error: unknown) {
+  return error instanceof Error
+    ? providerTelemetryValue((error as OpportunityCycleError).opportunityProviderTelemetry)
+    : emptyProviderTelemetry();
+}
+
+function attachProviderTelemetry(
+  error: unknown,
+  providerTelemetry: OpportunityProviderTelemetry,
+) {
+  const cycleError = error instanceof Error
+    ? error as OpportunityCycleError
+    : new Error(String(error));
+  try {
+    Object.defineProperty(cycleError, "opportunityProviderTelemetry", {
+      value: providerTelemetry,
+      configurable: true,
+    });
+  } catch {
+    // Keep the original error when it cannot be annotated for structured logs.
+  }
+  return cycleError;
+}
+
 function independentSourceCount(candidate: OpportunityCandidate) {
   return new Set(
     candidate.evidence.map((item) => `${item.sourceType}:${item.sourceName}`),
@@ -549,6 +577,7 @@ export async function runOpportunityCycle(
   const loadMarketReaction =
     options.loadMarketReaction ?? loadOpportunityMarketReaction;
   const evaluateBatch = options.evaluateBatch ?? evaluateOpportunityBatch;
+  let providerTelemetry = emptyProviderTelemetry();
 
   try {
     const [items, priorityAssetKeys] = await Promise.all([
@@ -628,6 +657,7 @@ export async function runOpportunityCycle(
         aiResult = await evaluateBatch({
           inputs: pending.map((entry) => entry.input),
         });
+        providerTelemetry = providerTelemetryValue(aiResult.providerTelemetry);
       } catch (error) {
         aiFailureClass = errorClass(error);
       }
@@ -670,7 +700,7 @@ export async function runOpportunityCycle(
         aiResult && !aiResult.ruleOnly && !aiFailureClass
           ? aiResult.provider?.model ?? null
           : null,
-      providerTelemetry: providerTelemetryValue(aiResult?.providerTelemetry),
+      providerTelemetry,
       durationMs: Date.now() - startedAt,
     };
     writeCycleState(db, result);
@@ -687,7 +717,7 @@ export async function runOpportunityCycle(
       selectedToday: previous?.selectedToday ?? 0,
       provider: previous?.provider ?? null,
       model: previous?.model ?? null,
-      providerTelemetry: emptyProviderTelemetry(),
+      providerTelemetry,
       durationMs: Date.now() - startedAt,
     };
     try {
@@ -695,7 +725,7 @@ export async function runOpportunityCycle(
     } catch {
       // Preserve the cycle failure when the database cannot record health state.
     }
-    throw error;
+    throw attachProviderTelemetry(error, providerTelemetry);
   } finally {
     if (ownsDb) db.close();
   }

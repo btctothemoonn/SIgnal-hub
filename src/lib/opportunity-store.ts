@@ -17,6 +17,7 @@ import type {
   OpportunitySourceItem,
   OpportunityStatus,
 } from "./opportunity-types.ts";
+import { sanitizeOpportunityOriginalUrl } from "./opportunity-url.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -182,19 +183,6 @@ function redactedExcerpt(text: string) {
 function safeEvidenceExcerpt(evidence: OpportunitySourceItem) {
   if (evidence.sourceType === "patreon") return PRIVATE_PATREON_EXCERPT;
   return redactedExcerpt(evidence.translation || evidence.text);
-}
-
-function safeOriginalUrl(value: string) {
-  try {
-    const url = new URL(value);
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return "";
-  }
 }
 
 function withTransaction<T>(db: DatabaseSync, operation: () => T) {
@@ -418,7 +406,7 @@ export function upsertOpportunityEvidence(db: DatabaseSync, clusterId: number, e
     evidence.sourceName,
     evidence.publishedAt,
     excerpt,
-    safeOriginalUrl(evidence.originalUrl),
+    sanitizeOpportunityOriginalUrl(evidence.originalUrl),
     JSON.stringify(evidence.assetKeys),
     contentHash,
   );

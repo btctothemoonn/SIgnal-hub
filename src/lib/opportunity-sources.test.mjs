@@ -149,6 +149,27 @@ assert.equal(
   stableIds.get("Stable with link\nNVDA revenue update"),
   "news:NVDA:https://example.com/nvda-earnings",
 );
+const noLinkCatalystOriginal = normalizeCatalystOpportunityItems(
+  { catalysts: { NVDA: [stableCatalysts[0]] } },
+  { now },
+)[0];
+const noLinkCatalystEdited = normalizeCatalystOpportunityItems(
+  {
+    catalysts: {
+      NVDA: [{
+        ...stableCatalysts[0],
+        title: "Editorially revised headline",
+        summary: "Editorially revised body text with different wording",
+      }],
+    },
+  },
+  { now },
+)[0];
+assert.equal(
+  noLinkCatalystEdited.id,
+  noLinkCatalystOriginal.id,
+  "no-link catalyst identity ignores editable title and summary text",
+);
 
 const sharedLinkItems = normalizeCatalystOpportunityItems(
   {

@@ -5,6 +5,7 @@ import {
   type AiProviderConfig,
 } from "./ai-provider-fallback.ts";
 import type { OpportunityCandidate } from "./opportunity-types.ts";
+import { sanitizeOpportunityOriginalUrl } from "./opportunity-url.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type FetchLike = (
@@ -351,8 +352,10 @@ export function validateOpportunityAiBatch(
       throw new Error(`Single-source candidate cannot cross display threshold: ${item.canonicalKey}`);
     }
 
-    const allowedEvidenceIds = new Set(
-      input.candidate.evidence.map((evidence) => evidence.id),
+    const linkableEvidenceIds = new Set(
+      input.candidate.evidence
+        .filter((evidence) => Boolean(sanitizeOpportunityOriginalUrl(evidence.originalUrl)))
+        .map((evidence) => evidence.id),
     );
     const claims = [
       item.thesis,
@@ -361,7 +364,7 @@ export function validateOpportunityAiBatch(
       ...item.invalidation,
     ];
     claims.forEach((claim, index) => {
-      validateClaimEvidence(claim, allowedEvidenceIds, `${item.canonicalKey}:${index}`);
+      validateClaimEvidence(claim, linkableEvidenceIds, `${item.canonicalKey}:${index}`);
     });
     const aggregateEvidenceIds = [
       ...new Set(claims.flatMap((claim) => claim.evidenceIds)),

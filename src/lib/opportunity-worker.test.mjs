@@ -11,6 +11,7 @@ import {
   getOpportunityWorkerIntervalMs,
   runOpportunityCycle,
 } from "./opportunity-worker.ts";
+import { normalizeCatalystOpportunityItems } from "./opportunity-sources.ts";
 
 const NOW = new Date("2026-07-12T02:00:00.000Z");
 
@@ -176,6 +177,51 @@ assert.equal(
 {
   const db = new DatabaseSync(":memory:");
   initOpportunityDb(db);
+  const sourceNow = new Date("2026-07-12T02:00:00.000Z");
+  const original = normalizeCatalystOpportunityItems({
+    catalysts: {
+      NVDA: [{
+        title: "Original no-link catalyst title",
+        summary: "NVDA contract demand is improving",
+        date: "2026-07-11T00:00:00.000Z",
+        type: "industry-event",
+        source: "Google News",
+      }],
+    },
+  }, { now: sourceNow });
+  const edited = normalizeCatalystOpportunityItems({
+    catalysts: {
+      NVDA: [{
+        title: "Revised no-link catalyst title",
+        summary: "Editorial revisions changed this catalyst summary",
+        date: "2026-07-11T00:00:00.000Z",
+        type: "industry-event",
+        source: "Google News",
+      }],
+    },
+  }, { now: sourceNow });
+  assert.equal(edited[0].id, original[0].id);
+  await runOpportunityCycle(cycleOptions(db, original, async ({ inputs }) => successResult(inputs), sourceNow));
+  await runOpportunityCycle(cycleOptions(
+    db,
+    edited,
+    async ({ inputs }) => successResult(inputs),
+    new Date("2026-07-12T03:00:00.000Z"),
+  ));
+  assert.equal(
+    Number(db.prepare("select count(*) as count from opportunity_clusters").get().count),
+    1,
+  );
+  assert.equal(
+    Number(db.prepare("select count(*) as count from opportunity_evidence").get().count),
+    1,
+  );
+  db.close();
+}
+
+{
+  const db = new DatabaseSync(":memory:");
+  initOpportunityDb(db);
   const original = highScoreFixtures();
   const edited = original.map((item) => ({
     ...item,
@@ -255,6 +301,30 @@ for (const secondCycleFixtures of [highScoreFixtures(), []]) {
     }).length,
     0,
   );
+  db.close();
+}
+
+{
+  const db = new DatabaseSync(":memory:");
+  initOpportunityDb(db);
+  db.exec(`
+    CREATE TRIGGER reject_daily_selection
+    BEFORE UPDATE OF selected_at ON opportunity_clusters
+    WHEN NEW.selected_at IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'late selection failure');
+    END;
+  `);
+  await assert.rejects(
+    runOpportunityCycle(
+      cycleOptions(db, highScoreFixtures(), async ({ inputs }) => successResult(inputs)),
+    ),
+    /late selection failure/,
+  );
+  const failedState = JSON.parse(getOpportunityWorkerState(db, "last_cycle"));
+  assert.equal(failedState.lastError, "Error");
+  assert.equal(failedState.providerTelemetry.minimax.attempts, 1);
+  assert.equal(failedState.providerTelemetry.minimax.successes, 1);
   db.close();
 }
 
