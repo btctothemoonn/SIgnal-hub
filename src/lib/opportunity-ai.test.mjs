@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { resetAiProviderCircuitBreakers } from "./ai-provider-fallback.ts";
 import {
+  OPPORTUNITY_DISPLAY_THRESHOLD,
   OPPORTUNITY_PROMPT_VERSION,
   buildOpportunityInputHash,
   buildOpportunityPrompt,
@@ -10,6 +12,20 @@ import {
   validateOpportunityAiBatch,
 } from "./opportunity-ai.ts";
 
+const evidence = (overrides = {}) => ({
+  id: "x:1",
+  sourceType: "x",
+  sourceName: "analyst-a",
+  market: "us",
+  assetKeys: ["NVDA"],
+  eventType: "order",
+  publishedAt: "2026-07-12T01:00:00.000Z",
+  text: "x".repeat(2_500),
+  translation: "Q3 order confirmed",
+  originalUrl: "https://example.com/private?token=secret",
+  ...overrides,
+});
+
 const candidate = {
   canonicalKey: "us:order:NVDA:1",
   market: "us",
@@ -17,63 +33,93 @@ const candidate = {
   eventType: "order",
   firstSeenAt: "2026-07-12T01:00:00.000Z",
   lastSeenAt: "2026-07-12T01:00:00.000Z",
-  evidence: [
-    {
-      id: "x:1",
-      sourceType: "x",
-      sourceName: "analyst-a",
-      market: "us",
-      assetKeys: ["NVDA"],
-      eventType: "order",
-      publishedAt: "2026-07-12T01:00:00.000Z",
-      text: "x".repeat(2_500),
-      translation: "Q3 order confirmed",
-      originalUrl: "https://example.com/private?token=secret",
-    },
-  ],
+  evidence: [evidence(), evidence({ id: "x:2", publishedAt: "2026-07-12T01:05:00.000Z" })],
 };
-const candidates = [candidate];
-const validBatch = {
-  opportunities: [
-    {
-      canonicalKey: candidate.canonicalKey,
-      aiAdjustment: 5,
-      thesis: "Q3 order",
-      reasons: ["confirmed order"],
-      risks: ["delivery"],
-      invalidation: ["order cancelled"],
-      validUntil: "2026-08-01T00:00:00.000Z",
-      confidence: "high",
-      evidenceIds: ["x:1"],
-    },
-  ],
+const input = { candidate, ruleScore: 70 };
+const inputs = [input];
+const claim = (text, evidenceIds) => ({ text, evidenceIds });
+const validOpportunity = {
+  canonicalKey: candidate.canonicalKey,
+  aiAdjustment: 4,
+  thesis: claim("Q3 order", ["x:1"]),
+  reasons: [claim("confirmed order", ["x:2"])],
+  risks: [claim("delivery", ["x:1"])],
+  invalidation: [claim("order cancelled", ["x:2"])],
+  validUntil: "2026-08-01T00:00:00.000Z",
+  confidence: "high",
 };
-const evidenceByCluster = new Map([
-  [candidate.canonicalKey, new Set(["x:1"])],
-]);
+const validBatch = { opportunities: [validOpportunity] };
+const normalizedOpportunity = {
+  canonicalKey: candidate.canonicalKey,
+  aiAdjustment: 4,
+  thesis: "Q3 order",
+  reasons: ["confirmed order"],
+  risks: ["delivery"],
+  invalidation: ["order cancelled"],
+  validUntil: "2026-08-01T00:00:00.000Z",
+  confidence: "high",
+  evidenceIds: ["x:1", "x:2"],
+};
 
-const hash = buildOpportunityInputHash(candidates, OPPORTUNITY_PROMPT_VERSION);
+const promptText = buildOpportunityPrompt(inputs);
+const prompt = JSON.parse(promptText);
+assert.equal(prompt.promptVersion, OPPORTUNITY_PROMPT_VERSION);
+assert.equal(prompt.displayThreshold, OPPORTUNITY_DISPLAY_THRESHOLD);
+assert.equal(prompt.candidates[0].ruleScore, 70);
+assert.equal(prompt.candidates[0].independentSourceCount, 1);
+assert.equal(prompt.candidates[0].displayThreshold, 75);
+assert.equal(prompt.candidates[0].evidence[0].text, "Q3 order confirmed");
+assert.equal("originalUrl" in prompt.candidates[0].evidence[0], false);
+assert.deepEqual(prompt.responseShape.opportunities[0].thesis, {
+  text: "string",
+  evidenceIds: ["source:id"],
+});
+assert.throws(
+  () => buildOpportunityPrompt([{ ...input, ruleScore: Number.NaN }]),
+  /ruleScore/i,
+);
+
+const longInput = {
+  candidate: {
+    ...candidate,
+    evidence: [evidence({ translation: null })],
+  },
+  ruleScore: 70,
+};
+assert.equal(
+  JSON.parse(buildOpportunityPrompt([longInput])).candidates[0].evidence[0].text.length,
+  2_000,
+);
+
+const hash = buildOpportunityInputHash(inputs);
 assert.match(hash, /^[a-f0-9]{64}$/);
 assert.equal(
   hash,
-  buildOpportunityInputHash(candidates, OPPORTUNITY_PROMPT_VERSION),
+  createHash("sha256").update(promptText).digest("hex"),
 );
+assert.equal(hash, buildOpportunityInputHash(inputs));
 assert.notEqual(
   hash,
-  buildOpportunityInputHash(candidates, OPPORTUNITY_PROMPT_VERSION + 1),
+  buildOpportunityInputHash(inputs, OPPORTUNITY_PROMPT_VERSION + 1),
 );
-
-const prompt = JSON.parse(buildOpportunityPrompt(candidates));
-assert.equal(prompt.promptVersion, OPPORTUNITY_PROMPT_VERSION);
-assert.equal(prompt.candidates[0].evidence[0].text, "Q3 order confirmed");
-assert.equal("originalUrl" in prompt.candidates[0].evidence[0], false);
-
-const longCandidate = {
-  ...candidate,
-  evidence: [{ ...candidate.evidence[0], translation: null }],
-};
-const longPrompt = JSON.parse(buildOpportunityPrompt([longCandidate]));
-assert.equal(longPrompt.candidates[0].evidence[0].text.length, 2_000);
+const unsentFieldsChanged = [{
+  candidate: {
+    ...candidate,
+    firstSeenAt: "2030-01-01T00:00:00.000Z",
+    lastSeenAt: "2030-01-02T00:00:00.000Z",
+    evidence: candidate.evidence.map((item) => ({
+      ...item,
+      originalUrl: "https://different.example/secret",
+      text: "not sent because translation is present",
+    })),
+  },
+  ruleScore: 70,
+}];
+assert.equal(hash, buildOpportunityInputHash(unsentFieldsChanged));
+assert.notEqual(
+  hash,
+  buildOpportunityInputHash([{ ...input, ruleScore: 71 }]),
+);
 
 const parsed = parseOpportunityAiBatch(JSON.stringify(validBatch));
 assert.deepEqual(parsed, validBatch);
@@ -81,192 +127,300 @@ assert.deepEqual(
   parseOpportunityAiBatch(`\n\`\`\`json\n${JSON.stringify(validBatch)}\n\`\`\`\n`),
   validBatch,
 );
-assert.equal(
-  validateOpportunityAiBatch(parsed, evidenceByCluster)[0].aiAdjustment,
-  5,
-);
+assert.deepEqual(validateOpportunityAiBatch(parsed, inputs), [normalizedOpportunity]);
 
 assert.throws(
   () => parseOpportunityAiBatch(JSON.stringify({ ...validBatch, extra: true })),
   /unexpected|schema/i,
 );
 assert.throws(
-  () =>
-    parseOpportunityAiBatch(
-      JSON.stringify({
-        opportunities: [{ ...validBatch.opportunities[0], aiAdjustment: "5" }],
-      }),
-    ),
+  () => parseOpportunityAiBatch(JSON.stringify({
+    opportunities: [{ ...validOpportunity, aiAdjustment: "4" }],
+  })),
   /adjustment|schema/i,
 );
 assert.throws(
-  () =>
-    parseOpportunityAiBatch(
-      JSON.stringify({
-        opportunities: [{ ...validBatch.opportunities[0], risks: ["delivery", 7] }],
-      }),
-    ),
-  /risks|schema/i,
-);
-assert.throws(
-  () =>
-    parseOpportunityAiBatch(
-      JSON.stringify({
-        opportunities: [{ ...validBatch.opportunities[0], confidence: "certain" }],
-      }),
-    ),
+  () => parseOpportunityAiBatch(JSON.stringify({
+    opportunities: [{ ...validOpportunity, confidence: "certain" }],
+  })),
   /confidence|schema/i,
 );
 assert.throws(
-  () =>
-    parseOpportunityAiBatch(
-      JSON.stringify({
-        opportunities: [{ ...validBatch.opportunities[0], validUntil: "later" }],
-      }),
-    ),
+  () => parseOpportunityAiBatch(JSON.stringify({
+    opportunities: [{ ...validOpportunity, validUntil: "later" }],
+  })),
   /validUntil|date|schema/i,
+);
+assert.throws(
+  () => parseOpportunityAiBatch(JSON.stringify({
+    opportunities: [{
+      ...validOpportunity,
+      reasons: [
+        claim("one", ["x:1"]),
+        claim("two", ["x:1"]),
+        claim("three", ["x:1"]),
+        claim("four", ["x:1"]),
+      ],
+    }],
+  })),
+  /reasons|3/i,
 );
 
 assert.throws(
-  () =>
-    validateOpportunityAiBatch(
-      { opportunities: [{ ...validBatch.opportunities[0], aiAdjustment: 16 }] },
-      evidenceByCluster,
-    ),
-  /adjustment/i,
+  () => validateOpportunityAiBatch({ opportunities: [] }, inputs),
+  /complete|empty|batch/i,
 );
 assert.throws(
-  () =>
-    validateOpportunityAiBatch(
-      { opportunities: [{ ...validBatch.opportunities[0], evidenceIds: ["missing"] }] },
-      evidenceByCluster,
-    ),
-  /evidence/i,
-);
-assert.throws(
-  () =>
-    validateOpportunityAiBatch(
-      { opportunities: [{ ...validBatch.opportunities[0], evidenceIds: [] }] },
-      evidenceByCluster,
-    ),
-  /evidence/i,
-);
-assert.throws(
-  () =>
-    validateOpportunityAiBatch(
-      {
-        opportunities: [
-          { ...validBatch.opportunities[0], canonicalKey: "us:order:UNKNOWN:1" },
-        ],
-      },
-      evidenceByCluster,
-    ),
-  /canonical|evidence/i,
-);
-assert.throws(
-  () =>
-    validateOpportunityAiBatch(
-      { opportunities: [validBatch.opportunities[0], validBatch.opportunities[0]] },
-      evidenceByCluster,
-    ),
+  () => validateOpportunityAiBatch({ opportunities: [validOpportunity, validOpportunity] }, inputs),
   /duplicate/i,
 );
 
-const providers = getOpportunityProviderCandidates({
+const secondCandidate = {
+  ...candidate,
+  canonicalKey: "us:policy:AMD:2",
+  assetKeys: ["AMD"],
+  eventType: "policy",
+  evidence: [evidence({ id: "news:2", sourceType: "news", sourceName: "wire" })],
+};
+const secondInput = { candidate: secondCandidate, ruleScore: 80 };
+const secondOpportunity = {
+  ...validOpportunity,
+  canonicalKey: secondCandidate.canonicalKey,
+  aiAdjustment: 1,
+  thesis: claim("policy support", ["news:2"]),
+  reasons: [],
+  risks: [],
+  invalidation: [],
+};
+assert.throws(
+  () => validateOpportunityAiBatch(validBatch, [input, secondInput]),
+  /complete|missing/i,
+);
+assert.throws(
+  () => validateOpportunityAiBatch(
+    { opportunities: [validOpportunity, secondOpportunity] },
+    inputs,
+  ),
+  /complete|unexpected|canonical/i,
+);
+
+assert.throws(
+  () => validateOpportunityAiBatch({
+    opportunities: [{ ...validOpportunity, aiAdjustment: 16 }],
+  }, inputs),
+  /adjustment/i,
+);
+assert.throws(
+  () => validateOpportunityAiBatch({
+    opportunities: [{ ...validOpportunity, aiAdjustment: 5 }],
+  }, inputs),
+  /threshold|single.source|unverified/i,
+);
+assert.equal(
+  validateOpportunityAiBatch({
+    opportunities: [{ ...validOpportunity, aiAdjustment: 15 }],
+  }, [{ ...input, ruleScore: 75 }])[0].aiAdjustment,
+  15,
+);
+
+for (const field of ["thesis", "reasons", "risks", "invalidation"]) {
+  const invalidClaim = claim("unsupported", ["invented:1"]);
+  const opportunity = {
+    ...validOpportunity,
+    [field]: field === "thesis" ? invalidClaim : [invalidClaim],
+  };
+  assert.throws(
+    () => validateOpportunityAiBatch({ opportunities: [opportunity] }, inputs),
+    /evidence/i,
+  );
+}
+for (const field of ["thesis", "reasons", "risks", "invalidation"]) {
+  const uncitedClaim = claim("uncited", []);
+  const opportunity = {
+    ...validOpportunity,
+    [field]: field === "thesis" ? uncitedClaim : [uncitedClaim],
+  };
+  assert.throws(
+    () => validateOpportunityAiBatch({ opportunities: [opportunity] }, inputs),
+    /evidence/i,
+  );
+}
+
+const directProviders = getOpportunityProviderCandidates({
   MINIMAX_API_KEY: " minimax-test ",
   MINIMAX_BASE_URL: "https://minimax.example/v1/",
   DEEPSEEK_API_KEY: " deepseek-test ",
   DEEPSEEK_BASE_URL: "https://deepseek.example/",
 });
 assert.deepEqual(
-  providers.map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
+  directProviders.map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
   [
-    {
-      id: "minimax",
-      baseUrl: "https://minimax.example/v1",
-      model: "MiniMax-M2.7",
-    },
-    {
-      id: "deepseek",
-      baseUrl: "https://deepseek.example",
-      model: "deepseek-chat",
-    },
+    { id: "minimax", baseUrl: "https://minimax.example/v1", model: "MiniMax-M2.7" },
+    { id: "deepseek", baseUrl: "https://deepseek.example", model: "deepseek-chat" },
   ],
 );
 
-resetAiProviderCircuitBreakers();
-const urls = [];
-const requestBodies = [];
-const fallbackResult = await evaluateOpportunityBatch({
-  candidates,
-  env: {
-    MINIMAX_API_KEY: "minimax-test",
-    DEEPSEEK_API_KEY: "deepseek-test",
-  },
-  fetchImpl: async (url, init) => {
-    urls.push(String(url));
-    requestBodies.push(JSON.parse(String(init?.body)));
-    if (String(url).includes("minimaxi")) {
-      return new Response("private provider response", { status: 429 });
-    }
-    return Response.json({
-      choices: [{ message: { content: JSON.stringify(validBatch) } }],
-    });
-  },
+const reusedProviders = getOpportunityProviderCandidates({
+  AI_SUMMARY_API_KEY: "summary-minimax-key",
+  AI_SUMMARY_BASE_URL: "https://summary.minimax.example/v1/",
+  AI_SUMMARY_MODEL: "summary-minimax-model",
+  AI_SUMMARY_FALLBACK_API_KEY: "summary-deepseek-key",
+  AI_SUMMARY_FALLBACK_BASE_URL: "https://fallback.deepseek.example/v1/",
+  AI_SUMMARY_FALLBACK_MODEL: "summary-deepseek-model",
 });
-assert.equal(fallbackResult.ruleOnly, false);
-assert.equal(fallbackResult.provider?.id, "deepseek");
-assert.equal(fallbackResult.inputHash, hash);
-assert.deepEqual(fallbackResult.evaluations, validBatch.opportunities);
 assert.deepEqual(
-  urls.map((url) => new URL(url).hostname),
-  ["api.minimaxi.com", "api.deepseek.com"],
+  reusedProviders.map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
+  [
+    {
+      id: "minimax",
+      baseUrl: "https://summary.minimax.example/v1",
+      model: "summary-minimax-model",
+    },
+    {
+      id: "deepseek",
+      baseUrl: "https://fallback.deepseek.example/v1",
+      model: "summary-deepseek-model",
+    },
+  ],
 );
-assert.deepEqual(
-  requestBodies.map((body) => body.model),
-  ["MiniMax-M2.7", "deepseek-chat"],
-);
+assert.deepEqual(getOpportunityProviderCandidates({
+  AI_SUMMARY_API_KEY: "wrong-primary-key",
+  AI_SUMMARY_BASE_URL: "https://api.deepseek.com/v1",
+  AI_SUMMARY_FALLBACK_API_KEY: "wrong-fallback-key",
+  AI_SUMMARY_FALLBACK_BASE_URL: "https://api.minimaxi.com/v1",
+}), []);
+assert.deepEqual(getOpportunityProviderCandidates({
+  AI_SUMMARY_API_KEY: "path-spoofed-primary-key",
+  AI_SUMMARY_BASE_URL: "https://proxy.example/v1/minimax",
+  AI_SUMMARY_FALLBACK_API_KEY: "path-spoofed-fallback-key",
+  AI_SUMMARY_FALLBACK_BASE_URL: "https://proxy.example/v1/deepseek",
+}), []);
+
+const providerEnv = {
+  MINIMAX_API_KEY: "minimax-test",
+  DEEPSEEK_API_KEY: "deepseek-test",
+};
+const successResponse = () => Response.json({
+  choices: [{ message: { content: JSON.stringify(validBatch) } }],
+});
+
+for (const status of [408, 429, 500, 503]) {
+  resetAiProviderCircuitBreakers();
+  const urls = [];
+  const result = await evaluateOpportunityBatch({
+    inputs,
+    env: providerEnv,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return urls.length === 1
+        ? new Response("private provider response", { status })
+        : successResponse();
+    },
+  });
+  assert.equal(result.provider?.id, "deepseek");
+  assert.deepEqual(
+    urls.map((url) => new URL(url).hostname),
+    ["api.minimaxi.com", "api.deepseek.com"],
+  );
+}
 
 resetAiProviderCircuitBreakers();
-let thrownHttpAttempts = 0;
-const thrownHttpFallback = await evaluateOpportunityBatch({
-  candidates,
-  env: {
-    MINIMAX_API_KEY: "minimax-test",
-    DEEPSEEK_API_KEY: "deepseek-test",
-  },
-  fetchImpl: async (url) => {
-    thrownHttpAttempts += 1;
-    if (String(url).includes("minimaxi")) throw new Error("HTTP 500");
-    return Response.json({
-      choices: [{ message: { content: JSON.stringify(validBatch) } }],
-    });
+let badRequestAttempts = 0;
+const badRequestResult = await evaluateOpportunityBatch({
+  inputs,
+  env: providerEnv,
+  fetchImpl: async () => {
+    badRequestAttempts += 1;
+    return new Response("private bad request", { status: 400 });
   },
 });
-assert.equal(thrownHttpAttempts, 2);
-assert.equal(thrownHttpFallback.provider?.id, "deepseek");
+assert.equal(badRequestAttempts, 1);
+assert.equal(badRequestResult.ruleOnly, true);
+
+resetAiProviderCircuitBreakers();
+let timeoutAttempts = 0;
+const timeoutDelays = [];
+const clearedTimers = [];
+const timeoutResult = await evaluateOpportunityBatch({
+  inputs,
+  env: providerEnv,
+  timeoutMs: 25,
+  timer: {
+    setTimeout(callback, delay) {
+      timeoutDelays.push(delay);
+      const handle = timeoutDelays.length;
+      if (handle === 1) callback();
+      return handle;
+    },
+    clearTimeout(handle) {
+      clearedTimers.push(handle);
+    },
+  },
+  fetchImpl: async (url, init) => {
+    timeoutAttempts += 1;
+    if (String(url).includes("minimaxi")) {
+      assert.equal(init?.signal?.aborted, true);
+      throw new DOMException("aborted", "AbortError");
+    }
+    return successResponse();
+  },
+});
+assert.equal(timeoutResult.provider?.id, "deepseek");
+assert.equal(timeoutAttempts, 2);
+assert.deepEqual(timeoutDelays, [25, 25]);
+assert.deepEqual(clearedTimers, [1, 2]);
+
+resetAiProviderCircuitBreakers();
+let bodyTimeoutAttempts = 0;
+let bodyTimeoutCallback = null;
+let bodyTimerActive = false;
+const bodyTimeoutResult = await evaluateOpportunityBatch({
+  inputs,
+  env: providerEnv,
+  timeoutMs: 25,
+  timer: {
+    setTimeout(callback) {
+      bodyTimeoutCallback = callback;
+      bodyTimerActive = true;
+      return bodyTimeoutAttempts + 1;
+    },
+    clearTimeout() {
+      bodyTimerActive = false;
+    },
+  },
+  fetchImpl: async (url) => {
+    bodyTimeoutAttempts += 1;
+    if (String(url).includes("minimaxi")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          if (bodyTimerActive) bodyTimeoutCallback?.();
+          throw new DOMException("aborted while reading body", "AbortError");
+        },
+      };
+    }
+    return successResponse();
+  },
+});
+assert.equal(bodyTimeoutAttempts, 2);
+assert.equal(bodyTimeoutResult.provider?.id, "deepseek");
 
 resetAiProviderCircuitBreakers();
 let malformedResponseAttempts = 0;
 const malformedResponse = await evaluateOpportunityBatch({
-  candidates,
-  env: {
-    MINIMAX_API_KEY: "minimax-test",
-    DEEPSEEK_API_KEY: "deepseek-test",
-  },
+  inputs,
+  env: providerEnv,
   fetchImpl: async () => {
     malformedResponseAttempts += 1;
     return Response.json({
-      choices: [
-        {
-          message: {
-            content:
-              malformedResponseAttempts === 1
-                ? "HTTP 500 is not a valid structured response"
-                : JSON.stringify(validBatch),
-          },
+      choices: [{
+        message: {
+          content: malformedResponseAttempts === 1
+            ? "HTTP 500 is not a valid structured response"
+            : JSON.stringify(validBatch),
         },
-      ],
+      }],
     });
   },
 });
@@ -276,25 +430,17 @@ assert.equal(malformedResponse.ruleOnly, true);
 resetAiProviderCircuitBreakers();
 let validationAttempts = 0;
 const validationFailure = await evaluateOpportunityBatch({
-  candidates,
-  env: {
-    MINIMAX_API_KEY: "minimax-test",
-    DEEPSEEK_API_KEY: "deepseek-test",
-  },
+  inputs,
+  env: providerEnv,
   fetchImpl: async () => {
     validationAttempts += 1;
     return Response.json({
-      choices: [
-        {
-          message: {
-            content: JSON.stringify({
-              opportunities: [
-                { ...validBatch.opportunities[0], evidenceIds: ["invented:1"] },
-              ],
-            }),
-          },
-        },
-      ],
+      choices: [{ message: { content: JSON.stringify({
+        opportunities: [{
+          ...validOpportunity,
+          thesis: claim("invented", ["invented:1"]),
+        }],
+      }) } }],
     });
   },
 });
@@ -307,45 +453,22 @@ assert.deepEqual(validationFailure, {
 });
 
 const retriedSuccess = await evaluateOpportunityBatch({
-  candidates,
+  inputs,
   env: { MINIMAX_API_KEY: "minimax-test" },
-  fetchImpl: async () =>
-    Response.json({
-      choices: [{ message: { content: JSON.stringify(validBatch) } }],
-    }),
+  fetchImpl: async () => successResponse(),
 });
 assert.equal(retriedSuccess.ruleOnly, false);
 assert.equal(retriedSuccess.inputHash, hash);
+assert.deepEqual(retriedSuccess.evaluations, [normalizedOpportunity]);
 
 const noProviderResult = await evaluateOpportunityBatch({
-  candidates,
+  inputs,
   env: {},
   fetchImpl: async () => {
     throw new Error("fetch should not run");
   },
 });
 assert.deepEqual(noProviderResult, {
-  evaluations: [],
-  provider: null,
-  inputHash: null,
-  ruleOnly: true,
-});
-
-resetAiProviderCircuitBreakers();
-let failedRequests = 0;
-const allProvidersFailed = await evaluateOpportunityBatch({
-  candidates,
-  env: {
-    MINIMAX_API_KEY: "minimax-test",
-    DEEPSEEK_API_KEY: "deepseek-test",
-  },
-  fetchImpl: async () => {
-    failedRequests += 1;
-    return new Response("private response body must not escape", { status: 500 });
-  },
-});
-assert.equal(failedRequests, 2);
-assert.deepEqual(allProvidersFailed, {
   evaluations: [],
   provider: null,
   inputHash: null,
