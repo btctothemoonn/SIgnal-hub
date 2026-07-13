@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ALPHA_RESEARCH_STOCK_UNIVERSE } from "./alpha-research-pool.ts";
 import { readPersistedBinanceHoldingSnapshot } from "./binance-holdings-cache.ts";
 import { getDouyinSnapshot } from "./douyin-monitor.ts";
@@ -17,7 +18,18 @@ type OpportunitySourceItemWithExcerpt = OpportunitySourceItem & {
   textExcerpt: string;
 };
 type SourceNormalizerOptions = { now?: Date };
-type MarketReaction = { available: boolean; absoluteMovePercent: number };
+type MarketReaction = { available: boolean; absoluteMovePercent: number | null };
+type MaybePromise<T> = T | Promise<T>;
+
+export type OpportunitySourceReaders = {
+  telegram: (limit: number) => MaybePromise<Pick<TelegramDashboardSnapshot, "feed">>;
+  x: (limit: number) => MaybePromise<Pick<TwitterDashboardSnapshot, "feed">>;
+  catalysts: (env: EnvLike) => MaybePromise<StocksCatalystSnapshot | null>;
+  douyin: (env: EnvLike) => MaybePromise<Pick<DouyinSnapshot, "videos">>;
+  readPersistedTigerHoldingData: () => MaybePromise<Awaited<ReturnType<typeof readPersistedTigerHoldingData>>>;
+  readPersistedBinanceHoldingSnapshot: () => MaybePromise<Awaited<ReturnType<typeof readPersistedBinanceHoldingSnapshot>>>;
+  market: (env: EnvLike) => MaybePromise<StocksMarketSnapshot | null>;
+};
 
 const MAX_TEXT_EXCERPT_LENGTH = 2_000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -131,6 +143,28 @@ function sourceTypeForCatalyst(source: string) {
   return source.toLowerCase() === "patreon" ? "patreon" : "news";
 }
 
+function stableCatalystId({
+  sourceType,
+  source,
+  ticker,
+  publishedAt,
+  link,
+  text,
+}: {
+  sourceType: string;
+  source: string;
+  ticker: string;
+  publishedAt: string;
+  link: string;
+  text: string;
+}) {
+  if (link) return `${sourceType}:${link}`;
+  const contentHash = createHash("sha256")
+    .update(`${source}\n${ticker}\n${publishedAt}\n${text.toLowerCase().replace(/\s+/g, " ").trim()}`)
+    .digest("hex");
+  return `${sourceType}:${source}:${ticker}:${publishedAt}:${contentHash}`;
+}
+
 function isPositiveHoldingAmount(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -216,7 +250,7 @@ export function normalizeCatalystOpportunityItems(
 ): OpportunitySourceItemWithExcerpt[] {
   const items: OpportunitySourceItemWithExcerpt[] = [];
   for (const [ticker, catalysts] of Object.entries(snapshot.catalysts ?? {})) {
-    for (const [index, catalyst] of catalysts.entries()) {
+    for (const catalyst of catalysts) {
       const publishedAt = nonEmptyString(catalyst.date);
       if (!isWithinSevenDays(publishedAt, now)) continue;
 
@@ -227,13 +261,22 @@ export function normalizeCatalystOpportunityItems(
 
       const source = nonEmptyString(catalyst.source) || "Stocks catalyst";
       const sourceType = sourceTypeForCatalyst(source);
+      const originalUrl = nonEmptyString(catalyst.link);
+      const normalizedTicker = ticker.toUpperCase();
       const assetKeys = uniqueAssetKeys([
-        ticker.toUpperCase(),
+        normalizedTicker,
         ...extractOpportunityAssetKeys(text),
       ]);
       items.push(
         buildSourceItem({
-          id: `${sourceType}:${ticker.toUpperCase()}:${publishedAt}:${index}`,
+          id: stableCatalystId({
+            sourceType,
+            source,
+            ticker: normalizedTicker,
+            publishedAt,
+            link: originalUrl,
+            text,
+          }),
           sourceType,
           sourceName: nonEmptyString(catalyst.author) || source,
           market: sourceMarket(assetKeys),
@@ -243,7 +286,7 @@ export function normalizeCatalystOpportunityItems(
           // Do not use fullSummary: it may contain private Patreon body text.
           text,
           translation: null,
-          originalUrl: nonEmptyString(catalyst.link),
+          originalUrl,
         }),
       );
     }
@@ -315,30 +358,47 @@ async function emptyOnFailure<T>(loader: () => Promise<T>, fallback: T) {
   }
 }
 
+const defaultOpportunitySourceReaders: OpportunitySourceReaders = {
+  telegram: (limit) => getTelegramPipelineSnapshot(limit),
+  x: (limit) => getXPipelineSnapshot(limit),
+  catalysts: (env) =>
+    readStocksSnapshotCache<StocksCatalystSnapshot>({
+      kind: "catalysts",
+      env,
+      allowStale: true,
+    }),
+  douyin: (env) => getDouyinSnapshot({ env }),
+  readPersistedTigerHoldingData: () => readPersistedTigerHoldingData(),
+  readPersistedBinanceHoldingSnapshot: () => readPersistedBinanceHoldingSnapshot(),
+  market: (env) =>
+    readStocksSnapshotCache<StocksMarketSnapshot>({
+      kind: "market",
+      env,
+      allowStale: true,
+    }),
+};
+
 export async function loadOpportunitySourceItems({
   env = process.env,
+  readers = defaultOpportunitySourceReaders,
 }: {
   env?: EnvLike;
+  readers?: OpportunitySourceReaders;
 } = {}) {
   const telegram = await emptyOnFailure<Pick<TelegramDashboardSnapshot, "feed">>(
-    async () => getTelegramPipelineSnapshot(1_000),
+    async () => await readers.telegram(1_000),
     { feed: [] },
   );
   const x = await emptyOnFailure<Pick<TwitterDashboardSnapshot, "feed">>(
-    async () => getXPipelineSnapshot(1_000),
+    async () => await readers.x(1_000),
     { feed: [] },
   );
   const catalysts = await emptyOnFailure(
-    async () =>
-      await readStocksSnapshotCache<StocksCatalystSnapshot>({
-        kind: "catalysts",
-        env,
-        allowStale: true,
-      }),
+    async () => await readers.catalysts(env),
     null,
   );
   const douyin = await emptyOnFailure<Pick<DouyinSnapshot, "videos">>(
-    async () => await getDouyinSnapshot({ env }),
+    async () => await readers.douyin(env),
     { videos: [] },
   );
 
@@ -350,10 +410,14 @@ export async function loadOpportunitySourceItems({
   ]);
 }
 
-export async function loadOpportunityPriorityAssetKeys() {
+export async function loadOpportunityPriorityAssetKeys({
+  readers = defaultOpportunitySourceReaders,
+}: {
+  readers?: OpportunitySourceReaders;
+} = {}) {
   const [tiger, binance] = await Promise.all([
-    emptyOnFailure(() => readPersistedTigerHoldingData(), null),
-    emptyOnFailure(() => readPersistedBinanceHoldingSnapshot(), null),
+    emptyOnFailure(async () => await readers.readPersistedTigerHoldingData(), null),
+    emptyOnFailure(async () => await readers.readPersistedBinanceHoldingSnapshot(), null),
   ]);
   const keys = new Set(ALPHA_RESEARCH_STOCK_UNIVERSE.map((ticker) => ticker.toUpperCase()));
 
@@ -374,47 +438,47 @@ export async function loadOpportunityPriorityAssetKeys() {
 }
 
 export async function loadOpportunityMarketReaction(
-  assetKey: string,
-  { env = process.env }: { env?: EnvLike } = {},
+  assetKeys: string[],
+  {
+    env = process.env,
+    readers = defaultOpportunitySourceReaders,
+  }: {
+    env?: EnvLike;
+    readers?: OpportunitySourceReaders;
+  } = {},
 ): Promise<MarketReaction> {
-  const normalized = assetKey.trim().toUpperCase();
-  if (
-    !normalized ||
-    /[\u3400-\u9fff]/u.test(normalized) ||
-    /^\d{6}(?:\.(?:SZ|SS))?$/.test(normalized)
-  ) {
-    return { available: false, absoluteMovePercent: 0 };
-  }
-
   const [market, binance] = await Promise.all([
-    emptyOnFailure(
-      async () =>
-        await readStocksSnapshotCache<StocksMarketSnapshot>({
-          kind: "market",
-          env,
-          allowStale: true,
-        }),
-      null,
-    ),
-    emptyOnFailure(() => readPersistedBinanceHoldingSnapshot(), null),
+    emptyOnFailure(async () => await readers.market(env), null),
+    emptyOnFailure(async () => await readers.readPersistedBinanceHoldingSnapshot(), null),
   ]);
-  const quote = market?.quotes?.[normalized];
-  if (quote && Number.isFinite(quote.dayChangePct)) {
-    return { available: true, absoluteMovePercent: Math.abs(quote.dayChangePct) };
-  }
 
-  const position = binance?.futuresPositions.find((item) =>
-    [item.symbol, item.symbol.replace(/USDT$/, "")]
-      .map((value) => value.toUpperCase())
-      .includes(normalized),
-  );
-  if (position && position.entryPrice > 0 && Number.isFinite(position.markPrice)) {
-    return {
-      available: true,
-      absoluteMovePercent: Math.abs(
-        ((position.markPrice - position.entryPrice) / position.entryPrice) * 100,
-      ),
-    };
+  for (const assetKey of assetKeys) {
+    const normalized = assetKey.trim().toUpperCase();
+    if (
+      !normalized ||
+      /[\u3400-\u9fff]/u.test(normalized) ||
+      /^\d{6}(?:\.(?:SZ|SS))?$/.test(normalized)
+    ) {
+      continue;
+    }
+    const quote = market?.quotes?.[normalized];
+    if (quote && Number.isFinite(quote.dayChangePct)) {
+      return { available: true, absoluteMovePercent: Math.abs(quote.dayChangePct) };
+    }
+
+    const position = binance?.futuresPositions.find((item) =>
+      [item.symbol, item.symbol.replace(/USDT$/, "")]
+        .map((value) => value.toUpperCase())
+        .includes(normalized),
+    );
+    if (position && position.entryPrice > 0 && Number.isFinite(position.markPrice)) {
+      return {
+        available: true,
+        absoluteMovePercent: Math.abs(
+          ((position.markPrice - position.entryPrice) / position.entryPrice) * 100,
+        ),
+      };
+    }
   }
-  return { available: false, absoluteMovePercent: 0 };
+  return { available: false, absoluteMovePercent: null };
 }

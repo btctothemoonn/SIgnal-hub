@@ -3,7 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  loadOpportunityPriorityAssetKeys,
   loadOpportunityMarketReaction,
+  loadOpportunitySourceItems,
   normalizeCatalystOpportunityItems,
   normalizeDouyinOpportunityItems,
   normalizeTelegramOpportunityItems,
@@ -96,6 +98,58 @@ assert.equal(catalystItems[0].text, "Private research\nNVDA order momentum is im
 assert.equal(catalystItems[0].text.includes("private paid Patreon"), false);
 assert.equal(catalystItems[0].eventType, "order");
 
+const stableCatalysts = [
+  {
+    title: "Stable without link",
+    summary: "NVDA contract demand",
+    date: "2026-07-11T00:00:00.000Z",
+    type: "industry-event",
+    impact: "positive",
+    source: "Google News",
+  },
+  {
+    title: "Stable with link",
+    summary: "NVDA revenue update",
+    date: "2026-07-11T00:00:00.000Z",
+    type: "earnings",
+    impact: "positive",
+    source: "Yahoo Finance",
+    link: "https://example.com/nvda-earnings",
+  },
+];
+const stableIds = new Map(
+  normalizeCatalystOpportunityItems({ catalysts: { NVDA: stableCatalysts } }, { now }).map(
+    (item) => [item.text, item.id],
+  ),
+);
+const reorderedIds = new Map(
+  normalizeCatalystOpportunityItems(
+    {
+      catalysts: {
+        NVDA: [
+          {
+            title: "Newly inserted catalyst",
+            summary: "NVDA policy update",
+            date: "2026-07-11T00:00:00.000Z",
+            type: "regulatory",
+            impact: "neutral",
+            source: "Google News",
+          },
+          ...stableCatalysts.slice().reverse(),
+        ],
+      },
+    },
+    { now },
+  ).map((item) => [item.text, item.id]),
+);
+for (const [text, id] of stableIds) {
+  assert.equal(reorderedIds.get(text), id, `${text} keeps its stable source ID`);
+}
+assert.equal(
+  stableIds.get("Stable with link\nNVDA revenue update"),
+  "news:https://example.com/nvda-earnings",
+);
+
 const douyinItems = normalizeDouyinOpportunityItems(
   {
     videos: [
@@ -142,16 +196,71 @@ try {
     }),
   );
   const env = { STOCKS_MARKET_CACHE_PATH: marketCachePath };
-  assert.deepEqual(await loadOpportunityMarketReaction("NVDA", { env }), {
+  assert.deepEqual(await loadOpportunityMarketReaction(["UNKNOWN", "NVDA"], { env }), {
     available: true,
     absoluteMovePercent: 3.4,
   });
-  assert.deepEqual(await loadOpportunityMarketReaction("300308", { env }), {
+  assert.deepEqual(await loadOpportunityMarketReaction(["300308"], { env }), {
     available: false,
-    absoluteMovePercent: 0,
+    absoluteMovePercent: null,
   });
 } finally {
   await rm(cacheDir, { recursive: true, force: true });
 }
+
+const calls = {
+  telegram: 0,
+  x: 0,
+  catalysts: 0,
+  douyin: 0,
+  persistedTiger: 0,
+  persistedBinance: 0,
+};
+const readers = {
+  telegram: () => {
+    calls.telegram += 1;
+    return { feed: [] };
+  },
+  x: () => {
+    calls.x += 1;
+    return { feed: [] };
+  },
+  catalysts: async () => {
+    calls.catalysts += 1;
+    return null;
+  },
+  douyin: async () => {
+    calls.douyin += 1;
+    return { videos: [] };
+  },
+  readPersistedTigerHoldingData: async () => {
+    calls.persistedTiger += 1;
+    return null;
+  },
+  readPersistedBinanceHoldingSnapshot: async () => {
+    calls.persistedBinance += 1;
+    return null;
+  },
+  market: async () => null,
+};
+assert.deepEqual(await loadOpportunitySourceItems({ readers }), []);
+assert.deepEqual(calls, {
+  telegram: 1,
+  x: 1,
+  catalysts: 1,
+  douyin: 1,
+  persistedTiger: 0,
+  persistedBinance: 0,
+});
+const priorityKeys = await loadOpportunityPriorityAssetKeys({ readers });
+assert.equal(priorityKeys.has("NVDA"), true);
+assert.deepEqual(calls, {
+  telegram: 1,
+  x: 1,
+  catalysts: 1,
+  douyin: 1,
+  persistedTiger: 1,
+  persistedBinance: 1,
+});
 
 console.log("ok - opportunity sources");
