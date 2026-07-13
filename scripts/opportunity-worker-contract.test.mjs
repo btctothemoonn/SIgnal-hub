@@ -25,6 +25,8 @@ assert.match(script, /SIGINT/);
 assert.match(script, /SIGTERM/);
 assert.match(script, /getOpportunityWorkerIntervalMs/);
 assert.match(script, /already_running/);
+assert.match(script, /evaluatedThisCycle/);
+assert.match(script, /providerTelemetry/);
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "opportunity-worker-"));
 const dbPath = join(temporaryDirectory, "opportunities.sqlite");
@@ -61,7 +63,13 @@ try {
     select state_value from opportunity_worker_state where state_key = 'last_cycle'
   `).get();
   assert.ok(row);
-  assert.equal(JSON.parse(row.state_value).candidateCount, 0);
+  const state = JSON.parse(row.state_value);
+  assert.equal(state.candidateCount, 0);
+  assert.equal(state.evaluatedThisCycle, 0);
+  assert.deepEqual(state.providerTelemetry, {
+    minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  });
   db.close();
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });

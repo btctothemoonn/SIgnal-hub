@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import type {
   OpportunityCard,
+  OpportunityEvidenceView,
   OpportunityListStatus,
   OpportunityMarketFilter,
   OpportunitySnapshot,
@@ -71,6 +72,19 @@ export function applyOpportunitySnapshotMutation(
         : snapshot.items.filter((candidate) => candidate.id !== mutation.id),
   };
 }
+
+export function visibleOpportunityItems(snapshot: OpportunitySnapshot) {
+  return snapshot.status === "active"
+    ? snapshot.items.filter((item) => item.finalScore >= 75)
+    : snapshot.items;
+}
+
+const EMPTY_CLAIM_EVIDENCE = {
+  thesis: [],
+  reasons: [],
+  risks: [],
+  invalidation: [],
+};
 
 const MARKET_LABELS: Record<OpportunityCard["market"], string> = {
   us: "美股",
@@ -169,6 +183,56 @@ function formatOpportunityTime(value: string) {
   }).format(parsed);
 }
 
+export function resolveOpportunityClaimEvidence(
+  evidence: OpportunityEvidenceView[],
+  evidenceIds: string[],
+) {
+  const evidenceById = new Map(evidence.map((item) => [item.id, item]));
+  return [...new Set(evidenceIds)].flatMap((id) => {
+    const item = evidenceById.get(id);
+    return item ? [item] : [];
+  });
+}
+
+function OpportunityClaimEvidenceLinks({
+  evidence,
+  evidenceIds,
+}: {
+  evidence: OpportunityEvidenceView[];
+  evidenceIds: string[];
+}) {
+  const references = resolveOpportunityClaimEvidence(evidence, evidenceIds);
+  if (references.length === 0) return null;
+  return (
+    <span className="ml-1 inline-flex flex-wrap gap-1 align-baseline">
+      {references.map((reference, index) => {
+        const label = `证据 ${index + 1}：${reference.sourceName}`;
+        return reference.originalUrl ? (
+          <a
+            key={`${reference.sourceType}:${reference.id}`}
+            href={reference.originalUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={label}
+            title={label}
+            className="text-[11px] font-medium text-info hover:underline"
+          >
+            [{index + 1}]
+          </a>
+        ) : (
+          <span
+            key={`${reference.sourceType}:${reference.id}`}
+            title={label}
+            className="text-[11px] font-medium text-muted"
+          >
+            [{index + 1}]
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function formatMarketReaction(item: OpportunityCard) {
   const move = item.marketReaction.absoluteMovePercent;
   if (!item.marketReaction.available || move === null) return "待获取";
@@ -178,17 +242,27 @@ function formatMarketReaction(item: OpportunityCard) {
 function OpportunityDetailList({
   title,
   items,
+  evidenceIdsByItem,
+  evidence,
 }: {
   title: string;
   items: string[];
+  evidenceIdsByItem: string[][];
+  evidence: OpportunityEvidenceView[];
 }) {
   if (items.length === 0) return null;
   return (
     <div>
       <h4 className="text-xs font-semibold text-muted">{title}</h4>
       <ul className="mt-1 list-disc space-y-1 pl-4 text-xs leading-5 text-foreground">
-        {items.map((item) => (
-          <li key={item}>{item}</li>
+        {items.map((item, index) => (
+          <li key={`${item}:${index}`}>
+            {item}
+            <OpportunityClaimEvidenceLinks
+              evidence={evidence}
+              evidenceIds={evidenceIdsByItem[index] ?? []}
+            />
+          </li>
         ))}
       </ul>
     </div>
@@ -277,6 +351,7 @@ function OpportunityCardView({
     null,
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const claimEvidence = item.claimEvidence ?? EMPTY_CLAIM_EVIDENCE;
   const followLabel = item.followed ? "取消关注" : "关注";
   const dismissLabel = item.dismissed ? "已忽略" : "忽略";
   const thesis = item.thesis || (item.aiPending ? "AI 待补充" : "暂无机会摘要");
@@ -367,6 +442,12 @@ function OpportunityCardView({
 
       <p className="mt-1.5 break-words text-sm leading-5 text-foreground">
         {thesis}
+        {item.thesis ? (
+          <OpportunityClaimEvidenceLinks
+            evidence={item.evidence}
+            evidenceIds={claimEvidence.thesis}
+          />
+        ) : null}
       </p>
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted">
         <span>
@@ -388,9 +469,24 @@ function OpportunityCardView({
 
       {expanded ? (
         <div className="mt-3 grid min-w-0 gap-3 border-t border-line/70 pt-3">
-          <OpportunityDetailList title="理由" items={item.reasons} />
-          <OpportunityDetailList title="风险" items={item.risks} />
-          <OpportunityDetailList title="失效条件" items={item.invalidation} />
+          <OpportunityDetailList
+            title="理由"
+            items={item.reasons}
+            evidenceIdsByItem={claimEvidence.reasons}
+            evidence={item.evidence}
+          />
+          <OpportunityDetailList
+            title="风险"
+            items={item.risks}
+            evidenceIdsByItem={claimEvidence.risks}
+            evidence={item.evidence}
+          />
+          <OpportunityDetailList
+            title="失效条件"
+            items={item.invalidation}
+            evidenceIdsByItem={claimEvidence.invalidation}
+            evidence={item.evidence}
+          />
           {item.evidence.length > 0 ? (
             <div className="min-w-0">
               <h4 className="text-xs font-semibold text-muted">证据</h4>
@@ -441,6 +537,7 @@ export function OpportunityRadar() {
   const snapshotsRef = useRef(new Map<string, OpportunitySnapshot>());
   const requestSequencesRef = useRef(new Map<string, number>());
   const snapshot = liveByKey[cacheKey] ?? cached;
+  const visibleItems = snapshot ? visibleOpportunityItems(snapshot) : [];
   const requestState = requestStateByKey[cacheKey];
   const loading = requestState?.loading ?? snapshot === null;
   const error = requestState?.error ?? null;
@@ -605,7 +702,7 @@ export function OpportunityRadar() {
       ) : null}
 
       <div className="mt-3 grid min-w-0 gap-2">
-        {snapshot?.items.map((item) => (
+        {visibleItems.map((item) => (
           <OpportunityCardView
             key={item.id}
             item={item}
@@ -613,7 +710,7 @@ export function OpportunityRadar() {
             onDismiss={dismiss}
           />
         ))}
-        {snapshot && snapshot.items.length === 0 ? (
+        {snapshot && visibleItems.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted">
             当前筛选暂无机会
           </p>

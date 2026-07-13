@@ -6,10 +6,13 @@ import { getRuntimeDataPath } from "./runtime-storage.ts";
 import type {
   OpportunityCard,
   OpportunityCandidate,
+  OpportunityClaimEvidence,
   OpportunityEvidenceView,
   OpportunityListStatus,
   OpportunityMarket,
   OpportunityMarketFilter,
+  OpportunityMarketReaction,
+  OpportunityScoreContextAudit,
   OpportunitySort,
   OpportunitySourceItem,
   OpportunityStatus,
@@ -20,6 +23,10 @@ type DbRow = Record<string, unknown>;
 
 type OpportunityClusterInput = Omit<OpportunityCandidate, "evidence"> & {
   ruleScore: number;
+  marketReaction?: OpportunityMarketReaction;
+  scoreContext?: OpportunityScoreContextAudit;
+  scoreComponents?: Record<string, number>;
+  scorePenalties?: string[];
 };
 
 type OpportunityAnalysis = {
@@ -30,6 +37,7 @@ type OpportunityAnalysis = {
   reasons: string[];
   risks: string[];
   invalidation: string[];
+  claimEvidence: OpportunityClaimEvidence;
   validUntil: string | null;
   status: OpportunityStatus;
 };
@@ -56,6 +64,16 @@ type OpportunityListOptions = {
 
 const PRIVATE_PATREON_EXCERPT = "Private Patreon evidence available.";
 const MAX_EVIDENCE_EXCERPT_LENGTH = 500;
+const UNAVAILABLE_MARKET_REACTION: OpportunityMarketReaction = {
+  available: false,
+  absoluteMovePercent: null,
+};
+const EMPTY_CLAIM_EVIDENCE: OpportunityClaimEvidence = {
+  thesis: [],
+  reasons: [],
+  risks: [],
+  invalidation: [],
+};
 
 function nowIso() {
   return new Date().toISOString();
@@ -85,6 +103,55 @@ function parseJson<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function marketReactionValue(value: unknown): OpportunityMarketReaction {
+  if (typeof value !== "object" || value === null) return UNAVAILABLE_MARKET_REACTION;
+  const record = value as Record<string, unknown>;
+  return record.available === true &&
+    typeof record.absoluteMovePercent === "number" &&
+    Number.isFinite(record.absoluteMovePercent)
+    ? { available: true, absoluteMovePercent: record.absoluteMovePercent }
+    : UNAVAILABLE_MARKET_REACTION;
+}
+
+function stringArrayValue(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function claimEvidenceValue(value: unknown): OpportunityClaimEvidence {
+  const record = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+  const nested = (candidate: unknown) =>
+    Array.isArray(candidate) ? candidate.map(stringArrayValue) : [];
+  return {
+    thesis: stringArrayValue(record.thesis),
+    reasons: nested(record.reasons),
+    risks: nested(record.risks),
+    invalidation: nested(record.invalidation),
+  };
+}
+
+function scoreContextValue(value: unknown): OpportunityScoreContextAudit {
+  const record = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    evaluatedAt: nullableString(record.evaluatedAt),
+    priorityAsset: record.priorityAsset === true,
+    marketReaction: marketReactionValue(record.marketReaction),
+  };
+}
+
+function scoreComponentsValue(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] =>
+      typeof entry[1] === "number" && Number.isFinite(entry[1])),
+  );
 }
 
 function clampScore(value: number) {
@@ -188,6 +255,10 @@ export function initOpportunityDb(db: DatabaseSync) {
       risks_json TEXT NOT NULL DEFAULT '[]',
       invalidation_json TEXT NOT NULL DEFAULT '[]',
       market_reaction_json TEXT NOT NULL DEFAULT '{"available":false,"absoluteMovePercent":null}',
+      score_context_json TEXT NOT NULL DEFAULT '{}',
+      score_components_json TEXT NOT NULL DEFAULT '{}',
+      score_penalties_json TEXT NOT NULL DEFAULT '[]',
+      claim_evidence_json TEXT NOT NULL DEFAULT '{"thesis":[],"reasons":[],"risks":[],"invalidation":[]}',
       valid_until TEXT,
       invalidated_at TEXT,
       selected_at TEXT,
@@ -235,17 +306,38 @@ export function initOpportunityDb(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_opportunity_clusters_selected ON opportunity_clusters(selected_at DESC);
     CREATE INDEX IF NOT EXISTS idx_opportunity_evidence_cluster ON opportunity_evidence(cluster_id, published_at DESC);
   `);
+  const clusterColumns = new Set(
+    db.prepare("PRAGMA table_info(opportunity_clusters)").all()
+      .map((row) => stringValue(row.name)),
+  );
+  const ensureClusterColumn = (name: string, definition: string) => {
+    if (!clusterColumns.has(name)) db.exec(`ALTER TABLE opportunity_clusters ADD COLUMN ${definition}`);
+  };
+  ensureClusterColumn("score_context_json", "score_context_json TEXT NOT NULL DEFAULT '{}'");
+  ensureClusterColumn("score_components_json", "score_components_json TEXT NOT NULL DEFAULT '{}'");
+  ensureClusterColumn("score_penalties_json", "score_penalties_json TEXT NOT NULL DEFAULT '[]'");
+  ensureClusterColumn(
+    "claim_evidence_json",
+    `claim_evidence_json TEXT NOT NULL DEFAULT '{"thesis":[],"reasons":[],"risks":[],"invalidation":[]}'`,
+  );
 }
 
 export function upsertOpportunityCluster(db: DatabaseSync, cluster: OpportunityClusterInput) {
   const updatedAt = nowIso();
   const ruleScore = clampScore(cluster.ruleScore);
+  const marketReaction = cluster.marketReaction ?? UNAVAILABLE_MARKET_REACTION;
+  const scoreContext = cluster.scoreContext ?? {
+    evaluatedAt: null,
+    priorityAsset: false,
+    marketReaction,
+  };
   return withTransaction(db, () => {
     db.prepare(`
       INSERT INTO opportunity_clusters (
         canonical_key, market, event_type, asset_keys_json, first_seen_at, last_seen_at,
-        rule_score, final_score, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        rule_score, final_score, market_reaction_json, score_context_json,
+        score_components_json, score_penalties_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(canonical_key) DO UPDATE SET
         market = excluded.market,
         event_type = excluded.event_type,
@@ -254,6 +346,10 @@ export function upsertOpportunityCluster(db: DatabaseSync, cluster: OpportunityC
         last_seen_at = MAX(opportunity_clusters.last_seen_at, excluded.last_seen_at),
         rule_score = excluded.rule_score,
         final_score = MIN(100, MAX(0, excluded.rule_score + opportunity_clusters.ai_adjustment)),
+        market_reaction_json = CASE WHEN ? = 1 THEN excluded.market_reaction_json ELSE opportunity_clusters.market_reaction_json END,
+        score_context_json = CASE WHEN ? = 1 THEN excluded.score_context_json ELSE opportunity_clusters.score_context_json END,
+        score_components_json = CASE WHEN ? = 1 THEN excluded.score_components_json ELSE opportunity_clusters.score_components_json END,
+        score_penalties_json = CASE WHEN ? = 1 THEN excluded.score_penalties_json ELSE opportunity_clusters.score_penalties_json END,
         updated_at = excluded.updated_at
     `).run(
       cluster.canonicalKey,
@@ -264,12 +360,40 @@ export function upsertOpportunityCluster(db: DatabaseSync, cluster: OpportunityC
       cluster.lastSeenAt,
       ruleScore,
       ruleScore,
+      JSON.stringify(marketReaction),
+      JSON.stringify(scoreContext),
+      JSON.stringify(cluster.scoreComponents ?? {}),
+      JSON.stringify(cluster.scorePenalties ?? []),
       updatedAt,
       updatedAt,
+      cluster.marketReaction === undefined ? 0 : 1,
+      cluster.scoreContext === undefined ? 0 : 1,
+      cluster.scoreComponents === undefined ? 0 : 1,
+      cluster.scorePenalties === undefined ? 0 : 1,
     );
     const row = db.prepare("SELECT id FROM opportunity_clusters WHERE canonical_key = ?").get(cluster.canonicalKey);
     return numberValue(row?.id);
   });
+}
+
+export function findOpportunityClusterIdBySourceIdentity(
+  db: DatabaseSync,
+  evidence: OpportunitySourceItem[],
+) {
+  const find = db.prepare(`
+    SELECT cluster_id FROM opportunity_evidence
+    WHERE source_type = ? AND source_id = ?
+    ORDER BY cluster_id ASC
+    LIMIT 1
+  `);
+  let clusterId: number | null = null;
+  for (const item of evidence) {
+    const row = find.get(item.sourceType, item.id);
+    if (!row) continue;
+    const matched = numberValue(row.cluster_id);
+    if (matched > 0 && (clusterId === null || matched < clusterId)) clusterId = matched;
+  }
+  return clusterId;
 }
 
 export function upsertOpportunityEvidence(db: DatabaseSync, clusterId: number, evidence: OpportunitySourceItem) {
@@ -305,7 +429,7 @@ export function updateOpportunityAnalysis(db: DatabaseSync, clusterId: number, a
     UPDATE opportunity_clusters SET
       ai_adjustment = ?, final_score = ?, confidence = ?, thesis = ?,
       reasons_json = ?, risks_json = ?, invalidation_json = ?, valid_until = ?,
-      status = ?, updated_at = ?
+      claim_evidence_json = ?, status = ?, updated_at = ?
     WHERE id = ?
   `).run(
     numberValue(analysis.aiAdjustment),
@@ -316,6 +440,7 @@ export function updateOpportunityAnalysis(db: DatabaseSync, clusterId: number, a
     JSON.stringify(analysis.risks),
     JSON.stringify(analysis.invalidation),
     analysis.validUntil,
+    JSON.stringify(analysis.claimEvidence),
     analysis.status,
     updatedAt,
     clusterId,
@@ -418,6 +543,7 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
     values.push(options.market);
   }
   if (options.status === "active") conditions.push("c.status != 'expired'");
+  if (options.status === "active") conditions.push("c.final_score >= 75");
   if (options.status === "active" && !options.includeDismissed) {
     conditions.push("COALESCE(p.dismissed, 0) = 0");
   }
@@ -472,7 +598,13 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
     followed: numberValue(row.followed) === 1,
     dismissed: numberValue(row.dismissed) === 1,
     aiPending: numberValue(row.ai_pending) === 1,
-    marketReaction: parseJson(row.market_reaction_json, { available: false, absoluteMovePercent: null }),
+    marketReaction: marketReactionValue(parseJson(row.market_reaction_json, null)),
+    scoreAudit: {
+      context: scoreContextValue(parseJson(row.score_context_json, null)),
+      components: scoreComponentsValue(parseJson(row.score_components_json, null)),
+      penalties: stringArrayValue(parseJson(row.score_penalties_json, [])),
+    },
+    claimEvidence: claimEvidenceValue(parseJson(row.claim_evidence_json, EMPTY_CLAIM_EVIDENCE)),
     evidence: evidenceByCluster.get(numberValue(row.id)) ?? [],
   }));
 }

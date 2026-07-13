@@ -25,6 +25,14 @@ const clusterId = upsertOpportunityCluster(db, {
   firstSeenAt: "2026-07-12T01:00:00.000Z",
   lastSeenAt: "2026-07-12T01:10:00.000Z",
   ruleScore: 82,
+  marketReaction: { available: true, absoluteMovePercent: 1.25 },
+  scoreContext: {
+    evaluatedAt: "2026-07-12T01:15:00.000Z",
+    priorityAsset: true,
+    marketReaction: { available: true, absoluteMovePercent: 1.25 },
+  },
+  scoreComponents: { sourceQuality: 20, reaction: 10 },
+  scorePenalties: ["stale-source"],
 });
 assert.equal(
   upsertOpportunityCluster(db, {
@@ -127,6 +135,12 @@ updateOpportunityAnalysis(db, clusterId, {
   reasons: ["Order confirmed"],
   risks: ["Execution delay"],
   invalidation: ["Order cancelled"],
+  claimEvidence: {
+    thesis: ["x:1"],
+    reasons: [["x:1"]],
+    risks: [["news:secret-forms"]],
+    invalidation: [["x:1"]],
+  },
   validUntil: "2026-07-13T01:00:00.000Z",
   status: "tracking",
 }, "2026-07-12T01:20:00.000Z");
@@ -171,6 +185,58 @@ assert.equal(rows[0].evidence[0].textExcerpt, "Private Patreon evidence availabl
 assert.equal(rows[0].followed, true);
 assert.equal(rows[0].finalScore, 100);
 assert.equal(rows[0].aiPending, false);
+assert.deepEqual(rows[0].marketReaction, {
+  available: true,
+  absoluteMovePercent: 1.25,
+});
+assert.deepEqual(rows[0].scoreAudit, {
+  context: {
+    evaluatedAt: "2026-07-12T01:15:00.000Z",
+    priorityAsset: true,
+    marketReaction: { available: true, absoluteMovePercent: 1.25 },
+  },
+  components: { sourceQuality: 20, reaction: 10 },
+  penalties: ["stale-source"],
+});
+assert.deepEqual(rows[0].claimEvidence, {
+  thesis: ["x:1"],
+  reasons: [["x:1"]],
+  risks: [["news:secret-forms"]],
+  invalidation: [["x:1"]],
+});
+
+updateOpportunityAnalysis(db, clusterId, {
+  aiAdjustment: -11,
+  finalScore: 74,
+  confidence: "medium",
+  thesis: "Demand remains underappreciated.",
+  reasons: ["Order confirmed"],
+  risks: ["Execution delay"],
+  invalidation: ["Order cancelled"],
+  claimEvidence: rows[0].claimEvidence,
+  validUntil: null,
+  status: "tracking",
+}, "2026-07-12T02:05:00.000Z");
+assert.equal(
+  listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 }).length,
+  0,
+);
+assert.equal(
+  listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 }).length,
+  1,
+);
+updateOpportunityAnalysis(db, clusterId, {
+  aiAdjustment: 15,
+  finalScore: 100,
+  confidence: "high",
+  thesis: "Demand remains underappreciated.",
+  reasons: ["Order confirmed"],
+  risks: ["Execution delay"],
+  invalidation: ["Order cancelled"],
+  claimEvidence: rows[0].claimEvidence,
+  validUntil: null,
+  status: "tracking",
+}, "2026-07-12T02:06:00.000Z");
 
 setOpportunityPreference(db, clusterId, { followed: true, dismissed: true });
 assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 }).length, 0);

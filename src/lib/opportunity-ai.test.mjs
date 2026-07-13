@@ -59,6 +59,17 @@ const normalizedOpportunity = {
   validUntil: "2026-08-01T00:00:00.000Z",
   confidence: "high",
   evidenceIds: ["x:1", "x:2"],
+  claimEvidence: {
+    thesis: ["x:1"],
+    reasons: [["x:2"]],
+    risks: [["x:1"]],
+    invalidation: [["x:2"]],
+  },
+};
+
+const emptyProviderTelemetry = {
+  minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
 };
 
 const promptText = buildOpportunityPrompt(inputs);
@@ -344,6 +355,10 @@ for (const status of [408, 429, 500, 503]) {
     },
   });
   assert.equal(result.provider?.id, "deepseek");
+  assert.deepEqual(result.providerTelemetry, {
+    minimax: { attempts: 1, successes: 0, failures: 1, fallbacks: 0 },
+    deepseek: { attempts: 1, successes: 1, failures: 0, fallbacks: 1 },
+  });
   assert.deepEqual(
     urls.map((url) => new URL(url).hostname),
     ["api.minimaxi.com", "api.deepseek.com"],
@@ -407,6 +422,10 @@ const badRequestResult = await evaluateOpportunityBatch({
 });
 assert.equal(badRequestAttempts, 1);
 assert.equal(badRequestResult.ruleOnly, true);
+assert.deepEqual(badRequestResult.providerTelemetry, {
+  minimax: { attempts: 1, successes: 0, failures: 1, fallbacks: 0 },
+  deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+});
 
 const captureConfiguredTimeout = async (env, timeoutMs) => {
   let capturedDelay = null;
@@ -557,6 +576,10 @@ assert.deepEqual(validationFailure, {
   provider: null,
   inputHash: null,
   ruleOnly: true,
+  providerTelemetry: {
+    minimax: { attempts: 1, successes: 0, failures: 1, fallbacks: 0 },
+    deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  },
 });
 
 const retriedSuccess = await evaluateOpportunityBatch({
@@ -580,6 +603,7 @@ assert.deepEqual(noProviderResult, {
   provider: null,
   inputHash: null,
   ruleOnly: true,
+  providerTelemetry: emptyProviderTelemetry,
 });
 
 console.log("ok - opportunity AI batch evaluation");

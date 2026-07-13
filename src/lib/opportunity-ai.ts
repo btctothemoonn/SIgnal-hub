@@ -62,6 +62,24 @@ export type OpportunityAiEvaluation = {
   validUntil: string | null;
   confidence: "low" | "medium" | "high";
   evidenceIds: string[];
+  claimEvidence: {
+    thesis: string[];
+    reasons: string[][];
+    risks: string[][];
+    invalidation: string[][];
+  };
+};
+
+export type OpportunityProviderOutcomeCounters = {
+  attempts: number;
+  successes: number;
+  failures: number;
+  fallbacks: number;
+};
+
+export type OpportunityProviderTelemetry = {
+  minimax: OpportunityProviderOutcomeCounters;
+  deepseek: OpportunityProviderOutcomeCounters;
 };
 
 export type OpportunityAiBatchResult =
@@ -70,12 +88,14 @@ export type OpportunityAiBatchResult =
       provider: AiProviderConfig;
       inputHash: string;
       ruleOnly: false;
+      providerTelemetry: OpportunityProviderTelemetry;
     }
   | {
       evaluations: [];
       provider: null;
       inputHash: null;
       ruleOnly: true;
+      providerTelemetry: OpportunityProviderTelemetry;
     };
 
 const OPPORTUNITY_KEYS = [
@@ -357,6 +377,12 @@ export function validateOpportunityAiBatch(
       validUntil: item.validUntil,
       confidence: item.confidence,
       evidenceIds: aggregateEvidenceIds,
+      claimEvidence: {
+        thesis: [...item.thesis.evidenceIds],
+        reasons: item.reasons.map((claim) => [...claim.evidenceIds]),
+        risks: item.risks.map((claim) => [...claim.evidenceIds]),
+        invalidation: item.invalidation.map((claim) => [...claim.evidenceIds]),
+      },
     };
   });
 }
@@ -432,12 +458,38 @@ export function getOpportunityProviderCandidates(
   return providers;
 }
 
-function opportunityAiRuleOnlyResult(): OpportunityAiBatchResult {
+function emptyProviderTelemetry(): OpportunityProviderTelemetry {
+  return {
+    minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  };
+}
+
+function providerCounters(
+  telemetry: OpportunityProviderTelemetry,
+  providerId: string,
+) {
+  return providerId === "minimax" || providerId === "deepseek"
+    ? telemetry[providerId]
+    : null;
+}
+
+function incrementCounter(
+  counters: OpportunityProviderOutcomeCounters | null,
+  key: keyof OpportunityProviderOutcomeCounters,
+) {
+  if (counters) counters[key] = Math.min(100, counters[key] + 1);
+}
+
+function opportunityAiRuleOnlyResult(
+  providerTelemetry = emptyProviderTelemetry(),
+): OpportunityAiBatchResult {
   return {
     evaluations: [],
     provider: null,
     inputHash: null,
     ruleOnly: true,
+    providerTelemetry,
   };
 }
 
@@ -556,6 +608,7 @@ export async function evaluateOpportunityBatch({
 }): Promise<OpportunityAiBatchResult> {
   const providers = getOpportunityProviderCandidates(env);
   if (providers.length === 0) return opportunityAiRuleOnlyResult();
+  const providerTelemetry = emptyProviderTelemetry();
 
   try {
     const prompt = buildOpportunityPrompt(inputs);
@@ -567,6 +620,9 @@ export async function evaluateOpportunityBatch({
       cooldownMs: 60 * 60 * 1_000,
       shouldFallback: isRetryableOpportunityAiError,
       request: async (provider) => {
+        const counters = providerCounters(providerTelemetry, provider.id);
+        incrementCounter(counters, "attempts");
+        if (providers.indexOf(provider) > 0) incrementCounter(counters, "fallbacks");
         const controller = new AbortController();
         let timedOut = false;
         const timeoutHandle = timer.setTimeout(() => {
@@ -603,7 +659,12 @@ export async function evaluateOpportunityBatch({
           try {
             const content = responseContent(await response.json());
             if (timedOut) throw new OpportunityAiTimeoutError();
-            return validateOpportunityAiBatch(parseOpportunityAiBatch(content), inputs);
+            const evaluations = validateOpportunityAiBatch(
+              parseOpportunityAiBatch(content),
+              inputs,
+            );
+            incrementCounter(counters, "successes");
+            return evaluations;
           } catch (error) {
             if (timedOut || error instanceof OpportunityAiTimeoutError) {
               throw new OpportunityAiTimeoutError();
@@ -611,6 +672,7 @@ export async function evaluateOpportunityBatch({
             throw new OpportunityAiTerminalError();
           }
         } catch (error) {
+          incrementCounter(counters, "failures");
           if (timedOut) throw new OpportunityAiTimeoutError();
           throw error;
         } finally {
@@ -624,8 +686,9 @@ export async function evaluateOpportunityBatch({
       provider: result.provider,
       inputHash,
       ruleOnly: false,
+      providerTelemetry,
     };
   } catch {
-    return opportunityAiRuleOnlyResult();
+    return opportunityAiRuleOnlyResult(providerTelemetry);
   }
 }

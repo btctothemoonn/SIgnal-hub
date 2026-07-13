@@ -10,6 +10,9 @@ export type OpportunityEventType =
   | "other";
 export type OpportunityStatus = "new" | "tracking" | "confirmed" | "expired";
 export type OpportunitySourceType = "telegram" | "x" | "patreon" | "douyin" | "news";
+export type OpportunityMarketReaction =
+  | { available: true; absoluteMovePercent: number }
+  | { available: false; absoluteMovePercent: null };
 
 export type OpportunitySourceItem = {
   id: string;
@@ -38,6 +41,25 @@ export type OpportunityScore = {
   ruleScore: number;
   components: Record<string, number>;
   penalties: string[];
+};
+
+export type OpportunityScoreContextAudit = {
+  evaluatedAt: string | null;
+  priorityAsset: boolean;
+  marketReaction: OpportunityMarketReaction;
+};
+
+export type OpportunityScoreAudit = {
+  context: OpportunityScoreContextAudit;
+  components: Record<string, number>;
+  penalties: string[];
+};
+
+export type OpportunityClaimEvidence = {
+  thesis: string[];
+  reasons: string[][];
+  risks: string[][];
+  invalidation: string[][];
 };
 
 export type OpportunityMarketFilter = OpportunityMarket | "all";
@@ -70,7 +92,9 @@ export type OpportunityCard = {
   followed: boolean;
   dismissed: boolean;
   aiPending: boolean;
-  marketReaction: { available: boolean; absoluteMovePercent: number | null };
+  marketReaction: OpportunityMarketReaction;
+  scoreAudit: OpportunityScoreAudit;
+  claimEvidence: OpportunityClaimEvidence;
   evidence: OpportunityEvidenceView[];
 };
 export type OpportunitySnapshot = {

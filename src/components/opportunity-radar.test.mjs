@@ -33,11 +33,15 @@ const {
   applyOpportunitySnapshotMutation,
   isOpportunityRequestCurrent,
   nextOpportunityRequestSequence,
+  resolveOpportunityClaimEvidence,
+  visibleOpportunityItems,
 } = productionModule.exports;
 
 assert.equal(typeof applyOpportunitySnapshotMutation, "function");
 assert.equal(typeof isOpportunityRequestCurrent, "function");
 assert.equal(typeof nextOpportunityRequestSequence, "function");
+assert.equal(typeof resolveOpportunityClaimEvidence, "function");
+assert.equal(typeof visibleOpportunityItems, "function");
 
 const opportunity = {
   id: 7,
@@ -59,9 +63,39 @@ const opportunity = {
   dismissed: false,
   aiPending: false,
   marketReaction: { available: true, absoluteMovePercent: 1.2 },
-  evidence: [],
+  claimEvidence: {
+    thesis: ["news:1"],
+    reasons: [["news:1", "x:2"]],
+    risks: [["x:2"]],
+    invalidation: [["news:1"]],
+  },
+  scoreAudit: { context: {}, components: {}, penalties: [] },
+  evidence: [
+    {
+      id: "news:1",
+      sourceType: "news",
+      sourceName: "wire",
+      publishedAt: "2026-07-13T00:00:00.000Z",
+      textExcerpt: "public evidence",
+      originalUrl: "https://example.com/news/1",
+    },
+    {
+      id: "x:2",
+      sourceType: "x",
+      sourceName: "analyst",
+      publishedAt: "2026-07-13T00:05:00.000Z",
+      textExcerpt: "second source",
+      originalUrl: "https://example.com/x/2",
+    },
+  ],
 };
 
+assert.equal(
+  resolveOpportunityClaimEvidence(opportunity.evidence, ["x:2", "news:1", "missing"])
+    .map((item) => item.id)
+    .join(","),
+  "x:2,news:1",
+);
 const snapshot = (status, generatedAt, overrides = {}) => ({
   generatedAt,
   lastWorkerSuccessAt: generatedAt,
@@ -72,6 +106,23 @@ const snapshot = (status, generatedAt, overrides = {}) => ({
   error: null,
   ...overrides,
 });
+
+assert.deepEqual(
+  Array.from(visibleOpportunityItems(snapshot(
+    "active",
+    "2026-07-13T01:00:00.000Z",
+    { items: [opportunity, { ...opportunity, id: 8, finalScore: 74 }] },
+  )), (item) => item.id),
+  [7],
+);
+assert.deepEqual(
+  Array.from(visibleOpportunityItems(snapshot(
+    "history",
+    "2026-07-13T01:00:00.000Z",
+    { items: [opportunity, { ...opportunity, id: 8, finalScore: 74 }] },
+  )), (item) => item.id),
+  [7, 8],
+);
 
 {
   const sequences = new Map();
@@ -184,6 +235,11 @@ assert.match(component, /disabled=\{pendingAction !== null \|\| item\.dismissed\
 assert.match(component, /aria-label=\{expanded \? "收起" : "展开"\}/);
 assert.match(component, /target="_blank"/);
 assert.match(component, /rel="noreferrer"/);
+assert.match(component, /OpportunityClaimEvidenceLinks/);
+assert.match(component, /claimEvidence\.thesis/);
+assert.match(component, /evidenceIdsByItem/);
+assert.match(component, /item\.claimEvidence \?\?/);
+assert.match(component, /visibleOpportunityItems\(snapshot\)/);
 assert.match(component, /rounded-lg/);
 assert.doesNotMatch(component, /rounded-xl|rounded-2xl|rounded-3xl/);
 

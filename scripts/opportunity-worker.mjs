@@ -56,9 +56,11 @@ async function runCycle(reason) {
       durationMs: Date.now() - startedAt,
       candidates: result.candidateCount,
       evaluated: result.evaluatedCount,
+      evaluatedThisCycle: result.evaluatedThisCycle,
       selected: result.selectedToday,
       provider: result.provider,
       model: result.model,
+      providerTelemetry: result.providerTelemetry,
       errorClass: result.lastError,
     });
     return true;

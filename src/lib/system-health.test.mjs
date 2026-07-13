@@ -119,9 +119,14 @@ opportunityDb.prepare(`
     lastError: null,
     candidateCount: 8,
     evaluatedCount: 3,
+    evaluatedThisCycle: 3,
     selectedToday: 2,
     provider: "minimax",
     model: "MiniMax-M2.7",
+    providerTelemetry: {
+      minimax: { attempts: 1, successes: 1, failures: 0, fallbacks: 0 },
+      deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    },
   }),
   "2026-05-21T03:30:00.000Z",
 );
@@ -137,9 +142,18 @@ try {
     lastError: null,
     candidates: 8,
     evaluated: 3,
+    evaluatedThisCycle: 3,
     selected: 2,
     provider: "minimax",
     model: "MiniMax-M2.7",
+    minimaxAttempts: 1,
+    minimaxSuccesses: 1,
+    minimaxFailures: 0,
+    minimaxFallbacks: 0,
+    deepseekAttempts: 0,
+    deepseekSuccesses: 0,
+    deepseekFailures: 0,
+    deepseekFallbacks: 0,
   });
 
   const db = new DatabaseSync(opportunityDbPath);
@@ -153,9 +167,14 @@ try {
       lastError: "OpportunityAiUnavailable",
       candidateCount: 8,
       evaluatedCount: 0,
+      evaluatedThisCycle: 0,
       selectedToday: 2,
       provider: null,
       model: null,
+      providerTelemetry: {
+        minimax: { attempts: 1, successes: 0, failures: 1, fallbacks: 0 },
+        deepseek: { attempts: 1, successes: 0, failures: 1, fallbacks: 1 },
+      },
     }),
     "2026-05-21T04:00:00.000Z",
   );
@@ -176,9 +195,14 @@ try {
       lastError: null,
       candidateCount: 8,
       evaluatedCount: 3,
+      evaluatedThisCycle: 3,
       selectedToday: 2,
       provider: "deepseek",
       model: "deepseek-chat",
+      providerTelemetry: {
+        minimax: { attempts: 1, successes: 0, failures: 1, fallbacks: 0 },
+        deepseek: { attempts: 1, successes: 1, failures: 0, fallbacks: 1 },
+      },
     }),
     "2026-05-21T03:45:00.000Z",
   );
@@ -187,6 +211,41 @@ try {
   assert.equal(deepseekHealth.status, "warning");
   assert.equal(deepseekHealth.stale, false);
   assert.equal(deepseekHealth.meta?.provider, "deepseek");
+  assert.equal(deepseekHealth.meta?.minimaxAttempts, 1);
+  assert.equal(deepseekHealth.meta?.minimaxFailures, 1);
+  assert.equal(deepseekHealth.meta?.deepseekAttempts, 1);
+  assert.equal(deepseekHealth.meta?.deepseekSuccesses, 1);
+  assert.equal(deepseekHealth.meta?.deepseekFallbacks, 1);
+
+  const cachedDb = new DatabaseSync(opportunityDbPath);
+  cachedDb.prepare(`
+    UPDATE opportunity_worker_state
+    SET state_value = ?, updated_at = ?
+    WHERE state_key = 'last_cycle'
+  `).run(
+    JSON.stringify({
+      lastSuccessAt: "2026-05-21T03:50:00.000Z",
+      lastError: null,
+      candidateCount: 8,
+      evaluatedCount: 3,
+      evaluatedThisCycle: 0,
+      selectedToday: 2,
+      provider: null,
+      model: null,
+      providerTelemetry: {
+        minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+        deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+      },
+    }),
+    "2026-05-21T03:50:00.000Z",
+  );
+  cachedDb.close();
+  const cachedHealth = opportunityHealthItem({ OPPORTUNITY_DB: opportunityDbPath }, now);
+  assert.equal(cachedHealth.status, "ok");
+  assert.equal(cachedHealth.stale, false);
+  assert.equal(cachedHealth.meta?.evaluated, 3);
+  assert.equal(cachedHealth.meta?.evaluatedThisCycle, 0);
+  assert.match(cachedHealth.detail, /cached/);
 
   const ruleOnlyDb = new DatabaseSync(opportunityDbPath);
   ruleOnlyDb.prepare(`
@@ -199,9 +258,14 @@ try {
       lastError: null,
       candidateCount: 8,
       evaluatedCount: 0,
+      evaluatedThisCycle: 0,
       selectedToday: 2,
       provider: null,
       model: null,
+      providerTelemetry: {
+        minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+        deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+      },
     }),
     "2026-05-21T03:50:00.000Z",
   );
@@ -222,9 +286,14 @@ try {
       lastError: "Error",
       candidateCount: 0,
       evaluatedCount: 0,
+      evaluatedThisCycle: 0,
       selectedToday: 0,
       provider: null,
       model: null,
+      providerTelemetry: {
+        minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+        deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+      },
     }),
     "2026-05-21T04:00:00.000Z",
   );

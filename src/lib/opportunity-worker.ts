@@ -6,6 +6,7 @@ import {
   type OpportunityAiBatchResult,
   type OpportunityAiEvaluation,
   type OpportunityAiInput,
+  type OpportunityProviderTelemetry,
 } from "./opportunity-ai.ts";
 import {
   clusterOpportunityItems,
@@ -19,6 +20,7 @@ import {
   loadOpportunitySourceItems,
 } from "./opportunity-sources.ts";
 import {
+  findOpportunityClusterIdBySourceIdentity,
   getOpportunityEvaluationByInputHash,
   openOpportunityDb,
   saveOpportunityEvaluation,
@@ -29,7 +31,9 @@ import {
 } from "./opportunity-store.ts";
 import type {
   OpportunityCandidate,
+  OpportunityMarketReaction,
   OpportunityScore,
+  OpportunityScoreContextAudit,
   OpportunitySourceItem,
 } from "./opportunity-types.ts";
 
@@ -39,6 +43,8 @@ type MaybePromise<T> = T | Promise<T>;
 type ScoredOpportunity = {
   candidate: OpportunityCandidate;
   score: OpportunityScore;
+  marketReaction: OpportunityMarketReaction;
+  scoreContext: OpportunityScoreContextAudit;
 };
 
 type PersistedOpportunity = ScoredOpportunity & {
@@ -60,6 +66,7 @@ type OpportunityBatchResultLike = {
   provider: OpportunityProvider | null;
   inputHash: string | null;
   ruleOnly: boolean;
+  providerTelemetry?: OpportunityProviderTelemetry;
 };
 
 export type OpportunityCycleResult = {
@@ -68,9 +75,11 @@ export type OpportunityCycleResult = {
   lastError: string | null;
   candidateCount: number;
   evaluatedCount: number;
+  evaluatedThisCycle: number;
   selectedToday: number;
   provider: string | null;
   model: string | null;
+  providerTelemetry: OpportunityProviderTelemetry;
   durationMs: number;
 };
 
@@ -81,7 +90,7 @@ export type OpportunityCycleOptions = {
   loadPriorityAssets?: () => MaybePromise<Set<string>>;
   loadMarketReaction?: (
     assetKeys: string[],
-  ) => MaybePromise<{ available: boolean; absoluteMovePercent: number | null }>;
+  ) => MaybePromise<OpportunityMarketReaction>;
   evaluateBatch?: (options: {
     inputs: OpportunityAiInput[];
   }) => MaybePromise<OpportunityAiBatchResult | OpportunityBatchResultLike>;
@@ -92,6 +101,7 @@ const AI_THRESHOLD = 60;
 const AI_BATCH_LIMIT = 20;
 const DAILY_SELECTION_THRESHOLD = 75;
 const DAILY_SELECTION_LIMIT = 10;
+const MAX_PROVIDER_COUNTER = 100;
 const RULE_ONLY_THESIS = "AI 待补充";
 
 function errorClass(error: unknown) {
@@ -104,6 +114,37 @@ function numberValue(value: unknown) {
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function emptyProviderTelemetry(): OpportunityProviderTelemetry {
+  return {
+    minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  };
+}
+
+function boundedProviderCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(MAX_PROVIDER_COUNTER, Math.max(0, Math.floor(value)))
+    : 0;
+}
+
+function providerTelemetryValue(value: unknown): OpportunityProviderTelemetry {
+  const record = typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : {};
+  const counters = (provider: "minimax" | "deepseek") => {
+    const candidate = typeof record[provider] === "object" && record[provider] !== null
+      ? record[provider] as Record<string, unknown>
+      : {};
+    return {
+      attempts: boundedProviderCount(candidate.attempts),
+      successes: boundedProviderCount(candidate.successes),
+      failures: boundedProviderCount(candidate.failures),
+      fallbacks: boundedProviderCount(candidate.fallbacks),
+    };
+  };
+  return { minimax: counters("minimax"), deepseek: counters("deepseek") };
 }
 
 function independentSourceCount(candidate: OpportunityCandidate) {
@@ -126,15 +167,50 @@ function withTransaction<T>(db: DatabaseSync, operation: () => T) {
 
 function upsertRuleCluster(
   db: DatabaseSync,
-  candidate: OpportunityCandidate,
-  ruleScore: number,
+  entry: ScoredOpportunity,
   updatedAt: string,
 ) {
+  const { candidate, marketReaction, score, scoreContext } = entry;
+  const ruleScore = clampScore(score.ruleScore);
+  const sourceClusterId = findOpportunityClusterIdBySourceIdentity(
+    db,
+    candidate.evidence,
+  );
+  if (sourceClusterId !== null) {
+    db.prepare(`
+      UPDATE opportunity_clusters SET
+        market = ?, event_type = ?, asset_keys_json = ?,
+        first_seen_at = MIN(first_seen_at, ?),
+        last_seen_at = MAX(last_seen_at, ?),
+        rule_score = ?,
+        final_score = MIN(100, MAX(0, ? + ai_adjustment)),
+        market_reaction_json = ?, score_context_json = ?,
+        score_components_json = ?, score_penalties_json = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      candidate.market,
+      candidate.eventType,
+      JSON.stringify(candidate.assetKeys),
+      candidate.firstSeenAt,
+      candidate.lastSeenAt,
+      ruleScore,
+      ruleScore,
+      JSON.stringify(marketReaction),
+      JSON.stringify(scoreContext),
+      JSON.stringify(score.components),
+      JSON.stringify(score.penalties),
+      updatedAt,
+      sourceClusterId,
+    );
+    return sourceClusterId;
+  }
   db.prepare(`
     INSERT INTO opportunity_clusters (
       canonical_key, market, event_type, asset_keys_json, first_seen_at,
-      last_seen_at, rule_score, final_score, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      last_seen_at, rule_score, final_score, market_reaction_json,
+      score_context_json, score_components_json, score_penalties_json,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(canonical_key) DO UPDATE SET
       market = excluded.market,
       event_type = excluded.event_type,
@@ -143,6 +219,10 @@ function upsertRuleCluster(
       last_seen_at = MAX(opportunity_clusters.last_seen_at, excluded.last_seen_at),
       rule_score = excluded.rule_score,
       final_score = MIN(100, MAX(0, excluded.rule_score + opportunity_clusters.ai_adjustment)),
+      market_reaction_json = excluded.market_reaction_json,
+      score_context_json = excluded.score_context_json,
+      score_components_json = excluded.score_components_json,
+      score_penalties_json = excluded.score_penalties_json,
       updated_at = excluded.updated_at
   `).run(
     candidate.canonicalKey,
@@ -151,8 +231,12 @@ function upsertRuleCluster(
     JSON.stringify(candidate.assetKeys),
     candidate.firstSeenAt,
     candidate.lastSeenAt,
-    clampScore(ruleScore),
-    clampScore(ruleScore),
+    ruleScore,
+    ruleScore,
+    JSON.stringify(marketReaction),
+    JSON.stringify(scoreContext),
+    JSON.stringify(score.components),
+    JSON.stringify(score.penalties),
     updatedAt,
     updatedAt,
   );
@@ -168,17 +252,17 @@ function persistOpportunityRuleCandidates(
   updatedAt: string,
 ) {
   return withTransaction(db, () =>
-    scored.map(({ candidate, score }) => {
+    scored.map((entry) => {
+      const { candidate } = entry;
       const clusterId = upsertRuleCluster(
         db,
-        candidate,
-        score.ruleScore,
+        entry,
         updatedAt,
       );
       for (const evidence of candidate.evidence) {
         upsertOpportunityEvidence(db, clusterId, evidence);
       }
-      return { clusterId, candidate, score };
+      return { ...entry, clusterId };
     }),
   );
 }
@@ -213,6 +297,7 @@ function applyRuleOnlyAnalysis(
       reasons: [],
       risks: [],
       invalidation: [],
+      claimEvidence: { thesis: [], reasons: [], risks: [], invalidation: [] },
       validUntil: null,
       status: deriveOpportunityStatus(
         {
@@ -326,6 +411,7 @@ function applyOpportunityEvaluations(
           reasons: evaluation.reasons,
           risks: evaluation.risks,
           invalidation: evaluation.invalidation,
+          claimEvidence: evaluation.claimEvidence,
           validUntil: evaluation.validUntil,
           status: deriveOpportunityStatus(
             {
@@ -353,6 +439,26 @@ function selectedTodayCount(db: DatabaseSync, dateKey: string) {
         AND substr(datetime(selected_at, '+8 hours'), 1, 10) = ?
     `)
     .get(dateKey);
+  return numberValue(row?.count);
+}
+
+function currentEvaluationCoverageCount(
+  db: DatabaseSync,
+  currentClusterIds: number[],
+) {
+  const placeholders = currentClusterIds.map(() => "?").join(", ");
+  const currentCondition = currentClusterIds.length > 0
+    ? `c.selected_at IS NOT NULL OR c.id IN (${placeholders})`
+    : "c.selected_at IS NOT NULL";
+  const row = db.prepare(`
+    SELECT count(*) AS count FROM opportunity_clusters c
+    WHERE c.status != 'expired'
+      AND (${currentCondition})
+      AND EXISTS (
+        SELECT 1 FROM opportunity_evaluations e
+        WHERE e.cluster_id = c.id AND e.status = 'generated'
+      )
+  `).get(...currentClusterIds);
   return numberValue(row?.count);
 }
 
@@ -453,14 +559,19 @@ export async function runOpportunityCycle(
     const scored: ScoredOpportunity[] = await Promise.all(
       candidates.map(async (candidate) => {
         const marketReaction = await loadMarketReaction(candidate.assetKeys);
+        const scoreContext: OpportunityScoreContextAudit = {
+          evaluatedAt: nowIso,
+          priorityAsset: candidate.assetKeys.some((key) =>
+            priorityAssetKeys.has(key)),
+          marketReaction,
+        };
         return {
           candidate,
+          marketReaction,
+          scoreContext,
           score: scoreOpportunityCandidate(candidate, {
             priorityAssetKeys,
-            marketReaction: {
-              ...marketReaction,
-              absoluteMovePercent: marketReaction.absoluteMovePercent ?? 0,
-            },
+            marketReaction,
             now,
           }),
         };
@@ -542,7 +653,11 @@ export async function runOpportunityCycle(
       lastSuccessAt: nowIso,
       lastError: aiFailureClass,
       candidateCount: scored.length,
-      evaluatedCount:
+      evaluatedCount: currentEvaluationCoverageCount(
+        db,
+        persisted.map((entry) => entry.clusterId),
+      ),
+      evaluatedThisCycle:
         aiResult && !aiResult.ruleOnly && !aiFailureClass
           ? aiResult.evaluations.length
           : 0,
@@ -555,6 +670,7 @@ export async function runOpportunityCycle(
         aiResult && !aiResult.ruleOnly && !aiFailureClass
           ? aiResult.provider?.model ?? null
           : null,
+      providerTelemetry: providerTelemetryValue(aiResult?.providerTelemetry),
       durationMs: Date.now() - startedAt,
     };
     writeCycleState(db, result);
@@ -567,9 +683,11 @@ export async function runOpportunityCycle(
       lastError: errorClass(error),
       candidateCount: previous?.candidateCount ?? 0,
       evaluatedCount: previous?.evaluatedCount ?? 0,
+      evaluatedThisCycle: 0,
       selectedToday: previous?.selectedToday ?? 0,
       provider: previous?.provider ?? null,
       model: previous?.model ?? null,
+      providerTelemetry: emptyProviderTelemetry(),
       durationMs: Date.now() - startedAt,
     };
     try {

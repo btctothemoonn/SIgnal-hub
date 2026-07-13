@@ -3,7 +3,12 @@ import { ALPHA_RESEARCH_STOCK_UNIVERSE } from "./alpha-research-pool.ts";
 import { readPersistedBinanceHoldingSnapshot } from "./binance-holdings-cache.ts";
 import { getDouyinSnapshot } from "./douyin-monitor.ts";
 import type { DouyinSnapshot } from "./douyin-monitor.ts";
-import type { OpportunityEventType, OpportunityMarket, OpportunitySourceItem } from "./opportunity-types.ts";
+import type {
+  OpportunityEventType,
+  OpportunityMarket,
+  OpportunityMarketReaction,
+  OpportunitySourceItem,
+} from "./opportunity-types.ts";
 import type { StocksCatalystSnapshot } from "./stocks-catalyst-data.ts";
 import type { StocksMarketSnapshot } from "./stocks-market-data.ts";
 import { readStocksSnapshotCache } from "./stocks-prewarm.ts";
@@ -18,7 +23,7 @@ type OpportunitySourceItemWithExcerpt = OpportunitySourceItem & {
   textExcerpt: string;
 };
 type SourceNormalizerOptions = { now?: Date };
-type MarketReaction = { available: boolean; absoluteMovePercent: number | null };
+type MarketReaction = OpportunityMarketReaction;
 type MaybePromise<T> = T | Promise<T>;
 
 export type OpportunitySourceReaders = {

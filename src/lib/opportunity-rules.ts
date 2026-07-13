@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   OpportunityCandidate,
+  OpportunityMarketReaction,
   OpportunityScore,
   OpportunitySourceItem,
   OpportunityStatus,
@@ -55,7 +56,7 @@ export function clusterOpportunityItems(items: OpportunitySourceItem[]) {
 
 type OpportunityScoreContext = {
   priorityAssetKeys: Set<string>;
-  marketReaction: { available: boolean; absoluteMovePercent: number };
+  marketReaction: OpportunityMarketReaction;
   now: Date;
 };
 

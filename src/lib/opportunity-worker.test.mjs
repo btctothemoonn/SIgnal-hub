@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
 import { buildOpportunityInputHash } from "./opportunity-ai.ts";
 import {
   getOpportunityWorkerState,
@@ -58,7 +59,17 @@ function successResult(inputs, aiAdjustment = 3) {
       validUntil: null,
       confidence: "high",
       evidenceIds: candidate.evidence.map((evidence) => evidence.id),
+      claimEvidence: {
+        thesis: [candidate.evidence[0].id],
+        reasons: [[candidate.evidence[1]?.id ?? candidate.evidence[0].id]],
+        risks: [[candidate.evidence[0].id]],
+        invalidation: [[candidate.evidence[1]?.id ?? candidate.evidence[0].id]],
+      },
     })),
+    providerTelemetry: {
+      minimax: { attempts: 1, successes: 1, failures: 0, fallbacks: 0 },
+      deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    },
   };
 }
 
@@ -80,6 +91,10 @@ assert.equal(getOpportunityWorkerIntervalMs({}), 60 * 60 * 1_000);
 assert.equal(
   getOpportunityWorkerIntervalMs({ OPPORTUNITY_WORKER_INTERVAL_MS: "7200000" }),
   7_200_000,
+);
+assert.doesNotMatch(
+  readFileSync(new URL("./opportunity-worker.ts", import.meta.url), "utf8"),
+  /absoluteMovePercent:\s*marketReaction\.absoluteMovePercent\s*\?\?\s*0/,
 );
 assert.equal(
   getOpportunityWorkerIntervalMs({ OPPORTUNITY_WORKER_INTERVAL_MS: "invalid" }),
@@ -115,9 +130,15 @@ assert.equal(
   assert.ok(capturedInputs[0].ruleScore >= 60);
   assert.equal(first.candidateCount, 1);
   assert.equal(first.evaluatedCount, 1);
+  assert.equal(first.evaluatedThisCycle, 1);
   assert.equal(first.selectedToday, 1);
   assert.equal(first.provider, "minimax");
-  assert.equal(second.evaluatedCount, 0);
+  assert.equal(second.evaluatedCount, 1);
+  assert.equal(second.evaluatedThisCycle, 0);
+  assert.deepEqual(second.providerTelemetry, {
+    minimax: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+    deepseek: { attempts: 0, successes: 0, failures: 0, fallbacks: 0 },
+  });
 
   const rows = listOpportunities(db, {
     market: "all",
@@ -129,11 +150,63 @@ assert.equal(
   assert.equal(rows[0].finalScore, 100);
   assert.equal(rows[0].thesis, "Order confirmed");
   assert.equal(rows[0].aiPending, false);
+  assert.deepEqual(rows[0].marketReaction, {
+    available: true,
+    absoluteMovePercent: 1,
+  });
+  assert.equal(rows[0].scoreAudit.context.priorityAsset, true);
+  assert.deepEqual(rows[0].scoreAudit.components, {
+    sourceQuality: 20,
+    specificity: 15,
+    catalyst: 20,
+    corroboration: 8,
+    freshness: 10,
+    priority: 10,
+    reaction: 10,
+  });
+  assert.deepEqual(rows[0].claimEvidence.reasons, [["telegram:2"]]);
   assert.equal(
     db.prepare("select status from opportunity_evaluations").get().status,
     "generated",
   );
   assert.deepEqual(JSON.parse(getOpportunityWorkerState(db, "last_cycle")), second);
+  db.close();
+}
+
+{
+  const db = new DatabaseSync(":memory:");
+  initOpportunityDb(db);
+  const original = highScoreFixtures();
+  const edited = original.map((item) => ({
+    ...item,
+    text: `${item.assetKeys[0]} revised filing confirms the same large Q3 accelerator purchase`,
+  }));
+  await runOpportunityCycle(cycleOptions(db, original, async ({ inputs }) => successResult(inputs)));
+  await runOpportunityCycle(cycleOptions(
+    db,
+    edited,
+    async ({ inputs }) => successResult(inputs),
+    new Date("2026-07-12T03:00:00.000Z"),
+  ));
+
+  assert.equal(
+    Number(db.prepare("select count(*) as count from opportunity_clusters").get().count),
+    1,
+  );
+  assert.equal(
+    Number(db.prepare("select count(*) as count from opportunity_clusters where selected_at is not null").get().count),
+    1,
+  );
+  assert.equal(listOpportunities(db, {
+    market: "all",
+    sort: "score",
+    status: "active",
+    limit: 10,
+  }).length, 1);
+  assert.match(
+    db.prepare("select text_excerpt from opportunity_evidence where source_type = 'x' and source_id = 'x:1'").get().text_excerpt,
+    /revised filing/,
+  );
   db.close();
 }
 

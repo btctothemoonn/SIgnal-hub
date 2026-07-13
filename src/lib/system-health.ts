@@ -83,9 +83,21 @@ type OpportunityHealthState = {
   lastError: string | null;
   candidateCount: number;
   evaluatedCount: number;
+  evaluatedThisCycle: number;
   selectedToday: number;
   provider: string | null;
   model: string | null;
+  providerTelemetry: {
+    minimax: OpportunityProviderHealthCounters;
+    deepseek: OpportunityProviderHealthCounters;
+  };
+};
+
+type OpportunityProviderHealthCounters = {
+  attempts: number;
+  successes: number;
+  failures: number;
+  fallbacks: number;
 };
 
 function errorMessage(error: unknown) {
@@ -354,6 +366,24 @@ function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function boundedOpportunityCounter(value: unknown) {
+  return Math.min(100, Math.max(0, Math.floor(numberValue(value))));
+}
+
+function opportunityProviderTelemetryValue(value: unknown) {
+  const record = recordValue(value);
+  const counters = (provider: "minimax" | "deepseek") => {
+    const candidate = recordValue(record[provider]);
+    return {
+      attempts: boundedOpportunityCounter(candidate.attempts),
+      successes: boundedOpportunityCounter(candidate.successes),
+      failures: boundedOpportunityCounter(candidate.failures),
+      fallbacks: boundedOpportunityCounter(candidate.fallbacks),
+    };
+  };
+  return { minimax: counters("minimax"), deepseek: counters("deepseek") };
+}
+
 function nullableStringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
@@ -379,9 +409,11 @@ function readOpportunityHealthState(env: EnvLike): OpportunityHealthState | null
       lastError: nullableStringValue(state.lastError),
       candidateCount: numberValue(state.candidateCount),
       evaluatedCount: numberValue(state.evaluatedCount),
+      evaluatedThisCycle: numberValue(state.evaluatedThisCycle),
       selectedToday: numberValue(state.selectedToday),
       provider: nullableStringValue(state.provider),
       model: nullableStringValue(state.model),
+      providerTelemetry: opportunityProviderTelemetryValue(state.providerTelemetry),
     };
   } catch {
     return null;
@@ -419,8 +451,9 @@ export function opportunityHealthItem(env: EnvLike, now: Date): SystemHealthItem
     : [
         `${state.candidateCount} candidates`,
         `${state.evaluatedCount} evaluated`,
+        `${state.evaluatedThisCycle} this cycle`,
         `${state.selectedToday} selected`,
-        state.provider ?? "rule-only",
+        state.provider ?? (state.evaluatedCount > 0 ? "cached" : "rule-only"),
         ageLabel(state.lastSuccessAt, now),
       ].join(" 路 ");
 
@@ -436,9 +469,18 @@ export function opportunityHealthItem(env: EnvLike, now: Date): SystemHealthItem
       lastError: state.lastError,
       candidates: state.candidateCount,
       evaluated: state.evaluatedCount,
+      evaluatedThisCycle: state.evaluatedThisCycle,
       selected: state.selectedToday,
       provider: state.provider,
       model: state.model,
+      minimaxAttempts: state.providerTelemetry.minimax.attempts,
+      minimaxSuccesses: state.providerTelemetry.minimax.successes,
+      minimaxFailures: state.providerTelemetry.minimax.failures,
+      minimaxFallbacks: state.providerTelemetry.minimax.fallbacks,
+      deepseekAttempts: state.providerTelemetry.deepseek.attempts,
+      deepseekSuccesses: state.providerTelemetry.deepseek.successes,
+      deepseekFailures: state.providerTelemetry.deepseek.failures,
+      deepseekFallbacks: state.providerTelemetry.deepseek.fallbacks,
     },
   };
 }
