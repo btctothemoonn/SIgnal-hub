@@ -54,6 +54,12 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
     category: "collector",
     required: true,
   },
+  {
+    name: "signal-hub-opportunity",
+    label: "机会雷达",
+    category: "ai",
+    required: true,
+  },
 ];
 
 export function getSignalHubSystemdServiceNames() {
