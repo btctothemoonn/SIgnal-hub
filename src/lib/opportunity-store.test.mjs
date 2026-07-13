@@ -174,8 +174,19 @@ assert.equal(rows[0].aiPending, false);
 
 setOpportunityPreference(db, clusterId, { followed: true, dismissed: true });
 assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 }).length, 0);
-assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 }).length, 0);
+assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 }).length, 1);
 assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "history", includeDismissed: true, limit: 10 }).length, 1);
+
+setOpportunityPreference(db, clusterId, { followed: false });
+assert.deepEqual(
+  { ...db.prepare("SELECT followed, dismissed FROM opportunity_preferences WHERE cluster_id = ?").get(clusterId) },
+  { followed: 0, dismissed: 1 },
+);
+setOpportunityPreference(db, lowScoreClusterId, { followed: true });
+assert.deepEqual(
+  { ...db.prepare("SELECT followed, dismissed FROM opportunity_preferences WHERE cluster_id = ?").get(lowScoreClusterId) },
+  { followed: 1, dismissed: 0 },
+);
 
 assert.equal(getOpportunityWorkerState(db, "scan-cursor"), null);
 setOpportunityWorkerState(db, "scan-cursor", "2026-07-12T01:20:00.000Z");

@@ -1,15 +1,15 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server.js";
 import {
   getOpportunityWorkerState,
   listOpportunities,
   openOpportunityDb,
-} from "@/lib/opportunity-store";
+} from "../../../lib/opportunity-store.ts";
 import type {
   OpportunityListStatus,
   OpportunityMarketFilter,
   OpportunitySnapshot,
   OpportunitySort,
-} from "@/lib/opportunity-types";
+} from "../../../lib/opportunity-types.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,12 +34,11 @@ function parseOpportunityStatus(value: string | null): OpportunityListStatus | n
   return null;
 }
 
-function parseOpportunityLimit(value: string | null): number | null {
-  if (value === null || value === "") return 10;
-  if (!/^\d+$/.test(value)) return null;
+function parseOpportunityLimit(value: string | null): number {
+  if (value === null) return 10;
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) return null;
-  return Math.min(100, Math.max(1, parsed));
+  const normalized = Number.isFinite(parsed) && parsed !== 0 ? parsed : 10;
+  return Math.min(100, Math.max(1, normalized));
 }
 
 function lastWorkerSuccessAt(value: string | null): string | null {
@@ -58,8 +57,9 @@ export function getOpportunitySnapshot(options: {
   status: OpportunityListStatus;
   limit: number;
 }): OpportunitySnapshot {
-  const db = openOpportunityDb();
+  let db: ReturnType<typeof openOpportunityDb> | undefined;
   try {
+    db = openOpportunityDb();
     return {
       generatedAt: new Date().toISOString(),
       lastWorkerSuccessAt: lastWorkerSuccessAt(getOpportunityWorkerState(db, "last_cycle")),
@@ -70,7 +70,7 @@ export function getOpportunitySnapshot(options: {
       error: null,
     };
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
   const status = parseOpportunityStatus(request.nextUrl.searchParams.get("status"));
   const limit = parseOpportunityLimit(request.nextUrl.searchParams.get("limit"));
 
-  if (market === null || sort === null || status === null || limit === null) {
+  if (market === null || sort === null || status === null) {
     return NextResponse.json(
       { error: "Invalid opportunity query", success: false },
       { status: 400, headers: NO_STORE_HEADERS },

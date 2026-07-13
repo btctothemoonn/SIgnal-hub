@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { openOpportunityDb, setOpportunityPreference } from "@/lib/opportunity-store";
+import { NextResponse } from "next/server.js";
+import { openOpportunityDb, setOpportunityPreference } from "../../../../../lib/opportunity-store.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,8 +33,9 @@ export async function POST(
     );
   }
 
-  const db = openOpportunityDb();
+  let db: ReturnType<typeof openOpportunityDb> | undefined;
   try {
+    db = openOpportunityDb();
     const cluster = db.prepare("SELECT 1 FROM opportunity_clusters WHERE id = ?").get(clusterId);
     if (!cluster) {
       return NextResponse.json(
@@ -42,9 +43,9 @@ export async function POST(
         { status: 404, headers: NO_STORE_HEADERS },
       );
     }
-    setOpportunityPreference(db, clusterId, { followed: body.followed, dismissed: false });
+    setOpportunityPreference(db, clusterId, { followed: body.followed });
     return NextResponse.json(
-      { success: true, id: clusterId, followed: body.followed, dismissed: false },
+      { success: true, id: clusterId, followed: body.followed },
       { headers: NO_STORE_HEADERS },
     );
   } catch {
@@ -53,6 +54,6 @@ export async function POST(
       { status: 500, headers: NO_STORE_HEADERS },
     );
   } finally {
-    db.close();
+    db?.close();
   }
 }

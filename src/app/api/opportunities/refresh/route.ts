@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getOpportunitySnapshot } from "../route";
+import { NextResponse } from "next/server.js";
+import { getOpportunitySnapshot } from "../route.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

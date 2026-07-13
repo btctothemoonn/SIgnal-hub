@@ -373,16 +373,18 @@ export function getOpportunityEvaluationByInputHash(db: DatabaseSync, clusterId:
 export function setOpportunityPreference(
   db: DatabaseSync,
   clusterId: number,
-  preference: { followed: boolean; dismissed: boolean },
+  preference: { followed?: boolean; dismissed?: boolean },
 ) {
+  const followed = preference.followed === undefined ? null : preference.followed ? 1 : 0;
+  const dismissed = preference.dismissed === undefined ? null : preference.dismissed ? 1 : 0;
   db.prepare(`
     INSERT INTO opportunity_preferences(cluster_id, followed, dismissed, updated_at)
-    VALUES (?, ?, ?, ?)
+    VALUES (?, COALESCE(?, 0), COALESCE(?, 0), ?)
     ON CONFLICT(cluster_id) DO UPDATE SET
-      followed = excluded.followed,
-      dismissed = excluded.dismissed,
+      followed = COALESCE(?, opportunity_preferences.followed),
+      dismissed = COALESCE(?, opportunity_preferences.dismissed),
       updated_at = excluded.updated_at
-  `).run(clusterId, preference.followed ? 1 : 0, preference.dismissed ? 1 : 0, nowIso());
+  `).run(clusterId, followed, dismissed, nowIso(), followed, dismissed);
 }
 
 export function selectUnselectedDailyOpportunities(
@@ -416,7 +418,9 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
     values.push(options.market);
   }
   if (options.status === "active") conditions.push("c.status != 'expired'");
-  if (!options.includeDismissed) conditions.push("COALESCE(p.dismissed, 0) = 0");
+  if (options.status === "active" && !options.includeDismissed) {
+    conditions.push("COALESCE(p.dismissed, 0) = 0");
+  }
   const orderBy = options.sort === "latest" ? "c.last_seen_at DESC, c.updated_at DESC" : "c.final_score DESC, c.updated_at DESC";
   const limit = clampLimit(options.limit);
   const rows = db.prepare(`
