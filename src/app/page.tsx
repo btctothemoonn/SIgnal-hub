@@ -24,6 +24,9 @@ export default async function Home() {
         )}
         initialXSnapshot={xSnapshot}
         pollXSnapshot={pollXSnapshot}
+        opportunityEnabled={
+          process.env.OPPORTUNITY_RADAR_UI_ENABLED === "1"
+        }
       />
     </AppShell>
   );
