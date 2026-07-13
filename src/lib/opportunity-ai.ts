@@ -89,6 +89,9 @@ const OPPORTUNITY_KEYS = [
   "confidence",
 ] as const;
 const DEFAULT_TIMEOUT_MS = 60_000;
+const MIN_TIMEOUT_MS = 1_000;
+const MAX_TIMEOUT_MS = 300_000;
+const MAX_ERROR_BODY_BYTES = 1_024;
 const DEFAULT_TIMER: OpportunityAiTimer = {
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
@@ -378,25 +381,28 @@ export function getOpportunityProviderCandidates(
 ): AiProviderConfig[] {
   const providers: AiProviderConfig[] = [];
   const directMinimaxKey = env.MINIMAX_API_KEY?.trim() || "";
+  const directMinimaxBaseUrl = env.MINIMAX_BASE_URL?.trim() || "";
   const summaryBaseUrl = env.AI_SUMMARY_BASE_URL?.trim() || "";
-  const summaryMinimaxKey =
-    summaryBaseUrl && matchesProvider(summaryBaseUrl, "minimax")
+  const summaryIsMinimax =
+    Boolean(summaryBaseUrl) && matchesProvider(summaryBaseUrl, "minimax");
+  const summaryMinimaxKey = summaryIsMinimax
       ? env.AI_SUMMARY_API_KEY?.trim() || ""
       : "";
   const minimaxKey = directMinimaxKey || summaryMinimaxKey;
   if (minimaxKey) {
-    const reusedSummaryProvider = !directMinimaxKey && Boolean(summaryMinimaxKey);
+    const usesSummaryConfiguration = !directMinimaxBaseUrl && summaryIsMinimax;
     providers.push({
       id: "minimax",
       baseUrl: normalizedBaseUrl(
-        reusedSummaryProvider
+        usesSummaryConfiguration
           ? summaryBaseUrl
-          : env.MINIMAX_BASE_URL?.trim() || "https://api.minimaxi.com/v1",
+          : directMinimaxBaseUrl || "https://api.minimaxi.com/v1",
       ),
       apiKey: minimaxKey,
-      model: reusedSummaryProvider
-        ? env.AI_SUMMARY_MODEL?.trim() || "MiniMax-M2.7"
-        : env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7",
+      model:
+        env.MINIMAX_MODEL?.trim() ||
+        (usesSummaryConfiguration ? env.AI_SUMMARY_MODEL?.trim() : "") ||
+        "MiniMax-M2.7",
     });
   }
 
@@ -462,9 +468,19 @@ class OpportunityAiTimeoutError extends Error {
   }
 }
 
+class OpportunityAiQuotaError extends Error {
+  readonly code = "quota_exhausted";
+
+  constructor() {
+    super("Opportunity AI quota exhausted");
+    this.name = "OpportunityAiQuotaError";
+  }
+}
+
 function isRetryableOpportunityAiError(error: unknown) {
   if (error instanceof OpportunityAiTerminalError) return false;
   if (error instanceof OpportunityAiTimeoutError) return true;
+  if (error instanceof OpportunityAiQuotaError) return true;
   if (error instanceof OpportunityAiHttpError) {
     return error.status === 408 || error.status === 429 || error.status >= 500;
   }
@@ -473,6 +489,32 @@ function isRetryableOpportunityAiError(error: unknown) {
   if (/^(?:ETIMEDOUT|ECONNRESET|UND_ERR_CONNECT_TIMEOUT)$/i.test(code)) return true;
   const message = error instanceof Error ? error.message : String(error);
   return /\bHTTP (?:408|429|5\d\d)\b|timeout|fetch failed/i.test(message);
+}
+
+async function readResponseBodyForClassification(response: Response) {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+
+  const bytes = new Uint8Array(MAX_ERROR_BODY_BYTES);
+  let length = 0;
+  try {
+    while (length < MAX_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const take = Math.min(value.byteLength, MAX_ERROR_BODY_BYTES - length);
+      bytes.set(value.subarray(0, take), length);
+      length += take;
+      if (take < value.byteLength || length === MAX_ERROR_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        break;
+      }
+    }
+  } catch {
+    return "";
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(bytes.subarray(0, length));
 }
 
 function responseContent(payload: unknown) {
@@ -486,10 +528,17 @@ function responseContent(payload: unknown) {
   return requiredString(firstChoice.message.content, "response content");
 }
 
-function positiveTimeout(value: number | undefined, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? Math.floor(value)
-    : fallback;
+function boundedTimeout(value: number | undefined, fallback: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.floor(value)));
+}
+
+function configuredTimeout(env: EnvLike) {
+  const raw =
+    env.OPPORTUNITY_AI_TIMEOUT_MS?.trim() ||
+    env.AI_SUMMARY_TIMEOUT_MS?.trim() ||
+    "";
+  return raw ? boundedTimeout(Number(raw), DEFAULT_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS;
 }
 
 export async function evaluateOpportunityBatch({
@@ -511,11 +560,7 @@ export async function evaluateOpportunityBatch({
   try {
     const prompt = buildOpportunityPrompt(inputs);
     const inputHash = createHash("sha256").update(prompt).digest("hex");
-    const configuredEnvTimeout = Number(env.OPPORTUNITY_AI_TIMEOUT_MS);
-    const requestTimeoutMs = positiveTimeout(
-      timeoutMs,
-      positiveTimeout(configuredEnvTimeout, DEFAULT_TIMEOUT_MS),
-    );
+    const requestTimeoutMs = boundedTimeout(timeoutMs, configuredTimeout(env));
 
     const result = await runWithAiProviderFallback({
       providers,
@@ -547,6 +592,12 @@ export async function evaluateOpportunityBatch({
           });
           if (timedOut) throw new OpportunityAiTimeoutError();
           if (!response.ok) {
+            if (response.status !== 429) {
+              const classificationBody = await readResponseBodyForClassification(response);
+              if (isQuotaExhaustedError(classificationBody)) {
+                throw new OpportunityAiQuotaError();
+              }
+            }
             throw new OpportunityAiHttpError(response.status);
           }
           try {

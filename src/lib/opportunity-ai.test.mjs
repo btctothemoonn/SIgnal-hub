@@ -260,6 +260,32 @@ assert.deepEqual(
   ],
 );
 
+const documentedInternationalMinimax = getOpportunityProviderCandidates({
+  MINIMAX_API_KEY: "documented-minimax-key",
+  AI_SUMMARY_BASE_URL: "https://api.minimax.io/v1/",
+  AI_SUMMARY_MODEL: "MiniMax-M2.7-international",
+});
+assert.deepEqual(
+  documentedInternationalMinimax.map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
+  [{
+    id: "minimax",
+    baseUrl: "https://api.minimax.io/v1",
+    model: "MiniMax-M2.7-international",
+  }],
+);
+assert.deepEqual(
+  getOpportunityProviderCandidates({
+    MINIMAX_API_KEY: "direct-minimax-key",
+    AI_SUMMARY_BASE_URL: "https://api.openai.com/v1",
+    AI_SUMMARY_MODEL: "gpt-4o-mini",
+  }).map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
+  [{
+    id: "minimax",
+    baseUrl: "https://api.minimaxi.com/v1",
+    model: "MiniMax-M2.7",
+  }],
+);
+
 const reusedProviders = getOpportunityProviderCandidates({
   AI_SUMMARY_API_KEY: "summary-minimax-key",
   AI_SUMMARY_BASE_URL: "https://summary.minimax.example/v1/",
@@ -325,6 +351,51 @@ for (const status of [408, 429, 500, 503]) {
 }
 
 resetAiProviderCircuitBreakers();
+const quotaSecret = "PRIVATE_QUOTA_BODY_MARKER";
+let quotaAttempts = 0;
+let quotaBodyCancelled = false;
+const capturedConsole = [];
+const originalConsole = {
+  log: console.log,
+  warn: console.warn,
+  error: console.error,
+};
+console.log = (...args) => capturedConsole.push(args);
+console.warn = (...args) => capturedConsole.push(args);
+console.error = (...args) => capturedConsole.push(args);
+let quotaFallbackResult;
+try {
+  quotaFallbackResult = await evaluateOpportunityBatch({
+    inputs,
+    env: providerEnv,
+    fetchImpl: async (url) => {
+      quotaAttempts += 1;
+      if (!String(url).includes("minimaxi")) return successResponse();
+      const firstChunk = new TextEncoder().encode(
+        `quota exceeded (2062) ${quotaSecret} ${"x".repeat(2_048)}`,
+      );
+      return new Response(new ReadableStream({
+        pull(controller) {
+          controller.enqueue(firstChunk);
+        },
+        cancel() {
+          quotaBodyCancelled = true;
+        },
+      }), { status: 400 });
+    },
+  });
+} finally {
+  console.log = originalConsole.log;
+  console.warn = originalConsole.warn;
+  console.error = originalConsole.error;
+}
+assert.equal(quotaAttempts, 2);
+assert.equal(quotaFallbackResult.provider?.id, "deepseek");
+assert.equal(quotaBodyCancelled, true);
+assert.equal(JSON.stringify(quotaFallbackResult).includes(quotaSecret), false);
+assert.equal(JSON.stringify(capturedConsole).includes(quotaSecret), false);
+
+resetAiProviderCircuitBreakers();
 let badRequestAttempts = 0;
 const badRequestResult = await evaluateOpportunityBatch({
   inputs,
@@ -336,6 +407,42 @@ const badRequestResult = await evaluateOpportunityBatch({
 });
 assert.equal(badRequestAttempts, 1);
 assert.equal(badRequestResult.ruleOnly, true);
+
+const captureConfiguredTimeout = async (env, timeoutMs) => {
+  let capturedDelay = null;
+  const result = await evaluateOpportunityBatch({
+    inputs,
+    env: { MINIMAX_API_KEY: "minimax-test", ...env },
+    timeoutMs,
+    timer: {
+      setTimeout(_callback, delay) {
+        capturedDelay = delay;
+        return 1;
+      },
+      clearTimeout() {},
+    },
+    fetchImpl: async () => successResponse(),
+  });
+  assert.equal(result.ruleOnly, false);
+  return capturedDelay;
+};
+assert.equal(await captureConfiguredTimeout({
+  OPPORTUNITY_AI_TIMEOUT_MS: "7000",
+  AI_SUMMARY_TIMEOUT_MS: "9000",
+}), 7_000);
+assert.equal(await captureConfiguredTimeout({
+  AI_SUMMARY_TIMEOUT_MS: "240000",
+}), 240_000);
+assert.equal(await captureConfiguredTimeout({}), 60_000);
+assert.equal(await captureConfiguredTimeout({
+  OPPORTUNITY_AI_TIMEOUT_MS: "1",
+}), 1_000);
+assert.equal(await captureConfiguredTimeout({
+  OPPORTUNITY_AI_TIMEOUT_MS: "999999",
+}), 300_000);
+assert.equal(await captureConfiguredTimeout({
+  OPPORTUNITY_AI_TIMEOUT_MS: "7000",
+}, 25), 1_000);
 
 resetAiProviderCircuitBreakers();
 let timeoutAttempts = 0;
@@ -367,7 +474,7 @@ const timeoutResult = await evaluateOpportunityBatch({
 });
 assert.equal(timeoutResult.provider?.id, "deepseek");
 assert.equal(timeoutAttempts, 2);
-assert.deepEqual(timeoutDelays, [25, 25]);
+assert.deepEqual(timeoutDelays, [1_000, 1_000]);
 assert.deepEqual(clearedTimers, [1, 2]);
 
 resetAiProviderCircuitBreakers();
