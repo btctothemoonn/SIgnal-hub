@@ -158,7 +158,7 @@ function stableCatalystId({
   link: string;
   text: string;
 }) {
-  if (link) return `${sourceType}:${link}`;
+  if (link) return `${sourceType}:${ticker}:${link}`;
   const contentHash = createHash("sha256")
     .update(`${source}\n${ticker}\n${publishedAt}\n${text.toLowerCase().replace(/\s+/g, " ").trim()}`)
     .digest("hex");

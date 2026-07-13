@@ -147,7 +147,45 @@ for (const [text, id] of stableIds) {
 }
 assert.equal(
   stableIds.get("Stable with link\nNVDA revenue update"),
-  "news:https://example.com/nvda-earnings",
+  "news:NVDA:https://example.com/nvda-earnings",
+);
+
+const sharedLinkItems = normalizeCatalystOpportunityItems(
+  {
+    catalysts: {
+      NVDA: [
+        {
+          title: "Shared source",
+          summary: "NVDA update",
+          date: "2026-07-11T00:00:00.000Z",
+          type: "earnings",
+          impact: "positive",
+          source: "Yahoo Finance",
+          link: "https://example.com/shared-market-update",
+        },
+      ],
+      AMD: [
+        {
+          title: "Shared source",
+          summary: "AMD update",
+          date: "2026-07-11T00:00:00.000Z",
+          type: "earnings",
+          impact: "positive",
+          source: "Yahoo Finance",
+          link: "https://example.com/shared-market-update",
+        },
+      ],
+    },
+  },
+  { now },
+);
+assert.equal(sharedLinkItems.length, 2);
+assert.deepEqual(
+  sharedLinkItems.map((item) => item.id).sort(),
+  [
+    "news:AMD:https://example.com/shared-market-update",
+    "news:NVDA:https://example.com/shared-market-update",
+  ],
 );
 
 const douyinItems = normalizeDouyinOpportunityItems(
