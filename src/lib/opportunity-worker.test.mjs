@@ -137,6 +137,54 @@ assert.equal(
   db.close();
 }
 
+for (const secondCycleFixtures of [highScoreFixtures(), []]) {
+  const db = new DatabaseSync(":memory:");
+  initOpportunityDb(db);
+  let aiCalls = 0;
+  const fixtures = highScoreFixtures();
+  const evaluateBatch = async ({ inputs }) => {
+    aiCalls += 1;
+    const result = successResult(inputs);
+    result.evaluations[0].validUntil = "2026-07-12T02:30:00.000Z";
+    return result;
+  };
+
+  await runOpportunityCycle(cycleOptions(db, fixtures, evaluateBatch));
+  assert.equal(
+    listOpportunities(db, {
+      market: "all",
+      sort: "score",
+      status: "active",
+      limit: 10,
+    }).length,
+    1,
+  );
+
+  await runOpportunityCycle(
+    cycleOptions(
+      db,
+      secondCycleFixtures,
+      evaluateBatch,
+      new Date("2026-07-12T03:00:00.000Z"),
+    ),
+  );
+  assert.equal(aiCalls, 1);
+  assert.equal(
+    db.prepare("select status from opportunity_clusters").get().status,
+    "expired",
+  );
+  assert.equal(
+    listOpportunities(db, {
+      market: "all",
+      sort: "score",
+      status: "active",
+      limit: 10,
+    }).length,
+    0,
+  );
+  db.close();
+}
+
 {
   const db = new DatabaseSync(":memory:");
   initOpportunityDb(db);
@@ -242,14 +290,28 @@ assert.equal(
       originalUrl: `https://example.com/${index}/${sourceIndex}`,
     })),
   ).flat();
-  let inputCount = 0;
+  const evaluatedKeysByCycle = [];
+  const evaluateBatch = async ({ inputs }) => {
+    evaluatedKeysByCycle.push(
+      inputs.map(({ candidate }) => candidate.canonicalKey),
+    );
+    return successResult(inputs);
+  };
   await runOpportunityCycle(
-    cycleOptions(db, fixtures, async ({ inputs }) => {
-      inputCount = inputs.length;
-      return successResult(inputs);
-    }),
+    cycleOptions(db, fixtures, evaluateBatch),
   );
-  assert.equal(inputCount, 20);
+  await runOpportunityCycle(
+    cycleOptions(
+      db,
+      fixtures,
+      evaluateBatch,
+      new Date("2026-07-12T03:00:00.000Z"),
+    ),
+  );
+  assert.deepEqual(evaluatedKeysByCycle.map((keys) => keys.length), [20, 1]);
+  const evaluatedKeys = evaluatedKeysByCycle.flat();
+  assert.equal(new Set(evaluatedKeys).size, 21);
+  assert.deepEqual(evaluatedKeys, [...evaluatedKeys].sort());
   assert.equal(
     Number(db.prepare("select count(*) as count from opportunity_clusters").get().count),
     21,

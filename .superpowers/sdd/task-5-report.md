@@ -50,3 +50,27 @@ event names, counts, duration, provider/model, and error classes.
 - Node 24 emits existing experimental warnings for type transformation,
   `node:sqlite`, and typeless package ESM reparsing. No new package-level module
   setting was added because it is outside Task 5 scope.
+
+## Review Fixes
+
+- Pending AI work is now built for every `ruleScore >= 60` candidate by first
+  computing its actual `{ candidate, ruleScore }` input hash, then removing
+  generated evaluations, sorting deterministically by rule score and
+  canonical key, and only then applying the 20-item batch limit. The 21-item
+  regression evaluates 20 items in cycle one and the remaining item in cycle
+  two, with every canonical key evaluated exactly once.
+- Every cycle now independently recalculates lifecycle status for every
+  persisted non-expired cluster after AI application and before daily
+  selection. The recalculation uses persisted `valid_until`,
+  `invalidated_at`, final score, confidence, and independent evidence-source
+  count, so expiry works both on a generated-hash cache hit and after the
+  candidate leaves the seven-day source cache.
+- Task 2 store files were not changed; the lifecycle sweep is transactionally
+  contained in the worker.
+
+Review TDD evidence:
+
+- Starvation RED produced actual AI batch lengths `[20]` instead of expected
+  `[20, 1]`; GREEN now completes the pending item in the next cycle.
+- Lifecycle RED left the persisted status as `tracking` instead of `expired`;
+  GREEN now expires both hash-hit and source-cache-miss paths.

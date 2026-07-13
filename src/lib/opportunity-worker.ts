@@ -356,6 +356,54 @@ function selectedTodayCount(db: DatabaseSync, dateKey: string) {
   return numberValue(row?.count);
 }
 
+function refreshPersistedOpportunityStatuses(
+  db: DatabaseSync,
+  now: Date,
+  updatedAt: string,
+) {
+  const rows = db.prepare(`
+    SELECT
+      c.id,
+      c.status,
+      c.valid_until,
+      c.invalidated_at,
+      c.final_score,
+      c.confidence,
+      COUNT(DISTINCT e.source_type || char(31) || e.source_name)
+        AS independent_source_count
+    FROM opportunity_clusters c
+    LEFT JOIN opportunity_evidence e ON e.cluster_id = c.id
+    WHERE c.status != 'expired'
+    GROUP BY c.id
+  `).all();
+  const update = db.prepare(`
+    UPDATE opportunity_clusters
+    SET status = ?, updated_at = ?
+    WHERE id = ? AND status != ?
+  `);
+
+  withTransaction(db, () => {
+    for (const row of rows) {
+      const status = deriveOpportunityStatus(
+        {
+          validUntil:
+            typeof row.valid_until === "string" ? row.valid_until : null,
+          invalidatedAt:
+            typeof row.invalidated_at === "string"
+              ? row.invalidated_at
+              : null,
+          independentSourceCount: numberValue(row.independent_source_count),
+          finalScore: numberValue(row.final_score),
+          confidence:
+            typeof row.confidence === "string" ? row.confidence : "",
+        },
+        now,
+      );
+      update.run(status, updatedAt, row.id, status);
+    }
+  });
+}
+
 function previousCycleState(db: DatabaseSync) {
   const row = db
     .prepare(`
@@ -424,31 +472,43 @@ export async function runOpportunityCycle(
         applyRuleOnlyAnalysis(db, entry, nowIso);
       }
     });
-    const eligibleKeys = new Set(
-      scored
-        .filter((entry) => entry.score.ruleScore >= AI_THRESHOLD)
-        .slice(0, AI_BATCH_LIMIT)
-        .map((entry) => entry.candidate.canonicalKey),
-    );
-    const pending: PendingOpportunity[] = persisted.flatMap((entry) => {
-      if (!eligibleKeys.has(entry.candidate.canonicalKey)) return [];
-      const input = {
-        candidate: entry.candidate,
-        ruleScore: entry.score.ruleScore,
-      };
-      const inputHash = buildOpportunityInputHash(
-        [input],
-        OPPORTUNITY_PROMPT_VERSION,
-      );
-      const existing = getOpportunityEvaluationByInputHash(
-        db,
-        entry.clusterId,
-        inputHash,
-      );
-      return existing?.status === "generated"
-        ? []
-        : [{ ...entry, input, inputHash }];
-    });
+    const pending: PendingOpportunity[] = persisted
+      .filter((entry) => entry.score.ruleScore >= AI_THRESHOLD)
+      .map((entry) => {
+        const input = {
+          candidate: entry.candidate,
+          ruleScore: entry.score.ruleScore,
+        };
+        return {
+          ...entry,
+          input,
+          inputHash: buildOpportunityInputHash(
+            [input],
+            OPPORTUNITY_PROMPT_VERSION,
+          ),
+        };
+      })
+      .filter((entry) =>
+        getOpportunityEvaluationByInputHash(
+          db,
+          entry.clusterId,
+          entry.inputHash,
+        )?.status !== "generated",
+      )
+      .sort(
+        (left, right) => {
+          const scoreDifference =
+            right.score.ruleScore - left.score.ruleScore;
+          if (scoreDifference !== 0) return scoreDifference;
+          if (left.candidate.canonicalKey < right.candidate.canonicalKey) {
+            return -1;
+          }
+          return left.candidate.canonicalKey > right.candidate.canonicalKey
+            ? 1
+            : 0;
+        },
+      )
+      .slice(0, AI_BATCH_LIMIT);
 
     let aiResult: OpportunityBatchResultLike | null = null;
     let aiFailureClass: string | null = null;
@@ -469,6 +529,7 @@ export async function runOpportunityCycle(
       );
     }
 
+    refreshPersistedOpportunityStatuses(db, now, nowIso);
     const dateKey = formatOpportunityDateKey(now, "Asia/Shanghai");
     selectUnselectedDailyOpportunities(db, {
       dateKey,
