@@ -266,8 +266,20 @@ export function buildOpportunityInputHash(
   inputs: OpportunityAiInput[],
   promptVersion = OPPORTUNITY_PROMPT_VERSION,
 ) {
+  const evidenceLinkability = inputs.map(({ candidate }) => ({
+    canonicalKey: candidate.canonicalKey,
+    evidence: candidate.evidence.map((item) => {
+      const originalUrl = sanitizeOpportunityOriginalUrl(item.originalUrl);
+      return {
+        id: item.id,
+        linkable: Boolean(originalUrl),
+        originalUrl,
+      };
+    }),
+  }));
   return createHash("sha256")
     .update(buildOpportunityPrompt(inputs, promptVersion))
+    .update(JSON.stringify(evidenceLinkability))
     .digest("hex");
 }
 
@@ -615,7 +627,7 @@ export async function evaluateOpportunityBatch({
 
   try {
     const prompt = buildOpportunityPrompt(inputs);
-    const inputHash = createHash("sha256").update(prompt).digest("hex");
+    const inputHash = buildOpportunityInputHash(inputs);
     const requestTimeoutMs = boundedTimeout(timeoutMs, configuredTimeout(env));
 
     const result = await runWithAiProviderFallback({

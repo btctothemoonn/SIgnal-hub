@@ -71,3 +71,17 @@ These are equivalent to the requested `pnpm exec tsc --noEmit`, `pnpm exec eslin
 - PASS: `node scripts/opportunity-worker-contract.test.mjs`
 - PASS: `node src/lib/system-health.test.mjs`
 - PASS: bundled Node `node_modules/typescript/bin/tsc --noEmit` (the `pnpm exec tsc --noEmit` launcher could not find `node` on PATH)
+
+## Final Review Identity Fixes (2026-07-14)
+
+- AI evaluation input hashes now include each evidence item's sanitized URL and linkability state, and worker evaluation persistence uses that same hash. Invalidating an evidence URL therefore prevents reuse of linked cached claims.
+- Catalyst snapshots preserve the durable upstream `StocksCatalystSourceItem.id` as `sourceItemId`; no-link opportunity evidence IDs use it when present, so editorial edits retain identity while distinct same-timestamp catalysts remain distinct.
+
+### Verification
+
+- PASS: `node src/lib/opportunity-ai.test.mjs`
+- PASS: `node src/lib/opportunity-sources.test.mjs`
+- PASS: `node src/lib/stocks-catalyst-data.test.mjs`
+- PASS: `node src/lib/opportunity-worker.test.mjs`
+- PASS: `node src/components/opportunity-radar.test.mjs`
+- PASS: `pnpm exec tsc --noEmit`

@@ -83,6 +83,7 @@ export type AlphaResearchCatalyst = {
   sourceRole?: "external" | "supplemental" | "subscription" | "mock";
   author?: string;
   link?: string;
+  sourceItemId?: string;
 };
 
 export type AlphaResearchFinancialSnapshot = {

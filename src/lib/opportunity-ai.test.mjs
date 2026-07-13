@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { resetAiProviderCircuitBreakers } from "./ai-provider-fallback.ts";
 import {
   OPPORTUNITY_DISPLAY_THRESHOLD,
@@ -104,10 +103,6 @@ assert.equal(
 
 const hash = buildOpportunityInputHash(inputs);
 assert.match(hash, /^[a-f0-9]{64}$/);
-assert.equal(
-  hash,
-  createHash("sha256").update(promptText).digest("hex"),
-);
 assert.equal(hash, buildOpportunityInputHash(inputs));
 assert.notEqual(
   hash,
@@ -120,13 +115,26 @@ const unsentFieldsChanged = [{
     lastSeenAt: "2030-01-02T00:00:00.000Z",
     evidence: candidate.evidence.map((item) => ({
       ...item,
-      originalUrl: "https://different.example/secret",
       text: "not sent because translation is present",
     })),
   },
   ruleScore: 70,
 }];
 assert.equal(hash, buildOpportunityInputHash(unsentFieldsChanged));
+const evidenceWithoutLink = [{
+  candidate: {
+    ...candidate,
+    evidence: candidate.evidence.map((item) =>
+      item.id === "x:1" ? { ...item, originalUrl: "javascript:alert(1)" } : item,
+    ),
+  },
+  ruleScore: 70,
+}];
+assert.notEqual(
+  hash,
+  buildOpportunityInputHash(evidenceWithoutLink),
+  "removing a usable evidence URL invalidates cached AI claims",
+);
 assert.notEqual(
   hash,
   buildOpportunityInputHash([{ ...input, ruleScore: 71 }]),

@@ -878,6 +878,7 @@ function catalystFromItem(item: StocksCatalystSourceItem): AlphaResearchCatalyst
     sourceRole: item.sourceRole,
     author: item.author,
     link: item.link,
+    sourceItemId: item.id,
   };
 }
 

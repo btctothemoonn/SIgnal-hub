@@ -106,6 +106,7 @@ const stableCatalysts = [
     type: "industry-event",
     impact: "positive",
     source: "Google News",
+    sourceItemId: "google-news:nvda-stable-without-link",
   },
   {
     title: "Stable with link",
@@ -168,7 +169,34 @@ const noLinkCatalystEdited = normalizeCatalystOpportunityItems(
 assert.equal(
   noLinkCatalystEdited.id,
   noLinkCatalystOriginal.id,
-  "no-link catalyst identity ignores editable title and summary text",
+  "no-link catalyst identity follows the durable upstream item ID across edits",
+);
+const distinctNoLinkCatalysts = normalizeCatalystOpportunityItems(
+  {
+    catalysts: {
+      NVDA: [
+        {
+          ...stableCatalysts[0],
+          title: "First same-timestamp catalyst",
+          summary: "First distinct no-link item",
+          sourceItemId: "google-news:nvda-first",
+        },
+        {
+          ...stableCatalysts[0],
+          title: "Second same-timestamp catalyst",
+          summary: "Second distinct no-link item",
+          sourceItemId: "google-news:nvda-second",
+        },
+      ],
+    },
+  },
+  { now },
+);
+assert.equal(distinctNoLinkCatalysts.length, 2);
+assert.equal(
+  new Set(distinctNoLinkCatalysts.map((item) => item.id)).size,
+  2,
+  "distinct no-link catalysts with identical metadata retain distinct source IDs",
 );
 
 const sharedLinkItems = normalizeCatalystOpportunityItems(

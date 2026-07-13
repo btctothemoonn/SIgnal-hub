@@ -154,6 +154,7 @@ function stableCatalystId({
   ticker,
   publishedAt,
   link,
+  sourceItemId,
   category,
 }: {
   sourceType: string;
@@ -161,9 +162,11 @@ function stableCatalystId({
   ticker: string;
   publishedAt: string;
   link: string;
+  sourceItemId: string;
   category: string;
 }) {
   if (link) return `${sourceType}:${ticker}:${link}`;
+  if (sourceItemId) return `${sourceType}:${ticker}:${sourceItemId}`;
   const metadataHash = createHash("sha256")
     .update(
       [sourceType, source.trim().toLowerCase(), ticker, publishedAt, category]
@@ -283,6 +286,7 @@ export function normalizeCatalystOpportunityItems(
             ticker: normalizedTicker,
             publishedAt,
             link: originalUrl,
+            sourceItemId: nonEmptyString(catalyst.sourceItemId),
             category: nonEmptyString(catalyst.type).toLowerCase() || "other",
           }),
           sourceType,

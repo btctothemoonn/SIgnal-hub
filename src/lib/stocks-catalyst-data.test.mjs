@@ -341,6 +341,7 @@ assert.equal(liveSnapshot.catalysts.NVDA.length, 2);
 assert.equal(liveSnapshot.catalysts.NVDA[0].type, "product");
 assert.equal(liveSnapshot.catalysts.NVDA[0].source, "Polygon");
 assert.equal(liveSnapshot.catalysts.NVDA[0].sourceRole, "external");
+assert.equal(liveSnapshot.catalysts.NVDA[0].sourceItemId, "polygon:article-1");
 assert.equal(liveSnapshot.catalysts.AMD.length, 1);
 assert.equal(liveSnapshot.catalysts.AMD[0].type, "earnings");
 assert.equal(
