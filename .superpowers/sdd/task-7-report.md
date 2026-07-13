@@ -40,3 +40,38 @@
 
 - 全量测试仍输出仓库既有的 Node experimental SQLite/transform-types 与 module-type 警告；本任务未修改相关配置。
 - 本地 Opportunity 数据为空时无法覆盖真实卡片 mutation，浏览器验证使用与 `OpportunitySnapshot` 接口一致的拦截快照和成功 mutation 响应。
+
+## 审查修复（2026-07-13）
+
+### 实现
+
+- GET、轮询和 mutation 共享按 cache key 单调递增的请求序号。GET 仅在序号仍为当前值时提交快照、缓存和错误状态；mutation 成功会提升序号，使此前发出的 GET 失效。
+- live snapshot 改为按 cache key 保存；mutation 从 `snapshotsRef` 读取最新快照，并通过函数式 state setter 提交，不再依赖 `live/cached` 闭包。
+- active 页 dismiss 仍局部移除卡片；history 页保留卡片并设置 `dismissed=true`，按钮显示“已忽略”且禁用。
+- feature-on 手机导航补齐 `tablist/tab/tabpanel`、稳定 ID、`aria-controls/aria-labelledby`、roving `tabIndex` 和左右/Home/End 键操作。非活动 panel 同时设置 `aria-hidden=true` 与 `inert`。
+- 浏览器验证发现 CSS `scroll-smooth` 会让程序化切页的中间 scroll 事件短暂回退 active panel；仅在 feature-on scroller 移除该类并使用原子定位。feature-off 分支继续使用原有 smooth 行为。
+
+### TDD 证据
+
+1. 测试直接转译并执行生产 `opportunity-radar.tsx` 的纯逻辑导出；最初因序号和 mutation helper 不存在失败。实现后覆盖旧 GET 在 follow 成功后到达不能回退，以及 A→B→A 乱序响应不能覆盖最新 A。
+2. active/history dismiss 差异测试最初失败；实现后验证 active 项目被移除，history 项目保留且 `dismissed=true`。
+3. 移动 tab/tabpanel、关联 ID、`aria-hidden/inert` 和键盘操作断言均先失败后通过。
+4. 浏览器复核捕获程序化平滑滚动导致的 ARIA 状态抖动；新增 feature-on 禁用 smooth 的失败断言后完成修复。
+
+### 最终验证
+
+- Focused：Opportunity Radar 与 responsive layout 2/2 通过。
+- 相关布局：Opportunity Radar、responsive layout、homepage mobile layout、alpha summary layout 4/4 通过。
+- 全量：`pnpm test`，138/138 test files 通过。
+- 类型：`pnpm exec tsc --noEmit` 通过。
+- Lint：6 个 Task 7 源码/测试文件定向 ESLint 通过。
+- 差异：`git diff --check` 通过。
+- 浏览器 feature-on desktop 1440x900：机会页可见、AI 右栏保留、无控制台错误或 Next 错误层。
+- 浏览器 feature-on mobile 390x844：3 个 tab；click 与方向键切换后选中、焦点、`aria-hidden/inert` 完全一致；无控制台错误或 Next 错误层。
+- 浏览器 feature-off：desktop 无机会入口且原 signals/AI 双栏可见；mobile 保持 2 个按钮、无 tab 语义并保留 smooth scroller。
+- 本地验证服务已停止。
+
+### 剩余顾虑
+
+- 本地 Opportunity 数据为空，未在浏览器中对真实卡片执行 follow/dismiss；生产纯逻辑的可执行回归覆盖本次竞态与 active/history 局部更新，API mutation 合约继续由现有全量测试覆盖。
+- 全量测试仍仅输出仓库既有的 Node experimental SQLite/transform-types 与 module-type 警告。

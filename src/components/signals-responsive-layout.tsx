@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { OpportunityRadar } from "@/components/opportunity-radar";
 import { UnifiedNewsPanel } from "@/components/unified-news-panel";
@@ -33,6 +39,18 @@ const MOBILE_PANEL_INDEX = {
   opportunities: 1,
   summary: 2,
 } as const;
+
+const MOBILE_TAB_ID: Record<SignalMobilePanel, string> = {
+  feed: "signal-mobile-tab-feed",
+  opportunities: "signal-mobile-tab-opportunities",
+  summary: "signal-mobile-tab-summary",
+};
+
+const MOBILE_PANEL_ID: Record<SignalMobilePanel, string> = {
+  feed: "signal-mobile-panel-feed",
+  opportunities: "signal-mobile-panel-opportunities",
+  summary: "signal-mobile-panel-summary",
+};
 
 export function SignalsResponsiveLayout({
   initialTelegramSnapshot,
@@ -69,10 +87,37 @@ export function SignalsResponsiveLayout({
           : 1;
       scroller.scrollTo({
         left: scroller.clientWidth * index,
-        behavior: "smooth",
+        behavior: opportunityEnabled ? "auto" : "smooth",
       });
     },
     [opportunityEnabled],
+  );
+
+  const handleMobileTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, panel: SignalMobilePanel) => {
+      const currentIndex = MOBILE_PANEL_INDEX[panel];
+      let nextIndex: number;
+
+      if (event.key === "ArrowLeft") {
+        nextIndex =
+          (currentIndex + enabledMobilePanels.length - 1) %
+          enabledMobilePanels.length;
+      } else if (event.key === "ArrowRight") {
+        nextIndex = (currentIndex + 1) % enabledMobilePanels.length;
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = enabledMobilePanels.length - 1;
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+      const nextPanel = enabledMobilePanels[nextIndex].id;
+      showMobilePanel(nextPanel);
+      document.getElementById(MOBILE_TAB_ID[nextPanel])?.focus();
+    },
+    [showMobilePanel],
   );
 
   const handleMobileScroll = useCallback(() => {
@@ -257,13 +302,22 @@ export function SignalsResponsiveLayout({
   return (
     <section data-mobile-signal-pager className="min-w-0">
       <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
-        <div className="grid grid-cols-3 gap-1">
+        <div
+          role="tablist"
+          aria-label="Signal Flow 移动视图"
+          className="grid grid-cols-3 gap-1"
+        >
           {(opportunityEnabled ? enabledMobilePanels : mobilePanels).map((panel) => (
             <button
               key={panel.id}
+              id={MOBILE_TAB_ID[panel.id]}
               type="button"
-              aria-pressed={activeMobilePanel === panel.id}
+              role="tab"
+              aria-selected={activeMobilePanel === panel.id}
+              aria-controls={MOBILE_PANEL_ID[panel.id]}
+              tabIndex={activeMobilePanel === panel.id ? 0 : -1}
               onClick={() => showMobilePanel(panel.id)}
+              onKeyDown={(event) => handleMobileTabKeyDown(event, panel.id)}
               className={[
                 "h-9 rounded-md text-sm font-semibold transition-colors",
                 activeMobilePanel === panel.id
@@ -280,9 +334,14 @@ export function SignalsResponsiveLayout({
       <div
         ref={mobileScrollerRef}
         onScroll={handleMobileScroll}
-        className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <div
+          id={MOBILE_PANEL_ID.feed}
+          role="tabpanel"
+          aria-labelledby={MOBILE_TAB_ID.feed}
+          aria-hidden={activeMobilePanel !== "feed"}
+          inert={activeMobilePanel !== "feed"}
           className={[
             "w-full shrink-0 snap-start",
             activeMobilePanel === "feed"
@@ -296,10 +355,24 @@ export function SignalsResponsiveLayout({
             pollXSnapshot={pollXSnapshot}
           />
         </div>
-        <div className="w-full shrink-0 snap-start pl-3">
+        <div
+          id={MOBILE_PANEL_ID.opportunities}
+          role="tabpanel"
+          aria-labelledby={MOBILE_TAB_ID.opportunities}
+          aria-hidden={activeMobilePanel !== "opportunities"}
+          inert={activeMobilePanel !== "opportunities"}
+          className="w-full shrink-0 snap-start pl-3"
+        >
           <OpportunityRadar />
         </div>
-        <div className="w-full shrink-0 snap-start pl-3">
+        <div
+          id={MOBILE_PANEL_ID.summary}
+          role="tabpanel"
+          aria-labelledby={MOBILE_TAB_ID.summary}
+          aria-hidden={activeMobilePanel !== "summary"}
+          inert={activeMobilePanel !== "summary"}
+          className="w-full shrink-0 snap-start pl-3"
+        >
           <AlphaSummaryCard
             audience="signals"
             compact

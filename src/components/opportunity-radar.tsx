@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import type {
   OpportunityCard,
@@ -16,6 +16,61 @@ type OpportunityIconName =
   | "external"
   | "refresh"
   | "x";
+
+type OpportunitySnapshotMutation =
+  | { type: "follow"; id: number; followed: boolean }
+  | { type: "dismiss"; id: number };
+
+type OpportunityRequestState = {
+  sequence: number;
+  loading: boolean;
+  error: string | null;
+};
+
+export function nextOpportunityRequestSequence(
+  sequences: Map<string, number>,
+  key: string,
+) {
+  const next = (sequences.get(key) ?? 0) + 1;
+  sequences.set(key, next);
+  return next;
+}
+
+export function isOpportunityRequestCurrent(
+  sequences: ReadonlyMap<string, number>,
+  key: string,
+  sequence: number,
+) {
+  return sequences.get(key) === sequence;
+}
+
+export function applyOpportunitySnapshotMutation(
+  snapshot: OpportunitySnapshot,
+  mutation: OpportunitySnapshotMutation,
+): OpportunitySnapshot {
+  if (mutation.type === "follow") {
+    return {
+      ...snapshot,
+      items: snapshot.items.map((candidate) =>
+        candidate.id === mutation.id
+          ? { ...candidate, followed: mutation.followed }
+          : candidate,
+      ),
+    };
+  }
+
+  return {
+    ...snapshot,
+    items:
+      snapshot.status === "history"
+        ? snapshot.items.map((candidate) =>
+            candidate.id === mutation.id
+              ? { ...candidate, dismissed: true }
+              : candidate,
+          )
+        : snapshot.items.filter((candidate) => candidate.id !== mutation.id),
+  };
+}
 
 const MARKET_LABELS: Record<OpportunityCard["market"], string> = {
   us: "美股",
@@ -223,6 +278,7 @@ function OpportunityCardView({
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
   const followLabel = item.followed ? "取消关注" : "关注";
+  const dismissLabel = item.dismissed ? "已忽略" : "忽略";
   const thesis = item.thesis || (item.aiPending ? "AI 待补充" : "暂无机会摘要");
 
   const updateFollow = async () => {
@@ -244,6 +300,7 @@ function OpportunityCardView({
       setMutationError(null);
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : String(error));
+    } finally {
       setPendingAction(null);
     }
   };
@@ -281,13 +338,17 @@ function OpportunityCardView({
           </button>
           <button
             type="button"
-            aria-label="忽略"
-            title="忽略"
-            disabled={pendingAction !== null}
+            aria-label={dismissLabel}
+            title={dismissLabel}
+            disabled={pendingAction !== null || item.dismissed}
             onClick={() => void dismiss()}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line/70 text-muted transition-colors hover:border-danger/40 hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+            className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-line/70 px-2 text-muted transition-colors hover:border-danger/40 hover:bg-danger-soft hover:text-danger disabled:opacity-60"
           >
-            <OpportunityIcon name="x" />
+            {item.dismissed ? (
+              <span className="text-[11px] font-medium">已忽略</span>
+            ) : (
+              <OpportunityIcon name="x" />
+            )}
           </button>
           <button
             type="button"
@@ -371,23 +432,41 @@ export function OpportunityRadar() {
   const [status, setStatus] = useState<OpportunityListStatus>("active");
   const cacheKey = `signal-hub:opportunities:v1:${market}:${sort}:${status}`;
   const [cached, writeCached] = useBrowserJsonCache<OpportunitySnapshot>(cacheKey);
-  const [live, setLive] = useState<{
-    key: string;
-    snapshot: OpportunitySnapshot;
-  } | null>(null);
-  const [requestState, setRequestState] = useState<{
-    key: string;
-    loading: boolean;
-    error: string | null;
-  } | null>(null);
-  const snapshot = live?.key === cacheKey ? live.snapshot : cached;
-  const loading =
-    requestState?.key === cacheKey ? requestState.loading : snapshot === null;
-  const error = requestState?.key === cacheKey ? requestState.error : null;
+  const [liveByKey, setLiveByKey] = useState<
+    Record<string, OpportunitySnapshot>
+  >({});
+  const [requestStateByKey, setRequestStateByKey] = useState<
+    Record<string, OpportunityRequestState>
+  >({});
+  const snapshotsRef = useRef(new Map<string, OpportunitySnapshot>());
+  const requestSequencesRef = useRef(new Map<string, number>());
+  const snapshot = liveByKey[cacheKey] ?? cached;
+  const requestState = requestStateByKey[cacheKey];
+  const loading = requestState?.loading ?? snapshot === null;
+  const error = requestState?.error ?? null;
+
+  useEffect(() => {
+    if (snapshot) snapshotsRef.current.set(cacheKey, snapshot);
+  }, [cacheKey, snapshot]);
+
+  const commitSnapshot = useCallback(
+    (key: string, next: OpportunitySnapshot) => {
+      snapshotsRef.current.set(key, next);
+      setLiveByKey((current) => ({ ...current, [key]: next }));
+    },
+    [],
+  );
 
   const load = useCallback(async () => {
     const requestKey = cacheKey;
-    setRequestState({ key: requestKey, loading: true, error: null });
+    const sequence = nextOpportunityRequestSequence(
+      requestSequencesRef.current,
+      requestKey,
+    );
+    setRequestStateByKey((current) => ({
+      ...current,
+      [requestKey]: { sequence, loading: true, error: null },
+    }));
     try {
       const query = new URLSearchParams({ market, sort, status });
       const response = await fetch(`/api/opportunities?${query.toString()}`, {
@@ -395,17 +474,42 @@ export function OpportunityRadar() {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const next = (await response.json()) as OpportunitySnapshot;
-      setLive({ key: requestKey, snapshot: next });
+      if (
+        !isOpportunityRequestCurrent(
+          requestSequencesRef.current,
+          requestKey,
+          sequence,
+        )
+      ) {
+        return;
+      }
+      commitSnapshot(requestKey, next);
       writeCached(next);
-      setRequestState({ key: requestKey, loading: false, error: null });
+      setRequestStateByKey((current) => ({
+        ...current,
+        [requestKey]: { sequence, loading: false, error: null },
+      }));
     } catch (loadError) {
-      setRequestState({
-        key: requestKey,
-        loading: false,
-        error: loadError instanceof Error ? loadError.message : String(loadError),
-      });
+      if (
+        !isOpportunityRequestCurrent(
+          requestSequencesRef.current,
+          requestKey,
+          sequence,
+        )
+      ) {
+        return;
+      }
+      setRequestStateByKey((current) => ({
+        ...current,
+        [requestKey]: {
+          sequence,
+          loading: false,
+          error:
+            loadError instanceof Error ? loadError.message : String(loadError),
+        },
+      }));
     }
-  }, [cacheKey, market, sort, status, writeCached]);
+  }, [cacheKey, commitSnapshot, market, sort, status, writeCached]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -417,14 +521,22 @@ export function OpportunityRadar() {
   }, [load]);
 
   const replaceSnapshot = useCallback(
-    (update: (current: OpportunitySnapshot) => OpportunitySnapshot) => {
-      const current = live?.key === cacheKey ? live.snapshot : cached;
+    (mutation: OpportunitySnapshotMutation) => {
+      const sequence = nextOpportunityRequestSequence(
+        requestSequencesRef.current,
+        cacheKey,
+      );
+      const current = snapshotsRef.current.get(cacheKey);
       if (!current) return;
-      const next = update(current);
-      setLive({ key: cacheKey, snapshot: next });
+      const next = applyOpportunitySnapshotMutation(current, mutation);
+      commitSnapshot(cacheKey, next);
       writeCached(next);
+      setRequestStateByKey((requestStates) => ({
+        ...requestStates,
+        [cacheKey]: { sequence, loading: false, error: null },
+      }));
     },
-    [cacheKey, cached, live, writeCached],
+    [cacheKey, commitSnapshot, writeCached],
   );
 
   const follow = useCallback(
@@ -435,12 +547,7 @@ export function OpportunityRadar() {
         body: JSON.stringify({ followed }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      replaceSnapshot((current) => ({
-        ...current,
-        items: current.items.map((candidate) =>
-          candidate.id === item.id ? { ...candidate, followed } : candidate,
-        ),
-      }));
+      replaceSnapshot({ type: "follow", id: item.id, followed });
     },
     [replaceSnapshot],
   );
@@ -451,10 +558,7 @@ export function OpportunityRadar() {
         method: "POST",
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      replaceSnapshot((current) => ({
-        ...current,
-        items: current.items.filter((candidate) => candidate.id !== item.id),
-      }));
+      replaceSnapshot({ type: "dismiss", id: item.id });
     },
     [replaceSnapshot],
   );
