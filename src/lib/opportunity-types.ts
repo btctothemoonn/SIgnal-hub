@@ -65,6 +65,7 @@ export type OpportunityClaimEvidence = {
 export type OpportunityMarketFilter = OpportunityMarket | "all";
 export type OpportunitySort = "score" | "latest";
 export type OpportunityListStatus = "active" | "history";
+export type OpportunityTier = "confirmed" | "watch";
 export type OpportunityEvidenceView = {
   id: string;
   sourceType: OpportunitySourceType;
@@ -79,6 +80,7 @@ export type OpportunityCard = {
   assetKeys: string[];
   eventType: OpportunityEventType;
   status: OpportunityStatus;
+  tier: OpportunityTier;
   finalScore: number;
   confidence: string;
   thesis: string;
@@ -88,7 +90,7 @@ export type OpportunityCard = {
   firstSeenAt: string;
   lastSeenAt: string;
   validUntil: string | null;
-  selectedAt: string;
+  selectedAt: string | null;
   followed: boolean;
   dismissed: boolean;
   aiPending: boolean;

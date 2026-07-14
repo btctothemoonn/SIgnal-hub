@@ -65,6 +65,9 @@ type OpportunityListOptions = {
 
 const PRIVATE_PATREON_EXCERPT = "Private Patreon evidence available.";
 const MAX_EVIDENCE_EXCERPT_LENGTH = 500;
+const OPPORTUNITY_WATCH_THRESHOLD = 60;
+const OPPORTUNITY_CONFIRMED_THRESHOLD = 75;
+const OPPORTUNITY_WATCH_LIMIT = 5;
 const UNAVAILABLE_MARKET_REACTION: OpportunityMarketReaction = {
   available: false,
   absoluteMovePercent: null,
@@ -524,28 +527,50 @@ export function selectUnselectedDailyOpportunities(
 }
 
 export function listOpportunities(db: DatabaseSync, options: OpportunityListOptions): OpportunityCard[] {
-  const conditions = ["c.selected_at IS NOT NULL"];
-  const values: Array<string | number> = [];
+  const confirmedConditions = ["c.selected_at IS NOT NULL"];
+  const confirmedValues: Array<string | number> = [];
   if (options.market !== "all") {
-    conditions.push("c.market = ?");
-    values.push(options.market);
+    confirmedConditions.push("c.market = ?");
+    confirmedValues.push(options.market);
   }
-  if (options.status === "active") conditions.push("c.status != 'expired'");
-  if (options.status === "active") conditions.push("c.final_score >= 75");
+  if (options.status === "active") confirmedConditions.push("c.status != 'expired'");
+  if (options.status === "active") confirmedConditions.push("c.final_score >= ?");
   if (options.status === "active" && !options.includeDismissed) {
-    conditions.push("COALESCE(p.dismissed, 0) = 0");
+    confirmedConditions.push("COALESCE(p.dismissed, 0) = 0");
   }
   const orderBy = options.sort === "latest" ? "c.last_seen_at DESC, c.updated_at DESC" : "c.final_score DESC, c.updated_at DESC";
   const limit = clampLimit(options.limit);
-  const rows = db.prepare(`
+  if (options.status === "active") confirmedValues.push(OPPORTUNITY_CONFIRMED_THRESHOLD);
+  const confirmedRows = db.prepare(`
     SELECT c.*, COALESCE(p.followed, 0) AS followed, COALESCE(p.dismissed, 0) AS dismissed,
       CASE WHEN c.confidence = 'rule-only' THEN 1 ELSE 0 END AS ai_pending
     FROM opportunity_clusters c
     LEFT JOIN opportunity_preferences p ON p.cluster_id = c.id
-    WHERE ${conditions.join(" AND ")}
+    WHERE ${confirmedConditions.join(" AND ")}
     ORDER BY ${orderBy}
     LIMIT ?
-  `).all(...values, limit);
+  `).all(...confirmedValues, limit);
+  const rows = options.status === "active"
+    ? confirmedRows.concat(db.prepare(`
+      SELECT c.*, COALESCE(p.followed, 0) AS followed,
+        COALESCE(p.dismissed, 0) AS dismissed,
+        CASE WHEN c.confidence = 'rule-only' THEN 1 ELSE 0 END AS ai_pending
+      FROM opportunity_clusters c
+      LEFT JOIN opportunity_preferences p ON p.cluster_id = c.id
+      WHERE c.selected_at IS NULL
+        AND c.status != 'expired'
+        AND c.final_score >= ?
+        AND c.final_score < ?
+        AND COALESCE(p.dismissed, 0) = 0${options.market !== "all" ? "\n        AND c.market = ?" : ""}
+      ORDER BY ${orderBy}
+      LIMIT ?
+    `).all(
+      OPPORTUNITY_WATCH_THRESHOLD,
+      OPPORTUNITY_CONFIRMED_THRESHOLD,
+      ...(options.market === "all" ? [] : [options.market]),
+      OPPORTUNITY_WATCH_LIMIT,
+    ))
+    : confirmedRows;
   if (rows.length === 0) return [];
 
   const clusterIds = rows.map((row) => numberValue(row.id));
@@ -564,34 +589,38 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
     evidenceByCluster.set(id, current);
   }
 
-  return rows.map((row) => ({
-    id: numberValue(row.id),
-    market: stringValue(row.market) as OpportunityMarket,
-    assetKeys: parseJson<string[]>(row.asset_keys_json, []),
-    eventType: stringValue(row.event_type) as OpportunityCard["eventType"],
-    status: stringValue(row.status) as OpportunityStatus,
-    finalScore: numberValue(row.final_score),
-    confidence: stringValue(row.confidence),
-    thesis: stringValue(row.thesis),
-    reasons: parseJson<string[]>(row.reasons_json, []),
-    risks: parseJson<string[]>(row.risks_json, []),
-    invalidation: parseJson<string[]>(row.invalidation_json, []),
-    firstSeenAt: stringValue(row.first_seen_at),
-    lastSeenAt: stringValue(row.last_seen_at),
-    validUntil: nullableString(row.valid_until),
-    selectedAt: stringValue(row.selected_at),
-    followed: numberValue(row.followed) === 1,
-    dismissed: numberValue(row.dismissed) === 1,
-    aiPending: numberValue(row.ai_pending) === 1,
-    marketReaction: marketReactionValue(parseJson(row.market_reaction_json, null)),
-    scoreAudit: {
-      context: scoreContextValue(parseJson(row.score_context_json, null)),
-      components: scoreComponentsValue(parseJson(row.score_components_json, null)),
-      penalties: stringArrayValue(parseJson(row.score_penalties_json, [])),
-    },
-    claimEvidence: claimEvidenceValue(parseJson(row.claim_evidence_json, EMPTY_CLAIM_EVIDENCE)),
-    evidence: evidenceByCluster.get(numberValue(row.id)) ?? [],
-  }));
+  return rows.map((row) => {
+    const selectedAt = nullableString(row.selected_at);
+    return {
+      id: numberValue(row.id),
+      market: stringValue(row.market) as OpportunityMarket,
+      assetKeys: parseJson<string[]>(row.asset_keys_json, []),
+      eventType: stringValue(row.event_type) as OpportunityCard["eventType"],
+      status: stringValue(row.status) as OpportunityStatus,
+      tier: selectedAt === null ? "watch" : "confirmed",
+      finalScore: numberValue(row.final_score),
+      confidence: stringValue(row.confidence),
+      thesis: stringValue(row.thesis),
+      reasons: parseJson<string[]>(row.reasons_json, []),
+      risks: parseJson<string[]>(row.risks_json, []),
+      invalidation: parseJson<string[]>(row.invalidation_json, []),
+      firstSeenAt: stringValue(row.first_seen_at),
+      lastSeenAt: stringValue(row.last_seen_at),
+      validUntil: nullableString(row.valid_until),
+      selectedAt,
+      followed: numberValue(row.followed) === 1,
+      dismissed: numberValue(row.dismissed) === 1,
+      aiPending: numberValue(row.ai_pending) === 1,
+      marketReaction: marketReactionValue(parseJson(row.market_reaction_json, null)),
+      scoreAudit: {
+        context: scoreContextValue(parseJson(row.score_context_json, null)),
+        components: scoreComponentsValue(parseJson(row.score_components_json, null)),
+        penalties: stringArrayValue(parseJson(row.score_penalties_json, [])),
+      },
+      claimEvidence: claimEvidenceValue(parseJson(row.claim_evidence_json, EMPTY_CLAIM_EVIDENCE)),
+      evidence: evidenceByCluster.get(numberValue(row.id)) ?? [],
+    };
+  });
 }
 
 export function getOpportunityWorkerState(db: DatabaseSync, stateKey: string) {

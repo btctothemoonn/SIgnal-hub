@@ -102,6 +102,17 @@ try {
     validUntil: null,
     status: "tracking",
   });
+  for (let score = 60; score <= 65; score += 1) {
+    upsertOpportunityCluster(db, {
+      canonicalKey: `us:order:WATCH-${score}:2026-07-13T01`,
+      market: "us",
+      eventType: "order",
+      assetKeys: [`WATCH-${score}`],
+      firstSeenAt: "2026-07-13T01:00:00.000Z",
+      lastSeenAt: "2026-07-13T01:00:00.000Z",
+      ruleScore: score,
+    });
+  }
   setOpportunityPreference(db, dismissedId, { dismissed: true });
   db.close();
 
@@ -109,10 +120,21 @@ try {
   const { GET } = await import("./route.ts");
   const request = (query = "") => new NextRequest(`https://hub.example/api/opportunities${query}`);
 
+  const active = await GET(request("?limit=10"));
+  const activeItems = (await active.json()).items;
+  assert.equal(activeItems.filter((item) => item.tier === "confirmed").length, 10);
+  assert.equal(activeItems.filter((item) => item.tier === "watch").length, 5);
+  assert.equal(
+    activeItems.filter((item) => item.tier === "watch")
+      .every((item) => item.selectedAt === null && item.finalScore >= 60 && item.finalScore < 75),
+    true,
+  );
+
   const history = await GET(request("?status=history&limit=100"));
   assert.equal(history.status, 200);
   const historyItems = (await history.json()).items;
   assert.equal(historyItems.some((item) => item.id === dismissedId), true);
+  assert.equal(historyItems.every((item) => item.tier === "confirmed"), true);
   const latestHistory = await GET(request("?status=history&sort=latest&limit=100"));
   const latestHistoryItems = (await latestHistory.json()).items;
   assert.equal(latestHistoryItems.some((item) => item.id === rescoredId), true);
@@ -133,15 +155,15 @@ try {
     const response = await GET(request(query));
     assert.equal(response.status, 200);
     const items = (await response.json()).items;
-    assert.equal(items.length, 10);
+    assert.equal(items.length, 15);
     assert.equal(items.some((item) => item.id === rescoredId), false);
   }
   const negativeLimit = await GET(request("?limit=-2"));
   assert.equal(negativeLimit.status, 200);
-  assert.equal((await negativeLimit.json()).items.length, 1);
+  assert.equal((await negativeLimit.json()).items.length, 6);
   const cappedLimit = await GET(request("?limit=999"));
   assert.equal(cappedLimit.status, 200);
-  assert.equal((await cappedLimit.json()).items.length, 100);
+  assert.equal((await cappedLimit.json()).items.length, 105);
 
   process.env.OPPORTUNITY_DB = tempDirectory;
   const failedOpen = await GET(request());

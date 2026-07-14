@@ -178,18 +178,22 @@ assert.equal(
   null,
 );
 
-const rows = listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 1000 });
-assert.equal(rows.length, 1);
-assert.equal(rows[0].evidence.length, 3);
-assert.equal(rows[0].evidence[0].textExcerpt, "Private Patreon evidence available.");
-assert.equal(rows[0].followed, true);
-assert.equal(rows[0].finalScore, 100);
-assert.equal(rows[0].aiPending, false);
-assert.deepEqual(rows[0].marketReaction, {
+const activeRows = listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 1000 });
+assert.equal(activeRows.find((item) => item.id === clusterId).tier, "confirmed");
+assert.equal(activeRows.find((item) => item.id === clusterId).selectedAt !== null, true);
+assert.equal(activeRows.find((item) => item.id === lowScoreClusterId).tier, "watch");
+assert.equal(activeRows.find((item) => item.id === lowScoreClusterId).selectedAt, null);
+assert.equal(activeRows.length, 2);
+assert.equal(activeRows[0].evidence.length, 3);
+assert.equal(activeRows[0].evidence[0].textExcerpt, "Private Patreon evidence available.");
+assert.equal(activeRows[0].followed, true);
+assert.equal(activeRows[0].finalScore, 100);
+assert.equal(activeRows[0].aiPending, false);
+assert.deepEqual(activeRows[0].marketReaction, {
   available: true,
   absoluteMovePercent: 1.25,
 });
-assert.deepEqual(rows[0].scoreAudit, {
+assert.deepEqual(activeRows[0].scoreAudit, {
   context: {
     evaluatedAt: "2026-07-12T01:15:00.000Z",
     priorityAsset: true,
@@ -198,12 +202,40 @@ assert.deepEqual(rows[0].scoreAudit, {
   components: { sourceQuality: 20, reaction: 10 },
   penalties: ["stale-source"],
 });
-assert.deepEqual(rows[0].claimEvidence, {
+assert.deepEqual(activeRows[0].claimEvidence, {
   thesis: ["x:1"],
   reasons: [["x:1"]],
   risks: [["news:secret-forms"]],
   invalidation: [["x:1"]],
 });
+
+const additionalWatchClusterIds = [73, 72, 71, 70, 69, 60].map((ruleScore) =>
+  upsertOpportunityCluster(db, {
+    canonicalKey: `us:order:WATCH-${ruleScore}:2026-07-12T01`,
+    market: "us",
+    eventType: "order",
+    assetKeys: [`WATCH-${ruleScore}`],
+    firstSeenAt: "2026-07-12T01:20:00.000Z",
+    lastSeenAt: "2026-07-12T01:20:00.000Z",
+    ruleScore,
+  })
+);
+setOpportunityPreference(db, additionalWatchClusterIds[0], { dismissed: true });
+const belowWatchThresholdClusterId = upsertOpportunityCluster(db, {
+  canonicalKey: "us:order:WATCH-59:2026-07-12T01",
+  market: "us",
+  eventType: "order",
+  assetKeys: ["WATCH-59"],
+  firstSeenAt: "2026-07-12T01:20:00.000Z",
+  lastSeenAt: "2026-07-12T01:20:00.000Z",
+  ruleScore: 59,
+});
+const watchRows = listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 1000 })
+  .filter((item) => item.tier === "watch");
+assert.equal(watchRows.length <= 5, true);
+assert.equal(watchRows.every((item) => item.selectedAt === null && item.finalScore >= 60 && item.finalScore < 75), true);
+assert.equal(watchRows.some((item) => item.id === additionalWatchClusterIds[0]), false);
+assert.equal(watchRows.some((item) => item.id === belowWatchThresholdClusterId), false);
 
 updateOpportunityAnalysis(db, clusterId, {
   aiAdjustment: -11,
@@ -213,18 +245,19 @@ updateOpportunityAnalysis(db, clusterId, {
   reasons: ["Order confirmed"],
   risks: ["Execution delay"],
   invalidation: ["Order cancelled"],
-  claimEvidence: rows[0].claimEvidence,
+  claimEvidence: activeRows[0].claimEvidence,
   validUntil: null,
   status: "tracking",
 }, "2026-07-12T02:05:00.000Z");
 assert.equal(
-  listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 }).length,
-  0,
+  listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 })
+    .some((item) => item.id === clusterId),
+  false,
 );
-assert.equal(
-  listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 }).length,
-  1,
-);
+const lowScoreHistoryRows = listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 });
+assert.equal(lowScoreHistoryRows.length, 1);
+assert.equal(lowScoreHistoryRows[0].tier, "confirmed");
+assert.equal(lowScoreHistoryRows[0].selectedAt !== null, true);
 updateOpportunityAnalysis(db, clusterId, {
   aiAdjustment: 15,
   finalScore: 100,
@@ -233,13 +266,17 @@ updateOpportunityAnalysis(db, clusterId, {
   reasons: ["Order confirmed"],
   risks: ["Execution delay"],
   invalidation: ["Order cancelled"],
-  claimEvidence: rows[0].claimEvidence,
+  claimEvidence: activeRows[0].claimEvidence,
   validUntil: null,
   status: "tracking",
 }, "2026-07-12T02:06:00.000Z");
 
 setOpportunityPreference(db, clusterId, { followed: true, dismissed: true });
-assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 }).length, 0);
+assert.equal(
+  listOpportunities(db, { market: "all", sort: "score", status: "active", limit: 10 })
+    .some((item) => item.id === clusterId),
+  false,
+);
 assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "history", limit: 10 }).length, 1);
 assert.equal(listOpportunities(db, { market: "all", sort: "score", status: "history", includeDismissed: true, limit: 10 }).length, 1);
 
