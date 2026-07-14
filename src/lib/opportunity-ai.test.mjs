@@ -146,6 +146,14 @@ assert.deepEqual(
   parseOpportunityAiBatch(`\n\`\`\`json\n${JSON.stringify(validBatch)}\n\`\`\`\n`),
   validBatch,
 );
+assert.deepEqual(
+  parseOpportunityAiBatch(`<think>checking supplied evidence</think>\n${JSON.stringify(validBatch)}`),
+  validBatch,
+);
+assert.deepEqual(
+  parseOpportunityAiBatch(`Here is the JSON only:\n${JSON.stringify(validBatch)}\nDone.`),
+  validBatch,
+);
 assert.deepEqual(validateOpportunityAiBatch(parsed, inputs), [normalizedOpportunity]);
 
 assert.throws(

@@ -285,8 +285,15 @@ export function buildOpportunityInputHash(
 
 export function parseOpportunityAiBatch(content: string): OpportunityAiBatch {
   const trimmed = content.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  const parsed = JSON.parse(fenced?.[1] ?? trimmed) as unknown;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const objectStart = trimmed.indexOf("{");
+  const objectEnd = trimmed.lastIndexOf("}");
+  const jsonContent =
+    fenced?.[1] ??
+    (objectStart >= 0 && objectEnd > objectStart
+      ? trimmed.slice(objectStart, objectEnd + 1)
+      : trimmed);
+  const parsed = JSON.parse(jsonContent) as unknown;
   if (!isRecord(parsed)) {
     throw new Error("Opportunity AI response must be an object");
   }
