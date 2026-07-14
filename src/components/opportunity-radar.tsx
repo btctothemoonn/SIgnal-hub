@@ -413,7 +413,7 @@ function OpportunityCardView({
             <span>状态 {STATUS_LABELS[item.status]}</span>
             <span
               className={
-                item.tier === "confirmed" ? "text-positive" : "text-warning"
+                item.tier === "confirmed" ? "text-success" : "text-warning"
               }
             >
               {item.tier === "confirmed" ? "确认" : "观察"}
@@ -548,6 +548,88 @@ function OpportunityCardView({
   );
 }
 
+export function OpportunityResults({
+  snapshot,
+  onFollow,
+  onDismiss,
+}: {
+  snapshot: OpportunitySnapshot;
+  onFollow: (item: OpportunityCard, followed: boolean) => Promise<void>;
+  onDismiss: (item: OpportunityCard) => Promise<void>;
+}) {
+  const visibleItems = visibleOpportunityItems(snapshot);
+
+  if (snapshot.status === "history") {
+    return (
+      <div className="mt-3 grid min-w-0 gap-2">
+        {visibleItems.map((item) => (
+          <OpportunityCardView
+            key={item.id}
+            item={item}
+            onFollow={onFollow}
+            onDismiss={onDismiss}
+          />
+        ))}
+        {visibleItems.length === 0 ? (
+          <p className="py-10 text-center text-sm text-muted">
+            当前筛选暂无机会
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const { confirmed, watch } = partitionOpportunityItems(visibleItems);
+  return (
+    <div className="mt-3 grid min-w-0 gap-4">
+      <section
+        className="grid min-w-0 gap-2"
+        aria-labelledby="confirmed-opportunities-heading"
+      >
+        <h3
+          id="confirmed-opportunities-heading"
+          className="text-sm font-semibold text-foreground"
+        >
+          确认机会
+        </h3>
+        {confirmed.map((item) => (
+          <OpportunityCardView
+            key={item.id}
+            item={item}
+            onFollow={onFollow}
+            onDismiss={onDismiss}
+          />
+        ))}
+        {confirmed.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted">暂无确认机会</p>
+        ) : null}
+      </section>
+      <section
+        className="grid min-w-0 gap-2"
+        aria-labelledby="watch-opportunities-heading"
+      >
+        <h3
+          id="watch-opportunities-heading"
+          className="text-sm font-semibold text-foreground"
+        >
+          候选观察
+        </h3>
+        {watch.map((item) => (
+          <OpportunityCardView
+            key={item.id}
+            item={item}
+            onFollow={onFollow}
+            onDismiss={onDismiss}
+          />
+        ))}
+        {watch.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted">暂无候选观察</p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 export function OpportunityRadar() {
   const [market, setMarket] = useState<OpportunityMarketFilter>("all");
   const [sort, setSort] = useState<OpportunitySort>("score");
@@ -563,8 +645,6 @@ export function OpportunityRadar() {
   const snapshotsRef = useRef(new Map<string, OpportunitySnapshot>());
   const requestSequencesRef = useRef(new Map<string, number>());
   const snapshot = liveByKey[cacheKey] ?? cached;
-  const visibleItems = snapshot ? visibleOpportunityItems(snapshot) : [];
-  const { confirmed, watch } = partitionOpportunityItems(visibleItems);
   const requestState = requestStateByKey[cacheKey];
   const loading = requestState?.loading ?? snapshot === null;
   const error = requestState?.error ?? null;
@@ -728,69 +808,12 @@ export function OpportunityRadar() {
         <p className="py-10 text-center text-sm text-muted">加载机会快照...</p>
       ) : null}
 
-      {snapshot?.status === "history" ? (
-        <div className="mt-3 grid min-w-0 gap-2">
-          {visibleItems.map((item) => (
-            <OpportunityCardView
-              key={item.id}
-              item={item}
-              onFollow={follow}
-              onDismiss={dismiss}
-            />
-          ))}
-          {visibleItems.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted">
-              当前筛选暂无机会
-            </p>
-          ) : null}
-        </div>
-      ) : snapshot ? (
-        <div className="mt-3 grid min-w-0 gap-4">
-          <section
-            className="grid min-w-0 gap-2"
-            aria-labelledby="confirmed-opportunities-heading"
-          >
-            <h3
-              id="confirmed-opportunities-heading"
-              className="text-sm font-semibold text-foreground"
-            >
-              确认机会
-            </h3>
-            {confirmed.map((item) => (
-              <OpportunityCardView
-                key={item.id}
-                item={item}
-                onFollow={follow}
-                onDismiss={dismiss}
-              />
-            ))}
-            {snapshot && confirmed.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted">暂无确认机会</p>
-            ) : null}
-          </section>
-          <section
-            className="grid min-w-0 gap-2"
-            aria-labelledby="watch-opportunities-heading"
-          >
-            <h3
-              id="watch-opportunities-heading"
-              className="text-sm font-semibold text-foreground"
-            >
-              候选观察
-            </h3>
-            {watch.map((item) => (
-              <OpportunityCardView
-                key={item.id}
-                item={item}
-                onFollow={follow}
-                onDismiss={dismiss}
-              />
-            ))}
-            {snapshot && watch.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted">暂无候选观察</p>
-            ) : null}
-          </section>
-        </div>
+      {snapshot ? (
+        <OpportunityResults
+          snapshot={snapshot}
+          onFollow={follow}
+          onDismiss={dismiss}
+        />
       ) : null}
     </section>
   );

@@ -166,6 +166,20 @@ function clampLimit(limit: number) {
   return Math.max(1, Math.min(100, Number.isFinite(limit) ? Math.floor(limit) : 1));
 }
 
+function opportunityWatchIndex(
+  market: OpportunityMarketFilter,
+  sort: OpportunitySort,
+) {
+  if (market === "all") {
+    return sort === "latest"
+      ? "idx_opportunity_watch_all_latest"
+      : "idx_opportunity_watch_all_score";
+  }
+  return sort === "latest"
+    ? "idx_opportunity_watch_market_latest"
+    : "idx_opportunity_watch_market_score";
+}
+
 function redactedExcerpt(text: string) {
   return text
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
@@ -295,6 +309,22 @@ export function initOpportunityDb(db: DatabaseSync) {
     );
     CREATE INDEX IF NOT EXISTS idx_opportunity_clusters_score ON opportunity_clusters(final_score DESC, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_opportunity_clusters_selected ON opportunity_clusters(selected_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_opportunity_watch_all_score
+      ON opportunity_clusters(final_score DESC, updated_at DESC)
+      WHERE selected_at IS NULL AND status != 'expired'
+        AND final_score >= 60 AND final_score < 75;
+    CREATE INDEX IF NOT EXISTS idx_opportunity_watch_market_score
+      ON opportunity_clusters(market, final_score DESC, updated_at DESC)
+      WHERE selected_at IS NULL AND status != 'expired'
+        AND final_score >= 60 AND final_score < 75;
+    CREATE INDEX IF NOT EXISTS idx_opportunity_watch_all_latest
+      ON opportunity_clusters(last_seen_at DESC, updated_at DESC)
+      WHERE selected_at IS NULL AND status != 'expired'
+        AND final_score >= 60 AND final_score < 75;
+    CREATE INDEX IF NOT EXISTS idx_opportunity_watch_market_latest
+      ON opportunity_clusters(market, last_seen_at DESC, updated_at DESC)
+      WHERE selected_at IS NULL AND status != 'expired'
+        AND final_score >= 60 AND final_score < 75;
     CREATE INDEX IF NOT EXISTS idx_opportunity_evidence_cluster ON opportunity_evidence(cluster_id, published_at DESC);
   `);
   const clusterColumns = new Set(
@@ -539,6 +569,7 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
     confirmedConditions.push("COALESCE(p.dismissed, 0) = 0");
   }
   const orderBy = options.sort === "latest" ? "c.last_seen_at DESC, c.updated_at DESC" : "c.final_score DESC, c.updated_at DESC";
+  const watchIndex = opportunityWatchIndex(options.market, options.sort);
   const limit = clampLimit(options.limit);
   if (options.status === "active") confirmedValues.push(OPPORTUNITY_CONFIRMED_THRESHOLD);
   const confirmedRows = db.prepare(`
@@ -555,18 +586,16 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
       SELECT c.*, COALESCE(p.followed, 0) AS followed,
         COALESCE(p.dismissed, 0) AS dismissed,
         CASE WHEN c.confidence = 'rule-only' THEN 1 ELSE 0 END AS ai_pending
-      FROM opportunity_clusters c
+      FROM opportunity_clusters c INDEXED BY ${watchIndex}
       LEFT JOIN opportunity_preferences p ON p.cluster_id = c.id
       WHERE c.selected_at IS NULL
         AND c.status != 'expired'
-        AND c.final_score >= ?
-        AND c.final_score < ?
+        AND c.final_score >= ${OPPORTUNITY_WATCH_THRESHOLD}
+        AND c.final_score < ${OPPORTUNITY_CONFIRMED_THRESHOLD}
         AND COALESCE(p.dismissed, 0) = 0${options.market !== "all" ? "\n        AND c.market = ?" : ""}
       ORDER BY ${orderBy}
       LIMIT ?
     `).all(
-      OPPORTUNITY_WATCH_THRESHOLD,
-      OPPORTUNITY_CONFIRMED_THRESHOLD,
       ...(options.market === "all" ? [] : [options.market]),
       OPPORTUNITY_WATCH_LIMIT,
     ))

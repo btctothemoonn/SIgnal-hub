@@ -17,6 +17,90 @@ import {
 const db = new DatabaseSync(":memory:");
 initOpportunityDb(db);
 
+const watchIndexSpecs = [
+  {
+    name: "idx_opportunity_watch_all_score",
+    columns: "final_score DESC, updated_at DESC",
+    market: "all",
+    sort: "score",
+  },
+  {
+    name: "idx_opportunity_watch_market_score",
+    columns: "market, final_score DESC, updated_at DESC",
+    market: "us",
+    sort: "score",
+  },
+  {
+    name: "idx_opportunity_watch_all_latest",
+    columns: "last_seen_at DESC, updated_at DESC",
+    market: "all",
+    sort: "latest",
+  },
+  {
+    name: "idx_opportunity_watch_market_latest",
+    columns: "market, last_seen_at DESC, updated_at DESC",
+    market: "us",
+    sort: "latest",
+  },
+];
+const watchIndexDefinitions = new Map(
+  db.prepare(`
+    SELECT name, sql FROM sqlite_master
+    WHERE type = 'index' AND name LIKE 'idx_opportunity_watch_%'
+  `).all().map((row) => [row.name, String(row.sql).replace(/\s+/g, " ").trim()]),
+);
+assert.equal(watchIndexDefinitions.size, watchIndexSpecs.length);
+
+const explainWatchListQuery = (options) => {
+  let watchQuery = null;
+  const instrumentedDb = new Proxy(db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql) => {
+        const statement = target.prepare(sql);
+        if (!sql.includes("WHERE c.selected_at IS NULL")) return statement;
+        return new Proxy(statement, {
+          get(statementTarget, statementProperty) {
+            if (statementProperty !== "all") {
+              const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+              return typeof value === "function" ? value.bind(statementTarget) : value;
+            }
+            return (...args) => {
+              watchQuery = { sql, args };
+              return statementTarget.all(...args);
+            };
+          },
+        });
+      };
+    },
+  });
+  listOpportunities(instrumentedDb, {
+    ...options,
+    status: "active",
+    limit: 10,
+  });
+  assert.ok(watchQuery, "watch list query was not executed");
+  return db.prepare(`EXPLAIN QUERY PLAN ${watchQuery.sql}`).all(...watchQuery.args);
+};
+
+for (const spec of watchIndexSpecs) {
+  const definition = watchIndexDefinitions.get(spec.name);
+  assert.ok(definition, `missing ${spec.name}`);
+  assert.match(definition, new RegExp(`ON opportunity_clusters\\(${spec.columns}\\)`));
+  assert.match(
+    definition,
+    /WHERE selected_at IS NULL AND status != 'expired' AND final_score >= 60 AND final_score < 75$/,
+  );
+
+  const plan = explainWatchListQuery({ market: spec.market, sort: spec.sort });
+  const planDetails = plan.map((row) => String(row.detail)).join("\n");
+  assert.match(planDetails, new RegExp(`(?:SCAN|SEARCH) c USING INDEX ${spec.name}`));
+  assert.doesNotMatch(planDetails, /USE TEMP B-TREE/);
+}
+
 const clusterId = upsertOpportunityCluster(db, {
   canonicalKey: "us:order:NVDA:2026-07-12T01",
   market: "us",
@@ -235,6 +319,49 @@ assert.deepEqual(
   [newestWatchId, newerConfirmedId, olderWatchId, oldestConfirmedId],
 );
 latestDb.close();
+
+const filterDb = new DatabaseSync(":memory:");
+initOpportunityDb(filterDb);
+const createFilterCluster = (canonicalKey, market, ruleScore) =>
+  upsertOpportunityCluster(filterDb, {
+    canonicalKey,
+    market,
+    eventType: "order",
+    assetKeys: [canonicalKey],
+    firstSeenAt: "2026-07-12T01:00:00.000Z",
+    lastSeenAt: "2026-07-12T01:00:00.000Z",
+    ruleScore,
+  });
+const usConfirmedFilterId = createFilterCluster("us:filter:confirmed", "us", 80);
+const cnConfirmedFilterId = createFilterCluster("cn:filter:confirmed", "cn", 80);
+const usWatchFilterId = createFilterCluster("us:filter:watch", "us", 70);
+const cnWatchFilterId = createFilterCluster("cn:filter:watch", "cn", 70);
+const expiredWatchFilterId = createFilterCluster("us:filter:expired-watch", "us", 74);
+for (const id of [usConfirmedFilterId, cnConfirmedFilterId]) {
+  filterDb.prepare("UPDATE opportunity_clusters SET selected_at = ? WHERE id = ?")
+    .run("2026-07-12T02:00:00.000Z", id);
+}
+filterDb.prepare("UPDATE opportunity_clusters SET status = 'expired' WHERE id = ?")
+  .run(expiredWatchFilterId);
+const usFilterRows = listOpportunities(filterDb, {
+  market: "us",
+  sort: "score",
+  status: "active",
+  limit: 10,
+});
+assert.deepEqual(
+  usFilterRows.map((item) => [item.id, item.tier]),
+  [
+    [usConfirmedFilterId, "confirmed"],
+    [usWatchFilterId, "watch"],
+  ],
+);
+assert.equal(
+  usFilterRows.some((item) =>
+    [cnConfirmedFilterId, cnWatchFilterId, expiredWatchFilterId].includes(item.id)),
+  false,
+);
+filterDb.close();
 
 const additionalWatchClusterIds = [73, 72, 71, 70, 69, 60].map((ruleScore) =>
   upsertOpportunityCluster(db, {

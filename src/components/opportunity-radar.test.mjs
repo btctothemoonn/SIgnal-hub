@@ -9,6 +9,8 @@ const component = readFileSync(
 );
 
 const require = createRequire(import.meta.url);
+const React = require("react");
+const { renderToStaticMarkup } = require("react-dom/server");
 const ts = require("typescript");
 const transpiled = ts.transpileModule(component, {
   compilerOptions: {
@@ -33,6 +35,7 @@ const {
   applyOpportunitySnapshotMutation,
   isOpportunityRequestCurrent,
   nextOpportunityRequestSequence,
+  OpportunityResults,
   partitionOpportunityItems,
   resolveOpportunityClaimEvidence,
   visibleOpportunityItems,
@@ -41,6 +44,7 @@ const {
 assert.equal(typeof applyOpportunitySnapshotMutation, "function");
 assert.equal(typeof isOpportunityRequestCurrent, "function");
 assert.equal(typeof nextOpportunityRequestSequence, "function");
+assert.equal(typeof OpportunityResults, "function");
 assert.equal(typeof partitionOpportunityItems, "function");
 assert.equal(typeof resolveOpportunityClaimEvidence, "function");
 assert.equal(typeof visibleOpportunityItems, "function");
@@ -109,6 +113,75 @@ const snapshot = (status, generatedAt, overrides = {}) => ({
   error: null,
   ...overrides,
 });
+
+const renderResults = (items) => renderToStaticMarkup(
+  React.createElement(OpportunityResults, {
+    snapshot: snapshot("active", "2026-07-13T01:00:00.000Z", { items }),
+    onFollow: async () => undefined,
+    onDismiss: async () => undefined,
+  }),
+);
+const renderedSection = (markup, headingId) => {
+  const match = markup.match(
+    new RegExp(`<section[^>]*aria-labelledby="${headingId}"[^>]*>([\\s\\S]*?)</section>`),
+  );
+  assert.ok(match, `missing rendered section ${headingId}`);
+  return match[1];
+};
+
+{
+  const markup = renderResults([
+    { ...opportunity, assetKeys: ["CONFIRMED-ASSET"] },
+    {
+      ...opportunity,
+      id: 8,
+      assetKeys: ["WATCH-ASSET"],
+      tier: "watch",
+      finalScore: 70,
+      selectedAt: null,
+    },
+  ]);
+  const confirmedMarkup = renderedSection(markup, "confirmed-opportunities-heading");
+  const watchMarkup = renderedSection(markup, "watch-opportunities-heading");
+  assert.match(confirmedMarkup, /CONFIRMED-ASSET/);
+  assert.doesNotMatch(confirmedMarkup, /WATCH-ASSET/);
+  assert.match(watchMarkup, /WATCH-ASSET/);
+  assert.doesNotMatch(watchMarkup, /CONFIRMED-ASSET/);
+  assert.match(confirmedMarkup, /aria-label="关注"/);
+  assert.match(confirmedMarkup, /aria-label="忽略"/);
+  assert.match(confirmedMarkup, /aria-label="展开"[^>]*aria-expanded="false"/);
+}
+
+{
+  const markup = renderResults([{
+    ...opportunity,
+    id: 8,
+    assetKeys: ["WATCH-ONLY"],
+    tier: "watch",
+    finalScore: 70,
+    selectedAt: null,
+  }]);
+  assert.match(
+    renderedSection(markup, "confirmed-opportunities-heading"),
+    /暂无确认机会/,
+  );
+  assert.doesNotMatch(
+    renderedSection(markup, "watch-opportunities-heading"),
+    /暂无候选观察/,
+  );
+}
+
+{
+  const markup = renderResults([{ ...opportunity, assetKeys: ["CONFIRMED-ONLY"] }]);
+  assert.doesNotMatch(
+    renderedSection(markup, "confirmed-opportunities-heading"),
+    /暂无确认机会/,
+  );
+  assert.match(
+    renderedSection(markup, "watch-opportunities-heading"),
+    /暂无候选观察/,
+  );
+}
 
 assert.deepEqual(
   Array.from(visibleOpportunityItems(snapshot(
@@ -279,6 +352,8 @@ assert.match(component, /claimEvidence\.thesis/);
 assert.match(component, /evidenceIdsByItem/);
 assert.match(component, /item\.claimEvidence \?\?/);
 assert.match(component, /visibleOpportunityItems\(snapshot\)/);
+assert.match(component, /text-success/);
+assert.doesNotMatch(component, /text-positive/);
 assert.match(component, /rounded-lg/);
 assert.doesNotMatch(component, /rounded-xl|rounded-2xl|rounded-3xl/);
 
