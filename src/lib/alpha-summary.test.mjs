@@ -94,6 +94,24 @@ const repairedSummary = parseAlphaSummaryContent(`{
 }`);
 assert.deepEqual(repairedSummary.authors[0].alpha, ["first", "second"]);
 
+const wrappedSummary = parseAlphaSummaryContent(`<think>drafting</think>
+{
+  "headline": "wrapped",
+  "authors": [{
+    "name": "@analyst",
+    "sourceCount": 1,
+    "coreView": "view",
+    "alpha": [],
+    "watch": []
+  }],
+  "consensus": [],
+  "risks": [],
+  "watchlist": []
+}
+extra diagnostic {"ignored": true}`);
+assert.equal(wrappedSummary.headline, "wrapped");
+assert.equal(wrappedSummary.authors[0].name, "@analyst");
+
 const reusableCachePeriod = getAlphaSummaryPeriod({ now });
 assert.equal(
   shouldReuseCachedAlphaSummary({

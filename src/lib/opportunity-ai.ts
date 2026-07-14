@@ -283,16 +283,40 @@ export function buildOpportunityInputHash(
     .digest("hex");
 }
 
+function extractFirstJsonObject(content: string) {
+  const start = content.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return content.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
 export function parseOpportunityAiBatch(content: string): OpportunityAiBatch {
   const trimmed = content.trim();
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const objectStart = trimmed.indexOf("{");
-  const objectEnd = trimmed.lastIndexOf("}");
-  const jsonContent =
-    fenced?.[1] ??
-    (objectStart >= 0 && objectEnd > objectStart
-      ? trimmed.slice(objectStart, objectEnd + 1)
-      : trimmed);
+  const jsonContent = fenced?.[1] ?? extractFirstJsonObject(trimmed) ?? trimmed;
   const parsed = JSON.parse(jsonContent) as unknown;
   if (!isRecord(parsed)) {
     throw new Error("Opportunity AI response must be an object");

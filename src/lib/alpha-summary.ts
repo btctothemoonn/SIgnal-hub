@@ -1168,6 +1168,36 @@ function repairCommonAiJsonIssues(content: string) {
     .replace(/([}\]])\s*\n\s*"/g, '$1,\n"');
 }
 
+function extractFirstJsonObject(content: string) {
+  const start = content.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return content.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
 export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
   const cleanedBase = content
     .trim()
@@ -1176,12 +1206,7 @@ export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/i, "")
     .trim();
-  const jsonStart = cleanedBase.indexOf("{");
-  const jsonEnd = cleanedBase.lastIndexOf("}");
-  const cleaned =
-    jsonStart >= 0 && jsonEnd > jsonStart
-      ? cleanedBase.slice(jsonStart, jsonEnd + 1)
-      : cleanedBase;
+  const cleaned = extractFirstJsonObject(cleanedBase) ?? cleanedBase;
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(cleaned) as Record<string, unknown>;

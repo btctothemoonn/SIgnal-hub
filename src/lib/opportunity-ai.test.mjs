@@ -154,6 +154,10 @@ assert.deepEqual(
   parseOpportunityAiBatch(`Here is the JSON only:\n${JSON.stringify(validBatch)}\nDone.`),
   validBatch,
 );
+assert.deepEqual(
+  parseOpportunityAiBatch(`${JSON.stringify(validBatch)}\nextra diagnostic {"ignored":true}`),
+  validBatch,
+);
 assert.deepEqual(validateOpportunityAiBatch(parsed, inputs), [normalizedOpportunity]);
 
 assert.throws(
