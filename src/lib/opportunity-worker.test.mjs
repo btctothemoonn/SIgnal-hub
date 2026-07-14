@@ -385,6 +385,55 @@ for (const secondCycleFixtures of [highScoreFixtures(), []]) {
 {
   const db = new DatabaseSync(":memory:");
   initOpportunityDb(db);
+  const fixtures = highScoreFixtures();
+  await runOpportunityCycle(
+    cycleOptions(db, fixtures, async ({ inputs }) => successResult(inputs)),
+  );
+
+  const invalidatedUrlFixtures = fixtures.map((item, index) =>
+    index === 0 ? { ...item, originalUrl: "javascript:alert(1)" } : item,
+  );
+  const failed = await runOpportunityCycle(
+    cycleOptions(
+      db,
+      invalidatedUrlFixtures,
+      async () => ({
+        evaluations: [],
+        provider: null,
+        inputHash: null,
+        ruleOnly: true,
+      }),
+      new Date("2026-07-12T03:00:00.000Z"),
+    ),
+  );
+  const row = listOpportunities(db, {
+    market: "all",
+    sort: "score",
+    status: "active",
+    limit: 10,
+  })[0];
+  assert.equal(row.confidence, "rule-only");
+  assert.notEqual(row.thesis, "Order confirmed");
+  assert.deepEqual(row.claimEvidence, {
+    thesis: [],
+    reasons: [],
+    risks: [],
+    invalidation: [],
+  });
+  assert.equal(row.aiPending, true);
+  assert.equal(failed.evaluatedCount, 0);
+  assert.equal(failed.lastError, "OpportunityAiUnavailable");
+  assert.deepEqual(
+    db.prepare("select status from opportunity_evaluations order by id").all()
+      .map((evaluation) => evaluation.status),
+    ["generated", "error"],
+  );
+  db.close();
+}
+
+{
+  const db = new DatabaseSync(":memory:");
+  initOpportunityDb(db);
   let calls = 0;
   const fixtures = highScoreFixtures();
   await runOpportunityCycle(
@@ -415,9 +464,9 @@ for (const secondCycleFixtures of [highScoreFixtures(), []]) {
     limit: 10,
   })[0];
   assert.equal(calls, 2);
-  assert.equal(row.thesis, "Order confirmed");
-  assert.equal(row.confidence, "high");
-  assert.equal(row.aiPending, false);
+  assert.notEqual(row.thesis, "Order confirmed");
+  assert.equal(row.confidence, "rule-only");
+  assert.equal(row.aiPending, true);
   db.close();
 }
 

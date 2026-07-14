@@ -295,24 +295,23 @@ function persistOpportunityRuleCandidates(
   );
 }
 
-function hasGeneratedEvaluation(db: DatabaseSync, clusterId: number) {
-  return Boolean(
-    db
-      .prepare(`
-        SELECT 1 FROM opportunity_evaluations
-        WHERE cluster_id = ? AND status = 'generated'
-        LIMIT 1
-      `)
-      .get(clusterId),
+function hasGeneratedEvaluation(
+  db: DatabaseSync,
+  clusterId: number,
+  inputHash: string,
+) {
+  return (
+    getOpportunityEvaluationByInputHash(db, clusterId, inputHash)?.status ===
+    "generated"
   );
 }
 
 function applyRuleOnlyAnalysis(
   db: DatabaseSync,
-  entry: PersistedOpportunity,
+  entry: PendingOpportunity,
   updatedAt: string,
 ) {
-  if (hasGeneratedEvaluation(db, entry.clusterId)) return;
+  if (hasGeneratedEvaluation(db, entry.clusterId, entry.inputHash)) return;
   const finalScore = clampScore(entry.score.ruleScore);
   updateOpportunityAnalysis(
     db,
@@ -472,22 +471,11 @@ function selectedTodayCount(db: DatabaseSync, dateKey: string) {
 
 function currentEvaluationCoverageCount(
   db: DatabaseSync,
-  currentClusterIds: number[],
+  currentEntries: PendingOpportunity[],
 ) {
-  const placeholders = currentClusterIds.map(() => "?").join(", ");
-  const currentCondition = currentClusterIds.length > 0
-    ? `c.selected_at IS NOT NULL OR c.id IN (${placeholders})`
-    : "c.selected_at IS NOT NULL";
-  const row = db.prepare(`
-    SELECT count(*) AS count FROM opportunity_clusters c
-    WHERE c.status != 'expired'
-      AND (${currentCondition})
-      AND EXISTS (
-        SELECT 1 FROM opportunity_evaluations e
-        WHERE e.cluster_id = c.id AND e.status = 'generated'
-      )
-  `).get(...currentClusterIds);
-  return numberValue(row?.count);
+  return currentEntries.filter((entry) =>
+    hasGeneratedEvaluation(db, entry.clusterId, entry.inputHash),
+  ).length;
 }
 
 function refreshPersistedOpportunityStatuses(
@@ -607,27 +595,27 @@ export async function runOpportunityCycle(
       }),
     );
     const persisted = persistOpportunityRuleCandidates(db, scored, nowIso);
+    const currentEntries: PendingOpportunity[] = persisted.map((entry) => {
+      const input = {
+        candidate: entry.candidate,
+        ruleScore: entry.score.ruleScore,
+      };
+      return {
+        ...entry,
+        input,
+        inputHash: buildOpportunityInputHash(
+          [input],
+          OPPORTUNITY_PROMPT_VERSION,
+        ),
+      };
+    });
     withTransaction(db, () => {
-      for (const entry of persisted) {
+      for (const entry of currentEntries) {
         applyRuleOnlyAnalysis(db, entry, nowIso);
       }
     });
-    const pending: PendingOpportunity[] = persisted
+    const pending: PendingOpportunity[] = currentEntries
       .filter((entry) => entry.score.ruleScore >= AI_THRESHOLD)
-      .map((entry) => {
-        const input = {
-          candidate: entry.candidate,
-          ruleScore: entry.score.ruleScore,
-        };
-        return {
-          ...entry,
-          input,
-          inputHash: buildOpportunityInputHash(
-            [input],
-            OPPORTUNITY_PROMPT_VERSION,
-          ),
-        };
-      })
       .filter((entry) =>
         getOpportunityEvaluationByInputHash(
           db,
@@ -683,10 +671,7 @@ export async function runOpportunityCycle(
       lastSuccessAt: nowIso,
       lastError: aiFailureClass,
       candidateCount: scored.length,
-      evaluatedCount: currentEvaluationCoverageCount(
-        db,
-        persisted.map((entry) => entry.clusterId),
-      ),
+      evaluatedCount: currentEvaluationCoverageCount(db, currentEntries),
       evaluatedThisCycle:
         aiResult && !aiResult.ruleOnly && !aiFailureClass
           ? aiResult.evaluations.length

@@ -539,10 +539,7 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
   const limit = clampLimit(options.limit);
   const rows = db.prepare(`
     SELECT c.*, COALESCE(p.followed, 0) AS followed, COALESCE(p.dismissed, 0) AS dismissed,
-      CASE WHEN EXISTS (
-        SELECT 1 FROM opportunity_evaluations e
-        WHERE e.cluster_id = c.id AND e.status = 'generated'
-      ) THEN 0 ELSE 1 END AS ai_pending
+      CASE WHEN c.confidence = 'rule-only' THEN 1 ELSE 0 END AS ai_pending
     FROM opportunity_clusters c
     LEFT JOIN opportunity_preferences p ON p.cluster_id = c.id
     WHERE ${conditions.join(" AND ")}

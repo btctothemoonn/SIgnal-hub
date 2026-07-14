@@ -85,3 +85,16 @@ These are equivalent to the requested `pnpm exec tsc --noEmit`, `pnpm exec eslin
 - PASS: `node src/lib/opportunity-worker.test.mjs`
 - PASS: `node src/components/opportunity-radar.test.mjs`
 - PASS: `pnpm exec tsc --noEmit`
+
+## Current-Hash AI Fallback Fix (2026-07-14)
+
+- Rule-only fallback now preserves generated analysis only when the current URL-aware input hash has a generated evaluation. A failed or unavailable evaluation for a changed hash clears stale AI thesis, claims, and claim evidence.
+- List-card `aiPending` now reflects the active rule-only analysis state rather than any historical generated evaluation.
+- Added a two-cycle regression where an evidence URL becomes invalid after a generated evaluation, ensuring the card is downgraded to rule-only and records the current-hash evaluation error.
+
+### Verification
+
+- PASS: `node src/lib/opportunity-worker.test.mjs`
+- PASS: `node src/lib/opportunity-store.test.mjs`
+- PASS: `node src/components/opportunity-radar.test.mjs`
+- PASS: bundled Node `node_modules/typescript/bin/tsc --noEmit`
