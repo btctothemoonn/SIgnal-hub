@@ -11,7 +11,9 @@ const component = readFileSync(
 const require = createRequire(import.meta.url);
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
+const TestRenderer = require("react-test-renderer");
 const ts = require("typescript");
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const transpiled = ts.transpileModule(component, {
   compilerOptions: {
     jsx: ts.JsxEmit.ReactJSX,
@@ -181,6 +183,77 @@ const renderedSection = (markup, headingId) => {
     renderedSection(markup, "watch-opportunities-heading"),
     /暂无候选观察/,
   );
+}
+
+{
+  const item = { ...opportunity, assetKeys: ["INTERACTIVE-ASSET"] };
+  const followCalls = [];
+  const dismissCalls = [];
+  let renderer;
+  await TestRenderer.act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(OpportunityResults, {
+        snapshot: snapshot("active", "2026-07-13T01:00:00.000Z", { items: [item] }),
+        onFollow: async (candidate, followed) => {
+          followCalls.push({ candidate, followed });
+        },
+        onDismiss: async (candidate) => {
+          dismissCalls.push(candidate);
+        },
+      }),
+    );
+  });
+
+  assert.deepEqual(
+    renderer.root.findByProps({ id: "confirmed-opportunities-heading" }).children,
+    ["确认机会"],
+  );
+  assert.deepEqual(
+    renderer.root.findByProps({ id: "watch-opportunities-heading" }).children,
+    ["候选观察"],
+  );
+
+  let article = renderer.root.findByType("article");
+  await TestRenderer.act(async () => {
+    article.findByProps({ "aria-label": "关注" }).props.onClick();
+  });
+  assert.equal(followCalls.length, 1);
+  assert.equal(followCalls[0].candidate, item);
+  assert.equal(followCalls[0].followed, true);
+
+  article = renderer.root.findByType("article");
+  await TestRenderer.act(async () => {
+    article.findByProps({ "aria-label": "忽略" }).props.onClick();
+  });
+  assert.deepEqual(dismissCalls, [item]);
+
+  article = renderer.root.findByType("article");
+  await TestRenderer.act(async () => {
+    article.findByProps({ "aria-label": "展开" }).props.onClick();
+  });
+  article = renderer.root.findByType("article");
+  assert.equal(
+    article.findByProps({ "aria-label": "收起" }).props["aria-expanded"],
+    true,
+  );
+  assert.equal(
+    article.findAllByType("li").some((node) => node.children.includes("Orders accelerated.")),
+    true,
+  );
+
+  await TestRenderer.act(async () => {
+    article.findByProps({ "aria-label": "收起" }).props.onClick();
+  });
+  article = renderer.root.findByType("article");
+  assert.equal(
+    article.findByProps({ "aria-label": "展开" }).props["aria-expanded"],
+    false,
+  );
+  assert.equal(article.findAllByType("li").length, 0);
+
+  await TestRenderer.act(async () => {
+    renderer.unmount();
+  });
 }
 
 assert.deepEqual(
