@@ -209,6 +209,33 @@ assert.deepEqual(activeRows[0].claimEvidence, {
   invalidation: [["x:1"]],
 });
 
+const latestDb = new DatabaseSync(":memory:");
+initOpportunityDb(latestDb);
+const createLatestCluster = (canonicalKey, lastSeenAt, ruleScore) =>
+  upsertOpportunityCluster(latestDb, {
+    canonicalKey,
+    market: "us",
+    eventType: "order",
+    assetKeys: [canonicalKey],
+    firstSeenAt: "2026-07-12T01:00:00.000Z",
+    lastSeenAt,
+    ruleScore,
+  });
+const oldestConfirmedId = createLatestCluster("us:order:LATEST-CONFIRMED-OLDEST", "2026-07-12T01:00:00.000Z", 80);
+const olderWatchId = createLatestCluster("us:order:LATEST-WATCH-OLDER", "2026-07-12T01:01:00.000Z", 70);
+const newerConfirmedId = createLatestCluster("us:order:LATEST-CONFIRMED-NEWER", "2026-07-12T01:02:00.000Z", 80);
+const newestWatchId = createLatestCluster("us:order:LATEST-WATCH-NEWEST", "2026-07-12T01:03:00.000Z", 70);
+for (const id of [oldestConfirmedId, newerConfirmedId]) {
+  latestDb.prepare("UPDATE opportunity_clusters SET selected_at = ? WHERE id = ?")
+    .run("2026-07-12T02:00:00.000Z", id);
+}
+assert.deepEqual(
+  listOpportunities(latestDb, { market: "all", sort: "latest", status: "active", limit: 10 })
+    .map((item) => item.id),
+  [newestWatchId, newerConfirmedId, olderWatchId, oldestConfirmedId],
+);
+latestDb.close();
+
 const additionalWatchClusterIds = [73, 72, 71, 70, 69, 60].map((ruleScore) =>
   upsertOpportunityCluster(db, {
     canonicalKey: `us:order:WATCH-${ruleScore}:2026-07-12T01`,

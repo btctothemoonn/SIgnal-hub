@@ -571,6 +571,12 @@ export function listOpportunities(db: DatabaseSync, options: OpportunityListOpti
       OPPORTUNITY_WATCH_LIMIT,
     ))
     : confirmedRows;
+  if (options.status === "active" && options.sort === "latest") {
+    rows.sort((left, right) => {
+      const lastSeenComparison = stringValue(right.last_seen_at).localeCompare(stringValue(left.last_seen_at));
+      return lastSeenComparison || stringValue(right.updated_at).localeCompare(stringValue(left.updated_at));
+    });
+  }
   if (rows.length === 0) return [];
 
   const clusterIds = rows.map((row) => numberValue(row.id));
