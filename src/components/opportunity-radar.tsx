@@ -74,9 +74,28 @@ export function applyOpportunitySnapshotMutation(
 }
 
 export function visibleOpportunityItems(snapshot: OpportunitySnapshot) {
-  return snapshot.status === "active"
-    ? snapshot.items.filter((item) => item.finalScore >= 75)
-    : snapshot.items;
+  if (snapshot.status === "history") return snapshot.items;
+
+  return snapshot.items.filter((item) => {
+    if (
+      typeof item.finalScore !== "number" ||
+      !Number.isFinite(item.finalScore)
+    ) {
+      return false;
+    }
+    if (item.tier === "confirmed") return item.finalScore >= 75;
+    if (item.tier === "watch") {
+      return item.finalScore >= 60 && item.finalScore < 75;
+    }
+    return false;
+  });
+}
+
+export function partitionOpportunityItems(items: OpportunityCard[]) {
+  return {
+    confirmed: items.filter((item) => item.tier === "confirmed"),
+    watch: items.filter((item) => item.tier === "watch"),
+  };
 }
 
 const EMPTY_CLAIM_EVIDENCE = {
@@ -392,6 +411,13 @@ function OpportunityCardView({
             <span>市场 {MARKET_LABELS[item.market]}</span>
             <span>事件 {EVENT_LABELS[item.eventType]}</span>
             <span>状态 {STATUS_LABELS[item.status]}</span>
+            <span
+              className={
+                item.tier === "confirmed" ? "text-positive" : "text-warning"
+              }
+            >
+              {item.tier === "confirmed" ? "确认" : "观察"}
+            </span>
           </div>
           <h3
             aria-label={`资产 ${item.assetKeys.join(" · ")}`}
@@ -526,7 +552,7 @@ export function OpportunityRadar() {
   const [market, setMarket] = useState<OpportunityMarketFilter>("all");
   const [sort, setSort] = useState<OpportunitySort>("score");
   const [status, setStatus] = useState<OpportunityListStatus>("active");
-  const cacheKey = `signal-hub:opportunities:v1:${market}:${sort}:${status}`;
+  const cacheKey = `signal-hub:opportunities:v2:${market}:${sort}:${status}`;
   const [cached, writeCached] = useBrowserJsonCache<OpportunitySnapshot>(cacheKey);
   const [liveByKey, setLiveByKey] = useState<
     Record<string, OpportunitySnapshot>
@@ -538,6 +564,7 @@ export function OpportunityRadar() {
   const requestSequencesRef = useRef(new Map<string, number>());
   const snapshot = liveByKey[cacheKey] ?? cached;
   const visibleItems = snapshot ? visibleOpportunityItems(snapshot) : [];
+  const { confirmed, watch } = partitionOpportunityItems(visibleItems);
   const requestState = requestStateByKey[cacheKey];
   const loading = requestState?.loading ?? snapshot === null;
   const error = requestState?.error ?? null;
@@ -701,21 +728,70 @@ export function OpportunityRadar() {
         <p className="py-10 text-center text-sm text-muted">加载机会快照...</p>
       ) : null}
 
-      <div className="mt-3 grid min-w-0 gap-2">
-        {visibleItems.map((item) => (
-          <OpportunityCardView
-            key={item.id}
-            item={item}
-            onFollow={follow}
-            onDismiss={dismiss}
-          />
-        ))}
-        {snapshot && visibleItems.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted">
-            当前筛选暂无机会
-          </p>
-        ) : null}
-      </div>
+      {snapshot?.status === "history" ? (
+        <div className="mt-3 grid min-w-0 gap-2">
+          {visibleItems.map((item) => (
+            <OpportunityCardView
+              key={item.id}
+              item={item}
+              onFollow={follow}
+              onDismiss={dismiss}
+            />
+          ))}
+          {visibleItems.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted">
+              当前筛选暂无机会
+            </p>
+          ) : null}
+        </div>
+      ) : snapshot ? (
+        <div className="mt-3 grid min-w-0 gap-4">
+          <section
+            className="grid min-w-0 gap-2"
+            aria-labelledby="confirmed-opportunities-heading"
+          >
+            <h3
+              id="confirmed-opportunities-heading"
+              className="text-sm font-semibold text-foreground"
+            >
+              确认机会
+            </h3>
+            {confirmed.map((item) => (
+              <OpportunityCardView
+                key={item.id}
+                item={item}
+                onFollow={follow}
+                onDismiss={dismiss}
+              />
+            ))}
+            {snapshot && confirmed.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted">暂无确认机会</p>
+            ) : null}
+          </section>
+          <section
+            className="grid min-w-0 gap-2"
+            aria-labelledby="watch-opportunities-heading"
+          >
+            <h3
+              id="watch-opportunities-heading"
+              className="text-sm font-semibold text-foreground"
+            >
+              候选观察
+            </h3>
+            {watch.map((item) => (
+              <OpportunityCardView
+                key={item.id}
+                item={item}
+                onFollow={follow}
+                onDismiss={dismiss}
+              />
+            ))}
+            {snapshot && watch.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted">暂无候选观察</p>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -33,6 +33,7 @@ const {
   applyOpportunitySnapshotMutation,
   isOpportunityRequestCurrent,
   nextOpportunityRequestSequence,
+  partitionOpportunityItems,
   resolveOpportunityClaimEvidence,
   visibleOpportunityItems,
 } = productionModule.exports;
@@ -40,6 +41,7 @@ const {
 assert.equal(typeof applyOpportunitySnapshotMutation, "function");
 assert.equal(typeof isOpportunityRequestCurrent, "function");
 assert.equal(typeof nextOpportunityRequestSequence, "function");
+assert.equal(typeof partitionOpportunityItems, "function");
 assert.equal(typeof resolveOpportunityClaimEvidence, "function");
 assert.equal(typeof visibleOpportunityItems, "function");
 
@@ -58,6 +60,7 @@ const opportunity = {
   firstSeenAt: "2026-07-13T00:00:00.000Z",
   lastSeenAt: "2026-07-13T01:00:00.000Z",
   validUntil: null,
+  tier: "confirmed",
   selectedAt: "2026-07-13T01:00:00.000Z",
   followed: false,
   dismissed: false,
@@ -111,9 +114,39 @@ assert.deepEqual(
   Array.from(visibleOpportunityItems(snapshot(
     "active",
     "2026-07-13T01:00:00.000Z",
-    { items: [opportunity, { ...opportunity, id: 8, finalScore: 74 }] },
+    {
+      items: [
+        opportunity,
+        { ...opportunity, id: 8, tier: "watch", finalScore: 74, selectedAt: null },
+        { ...opportunity, id: 9, tier: "confirmed", finalScore: 74 },
+        { ...opportunity, id: 10, tier: "watch", finalScore: 75 },
+        { ...opportunity, id: 11, tier: "watch", finalScore: 59 },
+        { ...opportunity, id: 12, tier: "unknown", finalScore: 90 },
+        { ...opportunity, id: 13, tier: "confirmed", finalScore: Number.NaN },
+      ],
+    },
   )), (item) => item.id),
+  [7, 8],
+);
+assert.deepEqual(
+  Array.from(
+    partitionOpportunityItems([
+      opportunity,
+      { ...opportunity, id: 8, tier: "watch", finalScore: 67, selectedAt: null },
+    ]).confirmed,
+    (item) => item.id,
+  ),
   [7],
+);
+assert.deepEqual(
+  Array.from(
+    partitionOpportunityItems([
+      opportunity,
+      { ...opportunity, id: 8, tier: "watch", finalScore: 67, selectedAt: null },
+    ]).watch,
+    (item) => item.id,
+  ),
+  [8],
 );
 assert.deepEqual(
   Array.from(visibleOpportunityItems(snapshot(
@@ -126,7 +159,7 @@ assert.deepEqual(
 
 {
   const sequences = new Map();
-  const key = "signal-hub:opportunities:v1:all:score:active";
+  const key = "signal-hub:opportunities:v2:all:score:active";
   const staleGet = nextOpportunityRequestSequence(sequences, key);
   let current = snapshot("active", "2026-07-13T01:00:00.000Z");
 
@@ -146,8 +179,8 @@ assert.deepEqual(
 
 {
   const sequences = new Map();
-  const keyA = "signal-hub:opportunities:v1:all:score:active";
-  const keyB = "signal-hub:opportunities:v1:us:score:active";
+  const keyA = "signal-hub:opportunities:v2:all:score:active";
+  const keyB = "signal-hub:opportunities:v2:us:score:active";
   const firstA = nextOpportunityRequestSequence(sequences, keyA);
   const onlyB = nextOpportunityRequestSequence(sequences, keyB);
   const secondA = nextOpportunityRequestSequence(sequences, keyA);
@@ -184,8 +217,14 @@ assert.deepEqual(
 assert.match(component, /useBrowserJsonCache<OpportunitySnapshot>\(cacheKey\)/);
 assert.match(
   component,
-  /signal-hub:opportunities:v1:\$\{market\}:\$\{sort\}:\$\{status\}/,
+  /signal-hub:opportunities:v2:\$\{market\}:\$\{sort\}:\$\{status\}/,
 );
+assert.match(component, /确认机会/);
+assert.match(component, /候选观察/);
+assert.match(component, /确认/);
+assert.match(component, /观察/);
+assert.match(component, /暂无确认机会/);
+assert.match(component, /暂无候选观察/);
 assert.match(component, /requestSequencesRef/);
 assert.match(component, /snapshotsRef/);
 assert.match(component, /\/api\/opportunities\?\$\{query\.toString\(\)\}/);
