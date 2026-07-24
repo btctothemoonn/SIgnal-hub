@@ -67,6 +67,35 @@ assert.equal(parsed?.guidance, "Next EPS 6.35 / Revenue 27.8B");
 assert.equal(parsed?.periodLabel, "TTM / next quarter");
 assert.equal(parsed?.source, "live");
 
+const dynamicEarningsStock = getAlphaResearchStockByTicker("NVDA");
+assert.ok(dynamicEarningsStock);
+const dynamicEarningsMerged = mergeStocksFinancialSnapshot(
+  [
+    {
+      ...dynamicEarningsStock,
+      market: {
+        ...dynamicEarningsStock.market,
+        earningsStatus: "quiet",
+      },
+    },
+  ],
+  {
+    generatedAt: "2026-07-24T12:00:00.000Z",
+    source: "live",
+    provider: "yahoo",
+    errors: [],
+    financials: {
+      NVDA: {
+        ...parsed,
+        nextEarningsDate: "2026-07-30",
+        updatedAt: "2026-07-24T12:00:00.000Z",
+      },
+    },
+  },
+  new Date("2026-07-24T12:00:00.000Z"),
+);
+assert.equal(dynamicEarningsMerged[0].market.earningsStatus, "upcoming");
+
 const fmpParsed = parseFmpFinancialStatement(
   "NVDA",
   {

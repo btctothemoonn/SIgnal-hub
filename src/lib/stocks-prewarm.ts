@@ -141,6 +141,28 @@ function snapshotTime(snapshot: CacheableStocksSnapshot) {
   return Number.isFinite(generatedAt) ? generatedAt : 0;
 }
 
+export type StocksSnapshotHealth = {
+  ageMs: number;
+  maxAgeMs: number;
+  stale: boolean;
+};
+
+export function getStocksSnapshotHealth(
+  kind: StocksSnapshotKind,
+  snapshot: CacheableStocksSnapshot,
+  env: EnvLike = process.env,
+  now = Date.now(),
+): StocksSnapshotHealth {
+  const maxAgeMs = cacheMaxAgeMs(kind, env);
+  const generatedAt = snapshotTime(snapshot);
+  const ageMs = generatedAt > 0 ? Math.max(0, now - generatedAt) : Number.POSITIVE_INFINITY;
+  return {
+    ageMs,
+    maxAgeMs,
+    stale: generatedAt <= 0 || ageMs > maxAgeMs,
+  };
+}
+
 function withCacheRefreshError<T extends CacheableStocksSnapshot>(
   snapshot: T,
   kind: StocksSnapshotKind,
@@ -251,11 +273,13 @@ export async function getCachedStocksSnapshot<
   kind,
   env = process.env,
   force = false,
+  now = Date.now(),
   loader,
 }: {
   kind: StocksSnapshotKind;
   env?: EnvLike;
   force?: boolean;
+  now?: number;
   loader: () => Promise<T>;
 }): Promise<T> {
   const cached = await readStocksSnapshotCache<T>({
@@ -263,7 +287,13 @@ export async function getCachedStocksSnapshot<
     env,
     allowStale: true,
   });
-  if (cached && !force) return cached;
+  if (
+    cached &&
+    !force &&
+    !getStocksSnapshotHealth(kind, cached, env, now).stale
+  ) {
+    return cached;
+  }
 
   try {
     const snapshot = await loader();
@@ -271,7 +301,12 @@ export async function getCachedStocksSnapshot<
       await writeStocksSnapshotCache({ kind, env, snapshot });
       return snapshot;
     }
-    if (cached) return cached;
+    if (cached) {
+      const reason =
+        snapshot.errors.find(Boolean) ??
+        `refresh returned ${snapshot.source} data`;
+      return withCacheRefreshError(cached, kind, reason);
+    }
     return snapshot;
   } catch (error) {
     if (cached) return withCacheRefreshError(cached, kind, error);

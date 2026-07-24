@@ -6,6 +6,7 @@ import {
   getProviderApiKeys,
   pickProviderApiKey,
 } from "./provider-api-keys.ts";
+import { resolveEarningsStatus } from "./stocks-earnings.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -769,6 +770,7 @@ export async function getStocksFinancialSnapshot({
 export function mergeStocksFinancialSnapshot(
   stocks: AlphaResearchStock[],
   snapshot: StocksFinancialSnapshot | null,
+  now = new Date(),
 ): AlphaResearchStock[] {
   if (!snapshot) return stocks;
   return stocks.map((stock) => {
@@ -776,6 +778,14 @@ export function mergeStocksFinancialSnapshot(
     if (!financial) return stock;
     return {
       ...stock,
+      market: {
+        ...stock.market,
+        earningsStatus: resolveEarningsStatus(
+          financial.nextEarningsDate,
+          now,
+          stock.market.earningsStatus,
+        ),
+      },
       financialSnapshot: {
         revenue: financial.revenue,
         revenueYoY: financial.revenueYoY,

@@ -76,6 +76,7 @@ export type AlphaResearchCatalyst = {
   title: string;
   type: AlphaCatalystType;
   date: string;
+  createdAt?: string;
   impact: "positive" | "neutral" | "negative";
   summary: string;
   fullSummary?: string;

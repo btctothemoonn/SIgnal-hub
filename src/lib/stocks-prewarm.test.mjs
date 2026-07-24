@@ -11,6 +11,7 @@ const packageJsonUrl = new URL("../../package.json", import.meta.url);
 const {
   getCachedStocksSnapshot,
   getStocksPrewarmIntervalMs,
+  getStocksSnapshotHealth,
   getStocksSnapshotCachePath,
   isStocksCachePrewarmEnabled,
   prewarmStocksCaches,
@@ -19,7 +20,10 @@ const {
 } = await import(moduleUrl);
 
 const runtimeDir = mkdtempSync(join(tmpdir(), "signal-hub-stocks-prewarm-"));
-const env = { SIGNAL_HUB_RUNTIME_DIR: runtimeDir };
+const env = {
+  SIGNAL_HUB_RUNTIME_DIR: runtimeDir,
+  STOCKS_MARKET_CACHE_MS: String(60 * 60 * 1000),
+};
 
 try {
   assert.equal(isStocksCachePrewarmEnabled({ STOCKS_CACHE_PREWARM_ENABLED: "0" }), false);
@@ -51,6 +55,7 @@ try {
   const cacheFirst = await getCachedStocksSnapshot({
     kind: "market",
     env,
+    now: Date.parse("2026-05-14T01:30:00.000Z"),
     loader: async () => {
       loaderCalls += 1;
       return freshMarket;
@@ -59,6 +64,27 @@ try {
 
   assert.equal(cacheFirst.generatedAt, cachedMarket.generatedAt);
   assert.equal(loaderCalls, 0);
+
+  const staleRefreshed = await getCachedStocksSnapshot({
+    kind: "market",
+    env,
+    now: Date.parse("2026-05-14T03:00:00.000Z"),
+    loader: async () => {
+      loaderCalls += 1;
+      return freshMarket;
+    },
+  });
+  assert.equal(staleRefreshed.generatedAt, freshMarket.generatedAt);
+  assert.equal(loaderCalls, 1);
+
+  const staleHealth = getStocksSnapshotHealth(
+    "market",
+    cachedMarket,
+    env,
+    Date.parse("2026-05-14T03:00:00.000Z"),
+  );
+  assert.equal(staleHealth.stale, true);
+  assert.equal(staleHealth.ageMs, 2 * 60 * 60 * 1000);
 
   const forced = await getCachedStocksSnapshot({
     kind: "market",
@@ -71,7 +97,7 @@ try {
   });
 
   assert.equal(forced.generatedAt, freshMarket.generatedAt);
-  assert.equal(loaderCalls, 1);
+  assert.equal(loaderCalls, 2);
   assert.equal(
     JSON.parse(readFileSync(getStocksSnapshotCachePath("market", env), "utf8"))
       .generatedAt,
@@ -91,6 +117,22 @@ try {
     }),
   });
   assert.equal(fallback.generatedAt, freshMarket.generatedAt);
+
+  await writeStocksSnapshotCache({ kind: "market", env, snapshot: cachedMarket });
+  const staleFailureFallback = await getCachedStocksSnapshot({
+    kind: "market",
+    env,
+    now: Date.parse("2026-05-14T03:00:00.000Z"),
+    loader: async () => {
+      throw new Error("provider unavailable");
+    },
+  });
+  assert.equal(staleFailureFallback.generatedAt, cachedMarket.generatedAt);
+  assert.ok(
+    staleFailureFallback.errors.some((error) =>
+      error.includes("provider unavailable"),
+    ),
+  );
 
   const financial = {
     generatedAt: "2026-05-14T01:06:00.000Z",

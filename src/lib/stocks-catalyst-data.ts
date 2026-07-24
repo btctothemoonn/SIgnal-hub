@@ -871,6 +871,7 @@ function catalystFromItem(item: StocksCatalystSourceItem): AlphaResearchCatalyst
     title: titleFromItem(item),
     type: classifyCatalystType(text),
     date: dateLabel(item.createdAt),
+    createdAt: item.createdAt,
     impact: classifyImpact(text),
     summary,
     ...(fullSummary ? { fullSummary } : {}),

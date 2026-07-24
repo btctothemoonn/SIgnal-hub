@@ -60,6 +60,8 @@ assert.match(source, /hasPerformanceSeries\(snapshot\)/);
 assert.match(source, /hasPerformanceSeries\(cachedPerformanceSnapshot\)/);
 assert.match(source, /if \(hasPerformanceSeries\(snapshot\)\)/);
 assert.match(source, /snapshotIssueLabel/);
+assert.match(source, /refresh failed; using cached snapshot/);
+assert.match(source, /刷新失败，使用缓存/);
 assert.match(source, /isPerformanceCacheNotice/);
 assert.match(source, /performanceIssueLabel/);
 assert.match(source, /使用最近缓存/);

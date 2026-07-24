@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
+import { StocksTodayChanges } from "@/components/stocks-today-changes";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
   ALPHA_RESEARCH_DEFAULT_TICKER,
@@ -24,6 +25,7 @@ import {
   type StocksCatalystSnapshot,
 } from "@/lib/stocks-catalyst-data";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import { buildStocksTodayChanges } from "@/lib/stocks-changes";
 import { buildStocksSubscriptionReports } from "@/lib/stocks-subscription-reports";
 
 type AlphaTab = "research" | "reports" | "messages";
@@ -72,7 +74,12 @@ function snapshotIssueLabel(
   snapshot: { source: "live" | "mock"; errors: string[] } | null,
 ) {
   if (!snapshot) return null;
-  return snapshot.source === "mock" ? `${label}已回落本地` : null;
+  if (snapshot.source === "mock") return `${label}已回落本地`;
+  return snapshot.errors.some((error) =>
+    error.includes("refresh failed; using cached snapshot"),
+  )
+    ? `${label}刷新失败，使用缓存`
+    : null;
 }
 
 function snapshotStatusTitle(
@@ -144,6 +151,10 @@ export function AlphaResearchPage() {
   );
   const subscriptionReports = useMemo(
     () => buildStocksSubscriptionReports(stocks),
+    [stocks],
+  );
+  const todayChanges = useMemo(
+    () => buildStocksTodayChanges(stocks),
     [stocks],
   );
   const selectedSector = useMemo(
@@ -560,28 +571,35 @@ export function AlphaResearchPage() {
       </section>
 
       {activeTab === "research" ? (
-        <StocksResearchLayout
-          performanceSnapshot={performanceSnapshot}
-          stocks={stocks}
-          selectedStock={selectedStock}
-          selectedTicker={selectedTicker}
-          performanceTickers={performanceTickers}
-          sectors={ALPHA_RESEARCH_SECTORS}
-          activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
-          onSelectSector={(sectorId) => {
-            const sector = ALPHA_RESEARCH_SECTORS.find(
-              (item) => item.id === sectorId,
-            );
-            if (!sector) {
-              return;
-            }
-            setSelectedTicker(sector.tickers[0]);
-          }}
-          onSelectTicker={setSelectedTicker}
-          marketDataLabel={marketDataLabel}
-          marketDataLoading={marketDataLoading}
-          performanceLoading={performanceSnapshot === null && performanceError === null}
-        />
+        <>
+          <StocksTodayChanges
+            changes={todayChanges}
+            selectedTicker={selectedTicker}
+            onSelectTicker={setSelectedTicker}
+          />
+          <StocksResearchLayout
+            performanceSnapshot={performanceSnapshot}
+            stocks={stocks}
+            selectedStock={selectedStock}
+            selectedTicker={selectedTicker}
+            performanceTickers={performanceTickers}
+            sectors={ALPHA_RESEARCH_SECTORS}
+            activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
+            onSelectSector={(sectorId) => {
+              const sector = ALPHA_RESEARCH_SECTORS.find(
+                (item) => item.id === sectorId,
+              );
+              if (!sector) {
+                return;
+              }
+              setSelectedTicker(sector.tickers[0]);
+            }}
+            onSelectTicker={setSelectedTicker}
+            marketDataLabel={marketDataLabel}
+            marketDataLoading={marketDataLoading}
+            performanceLoading={performanceSnapshot === null && performanceError === null}
+          />
+        </>
       ) : activeTab === "reports" ? (
         <StocksSubscriptionReports
           reports={subscriptionReports}

@@ -3,7 +3,18 @@ import { getAlphaResearchStockByTicker } from "./alpha-research-pool.ts";
 import {
   buildStocksIntelligence,
   buildSubscriptionReportInsight,
+  resolveEarningsStatus,
 } from "./stocks-intelligence.ts";
+
+const earningsNow = new Date("2026-07-24T12:00:00.000Z");
+assert.equal(resolveEarningsStatus("2026-07-30", earningsNow), "upcoming");
+assert.equal(resolveEarningsStatus("2026-07-20", earningsNow), "recent");
+assert.equal(resolveEarningsStatus("2026-08-20", earningsNow), "watch");
+assert.equal(resolveEarningsStatus("2026-10-20", earningsNow), "quiet");
+assert.equal(
+  resolveEarningsStatus("n/a", earningsNow, "upcoming"),
+  "upcoming",
+);
 
 const nvda = getAlphaResearchStockByTicker("NVDA");
 assert.ok(nvda);

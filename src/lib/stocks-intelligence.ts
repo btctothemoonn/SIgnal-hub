@@ -3,6 +3,7 @@ import type {
   AlphaResearchEarningsStatus,
   AlphaResearchStock,
 } from "./alpha-research-pool";
+export { resolveEarningsStatus } from "./stocks-earnings.ts";
 
 export type StocksIntelligenceTone =
   | "success"
