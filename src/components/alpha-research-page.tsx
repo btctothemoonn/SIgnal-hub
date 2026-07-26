@@ -121,6 +121,41 @@ function researchStateErrorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
+const RESEARCH_STATE_STATUSES = new Set<string>([
+  "watch",
+  "waiting",
+  "holding",
+  "avoid",
+]);
+
+function isStocksResearchState(value: unknown): value is StocksResearchState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const state = value as Record<string, unknown>;
+  const convictionIsValid =
+    state.conviction === null ||
+    (typeof state.conviction === "number" &&
+      Number.isInteger(state.conviction) &&
+      state.conviction >= 1 &&
+      state.conviction <= 5);
+
+  return (
+    typeof state.ticker === "string" &&
+    state.ticker.length > 0 &&
+    typeof state.status === "string" &&
+    RESEARCH_STATE_STATUSES.has(state.status) &&
+    convictionIsValid &&
+    typeof state.entryZone === "string" &&
+    typeof state.invalidation === "string" &&
+    typeof state.nextCatalyst === "string" &&
+    typeof state.thesis === "string" &&
+    (state.updatedAt === null || typeof state.updatedAt === "string") &&
+    typeof state.persisted === "boolean"
+  );
+}
+
 export function AlphaResearchPage() {
   const [activeTab, setActiveTab] = useState<AlphaTab>("research");
   const [selectedTicker, setSelectedTicker] = useState(
@@ -311,7 +346,7 @@ export function AlphaResearchPage() {
           );
         }
         const saved = payload.state;
-        if (!saved || saved.ticker !== input.ticker) {
+        if (!isStocksResearchState(saved) || saved.ticker !== input.ticker) {
           throw new Error("Research state save returned an invalid response.");
         }
         setResearchStates((current) => ({

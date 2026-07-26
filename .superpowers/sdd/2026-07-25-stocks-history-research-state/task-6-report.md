@@ -78,3 +78,96 @@ ok - UTF-8 src\components\alpha-sector-list.behavior.test.mjs
 
 - Node.js, npm, npx, pnpm, yarn, bun, deno, and tsc are unavailable on PATH, and no accessible `node.exe` was found. The component suite and TypeScript check are unexecuted in this environment.
 - The original source-contract tests and several implementation edits were already present or changed concurrently in the isolated worktree. They were reviewed and retained; the runtime filter test was expanded during this task.
+
+## Fix Round 1/5
+
+### Fix Details
+
+- Added complete successful-PUT response validation before reconciliation. The page now requires a non-empty ticker, one of the four persisted statuses, valid nullable conviction, all four text fields, nullable string `updatedAt`, and boolean `persisted`.
+- A malformed `200` response throws `Research state save returned an invalid response.` and leaves the existing state map unchanged.
+- Added `alpha-research-page.behavior.test.mjs`, which mounts the actual page workflow and verifies:
+  - research-state GET runs exactly once and is not registered with the page polling intervals;
+  - PUT receives the complete editor input;
+  - successful reconciliation replaces only the returned ticker;
+  - malformed successful responses for every required field are rejected without entering state;
+  - a failed save propagates through the page callback into the real controlled editor while preserving its draft.
+- The tracked-report metadata Minor remains unchanged for final triage, as required for this fix round.
+
+### Executed Test Evidence
+
+The following evidence supersedes the earlier unexecuted-test concern. Commands were run from `D:\Vibe coding\signal-hub\.worktrees\stocks-history-research-state`.
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\alpha-research-page.behavior.test.mjs
+```
+
+```text
+ok - alpha research page research-state workflow behavior
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+(node:72500) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/Vibe%20coding/signal-hub/.worktrees/stocks-history-research-state/src/components/stocks-research-state-form.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\Vibe coding\signal-hub\.worktrees\stocks-history-research-state\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\alpha-research-page.test.mjs
+```
+
+```text
+ok - alpha research page sticky controls
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\alpha-sector-list.behavior.test.mjs
+```
+
+```text
+ok - alpha sector list research-status filtering
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\alpha-sector-list.test.mjs
+```
+
+```text
+ok - alpha sector list sticky layout
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\stocks-research-layout.test.mjs
+```
+
+```text
+ok - stocks research layout uses desktop split and mobile pager
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\stocks-research-state-panel.behavior.test.mjs
+```
+
+```text
+ok - stocks research state panel behavior
+react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer
+(node:79552) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///D:/Vibe%20coding/signal-hub/.worktrees/stocks-history-research-state/src/components/stocks-research-state-form.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to D:\Vibe coding\signal-hub\.worktrees\stocks-history-research-state\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\stocks-research-state-panel.test.mjs
+```
+
+```text
+ok - stocks research state editor contract
+```
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' src\components\alpha-stock-detail.test.mjs
+```
+
+```text
+ok - alpha stock detail research review UI
+```
