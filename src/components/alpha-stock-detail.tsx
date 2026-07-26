@@ -13,11 +13,19 @@ import {
   buildSubscriptionReportInsight,
   type StocksIntelligenceTone,
 } from "@/lib/stocks-intelligence";
+import {
+  type StocksResearchState,
+  type StocksResearchStateInput,
+} from "@/lib/stocks-research-state";
+import { StocksResearchStatePanel } from "@/components/stocks-research-state-panel";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
   marketDataLabel: string;
   marketDataLoading: boolean;
+  researchState?: StocksResearchState | null;
+  researchStateLoading?: boolean;
+  onSaveResearchState?: (input: StocksResearchStateInput) => Promise<void>;
 };
 
 function formatSignedPercent(value: number) {
@@ -193,6 +201,9 @@ export function AlphaStockDetail({
   stock,
   marketDataLabel,
   marketDataLoading,
+  researchState = null,
+  researchStateLoading = false,
+  onSaveResearchState,
 }: AlphaStockDetailProps) {
   if (!stock) {
     return (
@@ -327,6 +338,21 @@ export function AlphaStockDetail({
             tone="text-warning"
           />
         </div>
+      </div>
+
+      <div className="mt-5">
+        {researchState && onSaveResearchState ? (
+          <StocksResearchStatePanel
+            ticker={stock.ticker}
+            researchState={researchState}
+            loading={researchStateLoading}
+            onSave={onSaveResearchState}
+          />
+        ) : (
+          <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
+            {researchStateLoading ? "研究状态加载中" : "研究状态暂不可用"}
+          </section>
+        )}
       </div>
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
