@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ALPHA_RESEARCH_STOCK_UNIVERSE } from "./alpha-research-pool.ts";
@@ -24,11 +24,11 @@ export type StocksResearchState = {
 export type StocksResearchStateInput = {
   ticker: string;
   status: StocksResearchStatus;
-  conviction?: number | null;
-  entryZone?: string | null;
-  invalidation?: string | null;
-  nextCatalyst?: string | null;
-  thesis?: string | null;
+  conviction: number | null;
+  entryZone: string;
+  invalidation: string;
+  nextCatalyst: string;
+  thesis: string;
 };
 
 export class StocksResearchStateValidationError extends Error {
@@ -121,15 +121,22 @@ function stateFromRow(row: DbRow): StocksResearchState {
   };
 }
 
+function requiredInputValue(input: StocksResearchStateInput, field: string): unknown {
+  if (!input || typeof input !== "object" || !(field in input)) {
+    throw new StocksResearchStateValidationError(`${field} is required.`);
+  }
+  return (input as Record<string, unknown>)[field];
+}
+
 function normalizeInput(input: StocksResearchStateInput) {
   return {
-    ticker: normalizeTicker(input.ticker),
-    status: normalizeStatus(input.status),
-    conviction: normalizeConviction(input.conviction),
-    entryZone: normalizeText(input.entryZone, "Entry zone", 500),
-    invalidation: normalizeText(input.invalidation, "Invalidation", 500),
-    nextCatalyst: normalizeText(input.nextCatalyst, "Next catalyst", 500),
-    thesis: normalizeText(input.thesis, "Thesis", 2000),
+    ticker: normalizeTicker(requiredInputValue(input, "ticker")),
+    status: normalizeStatus(requiredInputValue(input, "status")),
+    conviction: normalizeConviction(requiredInputValue(input, "conviction")),
+    entryZone: normalizeText(requiredInputValue(input, "entryZone"), "Entry zone", 500),
+    invalidation: normalizeText(requiredInputValue(input, "invalidation"), "Invalidation", 500),
+    nextCatalyst: normalizeText(requiredInputValue(input, "nextCatalyst"), "Next catalyst", 500),
+    thesis: normalizeText(requiredInputValue(input, "thesis"), "Thesis", 2000),
   };
 }
 
@@ -145,22 +152,31 @@ function openStocksResearchDb(path: string): DatabaseSync {
     mkdirSync(dirname(path), { recursive: true });
   }
   const db = new DatabaseSync(path);
-  db.exec("pragma journal_mode = wal");
-  db.exec("pragma synchronous = normal");
-  db.exec("pragma busy_timeout = 5000");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS stocks_research_state (
-      ticker TEXT PRIMARY KEY,
-      status TEXT NOT NULL,
-      conviction INTEGER,
-      entry_zone TEXT,
-      invalidation TEXT,
-      next_catalyst TEXT,
-      thesis TEXT,
-      updated_at TEXT NOT NULL
-    );
-  `);
-  return db;
+  try {
+    db.exec("pragma journal_mode = wal");
+    db.exec("pragma synchronous = normal");
+    db.exec("pragma busy_timeout = 5000");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS stocks_research_state (
+        ticker TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        conviction INTEGER,
+        entry_zone TEXT,
+        invalidation TEXT,
+        next_catalyst TEXT,
+        thesis TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+function hasResearchStateDatabase(path: string) {
+  return path === ":memory:" || existsSync(path);
 }
 
 type StoreOptions = {
@@ -171,13 +187,19 @@ type StoreOptions = {
 export function getStocksResearchStates(
   { dbPath, env = process.env }: StoreOptions = {},
 ): Record<string, StocksResearchState> {
-  const db = openStocksResearchDb(dbPath ?? getStocksResearchDbPath(env));
+  const path = dbPath ?? getStocksResearchDbPath(env);
+  const states = Object.fromEntries(
+    ALPHA_RESEARCH_STOCK_UNIVERSE.map((ticker) => [ticker, defaultState(ticker)]),
+  ) as Record<string, StocksResearchState>;
+  if (!hasResearchStateDatabase(path)) return states;
+
+  const db = openStocksResearchDb(path);
   try {
-    const states = Object.fromEntries(
-      ALPHA_RESEARCH_STOCK_UNIVERSE.map((ticker) => [ticker, defaultState(ticker)]),
-    ) as Record<string, StocksResearchState>;
     const rows = db.prepare("SELECT * FROM stocks_research_state").all() as DbRow[];
     for (const row of rows) {
+      if (typeof row.ticker !== "string" || !STOCK_TICKERS.has(row.ticker)) {
+        continue;
+      }
       const state = stateFromRow(row);
       states[state.ticker] = state;
     }
@@ -192,7 +214,10 @@ export function getStocksResearchState(
   { dbPath, env = process.env }: StoreOptions = {},
 ): StocksResearchState {
   const normalizedTicker = normalizeTicker(ticker);
-  const db = openStocksResearchDb(dbPath ?? getStocksResearchDbPath(env));
+  const path = dbPath ?? getStocksResearchDbPath(env);
+  if (!hasResearchStateDatabase(path)) return defaultState(normalizedTicker);
+
+  const db = openStocksResearchDb(path);
   try {
     const row = db
       .prepare("SELECT * FROM stocks_research_state WHERE ticker = ?")

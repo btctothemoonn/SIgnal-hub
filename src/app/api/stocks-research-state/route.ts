@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from "next/server.js";
 import {
   getStocksResearchState,
   getStocksResearchStates,
   saveStocksResearchState,
   StocksResearchStateValidationError,
   type StocksResearchStateInput,
-} from "@/lib/stocks-research-state";
+} from "../../../lib/stocks-research-state.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
