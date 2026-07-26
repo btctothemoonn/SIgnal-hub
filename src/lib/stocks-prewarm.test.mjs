@@ -180,6 +180,11 @@ try {
   const worker = readFileSync(workerUrl, "utf8");
   assert.match(worker, /prewarmStocksCaches/);
   assert.match(worker, /--once/);
+  assert.match(worker, /backfillStocksHistory/);
+  assert.match(worker, /STOCKS_HISTORY_BACKFILL_ENABLED/);
+  assert.match(worker, /STOCKS_HISTORY_BACKFILL_INTERVAL_MS/);
+  assert.match(worker, /stocks_history\.backfill\.done/);
+  assert.match(worker, /void runHistoryBackfill\("interval"\)/);
 } finally {
   rmSync(runtimeDir, { recursive: true, force: true });
 }
