@@ -71,5 +71,8 @@ assert.doesNotMatch(source, /部分源失败/);
 assert.match(source, /已回落本地/);
 assert.match(source, /setFinancialError\(null\)/);
 assert.match(source, /setCatalystError\(null\)/);
+assert.match(source, /\/api\/stocks-research-state/);
+assert.match(source, /method:\s*"PUT"/);
+assert.match(source, /researchStates/);
 
 console.log("ok - alpha research page sticky controls");

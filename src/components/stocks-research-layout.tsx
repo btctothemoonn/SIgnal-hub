@@ -9,6 +9,11 @@ import type {
   AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import type {
+  StocksResearchState,
+  StocksResearchStateInput,
+  StocksResearchStatus,
+} from "@/lib/stocks-research-state";
 
 type StocksMobilePanel = "pool" | "chart" | "detail";
 
@@ -25,6 +30,14 @@ type StocksResearchLayoutProps = {
   marketDataLabel: string;
   marketDataLoading: boolean;
   performanceLoading: boolean;
+  researchStates: Record<string, StocksResearchState>;
+  researchStatesLoading: boolean;
+  researchStatesError: string | null;
+  researchStatusFilter: StocksResearchStatus | "all";
+  onResearchStatusFilterChange: (
+    filter: StocksResearchStatus | "all",
+  ) => void;
+  onSaveResearchState: (input: StocksResearchStateInput) => Promise<void>;
 };
 
 const mobilePanels: Array<{ id: StocksMobilePanel; label: string }> = [
@@ -54,6 +67,12 @@ export function StocksResearchLayout({
   marketDataLabel,
   marketDataLoading,
   performanceLoading,
+  researchStates,
+  researchStatesLoading,
+  researchStatesError,
+  researchStatusFilter,
+  onResearchStatusFilterChange,
+  onSaveResearchState,
 }: StocksResearchLayoutProps) {
   const mobileScrollerRef = useRef<HTMLDivElement | null>(null);
   const [activeMobilePanel, setActiveMobilePanel] =
@@ -102,6 +121,9 @@ export function StocksResearchLayout({
       selectedTicker={selectedTicker}
       onSelectTicker={onSelectTicker}
       marketDataLoading={marketDataLoading}
+      researchStates={researchStates}
+      researchStatusFilter={researchStatusFilter}
+      onResearchStatusFilterChange={onResearchStatusFilterChange}
     />
   );
   const detail = (
@@ -109,6 +131,10 @@ export function StocksResearchLayout({
       stock={selectedStock}
       marketDataLabel={marketDataLabel}
       marketDataLoading={marketDataLoading}
+      researchState={researchStates[selectedTicker] ?? null}
+      researchStateLoading={researchStatesLoading}
+      researchStateError={researchStatesError}
+      onSaveResearchState={onSaveResearchState}
     />
   );
 

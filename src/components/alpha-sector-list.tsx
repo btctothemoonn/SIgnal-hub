@@ -3,15 +3,66 @@
 import {
   ALPHA_RESEARCH_SECTORS,
   type AlphaResearchEarningsStatus,
+  type AlphaResearchSector,
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
+import type {
+  StocksResearchState,
+  StocksResearchStatus,
+} from "@/lib/stocks-research-state";
+
+type ResearchStatusFilter = StocksResearchStatus | "all";
 
 type AlphaSectorListProps = {
   stocks: AlphaResearchStock[];
   selectedTicker: string;
   onSelectTicker: (ticker: string) => void;
   marketDataLoading: boolean;
+  researchStates?: Record<string, StocksResearchState>;
+  researchStatusFilter?: ResearchStatusFilter;
+  onResearchStatusFilterChange?: (filter: ResearchStatusFilter) => void;
 };
+
+const RESEARCH_STATUS_FILTERS: Array<{
+  value: ResearchStatusFilter;
+  label: string;
+}> = [
+  { value: "all", label: "全部" },
+  { value: "watch", label: "观察" },
+  { value: "waiting", label: "等待" },
+  { value: "holding", label: "持有" },
+  { value: "avoid", label: "回避" },
+];
+
+export function filterResearchPoolSectors({
+  sectors,
+  stocks,
+  researchStates,
+  researchStatusFilter,
+}: {
+  sectors: AlphaResearchSector[];
+  stocks: AlphaResearchStock[];
+  researchStates: Record<string, Pick<StocksResearchState, "status">>;
+  researchStatusFilter: ResearchStatusFilter;
+}) {
+  return sectors.flatMap((sector) => {
+    const rank = new Map(
+      sector.tickers.map((ticker, index) => [ticker, index]),
+    );
+    const sectorStocks = stocks
+      .filter((stock) => {
+        if (stock.sectorId !== sector.id) return false;
+        const status = researchStates[stock.ticker]?.status ?? "watch";
+        return researchStatusFilter === "all" || status === researchStatusFilter;
+      })
+      .sort(
+        (left, right) =>
+          (rank.get(left.ticker) ?? 0) - (rank.get(right.ticker) ?? 0),
+      );
+
+    return sectorStocks.length > 0 ? [{ ...sector, stocks: sectorStocks }] : [];
+  });
+}
 
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
@@ -54,19 +105,16 @@ export function AlphaSectorList({
   selectedTicker,
   onSelectTicker,
   marketDataLoading,
+  researchStates = {},
+  researchStatusFilter = "all",
+  onResearchStatusFilterChange = () => {},
 }: AlphaSectorListProps) {
-  const stocksForSector = (sectorId: string) => {
-    const sector = ALPHA_RESEARCH_SECTORS.find((item) => item.id === sectorId);
-    const rank = new Map(
-      (sector?.tickers ?? []).map((ticker, index) => [ticker, index]),
-    );
-    return stocks
-      .filter((stock) => stock.sectorId === sectorId)
-      .sort(
-        (left, right) =>
-          (rank.get(left.ticker) ?? 0) - (rank.get(right.ticker) ?? 0),
-      );
-  };
+  const visibleSectors = filterResearchPoolSectors({
+    sectors: ALPHA_RESEARCH_SECTORS,
+    stocks,
+    researchStates,
+    researchStatusFilter,
+  });
 
   return (
     <aside className="rounded-lg border border-line/70 bg-panel-strong p-3 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] lg:sticky lg:top-[11.75rem] lg:max-h-[calc(100vh-12.5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain">
@@ -75,10 +123,35 @@ export function AlphaSectorList({
         <p className="mt-1 text-xs text-muted">
           按板块分组，组内保留固定产业链顺序。
         </p>
+        <div
+          className="mt-2 flex flex-wrap gap-1"
+          role="group"
+          aria-label="研究状态筛选"
+        >
+          {RESEARCH_STATUS_FILTERS.map((filter) => {
+            const selected = filter.value === researchStatusFilter;
+            return (
+              <button
+                key={filter.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onResearchStatusFilterChange(filter.value)}
+                className={[
+                  "min-h-8 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors",
+                  selected
+                    ? "border-info/45 bg-info-soft text-info"
+                    : "border-line/60 bg-background/35 text-muted hover:text-foreground",
+                ].join(" ")}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="space-y-4">
-        {ALPHA_RESEARCH_SECTORS.map((sector) => (
+        {visibleSectors.map((sector) => (
           <section key={sector.id}>
             <div className="mb-2 flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -95,7 +168,7 @@ export function AlphaSectorList({
             </div>
 
             <div className="space-y-1.5">
-              {stocksForSector(sector.id).map((stock) => {
+              {sector.stocks.map((stock) => {
                 const selected = stock.ticker === selectedTicker;
                 const stockMarketIsLive = stock.market.source === "live";
                 const stockMarketIsLoading =

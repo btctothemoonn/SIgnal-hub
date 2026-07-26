@@ -26,6 +26,7 @@ type AlphaStockDetailProps = {
   marketDataLoading: boolean;
   researchState?: StocksResearchState | null;
   researchStateLoading?: boolean;
+  researchStateError?: string | null;
   onSaveResearchState?: (input: StocksResearchStateInput) => Promise<void>;
 };
 
@@ -204,6 +205,7 @@ export function AlphaStockDetail({
   marketDataLoading,
   researchState = null,
   researchStateLoading = false,
+  researchStateError = null,
   onSaveResearchState,
 }: AlphaStockDetailProps) {
   if (!stock) {
@@ -359,7 +361,9 @@ export function AlphaStockDetail({
           <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
             {researchStatePanelMode === "loading"
               ? "研究状态加载中"
-              : "研究状态暂不可用"}
+              : researchStateError
+                ? `研究状态暂不可用：${researchStateError}`
+                : "研究状态暂不可用"}
           </section>
         )}
       </div>

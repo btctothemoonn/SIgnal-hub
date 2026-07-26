@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
@@ -27,6 +27,11 @@ import {
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
 import { buildStocksTodayChanges } from "@/lib/stocks-changes";
 import { buildStocksSubscriptionReports } from "@/lib/stocks-subscription-reports";
+import type {
+  StocksResearchState,
+  StocksResearchStateInput,
+  StocksResearchStatus,
+} from "@/lib/stocks-research-state";
 
 type AlphaTab = "research" | "reports" | "messages";
 
@@ -101,6 +106,21 @@ function performanceIssueLabel(message: string) {
   return match ? `使用最近缓存 ${match[2]}` : message;
 }
 
+function researchStateErrorMessage(payload: unknown, fallback: string) {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "error" in payload &&
+    payload.error &&
+    typeof payload.error === "object" &&
+    "message" in payload.error &&
+    typeof payload.error.message === "string"
+  ) {
+    return payload.error.message;
+  }
+  return fallback;
+}
+
 export function AlphaResearchPage() {
   const [activeTab, setActiveTab] = useState<AlphaTab>("research");
   const [selectedTicker, setSelectedTicker] = useState(
@@ -118,6 +138,16 @@ export function AlphaResearchPage() {
   const [livePerformanceSnapshot, setLivePerformanceSnapshot] =
     useState<KeyedPerformanceSnapshot | null>(null);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
+  const [researchStates, setResearchStates] = useState<
+    Record<string, StocksResearchState>
+  >({});
+  const [researchStatesLoading, setResearchStatesLoading] = useState(true);
+  const [researchStatesError, setResearchStatesError] = useState<string | null>(
+    null,
+  );
+  const [researchStatusFilter, setResearchStatusFilter] = useState<
+    StocksResearchStatus | "all"
+  >("all");
   const [cachedMarketSnapshot, writeMarketSnapshotCache] =
     useBrowserJsonCache<StocksMarketSnapshot>(STOCKS_MARKET_SNAPSHOT_CACHE_KEY);
   const [cachedFinancialSnapshot, writeFinancialSnapshotCache] =
@@ -262,6 +292,82 @@ export function AlphaResearchPage() {
             : "info",
     },
   ];
+
+  const saveResearchState = useCallback(
+    async (input: StocksResearchStateInput) => {
+      try {
+        const response = await fetch("/api/stocks-research-state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const payload = (await response.json()) as {
+          state?: StocksResearchState;
+          error?: { message?: string };
+        };
+        if (!response.ok) {
+          throw new Error(
+            researchStateErrorMessage(payload, "Unable to save research state."),
+          );
+        }
+        const saved = payload.state;
+        if (!saved || saved.ticker !== input.ticker) {
+          throw new Error("Research state save returned an invalid response.");
+        }
+        setResearchStates((current) => ({
+          ...current,
+          [saved.ticker]: saved,
+        }));
+        setResearchStatesError(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setResearchStatesError(message);
+        throw new Error(message);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadResearchStates() {
+      try {
+        setResearchStatesLoading(true);
+        setResearchStatesError(null);
+        const response = await fetch("/api/stocks-research-state", {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as {
+          states?: Record<string, StocksResearchState>;
+          error?: { message?: string };
+        };
+        if (!response.ok) {
+          throw new Error(
+            researchStateErrorMessage(payload, "Unable to load research states."),
+          );
+        }
+        if (!payload.states || Array.isArray(payload.states)) {
+          throw new Error("Research state load returned an invalid response.");
+        }
+        if (!cancelled) {
+          setResearchStates(payload.states);
+          setResearchStatesError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setResearchStatesError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      } finally {
+        if (!cancelled) setResearchStatesLoading(false);
+      }
+    }
+    void loadResearchStates();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -598,6 +704,12 @@ export function AlphaResearchPage() {
             marketDataLabel={marketDataLabel}
             marketDataLoading={marketDataLoading}
             performanceLoading={performanceSnapshot === null && performanceError === null}
+            researchStates={researchStates}
+            researchStatesLoading={researchStatesLoading}
+            researchStatesError={researchStatesError}
+            researchStatusFilter={researchStatusFilter}
+            onResearchStatusFilterChange={setResearchStatusFilter}
+            onSaveResearchState={saveResearchState}
           />
         </>
       ) : activeTab === "reports" ? (

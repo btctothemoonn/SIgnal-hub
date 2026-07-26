@@ -21,6 +21,7 @@ assert.match(source, /stockPriceLabel/);
 assert.match(source, /Ticker Intelligence/);
 assert.match(source, /<StocksResearchStatePanel/);
 assert.match(source, /researchStateLoading/);
+assert.match(source, /researchStateError/);
 assert.match(source, /onSaveResearchState/);
 assert.match(source, /getResearchStatePanelMode/);
 assert.match(source, /研究状态暂不可用/);

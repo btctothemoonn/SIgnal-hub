@@ -26,8 +26,11 @@ assert.match(layout, /<StocksPerformanceChart/);
 assert.match(layout, /<AlphaStockDetail/);
 assert.match(layout, /compact/);
 assert.match(layout, /labelMode="ranked-list"/);
+assert.match(layout, /researchStatusFilter/);
+assert.match(layout, /researchStatesError/);
 assert.match(page, /import \{ StocksResearchLayout \}/);
 assert.match(page, /<StocksResearchLayout/);
+assert.match(page, /researchStatesError=\{researchStatesError\}/);
 assert.doesNotMatch(page, /<AlphaResearchPool/);
 
 console.log("ok - stocks research layout uses desktop split and mobile pager");
