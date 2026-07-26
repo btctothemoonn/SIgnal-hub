@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import {
+  getStocksHistoryBackfillStatus,
   getStocksHistoryCoverage,
   getStocksPerformanceSnapshot,
   marketDateInNewYork,
@@ -321,6 +321,13 @@ assert.deepEqual(
         price: 10,
         provider: "yahoo",
       },
+      {
+        ticker: "AMD",
+        marketDate: "2026-05-08",
+        capturedAt: "2026-02-30T20:00:00.000Z",
+        price: 10,
+        provider: "yahoo",
+      },
     ],
   }),
   { recorded: 1 },
@@ -361,15 +368,41 @@ updateStocksHistoryBackfillStatus({
   provider: "yahoo",
   status: "success",
 });
-const historyDb = new DatabaseSync(historyDbPath);
-const backfillStatus = historyDb
-  .prepare("SELECT * FROM stock_history_backfill_status WHERE ticker = ?")
-  .get("NVDA");
-historyDb.close();
-assert.equal(backfillStatus.ticker, "NVDA");
-assert.equal(backfillStatus.status, "success");
-assert.equal(backfillStatus.error, null);
-assert.equal(backfillStatus.covered_through_date, "2026-05-07");
+assert.deepEqual(getStocksHistoryBackfillStatus({
+  dbPath: historyDbPath,
+  ticker: "NVDA",
+}), {
+  ticker: "NVDA",
+  requestedStartDate: "2026-05-01",
+  coveredThroughDate: "2026-05-07",
+  lastAttemptAt: "2026-05-09T20:00:00.000Z",
+  lastSuccessAt: "2026-05-09T20:00:00.000Z",
+  provider: "yahoo",
+  status: "success",
+  error: null,
+});
+
+updateStocksHistoryBackfillStatus({
+  dbPath: historyDbPath,
+  ticker: "NVDA",
+  requestedStartDate: "2026-05-01",
+  lastAttemptAt: "2026-05-10T20:00:00.000Z",
+  status: "failed",
+  error: "provider unavailable again",
+});
+assert.deepEqual(getStocksHistoryBackfillStatus({
+  dbPath: historyDbPath,
+  ticker: "nvda",
+}), {
+  ticker: "NVDA",
+  requestedStartDate: "2026-05-01",
+  coveredThroughDate: "2026-05-07",
+  lastAttemptAt: "2026-05-10T20:00:00.000Z",
+  lastSuccessAt: "2026-05-09T20:00:00.000Z",
+  provider: "yahoo",
+  status: "failed",
+  error: "provider unavailable again",
+});
 
 rmSync(dbPath, { force: true });
 rmSync(historyDbPath, { force: true });

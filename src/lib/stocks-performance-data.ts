@@ -61,7 +61,18 @@ export type StocksHistoryCoverage = {
   pointCount: number;
 };
 
-type StocksHistoryBackfillStatus = {
+export type StocksHistoryBackfillStatus = {
+  ticker: string;
+  requestedStartDate: string;
+  coveredThroughDate: string | null;
+  lastAttemptAt: string;
+  lastSuccessAt: string | null;
+  provider: string | null;
+  status: string;
+  error: string | null;
+};
+
+type StocksHistoryBackfillStatusUpdate = {
   ticker: string;
   requestedStartDate: string;
   coveredThroughDate?: string;
@@ -194,8 +205,14 @@ function isIsoDate(value: string) {
 }
 
 function isIsoTimestamp(value: string) {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
-    && Number.isFinite(new Date(value).getTime());
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) {
+    return false;
+  }
+  const date = new Date(value);
+  const canonicalValue = value.includes(".")
+    ? value
+    : value.replace("Z", ".000Z");
+  return Number.isFinite(date.getTime()) && date.toISOString() === canonicalValue;
 }
 
 function deterministicDailyCapturedAt(marketDate: string) {
@@ -503,7 +520,7 @@ export function updateStocksHistoryBackfillStatus({
   error,
   env = process.env,
   dbPath = stocksPerformanceDbPath(env),
-}: StocksHistoryBackfillStatus & { env?: EnvLike; dbPath?: string }) {
+}: StocksHistoryBackfillStatusUpdate & { env?: EnvLike; dbPath?: string }) {
   const normalizedTicker = normalizeTicker(ticker);
   if (!normalizedTicker || !isIsoDate(requestedStartDate)) return;
   const db = openStocksPerformanceDb(dbPath);
@@ -531,6 +548,52 @@ export function updateStocksHistoryBackfillStatus({
       status,
       error ?? null,
     );
+  } finally {
+    db.close();
+  }
+}
+
+export function getStocksHistoryBackfillStatus({
+  ticker,
+  env = process.env,
+  dbPath = stocksPerformanceDbPath(env),
+}: {
+  ticker: string;
+  env?: EnvLike;
+  dbPath?: string;
+}): StocksHistoryBackfillStatus | null {
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker) return null;
+  const db = openStocksPerformanceDb(dbPath);
+  try {
+    const row = db
+      .prepare(`
+        SELECT ticker, requested_start_date, covered_through_date, last_attempt_at,
+               last_success_at, provider, status, error
+        FROM stock_history_backfill_status
+        WHERE ticker = ?
+      `)
+      .get(normalizedTicker) as {
+        ticker: string;
+        requested_start_date: string;
+        covered_through_date: string | null;
+        last_attempt_at: string;
+        last_success_at: string | null;
+        provider: string | null;
+        status: string;
+        error: string | null;
+      } | undefined;
+    if (!row) return null;
+    return {
+      ticker: row.ticker,
+      requestedStartDate: row.requested_start_date,
+      coveredThroughDate: row.covered_through_date,
+      lastAttemptAt: row.last_attempt_at,
+      lastSuccessAt: row.last_success_at,
+      provider: row.provider,
+      status: row.status,
+      error: row.error,
+    };
   } finally {
     db.close();
   }
