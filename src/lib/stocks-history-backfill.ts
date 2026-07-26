@@ -23,6 +23,20 @@ type FetchLike = (
   init?: { cache?: string },
 ) => Promise<FetchResponse>;
 
+type StocksHistoryStorage = {
+  getCoverage: typeof getStocksHistoryCoverage;
+  getBackfillStatus: typeof getStocksHistoryBackfillStatus;
+  recordDailyPoints: typeof recordStocksHistoricalDailyPoints;
+  updateBackfillStatus: typeof updateStocksHistoryBackfillStatus;
+};
+
+const defaultStorage: StocksHistoryStorage = {
+  getCoverage: getStocksHistoryCoverage,
+  getBackfillStatus: getStocksHistoryBackfillStatus,
+  recordDailyPoints: recordStocksHistoricalDailyPoints,
+  updateBackfillStatus: updateStocksHistoryBackfillStatus,
+};
+
 export type StocksHistoryBackfillResult = {
   ticker: string;
   status: "success" | "failed";
@@ -59,7 +73,30 @@ function isIsoDate(value: string) {
 }
 
 function dateAtNewYorkClose(marketDate: string) {
-  return `${marketDate}T20:00:00.000Z`;
+  const provisional = new Date(`${marketDate}T16:00:00.000Z`);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(provisional);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  const offset = Date.UTC(
+    value("year"),
+    value("month") - 1,
+    value("day"),
+    value("hour"),
+    value("minute"),
+    value("second"),
+  ) - provisional.getTime();
+  return new Date(
+    Date.parse(`${marketDate}T16:00:00.000Z`) - offset,
+  ).toISOString();
 }
 
 function dateFromUnixSeconds(value: unknown) {
@@ -191,6 +228,7 @@ export async function backfillStocksHistory({
   env = process.env,
   dbPath,
   fetchImpl = fetch as FetchLike,
+  storage = defaultStorage,
 }: {
   tickers: string[];
   startDate?: string;
@@ -198,6 +236,7 @@ export async function backfillStocksHistory({
   env?: EnvLike;
   dbPath?: string;
   fetchImpl?: FetchLike;
+  storage?: StocksHistoryStorage;
 }): Promise<StocksHistoryBackfillResult[]> {
   if (!isIsoDate(startDate)) throw new Error("startDate must be an ISO date");
   if (!isIsoDate(endDate)) throw new Error("endDate must be an ISO date");
@@ -205,63 +244,67 @@ export async function backfillStocksHistory({
   const normalizedTickers = Array.from(
     new Set(tickers.map(normalizeTicker).filter(Boolean)),
   );
-  const coverage = getStocksHistoryCoverage({
-    tickers: normalizedTickers,
-    env,
-    dbPath,
-  });
   const results: StocksHistoryBackfillResult[] = [];
 
   for (const [index, ticker] of normalizedTickers.entries()) {
     if (index > 0) await delay(requestDelayMs(env));
 
-    const tickerCoverage = coverage[ticker];
-    const status = getStocksHistoryBackfillStatus({ ticker, env, dbPath });
-    const hasFullCoverage =
-      status?.status === "success" &&
-      Boolean(tickerCoverage?.earliestMarketDate) &&
-      tickerCoverage.earliestMarketDate! <= startDate;
-    const requestedFrom = hasFullCoverage && tickerCoverage.latestMarketDate
-      ? maxDate(startDate, dateDaysBefore(tickerCoverage.latestMarketDate, 14))
-      : startDate;
+    let requestedFrom = startDate;
     const attemptedAt = new Date().toISOString();
     let provider: "yahoo" | "eodhd" | null = null;
     let points: StocksHistoricalDailyPoint[] = [];
     const errors: string[] = [];
 
     try {
-      const response = await fetchImpl(yahooHistoryUrl(ticker, requestedFrom, endDate), {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(`Yahoo history HTTP ${response.status}`);
-      points = parseYahooHistoricalDailyPoints(ticker, await response.json());
-      if (points.length === 0) throw new Error("Yahoo history returned no usable points");
-      provider = "yahoo";
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error));
-    }
+      const tickerCoverage = storage.getCoverage({
+        tickers: [ticker],
+        env,
+        dbPath,
+      })[ticker];
+      const status = storage.getBackfillStatus({ ticker, env, dbPath });
+      const hasFullCoverage =
+        Boolean(status?.lastSuccessAt && status.coveredThroughDate) &&
+        Boolean(tickerCoverage?.earliestMarketDate) &&
+        tickerCoverage.earliestMarketDate! <= startDate;
+      requestedFrom = hasFullCoverage && tickerCoverage.latestMarketDate
+        ? maxDate(startDate, dateDaysBefore(tickerCoverage.latestMarketDate, 14))
+        : startDate;
 
-    if (!provider) {
       try {
-        const apiKey = eodhdApiKey(env);
-        if (!apiKey) throw new Error("EODHD API key is not configured");
         const response = await fetchImpl(
-          eodhdHistoryUrl(ticker, apiKey, requestedFrom, endDate),
+          yahooHistoryUrl(ticker, requestedFrom, endDate),
           { cache: "no-store" },
         );
-        if (!response.ok) throw new Error(`EODHD history HTTP ${response.status}`);
-        points = parseEodhdHistoricalDailyPoints(ticker, await response.json());
-        if (points.length === 0) throw new Error("EODHD history returned no usable points");
-        provider = "eodhd";
+        if (!response.ok) throw new Error(`Yahoo history HTTP ${response.status}`);
+        points = parseYahooHistoricalDailyPoints(ticker, await response.json());
+        if (points.length === 0) throw new Error("Yahoo history returned no usable points");
+        provider = "yahoo";
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error));
       }
-    }
 
-    if (provider) {
-      const { recorded } = recordStocksHistoricalDailyPoints({ points, env, dbPath });
-      const updatedCoverage = getStocksHistoryCoverage({ tickers: [ticker], env, dbPath })[ticker];
-      updateStocksHistoryBackfillStatus({
+      if (!provider) {
+        try {
+          const apiKey = eodhdApiKey(env);
+          if (!apiKey) throw new Error("EODHD API key is not configured");
+          const response = await fetchImpl(
+            eodhdHistoryUrl(ticker, apiKey, requestedFrom, endDate),
+            { cache: "no-store" },
+          );
+          if (!response.ok) throw new Error(`EODHD history HTTP ${response.status}`);
+          points = parseEodhdHistoricalDailyPoints(ticker, await response.json());
+          if (points.length === 0) throw new Error("EODHD history returned no usable points");
+          provider = "eodhd";
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      if (!provider) throw new Error(errors.join("; ") || "No provider returned usable history");
+
+      const { recorded } = storage.recordDailyPoints({ points, env, dbPath });
+      const updatedCoverage = storage.getCoverage({ tickers: [ticker], env, dbPath })[ticker];
+      storage.updateBackfillStatus({
         ticker,
         requestedStartDate: startDate,
         coveredThroughDate: updatedCoverage.latestMarketDate ?? undefined,
@@ -281,28 +324,33 @@ export async function backfillStocksHistory({
         recorded,
         error: null,
       });
-      continue;
+    } catch (error) {
+      let message = error instanceof Error ? error.message : String(error);
+      try {
+        storage.updateBackfillStatus({
+          ticker,
+          requestedStartDate: startDate,
+          lastAttemptAt: attemptedAt,
+          status: "failed",
+          error: message,
+          env,
+          dbPath,
+        });
+      } catch (statusError) {
+        message = `${message}; status update failed: ${
+          statusError instanceof Error ? statusError.message : String(statusError)
+        }`;
+      }
+      results.push({
+        ticker,
+        status: "failed",
+        provider: null,
+        requestedFrom,
+        requestedTo: endDate,
+        recorded: 0,
+        error: message,
+      });
     }
-
-    const error = errors.join("; ") || "No provider returned usable history";
-    updateStocksHistoryBackfillStatus({
-      ticker,
-      requestedStartDate: startDate,
-      lastAttemptAt: attemptedAt,
-      status: "failed",
-      error,
-      env,
-      dbPath,
-    });
-    results.push({
-      ticker,
-      status: "failed",
-      provider: null,
-      requestedFrom,
-      requestedTo: endDate,
-      recorded: 0,
-      error,
-    });
   }
 
   return results;
