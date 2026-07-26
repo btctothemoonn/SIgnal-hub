@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
+  getStocksHistoryCoverage,
   getStocksPerformanceSnapshot,
   marketDateInNewYork,
+  recordStocksHistoricalDailyPoints,
   recordStocksPerformanceSnapshot,
+  updateStocksHistoryBackfillStatus,
 } from "./stocks-performance-data.ts";
 
 const dbPath = join(
@@ -12,7 +16,13 @@ const dbPath = join(
   ".signal-hub",
   `stocks-performance-test-${process.pid}.sqlite`,
 );
+const historyDbPath = join(
+  process.cwd(),
+  ".signal-hub",
+  `stocks-history-test-${process.pid}.sqlite`,
+);
 rmSync(dbPath, { force: true });
+rmSync(historyDbPath, { force: true });
 
 function quote(ticker, lastPrice, generatedAt) {
   return {
@@ -256,6 +266,112 @@ assert.deepEqual(
 );
 assert.equal(downsampledNvda?.latestChangePct, 33.33);
 
+assert.deepEqual(
+  recordStocksHistoricalDailyPoints({
+    dbPath: historyDbPath,
+    points: [
+      {
+        ticker: "NVDA",
+        marketDate: "2026-05-06",
+        capturedAt: "2026-05-06T20:00:00.000Z",
+        price: 91.2,
+        provider: "yahoo",
+      },
+      {
+        ticker: "NVDA",
+        marketDate: "2026-05-07",
+        capturedAt: "2026-05-07T20:00:00.000Z",
+        price: 93.4,
+        provider: "yahoo",
+      },
+    ],
+  }),
+  { recorded: 2 },
+);
+
+assert.deepEqual(
+  recordStocksHistoricalDailyPoints({
+    dbPath: historyDbPath,
+    points: [
+      {
+        ticker: "nvda",
+        marketDate: "2026-05-06",
+        capturedAt: "2026-05-06T20:00:00.000Z",
+        price: 92,
+        provider: "eodhd",
+      },
+      {
+        ticker: "AMD",
+        marketDate: "not-a-date",
+        capturedAt: "2026-05-08T20:00:00.000Z",
+        price: 10,
+        provider: "yahoo",
+      },
+      {
+        ticker: "AMD",
+        marketDate: "2026-05-08",
+        capturedAt: "2026-05-08T20:00:00.000Z",
+        price: 0,
+        provider: "yahoo",
+      },
+      {
+        ticker: "AMD",
+        marketDate: "2026-05-08",
+        capturedAt: "not-a-date",
+        price: 10,
+        provider: "yahoo",
+      },
+    ],
+  }),
+  { recorded: 1 },
+);
+
+const coverage = getStocksHistoryCoverage({
+  dbPath: historyDbPath,
+  tickers: ["NVDA", "AMD"],
+});
+assert.deepEqual(coverage.NVDA, {
+  ticker: "NVDA",
+  earliestMarketDate: "2026-05-06",
+  latestMarketDate: "2026-05-07",
+  pointCount: 2,
+});
+assert.deepEqual(coverage.AMD, {
+  ticker: "AMD",
+  earliestMarketDate: null,
+  latestMarketDate: null,
+  pointCount: 0,
+});
+
+updateStocksHistoryBackfillStatus({
+  dbPath: historyDbPath,
+  ticker: "nvda",
+  requestedStartDate: "2026-05-01",
+  lastAttemptAt: "2026-05-08T20:00:00.000Z",
+  status: "failed",
+  error: "provider unavailable",
+});
+updateStocksHistoryBackfillStatus({
+  dbPath: historyDbPath,
+  ticker: "NVDA",
+  requestedStartDate: "2026-05-01",
+  coveredThroughDate: "2026-05-07",
+  lastAttemptAt: "2026-05-09T20:00:00.000Z",
+  lastSuccessAt: "2026-05-09T20:00:00.000Z",
+  provider: "yahoo",
+  status: "success",
+});
+const historyDb = new DatabaseSync(historyDbPath);
+const backfillStatus = historyDb
+  .prepare("SELECT * FROM stock_history_backfill_status WHERE ticker = ?")
+  .get("NVDA");
+historyDb.close();
+assert.equal(backfillStatus.ticker, "NVDA");
+assert.equal(backfillStatus.status, "success");
+assert.equal(backfillStatus.error, null);
+assert.equal(backfillStatus.covered_through_date, "2026-05-07");
+
 rmSync(dbPath, { force: true });
+rmSync(historyDbPath, { force: true });
 
 console.log("ok - stocks performance data");

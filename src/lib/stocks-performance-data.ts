@@ -46,6 +46,32 @@ export type StocksPerformanceSnapshot = {
   errors: string[];
 };
 
+export type StocksHistoricalDailyPoint = {
+  ticker: string;
+  marketDate: string;
+  capturedAt: string;
+  price: number;
+  provider: "yahoo" | "eodhd";
+};
+
+export type StocksHistoryCoverage = {
+  ticker: string;
+  earliestMarketDate: string | null;
+  latestMarketDate: string | null;
+  pointCount: number;
+};
+
+type StocksHistoryBackfillStatus = {
+  ticker: string;
+  requestedStartDate: string;
+  coveredThroughDate?: string;
+  lastAttemptAt: string;
+  lastSuccessAt?: string;
+  provider?: string;
+  status: string;
+  error?: string;
+};
+
 type StockQuoteSnapshotRow = {
   ticker: string;
   market_date: string;
@@ -143,8 +169,37 @@ function openStocksPerformanceDb(path: string) {
     );
     CREATE INDEX IF NOT EXISTS idx_stock_quote_snapshots_date_ticker
       ON stock_quote_snapshots (market_date, ticker, captured_at);
+    CREATE TABLE IF NOT EXISTS stock_history_backfill_status (
+      ticker TEXT PRIMARY KEY,
+      requested_start_date TEXT NOT NULL,
+      covered_through_date TEXT,
+      last_attempt_at TEXT NOT NULL,
+      last_success_at TEXT,
+      provider TEXT,
+      status TEXT NOT NULL,
+      error TEXT
+    );
   `);
   return db;
+}
+
+function normalizeTicker(ticker: string) {
+  return ticker.trim().toUpperCase();
+}
+
+function isIsoDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function isIsoTimestamp(value: string) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
+    && Number.isFinite(new Date(value).getTime());
+}
+
+function deterministicDailyCapturedAt(marketDate: string) {
+  return `${marketDate}T20:00:00.000Z`;
 }
 
 function quoteConfidence({
@@ -338,6 +393,144 @@ export function recordStocksPerformanceSnapshot({
       recorded += 1;
     }
     return { recorded };
+  } finally {
+    db.close();
+  }
+}
+
+export function recordStocksHistoricalDailyPoints({
+  points,
+  env = process.env,
+  dbPath = stocksPerformanceDbPath(env),
+}: {
+  points: StocksHistoricalDailyPoint[];
+  env?: EnvLike;
+  dbPath?: string;
+}) {
+  const db = openStocksPerformanceDb(dbPath);
+  try {
+    const insert = db.prepare(`
+      INSERT OR REPLACE INTO stock_quote_snapshots (
+        ticker,
+        market_date,
+        captured_at,
+        price,
+        provider,
+        freshness,
+        confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    let recorded = 0;
+    for (const point of points) {
+      const ticker = normalizeTicker(point.ticker);
+      const price = numberValue(point.price);
+      if (
+        !ticker ||
+        !isIsoDate(point.marketDate) ||
+        !isIsoTimestamp(point.capturedAt) ||
+        price === null ||
+        price <= 0 ||
+        (point.provider !== "yahoo" && point.provider !== "eodhd")
+      ) {
+        continue;
+      }
+      insert.run(
+        ticker,
+        point.marketDate,
+        deterministicDailyCapturedAt(point.marketDate),
+        price,
+        point.provider,
+        "delayed",
+        "medium",
+      );
+      recorded += 1;
+    }
+    return { recorded };
+  } finally {
+    db.close();
+  }
+}
+
+export function getStocksHistoryCoverage({
+  tickers,
+  env = process.env,
+  dbPath = stocksPerformanceDbPath(env),
+}: {
+  tickers: string[];
+  env?: EnvLike;
+  dbPath?: string;
+}): Record<string, StocksHistoryCoverage> {
+  const normalizedTickers = Array.from(
+    new Set(tickers.map(normalizeTicker).filter(Boolean)),
+  );
+  const coverage: Record<string, StocksHistoryCoverage> = {};
+  const db = openStocksPerformanceDb(dbPath);
+  try {
+    const select = db.prepare(`
+      SELECT MIN(market_date) AS earliest_market_date,
+             MAX(market_date) AS latest_market_date,
+             COUNT(*) AS point_count
+      FROM stock_quote_snapshots
+      WHERE ticker = ? AND freshness = 'delayed'
+    `);
+    for (const ticker of normalizedTickers) {
+      const row = select.get(ticker) as {
+        earliest_market_date: string | null;
+        latest_market_date: string | null;
+        point_count: number;
+      };
+      coverage[ticker] = {
+        ticker,
+        earliestMarketDate: row.earliest_market_date,
+        latestMarketDate: row.latest_market_date,
+        pointCount: Number(row.point_count),
+      };
+    }
+    return coverage;
+  } finally {
+    db.close();
+  }
+}
+
+export function updateStocksHistoryBackfillStatus({
+  ticker,
+  requestedStartDate,
+  coveredThroughDate,
+  lastAttemptAt,
+  lastSuccessAt,
+  provider,
+  status,
+  error,
+  env = process.env,
+  dbPath = stocksPerformanceDbPath(env),
+}: StocksHistoryBackfillStatus & { env?: EnvLike; dbPath?: string }) {
+  const normalizedTicker = normalizeTicker(ticker);
+  if (!normalizedTicker || !isIsoDate(requestedStartDate)) return;
+  const db = openStocksPerformanceDb(dbPath);
+  try {
+    db.prepare(`
+      INSERT INTO stock_history_backfill_status (
+        ticker, requested_start_date, covered_through_date, last_attempt_at,
+        last_success_at, provider, status, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(ticker) DO UPDATE SET
+        requested_start_date = excluded.requested_start_date,
+        covered_through_date = COALESCE(excluded.covered_through_date, covered_through_date),
+        last_attempt_at = excluded.last_attempt_at,
+        last_success_at = COALESCE(excluded.last_success_at, last_success_at),
+        provider = COALESCE(excluded.provider, provider),
+        status = excluded.status,
+        error = excluded.error
+    `).run(
+      normalizedTicker,
+      requestedStartDate,
+      coveredThroughDate ?? null,
+      lastAttemptAt,
+      lastSuccessAt ?? null,
+      provider ?? null,
+      status,
+      error ?? null,
+    );
   } finally {
     db.close();
   }
