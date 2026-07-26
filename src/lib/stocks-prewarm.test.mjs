@@ -185,6 +185,10 @@ try {
   assert.match(worker, /STOCKS_HISTORY_BACKFILL_INTERVAL_MS/);
   assert.match(worker, /stocks_history\.backfill\.done/);
   assert.match(worker, /void runHistoryBackfill\("interval"\)/);
+  assert.match(
+    worker,
+    /if \(once\) \{\s+await runHistoryBackfill\("startup"\);\s+\} else \{\s+void runHistoryBackfill\("startup"\);\s+\}/s,
+  );
 } finally {
   rmSync(runtimeDir, { recursive: true, force: true });
 }

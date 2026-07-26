@@ -157,7 +157,11 @@ const historyIntervalMs = Math.max(
 
 const once = process.argv.includes("--once");
 await runPrewarm("startup", KINDS);
-await runHistoryBackfill("startup");
+if (once) {
+  await runHistoryBackfill("startup");
+} else {
+  void runHistoryBackfill("startup");
+}
 
 if (once) process.exit(0);
 
