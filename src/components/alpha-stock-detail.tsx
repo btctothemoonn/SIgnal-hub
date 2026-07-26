@@ -273,6 +273,7 @@ export function AlphaStockDetail({
     ["指引", stock.financialSnapshot.guidance],
   ];
   const researchStatePanelMode = getResearchStatePanelMode({
+    ticker: stock.ticker,
     researchState,
     loading: researchStateLoading,
     hasSaveHandler: Boolean(onSaveResearchState),

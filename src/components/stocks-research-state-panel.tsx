@@ -10,6 +10,7 @@ import {
   beginResearchStateSave,
   createResearchStatePanelState,
   finishResearchStateSave,
+  getResearchStatePanelMode,
   type ResearchStateSaveOperation,
   syncResearchStatePanelState,
   updateResearchStateForm,
@@ -17,9 +18,9 @@ import {
 
 type StocksResearchStatePanelProps = {
   ticker: string;
-  researchState: StocksResearchState;
+  researchState: StocksResearchState | null;
   loading: boolean;
-  onSave: (input: StocksResearchStateInput) => Promise<void>;
+  onSave?: (input: StocksResearchStateInput) => Promise<void>;
 };
 
 const STATUS_OPTIONS: Array<{ value: StocksResearchStatus; label: string }> = [
@@ -53,6 +54,47 @@ export function StocksResearchStatePanel({
   loading,
   onSave,
 }: StocksResearchStatePanelProps) {
+  const panelMode = getResearchStatePanelMode({
+    ticker,
+    researchState,
+    loading,
+    hasSaveHandler: Boolean(onSave),
+  });
+
+  if (
+    panelMode !== "editor" ||
+    !researchState ||
+    researchState.ticker !== ticker ||
+    !onSave
+  ) {
+    return (
+      <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
+        {panelMode === "loading" ? "研究状态加载中" : "研究状态暂不可用"}
+      </section>
+    );
+  }
+
+  return (
+    <StocksResearchStateEditor
+      ticker={ticker}
+      researchState={researchState}
+      loading={loading}
+      onSave={onSave}
+    />
+  );
+}
+
+function StocksResearchStateEditor({
+  ticker,
+  researchState,
+  loading,
+  onSave,
+}: {
+  ticker: string;
+  researchState: StocksResearchState;
+  loading: boolean;
+  onSave: (input: StocksResearchStateInput) => Promise<void>;
+}) {
   const sourceKey = `${ticker}:${researchState.updatedAt ?? "unsaved"}`;
   const [stateKey, setStateKey] = useState(sourceKey);
   const [panelState, setPanelState] = useState(() =>

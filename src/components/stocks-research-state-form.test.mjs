@@ -90,6 +90,7 @@ assert.equal(switchedTicker.saving, false);
 
 assert.equal(
   getResearchStatePanelMode({
+    ticker: "NVDA",
     researchState: null,
     loading: false,
     hasSaveHandler: true,
@@ -98,6 +99,7 @@ assert.equal(
 );
 assert.equal(
   getResearchStatePanelMode({
+    ticker: "NVDA",
     researchState: null,
     loading: true,
     hasSaveHandler: true,
@@ -106,6 +108,7 @@ assert.equal(
 );
 assert.equal(
   getResearchStatePanelMode({
+    ticker: "NVDA",
     researchState: researchState(),
     loading: false,
     hasSaveHandler: false,
@@ -114,11 +117,30 @@ assert.equal(
 );
 assert.equal(
   getResearchStatePanelMode({
+    ticker: "NVDA",
     researchState: researchState(),
     loading: false,
     hasSaveHandler: true,
   }),
   "editor",
+);
+assert.equal(
+  getResearchStatePanelMode({
+    ticker: "AMD",
+    researchState: researchState(),
+    loading: false,
+    hasSaveHandler: true,
+  }),
+  "unavailable",
+);
+assert.equal(
+  getResearchStatePanelMode({
+    ticker: "AMD",
+    researchState: researchState(),
+    loading: true,
+    hasSaveHandler: true,
+  }),
+  "loading",
 );
 
 console.log("ok - stocks research state form transitions");

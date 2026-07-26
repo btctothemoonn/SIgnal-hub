@@ -124,14 +124,16 @@ export function finishResearchStateSave(
 }
 
 export function getResearchStatePanelMode({
+  ticker,
   researchState,
   loading,
   hasSaveHandler,
 }: {
+  ticker: string;
   researchState: StocksResearchState | null;
   loading: boolean;
   hasSaveHandler: boolean;
 }): "editor" | "loading" | "unavailable" {
-  if (researchState && hasSaveHandler) return "editor";
+  if (researchState?.ticker === ticker && hasSaveHandler) return "editor";
   return loading ? "loading" : "unavailable";
 }
