@@ -68,6 +68,201 @@ assert.deepEqual(
   ],
 );
 
+const statelessStorage = {
+  getCoverage: ({ tickers }) =>
+    Object.fromEntries(
+      tickers.map((ticker) => [
+        ticker,
+        {
+          ticker,
+          earliestMarketDate: null,
+          latestMarketDate: null,
+          pointCount: 0,
+        },
+      ]),
+    ),
+  getBackfillStatus: () => null,
+  recordDailyPoints: ({ points }) => ({ recorded: points.length }),
+  updateBackfillStatus: () => {},
+};
+
+const eodhdSymbolUrls = [];
+const eodhdSymbolResults = await backfillStocksHistory({
+  tickers: ["NVDA", "000660.KS"],
+  startDate: "2026-05-06",
+  endDate: "2026-05-08",
+  env: {
+    STOCKS_EODHD_API_KEY: "test-key",
+    STOCKS_HISTORY_REQUEST_DELAY_MS: "0",
+  },
+  storage: statelessStorage,
+  fetchImpl: async (url) => {
+    if (url.includes("query1.finance.yahoo.com")) {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    eodhdSymbolUrls.push(url);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ date: "2026-05-06", adjusted_close: 100 }],
+    };
+  },
+});
+assert.deepEqual(
+  eodhdSymbolResults.map(({ ticker, status, provider }) => ({
+    ticker,
+    status,
+    provider,
+  })),
+  [
+    { ticker: "NVDA", status: "success", provider: "eodhd" },
+    { ticker: "000660.KS", status: "success", provider: "eodhd" },
+  ],
+);
+assert.deepEqual(eodhdSymbolUrls, [
+  "https://eodhd.com/api/eod/NVDA.US?api_token=test-key&fmt=json&period=d&from=2026-05-06&to=2026-05-08",
+  "https://eodhd.com/api/eod/000660.KO?api_token=test-key&fmt=json&period=d&from=2026-05-06&to=2026-05-08",
+]);
+
+let stalledYahooSignal;
+let timeoutFallbackSignal;
+let timeoutGuard;
+const timeoutFallbackPromise = backfillStocksHistory({
+  tickers: ["NVDA"],
+  startDate: "2026-05-06",
+  endDate: "2026-05-08",
+  env: {
+    STOCKS_EODHD_API_KEY: "timeout-key",
+    STOCKS_HISTORY_REQUEST_DELAY_MS: "0",
+    STOCKS_HISTORY_REQUEST_TIMEOUT_MS: "20",
+  },
+  storage: statelessStorage,
+  fetchImpl: async (url, init) => {
+    if (url.includes("query1.finance.yahoo.com")) {
+      stalledYahooSignal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        stalledYahooSignal?.addEventListener(
+          "abort",
+          () => reject(stalledYahooSignal.reason),
+          { once: true },
+        );
+      });
+    }
+    timeoutFallbackSignal = init?.signal;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ date: "2026-05-06", adjusted_close: 100 }],
+    };
+  },
+});
+const timeoutFallbackResults = await Promise.race([
+  timeoutFallbackPromise,
+  new Promise((_, reject) => {
+    timeoutGuard = setTimeout(
+      () => reject(new Error("Yahoo history timeout did not fall back")),
+      500,
+    );
+  }),
+]).finally(() => clearTimeout(timeoutGuard));
+assert.deepEqual(
+  timeoutFallbackResults.map(({ status, provider }) => ({ status, provider })),
+  [{ status: "success", provider: "eodhd" }],
+);
+assert.equal(stalledYahooSignal?.aborted, true);
+assert.equal(timeoutFallbackSignal?.aborted, false);
+await new Promise((resolve) => setTimeout(resolve, 40));
+assert.equal(timeoutFallbackSignal?.aborted, false);
+
+const eodhdTimeoutSignals = [];
+let eodhdTimeoutGuard;
+const eodhdTimeoutPromise = backfillStocksHistory({
+  tickers: ["NVDA"],
+  startDate: "2026-05-06",
+  endDate: "2026-05-08",
+  env: {
+    STOCKS_EODHD_API_KEYS: "stalled-key, recovery-key",
+    STOCKS_HISTORY_REQUEST_DELAY_MS: "0",
+    STOCKS_HISTORY_REQUEST_TIMEOUT_MS: "20",
+  },
+  storage: statelessStorage,
+  fetchImpl: async (url, init) => {
+    if (url.includes("query1.finance.yahoo.com")) {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    eodhdTimeoutSignals.push(init?.signal);
+    if (url.includes("api_token=stalled-key")) {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => reject(init.signal.reason),
+          { once: true },
+        );
+      });
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ date: "2026-05-06", adjusted_close: 100 }],
+    };
+  },
+});
+const eodhdTimeoutResults = await Promise.race([
+  eodhdTimeoutPromise,
+  new Promise((_, reject) => {
+    eodhdTimeoutGuard = setTimeout(
+      () => reject(new Error("EODHD history timeout did not rotate keys")),
+      500,
+    );
+  }),
+]).finally(() => clearTimeout(eodhdTimeoutGuard));
+assert.deepEqual(
+  eodhdTimeoutResults.map(({ status, provider }) => ({ status, provider })),
+  [{ status: "success", provider: "eodhd" }],
+);
+assert.equal(eodhdTimeoutSignals[0]?.aborted, true);
+assert.equal(eodhdTimeoutSignals[1]?.aborted, false);
+await new Promise((resolve) => setTimeout(resolve, 40));
+assert.equal(eodhdTimeoutSignals[1]?.aborted, false);
+
+const rotatedKeyUrls = [];
+const rotatedKeyResults = await backfillStocksHistory({
+  tickers: ["NVDA"],
+  startDate: "2026-05-06",
+  endDate: "2026-05-08",
+  env: {
+    STOCKS_EODHD_API_KEYS: "exhausted-key, backup-key",
+    STOCKS_HISTORY_REQUEST_DELAY_MS: "0",
+  },
+  storage: statelessStorage,
+  fetchImpl: async (url) => {
+    if (url.includes("query1.finance.yahoo.com")) {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    rotatedKeyUrls.push(url);
+    if (url.includes("api_token=exhausted-key")) {
+      return { ok: false, status: 429, json: async () => ({}) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ date: "2026-05-06", adjusted_close: 100 }],
+    };
+  },
+});
+assert.deepEqual(
+  rotatedKeyResults.map(({ status, provider, error }) => ({
+    status,
+    provider,
+    error,
+  })),
+  [{ status: "success", provider: "eodhd", error: null }],
+);
+assert.deepEqual(rotatedKeyUrls, [
+  "https://eodhd.com/api/eod/NVDA.US?api_token=exhausted-key&fmt=json&period=d&from=2026-05-06&to=2026-05-08",
+  "https://eodhd.com/api/eod/NVDA.US?api_token=backup-key&fmt=json&period=d&from=2026-05-06&to=2026-05-08",
+]);
+
 const dbPath = join(
   process.cwd(),
   ".signal-hub",

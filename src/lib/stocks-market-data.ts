@@ -10,6 +10,7 @@ import {
   getProviderApiKeys,
   pickProviderApiKey,
 } from "./provider-api-keys.ts";
+import { eodhdProviderSymbol } from "./stocks-provider-symbols.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -1008,7 +1009,7 @@ function finnhubStockCandlesUrl(ticker: string, apiKey: string) {
 function eodhdSymbol(ticker: string) {
   const normalizedTicker = ticker.trim().toUpperCase();
   if (!normalizedTicker || naverDomesticCode(normalizedTicker)) return "";
-  return normalizedTicker.includes(".") ? normalizedTicker : `${normalizedTicker}.US`;
+  return eodhdProviderSymbol(normalizedTicker);
 }
 
 function eodhdRealtimeUrl(ticker: string, apiKey: string) {

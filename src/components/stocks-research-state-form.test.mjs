@@ -64,6 +64,20 @@ const saved = finishResearchStateSave(parentUpdated, started.operation.id, {
 assert.equal(saved.saveStatus, "saved");
 assert.equal(saved.saving, false);
 
+for (const patch of [
+  { status: "waiting" },
+  { conviction: 2 },
+  { entryZone: "$190-$200" },
+  { invalidation: "Breaks the new support level" },
+  { nextCatalyst: "Investor day" },
+  { thesis: "Updated demand evidence" },
+]) {
+  const edited = updateResearchStateForm(saved, patch);
+  assert.equal(edited.saveStatus, "idle");
+  assert.equal(edited.saveError, null);
+  assert.deepEqual(edited.form, { ...saved.form, ...patch });
+}
+
 let rejectedDraft = createResearchStatePanelState(researchState());
 rejectedDraft = updateResearchStateForm(rejectedDraft, {
   thesis: "Keep this local draft",
@@ -78,6 +92,12 @@ const rejected = finishResearchStateSave(
 assert.equal(rejected.form.thesis, "Keep this local draft");
 assert.equal(rejected.saveStatus, "error");
 assert.equal(rejected.saveError, "Network unavailable");
+const editedRejected = updateResearchStateForm(rejected, {
+  thesis: "Keep this revised local draft",
+});
+assert.equal(editedRejected.form.thesis, "Keep this revised local draft");
+assert.equal(editedRejected.saveStatus, "idle");
+assert.equal(editedRejected.saveError, null);
 
 const switchedTicker = syncResearchStatePanelState(
   saved,

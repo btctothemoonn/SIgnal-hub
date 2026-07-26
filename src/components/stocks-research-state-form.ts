@@ -51,7 +51,12 @@ export function updateResearchStateForm(
   state: ResearchStatePanelState,
   patch: Partial<ResearchStateForm>,
 ): ResearchStatePanelState {
-  return { ...state, form: { ...state.form, ...patch } };
+  return {
+    ...state,
+    form: { ...state.form, ...patch },
+    saveStatus: state.saving ? "saving" : "idle",
+    saveError: null,
+  };
 }
 
 export function syncResearchStatePanelState(

@@ -1,6 +1,7 @@
 import {
   ALPHA_RESEARCH_POOL_TRACKING_START_DATE,
 } from "./alpha-research-pool.ts";
+import { getProviderApiKeys } from "./provider-api-keys.ts";
 import {
   getStocksHistoryBackfillStatus,
   getStocksHistoryCoverage,
@@ -9,6 +10,7 @@ import {
   updateStocksHistoryBackfillStatus,
   type StocksHistoricalDailyPoint,
 } from "./stocks-performance-data.ts";
+import { eodhdProviderSymbol } from "./stocks-provider-symbols.ts";
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -20,7 +22,7 @@ type FetchResponse = {
 
 type FetchLike = (
   input: string,
-  init?: { cache?: string },
+  init?: { cache?: string; signal?: AbortSignal },
 ) => Promise<FetchResponse>;
 
 type StocksHistoryStorage = {
@@ -105,17 +107,13 @@ function dateFromUnixSeconds(value: unknown) {
   return marketDateInNewYork(new Date(seconds * 1000).toISOString());
 }
 
-function eodhdApiKey(env: EnvLike) {
-  for (const name of [
+function eodhdApiKeys(env: EnvLike) {
+  return getProviderApiKeys(env, [
     "STOCKS_EODHD_API_KEYS",
     "STOCKS_EODHD_API_KEY",
     "EODHD_API_KEYS",
     "EODHD_API_KEY",
-  ]) {
-    const key = env[name]?.split(",").map((value) => value.trim()).find(Boolean);
-    if (key) return key;
-  }
-  return "";
+  ]);
 }
 
 function yahooHistoryUrl(ticker: string, startDate: string, endDate: string) {
@@ -142,7 +140,9 @@ function eodhdHistoryUrl(
     from: startDate,
     to: endDate,
   });
-  return `https://eodhd.com/api/eod/${encodeURIComponent(ticker)}?${params.toString()}`;
+  return `https://eodhd.com/api/eod/${encodeURIComponent(
+    eodhdProviderSymbol(ticker),
+  )}?${params.toString()}`;
 }
 
 function dateDaysBefore(value: string, days: number) {
@@ -158,6 +158,37 @@ function maxDate(left: string, right: string) {
 function requestDelayMs(env: EnvLike) {
   const value = Math.floor(Number(env.STOCKS_HISTORY_REQUEST_DELAY_MS ?? 150));
   return Number.isFinite(value) ? Math.max(0, Math.min(value, 30_000)) : 150;
+}
+
+function requestTimeoutMs(env: EnvLike) {
+  const value = Math.floor(
+    Number(env.STOCKS_HISTORY_REQUEST_TIMEOUT_MS ?? 15_000),
+  );
+  return Number.isFinite(value)
+    ? Math.max(1, Math.min(value, 120_000))
+    : 15_000;
+}
+
+async function withRequestTimeout<T>(
+  label: string,
+  timeoutMs: number,
+  request: (signal: AbortSignal) => Promise<T>,
+) {
+  const controller = new AbortController();
+  const timeoutError = new Error(`${label} timed out after ${timeoutMs}ms`);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([request(controller.signal), deadline]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 async function delay(milliseconds: number) {
@@ -271,32 +302,65 @@ export async function backfillStocksHistory({
         : startDate;
 
       try {
-        const response = await fetchImpl(
-          yahooHistoryUrl(ticker, requestedFrom, endDate),
-          { cache: "no-store" },
+        points = await withRequestTimeout(
+          "Yahoo history request",
+          requestTimeoutMs(env),
+          async (signal) => {
+            const response = await fetchImpl(
+              yahooHistoryUrl(ticker, requestedFrom, endDate),
+              { cache: "no-store", signal },
+            );
+            if (!response.ok) {
+              throw new Error(`Yahoo history HTTP ${response.status}`);
+            }
+            const parsed = parseYahooHistoricalDailyPoints(
+              ticker,
+              await response.json(),
+            );
+            if (parsed.length === 0) {
+              throw new Error("Yahoo history returned no usable points");
+            }
+            return parsed;
+          },
         );
-        if (!response.ok) throw new Error(`Yahoo history HTTP ${response.status}`);
-        points = parseYahooHistoricalDailyPoints(ticker, await response.json());
-        if (points.length === 0) throw new Error("Yahoo history returned no usable points");
         provider = "yahoo";
       } catch (error) {
         errors.push(error instanceof Error ? error.message : String(error));
       }
 
       if (!provider) {
-        try {
-          const apiKey = eodhdApiKey(env);
-          if (!apiKey) throw new Error("EODHD API key is not configured");
-          const response = await fetchImpl(
-            eodhdHistoryUrl(ticker, apiKey, requestedFrom, endDate),
-            { cache: "no-store" },
-          );
-          if (!response.ok) throw new Error(`EODHD history HTTP ${response.status}`);
-          points = parseEodhdHistoricalDailyPoints(ticker, await response.json());
-          if (points.length === 0) throw new Error("EODHD history returned no usable points");
-          provider = "eodhd";
-        } catch (error) {
-          errors.push(error instanceof Error ? error.message : String(error));
+        const apiKeys = eodhdApiKeys(env);
+        if (apiKeys.length === 0) {
+          errors.push("EODHD API key is not configured");
+        }
+        for (const apiKey of apiKeys) {
+          try {
+            points = await withRequestTimeout(
+              "EODHD history request",
+              requestTimeoutMs(env),
+              async (signal) => {
+                const response = await fetchImpl(
+                  eodhdHistoryUrl(ticker, apiKey, requestedFrom, endDate),
+                  { cache: "no-store", signal },
+                );
+                if (!response.ok) {
+                  throw new Error(`EODHD history HTTP ${response.status}`);
+                }
+                const parsed = parseEodhdHistoricalDailyPoints(
+                  ticker,
+                  await response.json(),
+                );
+                if (parsed.length === 0) {
+                  throw new Error("EODHD history returned no usable points");
+                }
+                return parsed;
+              },
+            );
+            provider = "eodhd";
+            break;
+          } catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+          }
         }
       }
 
