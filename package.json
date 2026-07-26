@@ -27,6 +27,7 @@
     "alpha-summary:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs --once",
     "stocks:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs",
     "stocks:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs --once",
+    "stocks:history:backfill": "node --experimental-strip-types --experimental-transform-types scripts/stocks-history-backfill.mjs",
     "tiger:holdings": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs",
     "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once",
     "douyin:worker": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs",
