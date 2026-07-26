@@ -18,6 +18,7 @@ import {
   type StocksResearchStateInput,
 } from "@/lib/stocks-research-state";
 import { StocksResearchStatePanel } from "@/components/stocks-research-state-panel";
+import { getResearchStatePanelMode } from "@/components/stocks-research-state-form";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
@@ -271,6 +272,11 @@ export function AlphaStockDetail({
     ["自由现金流", stock.financialSnapshot.freeCashFlow],
     ["指引", stock.financialSnapshot.guidance],
   ];
+  const researchStatePanelMode = getResearchStatePanelMode({
+    researchState,
+    loading: researchStateLoading,
+    hasSaveHandler: Boolean(onSaveResearchState),
+  });
 
   return (
     <article className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
@@ -341,7 +347,7 @@ export function AlphaStockDetail({
       </div>
 
       <div className="mt-5">
-        {researchState && onSaveResearchState ? (
+        {researchStatePanelMode === "editor" && researchState && onSaveResearchState ? (
           <StocksResearchStatePanel
             ticker={stock.ticker}
             researchState={researchState}
@@ -350,7 +356,9 @@ export function AlphaStockDetail({
           />
         ) : (
           <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
-            {researchStateLoading ? "研究状态加载中" : "研究状态暂不可用"}
+            {researchStatePanelMode === "loading"
+              ? "研究状态加载中"
+              : "研究状态暂不可用"}
           </section>
         )}
       </div>

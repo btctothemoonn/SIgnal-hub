@@ -18,7 +18,11 @@ assert.match(source, /保存研究状态/);
 assert.match(source, /onSave/);
 assert.match(source, /保存失败/);
 assert.match(source, /updatedAt/);
-assert.match(source, /disabled=\{loading \|\| saving\}/);
+assert.match(source, /<form[\s\S]*onSubmit=\{handleSubmit\}/);
+assert.match(source, /type="submit"/);
+assert.match(source, /disabled=\{loading \|\| panelState\.saving\}/);
 assert.match(source, /await onSave/);
+assert.match(source, /inline-flex overflow-hidden rounded-md border/);
+assert.match(source, /aria-pressed/);
 
 console.log("ok - stocks research state editor contract");
