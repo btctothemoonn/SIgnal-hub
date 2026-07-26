@@ -22,7 +22,7 @@
 
 ## Test Commands And Outputs
 
-The Node runtime required by the repository tests is not available on PATH or at an accessible `node.exe` location. The following commands were attempted from the isolated worktree:
+During the initial implementation pass, the Node runtime was not found through the PATH lookup used at that time. The following commands were attempted before the bundled executable was located:
 
 ```powershell
 node src/components/alpha-research-page.test.mjs
@@ -37,7 +37,7 @@ Output for each command:
 node : The term 'node' is not recognized as the name of a cmdlet, function, script file, or operable program.
 ```
 
-The final requested component-test commands remain blocked by the same missing runner:
+Those component-test commands were not executed during the initial pass. Fix Round 1 below supersedes this historical limitation with successful bundled-runtime evidence for the full covering set:
 
 ```powershell
 node src/components/alpha-research-page.test.mjs
@@ -76,7 +76,7 @@ ok - UTF-8 src\components\alpha-sector-list.behavior.test.mjs
 
 ## Concerns
 
-- Node.js, npm, npx, pnpm, yarn, bun, deno, and tsc are unavailable on PATH, and no accessible `node.exe` was found. The component suite and TypeScript check are unexecuted in this environment.
+- The initial PATH lookup did not expose Node.js. The bundled runtime was subsequently located and used for both component tests and real project TypeScript verification in the fix rounds below.
 - The original source-contract tests and several implementation edits were already present or changed concurrently in the isolated worktree. They were reviewed and retained; the runtime filter test was expanded during this task.
 
 ## Fix Round 1/5
@@ -170,4 +170,31 @@ ok - stocks research state editor contract
 
 ```text
 ok - alpha stock detail research review UI
+```
+
+## Fix Round 2/5
+
+### Fix Details
+
+- Replaced the stale statement that TypeScript verification was unexecuted with the current bundled-runtime evidence.
+- Ran the installed project compiler against the full workspace configuration. No Task 6 or other project type errors were reported, so product code and tests were unchanged in this round.
+
+### TypeScript Verification Evidence
+
+Command, executed from `D:\Vibe coding\signal-hub\.worktrees\stocks-history-research-state`:
+
+```powershell
+& 'C:\Users\vicar\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' .\node_modules\typescript\bin\tsc --noEmit
+```
+
+Exit code:
+
+```text
+0
+```
+
+Output:
+
+```text
+(no output)
 ```
