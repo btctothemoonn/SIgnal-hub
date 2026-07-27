@@ -31,9 +31,7 @@
     "tiger:holdings": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs",
     "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once",
     "douyin:worker": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs",
-    "douyin:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs --once",
-    "opportunity:worker": "node --experimental-strip-types --experimental-transform-types scripts/opportunity-worker.mjs",
-    "opportunity:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/opportunity-worker.mjs --once"
+    "douyin:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs --once"
   },
   "dependencies": {
     "@tigeropenapi/tigeropen": "^0.4.0",
