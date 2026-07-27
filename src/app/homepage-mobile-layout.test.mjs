@@ -13,20 +13,18 @@ assert.doesNotMatch(page, /getCached6551TwitterSnapshot/);
 assert.match(page, /mainClassName="[^"]*min-h-0[^"]*"/);
 assert.match(responsiveLayout, /data-mobile-signal-pager/);
 assert.match(responsiveLayout, /snap-x snap-mandatory/);
-assert.match(responsiveLayout, /opportunityEnabled \? enabledMobilePanels : mobilePanels/);
 assert.match(responsiveLayout, /MOBILE_PANEL_INDEX\[panel\]/);
-assert.match(responsiveLayout, /MOBILE_PANEL_INDEX\.opportunities/);
-assert.match(responsiveLayout, /if \(!opportunityEnabled\)/);
+assert.doesNotMatch(
+  responsiveLayout,
+  /OpportunityRadar|opportunityEnabled|opportunities/,
+);
 assert.match(responsiveLayout, /grid grid-cols-2 gap-1/);
-assert.match(responsiveLayout, /grid-cols-3/);
+assert.doesNotMatch(responsiveLayout, /grid-cols-3/);
 assert.match(responsiveLayout, /w-full shrink-0 snap-start/);
 assert.match(responsiveLayout, /lg:gap-4/);
 assert.match(responsiveLayout, /<section id="signals"/);
 assert.match(responsiveLayout, /<aside\s+id="alpha"/);
 assert.match(responsiveLayout, /className="[^"]*mobile-command-summary[^"]*"/);
-assert.match(
-  page,
-  /opportunityEnabled=\{\s*process\.env\.OPPORTUNITY_RADAR_UI_ENABLED === "1"\s*\}/,
-);
+assert.doesNotMatch(page, /OPPORTUNITY_RADAR_UI_ENABLED|opportunityEnabled/);
 
 console.log("ok - homepage mobile signal pager layout");
