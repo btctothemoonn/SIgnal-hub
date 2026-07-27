@@ -58,7 +58,10 @@ export function SignalsResponsiveLayout({
   pollXSnapshot,
   opportunityEnabled,
 }: SignalsResponsiveLayoutProps) {
+  const mobilePagerRef = useRef<HTMLElement | null>(null);
   const mobileScrollerRef = useRef<HTMLDivElement | null>(null);
+  const mobileReturnScrollYRef = useRef<number | null>(null);
+  const previousMobilePanelRef = useRef<SignalMobilePanel>("feed");
   const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
   const [activeMobilePanel, setActiveMobilePanel] =
     useState<SignalMobilePanel>("feed");
@@ -73,6 +76,31 @@ export function SignalsResponsiveLayout({
     media.addEventListener("change", syncLayout);
     return () => media.removeEventListener("change", syncLayout);
   }, []);
+
+  useEffect(() => {
+    if (isDesktop !== false) return;
+
+    const previousPanel = previousMobilePanelRef.current;
+    previousMobilePanelRef.current = activeMobilePanel;
+
+    if (activeMobilePanel !== "summary") {
+      if (previousPanel === "summary") {
+        const returnScrollY = mobileReturnScrollYRef.current;
+        mobileReturnScrollYRef.current = null;
+        if (returnScrollY !== null) {
+          window.scrollTo({ top: returnScrollY, behavior: "auto" });
+        }
+      }
+      return;
+    }
+
+    if (previousPanel === "summary") return;
+    mobileReturnScrollYRef.current = window.scrollY;
+    mobilePagerRef.current?.scrollIntoView({
+      behavior: "auto",
+      block: "start",
+    });
+  }, [activeMobilePanel, isDesktop]);
 
   const showMobilePanel = useCallback(
     (panel: SignalMobilePanel) => {
@@ -250,7 +278,11 @@ export function SignalsResponsiveLayout({
 
   if (!opportunityEnabled) {
     return (
-      <section data-mobile-signal-pager className="min-w-0">
+      <section
+        ref={mobilePagerRef}
+        data-mobile-signal-pager
+        className="min-w-0 scroll-mt-[5.25rem]"
+      >
         <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
           <div className="grid grid-cols-2 gap-1">
             {mobilePanels.map((panel) => (
@@ -300,7 +332,11 @@ export function SignalsResponsiveLayout({
   }
 
   return (
-    <section data-mobile-signal-pager className="min-w-0">
+    <section
+      ref={mobilePagerRef}
+      data-mobile-signal-pager
+      className="min-w-0 scroll-mt-[5.25rem]"
+    >
       <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
         <div
           role="tablist"

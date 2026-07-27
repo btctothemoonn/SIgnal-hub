@@ -35,6 +35,22 @@ assert.match(component, /behavior: opportunityEnabled \? "auto" : "smooth"/);
 assert.equal(component.match(/scroll-smooth/g)?.length, 1);
 assert.match(component, /snap-x snap-mandatory/);
 assert.match(component, /onScroll=\{handleMobileScroll\}/);
+assert.match(component, /const mobilePagerRef = useRef<HTMLElement \| null>\(null\)/);
+assert.match(
+  component,
+  /const mobileReturnScrollYRef = useRef<number \| null>\(null\)/,
+);
+assert.match(
+  component,
+  /const previousMobilePanelRef = useRef<SignalMobilePanel>\("feed"\)/,
+);
+assert.equal(component.match(/ref=\{mobilePagerRef\}/g)?.length, 2);
+assert.match(component, /if \(activeMobilePanel !== "summary"\) \{/);
+assert.match(component, /mobileReturnScrollYRef\.current = window\.scrollY/);
+assert.match(component, /mobilePagerRef\.current\?\.scrollIntoView\(\{/);
+assert.match(component, /behavior: "auto"/);
+assert.match(component, /block: "start"/);
+assert.match(component, /window\.scrollTo\(\{\s*top: returnScrollY/);
 assert.match(component, /aria-pressed=\{activeMobilePanel === panel\.id\}/);
 assert.match(component, /role="tablist"/);
 assert.match(component, /role="tab"/);
