@@ -15,9 +15,7 @@ assert.ok(names.includes("signal-hub-telegram"));
 assert.ok(names.includes("signal-hub-x-hybrid"));
 assert.ok(names.includes("signal-hub-tiger-holdings"));
 assert.ok(names.includes("signal-hub-douyin"));
-assert.equal(SIGNAL_HUB_SYSTEMD_SERVICES[8].name, "signal-hub-opportunity");
-assert.equal(SIGNAL_HUB_SYSTEMD_SERVICES[8].category, "ai");
-assert.equal(SIGNAL_HUB_SYSTEMD_SERVICES[8].required, true);
+assert.ok(!names.includes("signal-hub-opportunity"));
 assert.equal(getSignalHubSystemdServiceLabel("signal-hub-web"), "Web 应用");
 assert.equal(
   getSignalHubSystemdServiceLabel("signal-hub-unknown"),

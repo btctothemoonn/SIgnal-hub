@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
-import { getOpportunityDbPath } from "./opportunity-store.ts";
 import {
   getTelegramPipelineLatestUpdatedAt,
   getTelegramPipelineSnapshot,
@@ -75,29 +74,6 @@ const DEFAULT_STALE_MS = {
   stocksCatalysts: 45 * 60 * 1000,
   summary: 2 * 60 * 60 * 1000,
   tiger: 5 * 60 * 1000,
-  opportunity: 2 * 60 * 60 * 1000,
-};
-
-type OpportunityHealthState = {
-  lastSuccessAt: string | null;
-  lastError: string | null;
-  candidateCount: number;
-  evaluatedCount: number;
-  evaluatedThisCycle: number;
-  selectedToday: number;
-  provider: string | null;
-  model: string | null;
-  providerTelemetry: {
-    minimax: OpportunityProviderHealthCounters;
-    deepseek: OpportunityProviderHealthCounters;
-  };
-};
-
-type OpportunityProviderHealthCounters = {
-  attempts: number;
-  successes: number;
-  failures: number;
-  fallbacks: number;
 };
 
 function errorMessage(error: unknown) {
@@ -366,125 +342,6 @@ function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function boundedOpportunityCounter(value: unknown) {
-  return Math.min(100, Math.max(0, Math.floor(numberValue(value))));
-}
-
-function opportunityProviderTelemetryValue(value: unknown) {
-  const record = recordValue(value);
-  const counters = (provider: "minimax" | "deepseek") => {
-    const candidate = recordValue(record[provider]);
-    return {
-      attempts: boundedOpportunityCounter(candidate.attempts),
-      successes: boundedOpportunityCounter(candidate.successes),
-      failures: boundedOpportunityCounter(candidate.failures),
-      fallbacks: boundedOpportunityCounter(candidate.fallbacks),
-    };
-  };
-  return { minimax: counters("minimax"), deepseek: counters("deepseek") };
-}
-
-function nullableStringValue(value: unknown) {
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function readOpportunityHealthState(env: EnvLike): OpportunityHealthState | null {
-  const dbPath = getOpportunityDbPath(env);
-  if (!existsSync(dbPath)) return null;
-  let db: DatabaseSync | null = null;
-  try {
-    db = new DatabaseSync(dbPath);
-    const row = db
-      .prepare(`
-        SELECT state_value FROM opportunity_worker_state
-        WHERE state_key = 'last_cycle'
-      `)
-      .get() as Record<string, unknown> | undefined;
-    if (typeof row?.state_value !== "string") return null;
-    const parsed = JSON.parse(row.state_value) as unknown;
-    const state = recordValue(parsed);
-    if (Object.keys(state).length === 0) return null;
-    return {
-      lastSuccessAt: nullableStringValue(state.lastSuccessAt),
-      lastError: nullableStringValue(state.lastError),
-      candidateCount: numberValue(state.candidateCount),
-      evaluatedCount: numberValue(state.evaluatedCount),
-      evaluatedThisCycle: numberValue(state.evaluatedThisCycle),
-      selectedToday: numberValue(state.selectedToday),
-      provider: nullableStringValue(state.provider),
-      model: nullableStringValue(state.model),
-      providerTelemetry: opportunityProviderTelemetryValue(state.providerTelemetry),
-    };
-  } catch {
-    return null;
-  } finally {
-    db?.close();
-  }
-}
-
-export function opportunityHealthItem(env: EnvLike, now: Date): SystemHealthItem {
-  const state = readOpportunityHealthState(env);
-  if (!state) {
-    return {
-      id: "opportunity",
-      label: "机会雷达",
-      status: "warning",
-      detail: "opportunity cache missing",
-      updatedAt: null,
-      stale: true,
-    };
-  }
-
-  const stale = isStale(state.lastSuccessAt, now, DEFAULT_STALE_MS.opportunity);
-  const hasReadableSnapshot = Number.isFinite(parseTime(state.lastSuccessAt));
-  const ruleOnly =
-    state.candidateCount > 0 && state.provider === null && state.evaluatedCount === 0;
-  const providerFallback = state.provider === "deepseek";
-  const status: SystemHealthStatus =
-    state.lastError && !hasReadableSnapshot
-      ? "error"
-      : state.lastError || stale || ruleOnly || providerFallback
-        ? "warning"
-        : "ok";
-  const detail = state.lastError
-    ? state.lastError
-    : [
-        `${state.candidateCount} candidates`,
-        `${state.evaluatedCount} evaluated`,
-        `${state.evaluatedThisCycle} this cycle`,
-        `${state.selectedToday} selected`,
-        state.provider ?? (state.evaluatedCount > 0 ? "cached" : "rule-only"),
-        ageLabel(state.lastSuccessAt, now),
-      ].join(" 路 ");
-
-  return {
-    id: "opportunity",
-    label: "机会雷达",
-    status,
-    detail,
-    updatedAt: state.lastSuccessAt,
-    stale,
-    meta: {
-      lastSuccessAt: state.lastSuccessAt,
-      lastError: state.lastError,
-      candidates: state.candidateCount,
-      evaluated: state.evaluatedCount,
-      evaluatedThisCycle: state.evaluatedThisCycle,
-      selected: state.selectedToday,
-      provider: state.provider,
-      model: state.model,
-      minimaxAttempts: state.providerTelemetry.minimax.attempts,
-      minimaxSuccesses: state.providerTelemetry.minimax.successes,
-      minimaxFailures: state.providerTelemetry.minimax.failures,
-      minimaxFallbacks: state.providerTelemetry.minimax.fallbacks,
-      deepseekAttempts: state.providerTelemetry.deepseek.attempts,
-      deepseekSuccesses: state.providerTelemetry.deepseek.successes,
-      deepseekFailures: state.providerTelemetry.deepseek.failures,
-      deepseekFallbacks: state.providerTelemetry.deepseek.fallbacks,
-    },
-  };
-}
-
 function alphaSummaryDbPath(env: EnvLike, audience: AlphaSummaryAudience) {
   if (audience === "stocks") {
     return (
@@ -641,7 +498,6 @@ export async function getSystemHealthSnapshot({
     summaryHealthItem({ audience: "signals", label: "AI 总结(信号)", env, now }),
     summaryHealthItem({ audience: "stocks", label: "AI 总结(Stocks)", env, now }),
     tigerHealthItem(env, now),
-    opportunityHealthItem(env, now),
     ...serviceStates.map(summarizeServiceState),
   ];
 

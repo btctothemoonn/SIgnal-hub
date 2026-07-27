@@ -26,17 +26,8 @@ assert.match(source, /signal-hub-web/);
 assert.match(source, /signal-hub-stocks-cache/);
 assert.match(source, /signal-hub-tiger-holdings/);
 assert.match(source, /signal-hub-douyin/);
-assert.match(serviceRegistry, /signal-hub-opportunity/);
-assert.match(source, /signal-hub-opportunity\.service/);
-assert.match(
-  source,
-  /ExecStart=\$NODE_BIN --experimental-strip-types --experimental-transform-types \$APP_DIR\/scripts\/opportunity-worker\.mjs/,
-);
 assert.match(source, /Environment=SIGNAL_HUB_RUNTIME_DIR=\$APP_DIR\/\.signal-hub/);
-const opportunityEnableIndex = source.indexOf("sudo systemctl enable signal-hub-opportunity");
-const opportunityRestartIndex = source.indexOf("  signal-hub-opportunity\n", opportunityEnableIndex);
-assert.ok(opportunityEnableIndex >= 0, "deployment must enable the opportunity worker");
-assert.ok(opportunityRestartIndex > opportunityEnableIndex, "enabled opportunity worker must be restarted");
-assert.doesNotMatch(source, /OPPORTUNITY_RADAR_UI_ENABLED/);
+assert.doesNotMatch(serviceRegistry, /signal-hub-opportunity|机会雷达/);
+assert.doesNotMatch(source, /signal-hub-opportunity|opportunity-worker/);
 
 console.log("ok - vps deploy script contract");
