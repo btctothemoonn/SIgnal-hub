@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
-import type {
-  BinanceHynixPremiumPoint,
-  BinanceHynixPremiumSnapshot,
+import {
+  buildBinanceHynixPremiumPoint,
+  parseBinanceFuturesWebSocketMessage,
+  upsertBinanceHynixPremiumPoint,
+  type BinanceFuturesWebSocketMessage,
+  type BinanceHynixPremiumPoint,
+  type BinanceHynixPremiumSnapshot,
+  type BinanceKlinePoint,
 } from "@/lib/binance-hynix-premium";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
@@ -71,6 +76,11 @@ export function StocksHynixPremiumCurve() {
   const [liveSnapshot, setLiveSnapshot] =
     useState<BinanceHynixPremiumSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
+  const websocketKlinesRef = useRef<Record<string, BinanceKlinePoint>>({});
+  const websocketMarkPricesRef = useRef<
+    Record<string, { markPrice: number; eventTime: number }>
+  >({});
   const [cachedSnapshot, writeCachedSnapshot] =
     useBrowserJsonCache<BinanceHynixPremiumSnapshot>(
       STOCKS_HYNIX_PREMIUM_CACHE_KEY,
@@ -91,6 +101,10 @@ export function StocksHynixPremiumCurve() {
     [shownPoints],
   );
   const firstPoint = shownPoints[0] ?? null;
+
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+  }, [snapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -124,6 +138,106 @@ export function StocksHynixPremiumCurve() {
     };
   }, [writeCachedSnapshot]);
 
+  useEffect(() => {
+    const websocketUrl = snapshot?.websocket?.url;
+    const baseSymbol = snapshot?.symbols.base;
+    const benchmarkSymbol = snapshot?.symbols.benchmark;
+    if (!websocketUrl || !baseSymbol || !benchmarkSymbol) return;
+    if (typeof WebSocket === "undefined") return;
+
+    let closedByEffect = false;
+    const applyPremiumPoint = (point: BinanceHynixPremiumPoint | null) => {
+      if (!point) return;
+      setLiveSnapshot((current) => {
+        const baseSnapshot = current ?? snapshotRef.current;
+        if (!baseSnapshot) return current;
+        const nextSnapshot = upsertBinanceHynixPremiumPoint(
+          baseSnapshot,
+          point,
+          144,
+        );
+        writeCachedSnapshot(nextSnapshot);
+        return nextSnapshot;
+      });
+    };
+    const applyMarkPrice = (
+      message: Extract<BinanceFuturesWebSocketMessage, { type: "markPrice" }>,
+    ) => {
+      websocketMarkPricesRef.current[message.symbol] = {
+        markPrice: message.markPrice,
+        eventTime: message.eventTime,
+      };
+      const baseMark = websocketMarkPricesRef.current[baseSymbol];
+      const benchmarkMark = websocketMarkPricesRef.current[benchmarkSymbol];
+      if (!baseMark || !benchmarkMark) return;
+      const capturedTime = Math.min(baseMark.eventTime, benchmarkMark.eventTime);
+      const openTime = Math.floor(capturedTime / (5 * 60 * 1000)) * 5 * 60 * 1000;
+      applyPremiumPoint(
+        buildBinanceHynixPremiumPoint({
+          openTime,
+          closeTime: openTime + 5 * 60 * 1000 - 1,
+          capturedAt: new Date(capturedTime).toISOString(),
+          baseSymbol,
+          benchmarkSymbol,
+          basePrice: baseMark.markPrice,
+          benchmarkPrice: benchmarkMark.markPrice,
+        }),
+      );
+    };
+    const applyKline = (
+      message: Extract<BinanceFuturesWebSocketMessage, { type: "kline" }>,
+    ) => {
+      websocketKlinesRef.current[message.point.symbol] = message.point;
+      const baseKline = websocketKlinesRef.current[baseSymbol];
+      const benchmarkKline = websocketKlinesRef.current[benchmarkSymbol];
+      if (!baseKline || !benchmarkKline) return;
+      if (baseKline.openTime !== benchmarkKline.openTime) return;
+      applyPremiumPoint(
+        buildBinanceHynixPremiumPoint({
+          openTime: baseKline.openTime,
+          closeTime: Math.min(baseKline.closeTime, benchmarkKline.closeTime),
+          capturedAt: new Date(
+            Math.min(message.eventTime, baseKline.closeTime, benchmarkKline.closeTime),
+          ).toISOString(),
+          baseSymbol,
+          benchmarkSymbol,
+          basePrice: baseKline.closePrice,
+          benchmarkPrice: benchmarkKline.closePrice,
+        }),
+      );
+    };
+
+    const socket = new WebSocket(websocketUrl);
+    socket.onopen = () => {
+      if (!closedByEffect) setError(null);
+    };
+    socket.onmessage = (event) => {
+      const message = parseBinanceFuturesWebSocketMessage(event.data);
+      if (!message) return;
+      if (message.type === "markPrice") {
+        applyMarkPrice(message);
+      } else {
+        applyKline(message);
+      }
+    };
+    socket.onerror = () => {
+      if (!closedByEffect) setError("Binance Futures WebSocket error");
+    };
+    socket.onclose = () => {
+      if (!closedByEffect) setError("Binance Futures WebSocket disconnected");
+    };
+
+    return () => {
+      closedByEffect = true;
+      socket.close();
+    };
+  }, [
+    snapshot?.symbols.base,
+    snapshot?.symbols.benchmark,
+    snapshot?.websocket?.url,
+    writeCachedSnapshot,
+  ]);
+
   return (
     <section
       data-testid="stocks-hynix-premium-curve"
@@ -135,7 +249,7 @@ export function StocksHynixPremiumCurve() {
             币安海力士溢价曲线
           </h2>
           <p className="mt-0.5 text-[11px] text-muted">
-            SKHYUSDT * 10 / SKHYNIXUSDT · 5m K 线 · Binance Alpha
+            SKHYUSDT * 10 / SKHYNIXUSDT · 5m K 线 · Binance Futures
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:min-w-[30rem]">

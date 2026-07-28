@@ -1,7 +1,7 @@
 type EnvLike = Record<string, string | undefined>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-export type BinanceHynixPremiumProvider = "binance-alpha" | "binance-spot";
+export type BinanceHynixPremiumProvider = "binance-futures";
 
 export type BinanceKlinePoint = {
   symbol: string;
@@ -13,6 +13,13 @@ export type BinanceKlinePoint = {
   lowPrice: number;
   closePrice: number;
   volume: number;
+};
+
+export type BinanceFuturesMarkPrice = {
+  symbol: string;
+  markPrice: number;
+  indexPrice: number | null;
+  time: number;
 };
 
 export type BinanceHynixPremiumPoint = {
@@ -35,10 +42,29 @@ export type BinanceHynixPremiumSnapshot = {
     base: string;
     benchmark: string;
   };
+  websocket: {
+    url: string;
+    streams: string[];
+  };
   points: BinanceHynixPremiumPoint[];
   latest: BinanceHynixPremiumPoint | null;
   errors: string[];
 };
+
+export type BinanceFuturesWebSocketMessage =
+  | {
+      type: "kline";
+      point: BinanceKlinePoint;
+      eventTime: number;
+      closed: boolean;
+    }
+  | {
+      type: "markPrice";
+      symbol: string;
+      markPrice: number;
+      indexPrice: number | null;
+      eventTime: number;
+    };
 
 type SnapshotInput = {
   generatedAt?: string;
@@ -48,12 +74,16 @@ type SnapshotInput = {
   baseKlines: BinanceKlinePoint[];
   benchmarkKlines: BinanceKlinePoint[];
   errors: string[];
+  websocketBaseUrl?: string;
 };
 
 const DEFAULT_BASE_SYMBOL = "SKHYUSDT";
 const DEFAULT_BENCHMARK_SYMBOL = "SKHYNIXUSDT";
+const DEFAULT_FUTURES_REST_BASE_URL = "https://fapi.binance.com";
+const DEFAULT_FUTURES_WS_BASE_URL = "wss://fstream.binance.com";
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
 const INTERVAL = "5m" as const;
+const INTERVAL_MS = 5 * 60 * 1000;
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -62,6 +92,10 @@ function stringValue(value: unknown) {
 function numberValue(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function booleanValue(value: unknown) {
+  return value === true || value === "true";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -84,40 +118,33 @@ function normalizeLimit(value: number | undefined) {
   return Number.isFinite(parsed) ? Math.max(2, Math.min(parsed, 288)) : 144;
 }
 
-function normalizeProvider(value: string | undefined): BinanceHynixPremiumProvider {
-  return value?.trim().toLowerCase() === "spot"
-    ? "binance-spot"
-    : "binance-alpha";
-}
-
 function trimBaseUrl(value: string) {
   return value.replace(/\/+$/, "");
 }
 
-function resolveBaseUrl(provider: BinanceHynixPremiumProvider, env: EnvLike) {
-  if (provider === "binance-spot") {
-    return trimBaseUrl(
-      env.BINANCE_HYNIX_PREMIUM_BASE_URL?.trim() ||
-        env.BINANCE_SPOT_BASE_URL?.trim() ||
-        "https://api.binance.com",
-    );
-  }
-
+function resolveRestBaseUrl(env: EnvLike) {
   return trimBaseUrl(
-    env.BINANCE_HYNIX_PREMIUM_BASE_URL?.trim() ||
-      env.BINANCE_ALPHA_BASE_URL?.trim() ||
-      "https://www.binance.com",
+    env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL?.trim() ||
+      env.BINANCE_HYNIX_PREMIUM_BASE_URL?.trim() ||
+      env.BINANCE_FUTURES_BASE_URL?.trim() ||
+      DEFAULT_FUTURES_REST_BASE_URL,
+  );
+}
+
+function resolveWebSocketBaseUrl(env: EnvLike) {
+  return trimBaseUrl(
+    env.BINANCE_HYNIX_PREMIUM_WS_BASE_URL?.trim() ||
+      env.BINANCE_FUTURES_WS_BASE_URL?.trim() ||
+      DEFAULT_FUTURES_WS_BASE_URL,
   );
 }
 
 function klineUrl({
   baseUrl,
-  provider,
   symbol,
   limit,
 }: {
   baseUrl: string;
-  provider: BinanceHynixPremiumProvider;
   symbol: string;
   limit: number;
 }) {
@@ -126,11 +153,45 @@ function klineUrl({
     interval: INTERVAL,
     limit: String(limit),
   });
-  const path =
-    provider === "binance-alpha"
-      ? "/bapi/defi/v1/public/alpha-trade/klines"
-      : "/api/v3/klines";
-  return `${baseUrl}${path}?${params.toString()}`;
+  return `${baseUrl}/fapi/v1/klines?${params.toString()}`;
+}
+
+function premiumIndexUrl({ baseUrl, symbol }: { baseUrl: string; symbol: string }) {
+  const params = new URLSearchParams({ symbol });
+  return `${baseUrl}/fapi/v1/premiumIndex?${params.toString()}`;
+}
+
+export function binanceHynixPremiumWebSocketStreams({
+  baseSymbol,
+  benchmarkSymbol,
+}: {
+  baseSymbol: string;
+  benchmarkSymbol: string;
+}) {
+  const base = baseSymbol.toLowerCase();
+  const benchmark = benchmarkSymbol.toLowerCase();
+  return [
+    `${base}@markPrice`,
+    `${benchmark}@markPrice`,
+    `${base}@kline_5m`,
+    `${benchmark}@kline_5m`,
+  ];
+}
+
+export function binanceHynixPremiumWebSocketUrl({
+  baseSymbol = DEFAULT_BASE_SYMBOL,
+  benchmarkSymbol = DEFAULT_BENCHMARK_SYMBOL,
+  baseUrl = DEFAULT_FUTURES_WS_BASE_URL,
+}: {
+  baseSymbol?: string;
+  benchmarkSymbol?: string;
+  baseUrl?: string;
+} = {}) {
+  const streams = binanceHynixPremiumWebSocketStreams({
+    baseSymbol,
+    benchmarkSymbol,
+  });
+  return `${trimBaseUrl(baseUrl)}/public/stream?streams=${streams.join("/")}`;
 }
 
 function payloadRows(payload: unknown) {
@@ -184,6 +245,8 @@ function parseObjectKline(
   row: Record<string, unknown>,
   symbol: string,
 ): BinanceKlinePoint | null {
+  const interval = stringValue(row.interval ?? row.i);
+  if (interval && interval !== INTERVAL) return null;
   const openTime = numberValue(row.openTime ?? row.open_time ?? row.t);
   const closeTime = numberValue(row.closeTime ?? row.close_time ?? row.T);
   const openPrice = numberValue(row.open ?? row.openPrice ?? row.o);
@@ -232,14 +295,148 @@ export function parseBinanceKlinePayload(
     .sort((left, right) => left.openTime - right.openTime);
 }
 
+function parseJsonPayload(payload: unknown) {
+  if (typeof payload !== "string") return payload;
+  try {
+    return JSON.parse(payload) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function parseBinanceFuturesWebSocketMessage(
+  payload: unknown,
+): BinanceFuturesWebSocketMessage | null {
+  const parsed = parseJsonPayload(payload);
+  const wrapper = asRecord(parsed);
+  const data = asRecord(wrapper.data);
+  const message = Object.keys(data).length > 0 ? data : wrapper;
+  const eventType = stringValue(message.e);
+
+  if (eventType === "kline" || Object.keys(asRecord(message.k)).length > 0) {
+    const kline = asRecord(message.k);
+    const symbol = normalizeSymbol(
+      stringValue(kline.s) || stringValue(message.s),
+      DEFAULT_BASE_SYMBOL,
+    );
+    const point = parseObjectKline(kline, symbol);
+    const eventTime = numberValue(message.E) ?? point?.closeTime ?? Date.now();
+    if (!point) return null;
+    return {
+      type: "kline",
+      point,
+      eventTime,
+      closed: booleanValue(kline.x),
+    };
+  }
+
+  if (eventType === "markPriceUpdate" || message.p !== undefined) {
+    const symbol = normalizeSymbol(stringValue(message.s), DEFAULT_BASE_SYMBOL);
+    const markPrice = numberValue(message.p);
+    const indexPrice = numberValue(message.i);
+    const eventTime = numberValue(message.E) ?? Date.now();
+    if (markPrice === null) return null;
+    return {
+      type: "markPrice",
+      symbol,
+      markPrice,
+      indexPrice,
+      eventTime,
+    };
+  }
+
+  return null;
+}
+
+export function buildBinanceHynixPremiumPoint({
+  openTime,
+  closeTime,
+  capturedAt,
+  baseSymbol,
+  benchmarkSymbol,
+  basePrice,
+  benchmarkPrice,
+}: {
+  openTime: number;
+  closeTime: number;
+  capturedAt: string;
+  baseSymbol: string;
+  benchmarkSymbol: string;
+  basePrice: number;
+  benchmarkPrice: number;
+}): BinanceHynixPremiumPoint | null {
+  if (!Number.isFinite(basePrice) || !Number.isFinite(benchmarkPrice)) {
+    return null;
+  }
+  if (benchmarkPrice === 0) return null;
+  return {
+    openTime,
+    closeTime,
+    capturedAt,
+    baseSymbol,
+    benchmarkSymbol,
+    basePrice,
+    benchmarkPrice,
+    premiumPct: roundNumber(
+      ((basePrice * HYNIX_PREMIUM_BASE_MULTIPLIER) / benchmarkPrice - 1) *
+        100,
+    ),
+  };
+}
+
+export function upsertBinanceHynixPremiumPoint(
+  snapshot: BinanceHynixPremiumSnapshot,
+  point: BinanceHynixPremiumPoint,
+  limit = 288,
+): BinanceHynixPremiumSnapshot {
+  const points = [
+    ...snapshot.points.filter((candidate) => candidate.openTime !== point.openTime),
+    point,
+  ]
+    .sort((left, right) => left.openTime - right.openTime)
+    .slice(-Math.max(2, limit));
+  return {
+    ...snapshot,
+    generatedAt: new Date().toISOString(),
+    source: "live",
+    points,
+    latest: points.at(-1) ?? null,
+  };
+}
+
+function markPremiumPoint({
+  baseMark,
+  benchmarkMark,
+  baseSymbol,
+  benchmarkSymbol,
+}: {
+  baseMark: BinanceFuturesMarkPrice;
+  benchmarkMark: BinanceFuturesMarkPrice;
+  baseSymbol: string;
+  benchmarkSymbol: string;
+}) {
+  const capturedTime = Math.min(baseMark.time, benchmarkMark.time);
+  const openTime = Math.floor(capturedTime / INTERVAL_MS) * INTERVAL_MS;
+  return buildBinanceHynixPremiumPoint({
+    openTime,
+    closeTime: openTime + INTERVAL_MS - 1,
+    capturedAt: new Date(capturedTime).toISOString(),
+    baseSymbol,
+    benchmarkSymbol,
+    basePrice: baseMark.markPrice,
+    benchmarkPrice: benchmarkMark.markPrice,
+  });
+}
+
 export function buildBinanceHynixPremiumSnapshot({
   generatedAt = new Date().toISOString(),
-  provider = "binance-alpha",
+  provider = "binance-futures",
   baseSymbol,
   benchmarkSymbol,
   baseKlines,
   benchmarkKlines,
   errors,
+  websocketBaseUrl = DEFAULT_FUTURES_WS_BASE_URL,
 }: SnapshotInput): BinanceHynixPremiumSnapshot {
   const benchmarkByOpenTime = new Map(
     benchmarkKlines.map((point) => [point.openTime, point]),
@@ -247,8 +444,8 @@ export function buildBinanceHynixPremiumSnapshot({
   const points = baseKlines
     .map((basePoint): BinanceHynixPremiumPoint | null => {
       const benchmarkPoint = benchmarkByOpenTime.get(basePoint.openTime);
-      if (!benchmarkPoint || benchmarkPoint.closePrice === 0) return null;
-      return {
+      if (!benchmarkPoint) return null;
+      return buildBinanceHynixPremiumPoint({
         openTime: basePoint.openTime,
         closeTime: Math.min(basePoint.closeTime, benchmarkPoint.closeTime),
         capturedAt: new Date(
@@ -258,15 +455,13 @@ export function buildBinanceHynixPremiumSnapshot({
         benchmarkSymbol,
         basePrice: basePoint.closePrice,
         benchmarkPrice: benchmarkPoint.closePrice,
-        premiumPct: roundNumber(
-          ((basePoint.closePrice * HYNIX_PREMIUM_BASE_MULTIPLIER) /
-            benchmarkPoint.closePrice -
-            1) *
-            100,
-        ),
-      };
+      });
     })
     .filter((point): point is BinanceHynixPremiumPoint => Boolean(point));
+  const streams = binanceHynixPremiumWebSocketStreams({
+    baseSymbol,
+    benchmarkSymbol,
+  });
 
   return {
     generatedAt,
@@ -276,6 +471,14 @@ export function buildBinanceHynixPremiumSnapshot({
     symbols: {
       base: baseSymbol,
       benchmark: benchmarkSymbol,
+    },
+    websocket: {
+      url: binanceHynixPremiumWebSocketUrl({
+        baseSymbol,
+        benchmarkSymbol,
+        baseUrl: websocketBaseUrl,
+      }),
+      streams,
     },
     points,
     latest: points.at(-1) ?? null,
@@ -289,6 +492,13 @@ async function readPayload(response: Response) {
   } catch {
     return await response.text();
   }
+}
+
+function errorFromPayload(payload: unknown) {
+  const record = asRecord(payload);
+  const code = stringValue(record.code);
+  const message = stringValue(record.message) || stringValue(record.msg);
+  return code ? `${code}${message ? `: ${message}` : ""}` : "";
 }
 
 async function fetchKlines({
@@ -306,17 +516,66 @@ async function fetchKlines({
       accept: "application/json,text/plain,*/*",
     },
   });
-  if (!response.ok) {
-    throw new Error(`${symbol} Binance kline HTTP ${response.status}`);
-  }
   const payload = await readPayload(response);
-  const record = asRecord(payload);
-  const code = stringValue(record.code);
-  const message = stringValue(record.message) || stringValue(record.msg);
-  if (code && code !== "000000" && code !== "0") {
-    throw new Error(`${symbol} Binance kline error ${code}${message ? `: ${message}` : ""}`);
+  if (!response.ok) {
+    throw new Error(
+      `${symbol} Binance futures kline HTTP ${response.status}${
+        errorFromPayload(payload) ? `: ${errorFromPayload(payload)}` : ""
+      }`,
+    );
+  }
+  const error = errorFromPayload(payload);
+  if (error && !Array.isArray(payload)) {
+    throw new Error(`${symbol} Binance futures kline error ${error}`);
   }
   return parseBinanceKlinePayload(payload, symbol);
+}
+
+function parseMarkPricePayload(
+  payload: unknown,
+  symbol: string,
+): BinanceFuturesMarkPrice | null {
+  const record = asRecord(payload);
+  const markPrice = numberValue(record.markPrice);
+  const indexPrice = numberValue(record.indexPrice);
+  const time = numberValue(record.time);
+  if (markPrice === null || time === null) return null;
+  return {
+    symbol: normalizeSymbol(stringValue(record.symbol), symbol),
+    markPrice,
+    indexPrice,
+    time,
+  };
+}
+
+async function fetchMarkPrice({
+  fetchImpl,
+  url,
+  symbol,
+}: {
+  fetchImpl: FetchLike;
+  url: string;
+  symbol: string;
+}) {
+  const response = await fetchImpl(url, {
+    cache: "no-store",
+    headers: {
+      accept: "application/json,text/plain,*/*",
+    },
+  });
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new Error(
+      `${symbol} Binance futures premiumIndex HTTP ${response.status}${
+        errorFromPayload(payload) ? `: ${errorFromPayload(payload)}` : ""
+      }`,
+    );
+  }
+  const parsed = parseMarkPricePayload(payload, symbol);
+  if (!parsed) {
+    throw new Error(`${symbol} Binance futures premiumIndex invalid payload`);
+  }
+  return parsed;
 }
 
 export async function fetchBinanceHynixPremiumSnapshot({
@@ -328,7 +587,7 @@ export async function fetchBinanceHynixPremiumSnapshot({
   env?: EnvLike;
   limit?: number;
 } = {}): Promise<BinanceHynixPremiumSnapshot> {
-  const provider = normalizeProvider(env.BINANCE_HYNIX_PREMIUM_PROVIDER);
+  const provider: BinanceHynixPremiumProvider = "binance-futures";
   const baseSymbol = normalizeSymbol(
     env.BINANCE_HYNIX_PREMIUM_BASE_SYMBOL,
     DEFAULT_BASE_SYMBOL,
@@ -337,14 +596,14 @@ export async function fetchBinanceHynixPremiumSnapshot({
     env.BINANCE_HYNIX_PREMIUM_BENCHMARK_SYMBOL,
     DEFAULT_BENCHMARK_SYMBOL,
   );
-  const baseUrl = resolveBaseUrl(provider, env);
+  const restBaseUrl = resolveRestBaseUrl(env);
+  const websocketBaseUrl = resolveWebSocketBaseUrl(env);
   const normalizedLimit = normalizeLimit(limit);
-  const requests = [
+  const klineRequests = [
     {
       symbol: baseSymbol,
       url: klineUrl({
-        baseUrl,
-        provider,
+        baseUrl: restBaseUrl,
         symbol: baseSymbol,
         limit: normalizedLimit,
       }),
@@ -352,23 +611,40 @@ export async function fetchBinanceHynixPremiumSnapshot({
     {
       symbol: benchmarkSymbol,
       url: klineUrl({
-        baseUrl,
-        provider,
+        baseUrl: restBaseUrl,
         symbol: benchmarkSymbol,
         limit: normalizedLimit,
       }),
     },
   ];
+  const markRequests = [
+    {
+      symbol: baseSymbol,
+      url: premiumIndexUrl({ baseUrl: restBaseUrl, symbol: baseSymbol }),
+    },
+    {
+      symbol: benchmarkSymbol,
+      url: premiumIndexUrl({ baseUrl: restBaseUrl, symbol: benchmarkSymbol }),
+    },
+  ];
   const [baseResult, benchmarkResult] = await Promise.allSettled(
-    requests.map((request) => fetchKlines({ fetchImpl, ...request })),
+    klineRequests.map((request) => fetchKlines({ fetchImpl, ...request })),
   );
-  const errors = [baseResult, benchmarkResult]
+  const [baseMarkResult, benchmarkMarkResult] = await Promise.allSettled(
+    markRequests.map((request) => fetchMarkPrice({ fetchImpl, ...request })),
+  );
+  const errors = [
+    baseResult,
+    benchmarkResult,
+    baseMarkResult,
+    benchmarkMarkResult,
+  ]
     .filter((result): result is PromiseRejectedResult => result.status === "rejected")
     .map((result) =>
       result.reason instanceof Error ? result.reason.message : String(result.reason),
     );
 
-  return buildBinanceHynixPremiumSnapshot({
+  const snapshot = buildBinanceHynixPremiumSnapshot({
     provider,
     baseSymbol,
     benchmarkSymbol,
@@ -376,5 +652,21 @@ export async function fetchBinanceHynixPremiumSnapshot({
     benchmarkKlines:
       benchmarkResult.status === "fulfilled" ? benchmarkResult.value : [],
     errors,
+    websocketBaseUrl,
   });
+  if (
+    baseMarkResult.status !== "fulfilled" ||
+    benchmarkMarkResult.status !== "fulfilled"
+  ) {
+    return snapshot;
+  }
+  const latestMarkPoint = markPremiumPoint({
+    baseMark: baseMarkResult.value,
+    benchmarkMark: benchmarkMarkResult.value,
+    baseSymbol,
+    benchmarkSymbol,
+  });
+  return latestMarkPoint
+    ? upsertBinanceHynixPremiumPoint(snapshot, latestMarkPoint, normalizedLimit)
+    : snapshot;
 }
