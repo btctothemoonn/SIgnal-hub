@@ -170,6 +170,7 @@ export type TwitterFeedItem = {
   quotedTweet: TwitterQuotedTweet | null;
   origin: "watch" | "search";
   queryLabel: string;
+  eventType?: string;
   translation: TranslationNote | null;
 };
 

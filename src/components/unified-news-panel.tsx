@@ -103,6 +103,7 @@ type UnifiedNewsItem = {
   id: string;
   source: SignalFeedSource;
   createdAt: string;
+  eventType: string | null;
   sourceLabel: string;
   title: string;
   titleUrl: string;
@@ -172,6 +173,16 @@ function formatLanguageTag(code: string) {
 function fallbackXAvatar(username: string | null | undefined) {
   const clean = username?.trim().replace(/^@+/, "").replace(/^truth:/, "");
   return clean ? `https://unavatar.io/twitter/${clean}` : null;
+}
+
+const PIN_STATE_EVENT_LABELS: Record<string, string> = {
+  TWEET_TOPPING: "置顶",
+  TWEET_UNTOPPING: "取消置顶",
+};
+
+function getPinStateEventLabel(eventType: string | null | undefined) {
+  if (!eventType) return null;
+  return PIN_STATE_EVENT_LABELS[eventType] ?? null;
 }
 
 function parseEventPayload<T>(event: Event): T | null {
@@ -312,6 +323,7 @@ function toUnifiedTelegramItems(
     id: `telegram:${message.id}`,
     source: "telegram",
     createdAt: message.createdAt,
+    eventType: null,
     sourceLabel: "Telegram",
     title: message.channelTitle,
     titleUrl: message.channelLink,
@@ -383,6 +395,7 @@ function toUnifiedTwitterItems(
       id: `x:${tweet.id}`,
       source,
       createdAt: tweet.createdAt,
+      eventType: tweet.eventType ?? null,
       sourceLabel:
         source === "truth" ? "Truth" : source === "monitor985" ? "X-985" : "X-6551",
       title: tweet.displayName || `@${displayUsername}`,
@@ -1922,6 +1935,7 @@ export function UnifiedNewsPanel({
             const isRead = readItems.has(item.id);
             const icon = SOURCE_ICON[item.source] || SOURCE_ICON.alert;
             const sourceBadge = getXSourceBadge(item.source);
+            const pinStateEventLabel = getPinStateEventLabel(item.eventType);
             const copyText = item.translation?.text
               ? `${item.text}\n\n${item.translation.text}`
               : item.text;
@@ -2000,6 +2014,11 @@ export function UnifiedNewsPanel({
                         className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${sourceBadge.className}`}
                       >
                         {sourceBadge.label}
+                      </span>
+                    ) : null}
+                    {pinStateEventLabel ? (
+                      <span className="shrink-0 rounded border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold leading-none text-warning">
+                        {pinStateEventLabel}
                       </span>
                     ) : null}
                     {item.subtitle ? (

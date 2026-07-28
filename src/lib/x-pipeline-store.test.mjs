@@ -252,6 +252,7 @@ assert.equal(snapshot.watchAccounts[0].username, "SpaceY");
 assert.equal(snapshot.feed.length, 1);
 assert.equal(snapshot.feed[0].id, "177");
 assert.equal(snapshot.feed[0].text, "updated tweet");
+assert.equal(snapshot.feed[0].eventType, "NEW_TWEET");
 assert.deepEqual(snapshot.feed[0].hashtags, ["BTC"]);
 assert.deepEqual(snapshot.feed[0].media, [
   {

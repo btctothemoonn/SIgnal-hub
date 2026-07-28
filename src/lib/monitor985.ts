@@ -90,6 +90,21 @@ function normalizeDate(raw: unknown, fallback = ""): string {
   return fallback || text;
 }
 
+function xSnowflakeCreatedAt(id: string): string | null {
+  if (!/^\d{15,22}$/.test(id)) return null;
+  try {
+    const twitterEpochMs = BigInt("1288834974657");
+    const timestampMs = (BigInt(id) >> BigInt(22)) + twitterEpochMs;
+    const timestamp = Number(timestampMs);
+    if (!Number.isFinite(timestamp)) return null;
+    const createdAt = new Date(timestamp);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    return createdAt.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeText(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
@@ -202,7 +217,10 @@ function normalizeFeedItem(
   const text = normalizeText(content.fullText) || normalizeText(content.text);
   if (!id || !sourceUsername || !text) return null;
 
-  const createdAt = normalizeDate(content.createdAt, normalizeDate(event.createdAt));
+  const createdAt = normalizeDate(
+    content.createdAt,
+    (!isTruth && xSnowflakeCreatedAt(id)) || normalizeDate(event.createdAt),
+  );
   const truthUrl = pickString(content.webLink);
   return {
     id: isTruth ? `truth:${id}` : id,

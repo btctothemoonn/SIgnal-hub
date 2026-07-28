@@ -1285,6 +1285,7 @@ function toFeedItem(row: DbRow): TwitterFeedItem {
     quotedTweet: parseQuotedTweet(row.quoted_tweet_json),
     origin: stringValue(row.origin) === "search" ? "search" : "watch",
     queryLabel: stringValue(row.query_label),
+    eventType: stringValue(row.event_type),
     translation: isUsefulTranslation(text, translation) ? translation : null,
   };
 }

@@ -142,6 +142,24 @@ assert.equal(truthUpdate?.feedItem.userAvatar, "https://static-assets-1.truthsoc
 assert.equal(truthUpdate?.feedItem.queryLabel, "985monitor / truth");
 assert.equal(truthUpdate?.feedItem.translation?.text, "终止阻挠议事，然后赢！！！总统DJT");
 
+const untoppingUpdate = normalizeMonitor985Event({
+  key: "xiaomustock::TWEET_UNTOPPING::2070042111026835547",
+  eventType: "TWEET_UNTOPPING",
+  twAccount: "xiaomustock",
+  createdAt: "2026-07-28T00:20:27+08:00",
+  profileUrl: "https://pbs.twimg.com/profile_images/xiaomu_normal.jpg",
+  content: {
+    id: "2070042111026835547",
+    text: "玻璃基板，康宁 $GLW",
+    userScreenName: "xiaomustock",
+    userName: "xiaomustock",
+    media: [],
+  },
+});
+assert.equal(untoppingUpdate?.eventType, "TWEET_UNTOPPING");
+assert.equal(untoppingUpdate?.feedItem.createdAt, "2026-06-25T07:11:13.448Z");
+assert.equal(untoppingUpdate?.createdAt, "2026-06-25T07:11:13.448Z");
+
 assert.equal(normalizeMonitor985Event({ eventType: "NEW_TWEET", content: {} }), null);
 
 console.log("ok - 985monitor events normalize into x pipeline updates");

@@ -13,9 +13,14 @@ assert.match(source, /return limitNewsItems\(matching, feedLimitForTab\(activeTa
 assert.match(source, /requestTelegramSnapshot\(\{ range: feedRange \}\)/);
 assert.match(source, /requestXSnapshot\(\{ range: feedRange \}\)/);
 assert.match(source, /title:\s*tweet\.displayName\s*\|\|\s*`@\${displayUsername}`/);
+assert.match(source, /eventType:\s*tweet\.eventType\s*\?\?\s*null/);
 assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(displayUsername,\s*tweet\.queryLabel\)/);
 assert.match(source, /title:\s*tweet\.quotedTweet\.displayName\s*\|\|/);
 assert.match(source, /subtitle:\s*formatXAuthorSubtitle\(\s*tweet\.quotedTweet\.username\.replace/);
+assert.match(source, /TWEET_TOPPING:\s*"置顶"/);
+assert.match(source, /TWEET_UNTOPPING:\s*"取消置顶"/);
+assert.match(source, /const pinStateEventLabel = getPinStateEventLabel\(item\.eventType\);/);
+assert.match(source, />\s*\{pinStateEventLabel\}\s*<\/span>/);
 assert.match(source, /useBrowserJsonCache/);
 assert.match(source, /useSyncExternalStore/);
 assert.match(source, /effectiveSignalFeedAuthorFilter/);
