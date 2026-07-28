@@ -12,25 +12,39 @@ import {
   type HistogramData,
   type IChartApi,
   type ISeriesApi,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
+  BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
+  binanceHynixPremiumIntervalMs,
   buildBinanceHynixPremiumPoint,
+  formatShanghaiChartTime,
   parseBinanceFuturesWebSocketMessage,
   upsertBinanceHynixPremiumPoint,
   type BinanceFuturesWebSocketMessage,
+  type BinanceHynixFundingSnapshot,
+  type BinanceHynixPremiumInterval,
   type BinanceHynixPremiumPoint,
   type BinanceHynixPremiumSnapshot,
   type BinanceKlinePoint,
 } from "@/lib/binance-hynix-premium";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
-  "signal-hub:stocks:hynix-premium:5m:v2";
+  "signal-hub:stocks:hynix-premium:v3";
+const STOCKS_HYNIX_FUNDING_CACHE_KEY =
+  "signal-hub:stocks:hynix-funding:v1";
 const PREMIUM_CHART_HEIGHT = 360;
-const PREMIUM_CHART_LIMIT = 288;
+const PREMIUM_KLINE_PAGE_LIMIT = 1500;
+const PREMIUM_MAX_POINTS = 20000;
 const PREMIUM_UP_COLOR = "#62d6aa";
 const PREMIUM_DOWN_COLOR = "#ff7b8a";
+const PREMIUM_INTERVAL_OPTIONS = [
+  { value: "5m", label: "5分钟" },
+  { value: "1h", label: "1小时" },
+  { value: "1d", label: "1天" },
+] satisfies Array<{ value: BinanceHynixPremiumInterval; label: string }>;
 
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
@@ -45,10 +59,7 @@ function formatPrice(value: number) {
 }
 
 function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatShanghaiChartTime(Date.parse(value) / 1000, "5m");
 }
 
 function premiumTone(value: number | null | undefined) {
@@ -56,6 +67,11 @@ function premiumTone(value: number | null | undefined) {
   if (value > 0) return "text-success";
   if (value < 0) return "text-danger";
   return "text-muted";
+}
+
+function formatSignedFundingFee(value: number) {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)} USDT / 1万USDT名义`;
 }
 
 function chartTime(point: BinanceHynixPremiumPoint) {
@@ -90,9 +106,14 @@ function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
 }
 
 export function StocksHynixPremiumCurve() {
+  const [selectedInterval, setSelectedInterval] =
+    useState<BinanceHynixPremiumInterval>("5m");
   const [liveSnapshot, setLiveSnapshot] =
     useState<BinanceHynixPremiumSnapshot | null>(null);
+  const [liveFundingSnapshot, setLiveFundingSnapshot] =
+    useState<BinanceHynixFundingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fundingError, setFundingError] = useState<string | null>(null);
   const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -105,12 +126,24 @@ export function StocksHynixPremiumCurve() {
   >({});
   const [cachedSnapshot, writeCachedSnapshot] =
     useBrowserJsonCache<BinanceHynixPremiumSnapshot>(
-      STOCKS_HYNIX_PREMIUM_CACHE_KEY,
+      `${STOCKS_HYNIX_PREMIUM_CACHE_KEY}:${selectedInterval}`,
     );
-  const snapshot = liveSnapshot ?? cachedSnapshot;
+  const [cachedFundingSnapshot, writeCachedFundingSnapshot] =
+    useBrowserJsonCache<BinanceHynixFundingSnapshot>(
+      STOCKS_HYNIX_FUNDING_CACHE_KEY,
+    );
+  const snapshot =
+    liveSnapshot?.interval === selectedInterval
+      ? liveSnapshot
+      : cachedSnapshot?.interval === selectedInterval
+        ? cachedSnapshot
+        : null;
+  const fundingSnapshot = liveFundingSnapshot ?? cachedFundingSnapshot;
   const points = snapshot?.points ?? [];
   const latest = snapshot?.latest ?? points.at(-1) ?? null;
-  const shownPoints = points.slice(-PREMIUM_CHART_LIMIT);
+  const latestFunding = fundingSnapshot?.latest ?? null;
+  const latestFundingDaily = fundingSnapshot?.daily.at(-1) ?? null;
+  const shownPoints = points.slice(-PREMIUM_MAX_POINTS);
   const candleData = useMemo(
     () => shownPoints.map(pointToCandle),
     [shownPoints],
@@ -139,6 +172,8 @@ export function StocksHynixPremiumCurve() {
       localization: {
         locale: "zh-CN",
         priceFormatter: (price: number) => `${price.toFixed(2)}%`,
+        timeFormatter: (time: Time) =>
+          `${formatShanghaiChartTime(time, selectedInterval)} UTC+8`,
       },
       grid: {
         vertLines: { color: "rgba(148, 163, 184, 0.12)" },
@@ -167,6 +202,8 @@ export function StocksHynixPremiumCurve() {
         borderColor: "rgba(148, 163, 184, 0.22)",
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time: Time) =>
+          formatShanghaiChartTime(time, selectedInterval),
         rightOffset: 8,
         barSpacing: 8,
         minBarSpacing: 3,
@@ -236,7 +273,7 @@ export function StocksHynixPremiumCurve() {
       volumeSeriesRef.current = null;
       fittedRangeRef.current = null;
     };
-  }, []);
+  }, [selectedInterval]);
 
   useEffect(() => {
     candleSeriesRef.current?.setData(candleData);
@@ -246,12 +283,12 @@ export function StocksHynixPremiumCurve() {
     const rangeKey =
       first === undefined || last === undefined
         ? null
-        : `${first}:${last}:${candleData.length}`;
+        : `${selectedInterval}:${first}:${last}:${candleData.length}`;
     if (rangeKey && rangeKey !== fittedRangeRef.current) {
       chartRef.current?.timeScale().fitContent();
       fittedRangeRef.current = rangeKey;
     }
-  }, [candleData, volumeData]);
+  }, [candleData, selectedInterval, volumeData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,7 +296,7 @@ export function StocksHynixPremiumCurve() {
       try {
         setError(null);
         const response = await fetch(
-          `/api/stocks-hynix-premium?limit=${PREMIUM_CHART_LIMIT}`,
+          `/api/stocks-hynix-premium?interval=${selectedInterval}&startTime=${BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS}&limit=${PREMIUM_KLINE_PAGE_LIMIT}`,
           {
             cache: "no-store",
           },
@@ -286,7 +323,42 @@ export function StocksHynixPremiumCurve() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [writeCachedSnapshot]);
+  }, [selectedInterval, writeCachedSnapshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFundingData() {
+      try {
+        setFundingError(null);
+        const response = await fetch(
+          `/api/stocks-hynix-funding?startTime=${BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS}&limit=1000`,
+          {
+            cache: "no-store",
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`hynix funding HTTP ${response.status}`);
+        }
+        const snapshot = (await response.json()) as BinanceHynixFundingSnapshot;
+        if (!cancelled) {
+          setLiveFundingSnapshot(snapshot);
+          if (snapshot.records.length > 0) writeCachedFundingSnapshot(snapshot);
+          setFundingError(snapshot.errors[0] ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFundingError(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    void loadFundingData();
+    const timer = window.setInterval(loadFundingData, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [writeCachedFundingSnapshot]);
 
   useEffect(() => {
     const websocketUrl = snapshot?.websocket?.url;
@@ -296,6 +368,8 @@ export function StocksHynixPremiumCurve() {
     if (typeof WebSocket === "undefined") return;
 
     let closedByEffect = false;
+    websocketKlinesRef.current = {};
+    websocketMarkPricesRef.current = {};
     const applyPremiumPoint = (point: BinanceHynixPremiumPoint | null) => {
       if (!point) return;
       setLiveSnapshot((current) => {
@@ -304,7 +378,7 @@ export function StocksHynixPremiumCurve() {
         const nextSnapshot = upsertBinanceHynixPremiumPoint(
           baseSnapshot,
           point,
-          PREMIUM_CHART_LIMIT,
+          PREMIUM_MAX_POINTS,
         );
         writeCachedSnapshot(nextSnapshot);
         return nextSnapshot;
@@ -321,11 +395,12 @@ export function StocksHynixPremiumCurve() {
       const benchmarkMark = websocketMarkPricesRef.current[benchmarkSymbol];
       if (!baseMark || !benchmarkMark) return;
       const capturedTime = Math.min(baseMark.eventTime, benchmarkMark.eventTime);
-      const openTime = Math.floor(capturedTime / (5 * 60 * 1000)) * 5 * 60 * 1000;
+      const intervalMs = binanceHynixPremiumIntervalMs(selectedInterval);
+      const openTime = Math.floor(capturedTime / intervalMs) * intervalMs;
       applyPremiumPoint(
         buildBinanceHynixPremiumPoint({
           openTime,
-          closeTime: openTime + 5 * 60 * 1000 - 1,
+          closeTime: openTime + intervalMs - 1,
           capturedAt: new Date(capturedTime).toISOString(),
           baseSymbol,
           benchmarkSymbol,
@@ -337,6 +412,7 @@ export function StocksHynixPremiumCurve() {
     const applyKline = (
       message: Extract<BinanceFuturesWebSocketMessage, { type: "kline" }>,
     ) => {
+      if (message.point.interval !== selectedInterval) return;
       websocketKlinesRef.current[message.point.symbol] = message.point;
       const baseKline = websocketKlinesRef.current[baseSymbol];
       const benchmarkKline = websocketKlinesRef.current[benchmarkSymbol];
@@ -347,7 +423,11 @@ export function StocksHynixPremiumCurve() {
           openTime: baseKline.openTime,
           closeTime: Math.min(baseKline.closeTime, benchmarkKline.closeTime),
           capturedAt: new Date(
-            Math.min(message.eventTime, baseKline.closeTime, benchmarkKline.closeTime),
+            Math.min(
+              message.eventTime,
+              baseKline.closeTime,
+              benchmarkKline.closeTime,
+            ),
           ).toISOString(),
           baseSymbol,
           benchmarkSymbol,
@@ -394,6 +474,7 @@ export function StocksHynixPremiumCurve() {
     snapshot?.symbols.base,
     snapshot?.symbols.benchmark,
     snapshot?.websocket?.url,
+    selectedInterval,
     writeCachedSnapshot,
   ]);
 
@@ -408,8 +489,25 @@ export function StocksHynixPremiumCurve() {
             币安海力士溢价曲线
           </h2>
           <p className="mt-0.5 text-[11px] text-muted">
-            SKHYUSDT * 10 / SKHYNIXUSDT · 5m K 线 · Binance Futures
+            SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
+            2026-07-14 起
           </p>
+          <div className="mt-2 inline-flex rounded-md border border-line/70 bg-background/45 p-1">
+            {PREMIUM_INTERVAL_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSelectedInterval(option.value)}
+                className={`rounded px-2.5 py-1 text-xs font-semibold transition ${
+                  selectedInterval === option.value
+                    ? "bg-foreground text-background"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:min-w-[30rem]">
           <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
@@ -441,21 +539,77 @@ export function StocksHynixPremiumCurve() {
         <div
           ref={chartContainerRef}
           role="img"
-          aria-label="SKHYUSDT times 10 against SKHYNIXUSDT 5 minute premium candlestick chart"
+          aria-label="SKHYUSDT times 10 against SKHYNIXUSDT premium candlestick chart"
           className="h-[360px] w-full"
         />
         {shownPoints.length <= 1 ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/55 px-4 text-sm text-muted">
-            {error ?? "等待 Binance 5m K 线数据。"}
+            {error ?? "等待 Binance K 线数据。"}
           </div>
         ) : null}
       </div>
 
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="rounded-lg border border-line/60 bg-background/35 px-3 py-3">
+          <p className="text-xs font-semibold text-foreground">
+            溢价回归套利资金费
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            做空 SKHY + 做多 SKHYNIX，正数代表资金费收钱
+          </p>
+        </div>
+        <div className="rounded-lg border border-line/60 bg-background/35 px-3 py-3">
+          <p className="text-[10px] font-semibold text-muted">最近一期合计</p>
+          <p
+            className={`mt-1 font-mono text-base font-semibold ${premiumTone(
+              latestFunding?.combinedFundingRatePct,
+            )}`}
+          >
+            {latestFunding
+              ? formatSignedPercent(latestFunding.combinedFundingRatePct)
+              : "--"}
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            {latestFunding
+              ? formatShanghaiChartTime(latestFunding.fundingTime / 1000, "5m")
+              : "等待资金费率"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-line/60 bg-background/35 px-3 py-3">
+          <p className="text-[10px] font-semibold text-muted">
+            当日累计 / 1万USDT
+          </p>
+          <p
+            className={`mt-1 font-mono text-base font-semibold ${premiumTone(
+              latestFundingDaily?.combinedFundingFeePer10kUsdt,
+            )}`}
+          >
+            {latestFundingDaily
+              ? formatSignedFundingFee(
+                  latestFundingDaily.combinedFundingFeePer10kUsdt,
+                )
+              : "--"}
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            {fundingSnapshot
+              ? `${fundingSnapshot.records.length} 条资金费记录`
+              : "加载中"}
+          </p>
+        </div>
+      </div>
+
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
-        <span>{snapshot ? `${shownPoints.length} 根 5m K 线` : "加载中"}</span>
+        <span>
+          {snapshot
+            ? `${shownPoints.length} 根 ${selectedInterval} K 线`
+            : "加载中"}
+        </span>
         {firstPoint ? <span>起点 {formatTime(firstPoint.capturedAt)}</span> : null}
         {latest ? <span>更新 {formatTime(latest.capturedAt)}</span> : null}
         {error ? <span className="text-warning">{error}</span> : null}
+        {fundingError ? (
+          <span className="text-warning">{fundingError}</span>
+        ) : null}
       </div>
     </section>
   );

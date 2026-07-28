@@ -2,10 +2,11 @@ type EnvLike = Record<string, string | undefined>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export type BinanceHynixPremiumProvider = "binance-futures";
+export type BinanceHynixPremiumInterval = "5m" | "1h" | "1d";
 
 export type BinanceKlinePoint = {
   symbol: string;
-  interval: "5m";
+  interval: BinanceHynixPremiumInterval;
   openTime: number;
   closeTime: number;
   openPrice: number;
@@ -19,7 +20,39 @@ export type BinanceFuturesMarkPrice = {
   symbol: string;
   markPrice: number;
   indexPrice: number | null;
+  lastFundingRate: number | null;
+  nextFundingTime: number | null;
   time: number;
+};
+
+export type BinanceFundingRatePoint = {
+  symbol: string;
+  fundingRate: number;
+  fundingTime: number;
+  markPrice: number | null;
+};
+
+export type BinanceHynixFundingRecord = {
+  fundingTime: number;
+  capturedAt: string;
+  shanghaiDate: string;
+  baseSymbol: string;
+  benchmarkSymbol: string;
+  baseFundingRate: number;
+  benchmarkFundingRate: number;
+  shortBaseFundingRate: number;
+  longBenchmarkFundingRate: number;
+  combinedFundingRate: number;
+  combinedFundingRatePct: number;
+  combinedFundingFeePer10kUsdt: number;
+};
+
+export type BinanceHynixFundingDaily = {
+  date: string;
+  records: number;
+  combinedFundingRate: number;
+  combinedFundingRatePct: number;
+  combinedFundingFeePer10kUsdt: number;
 };
 
 export type BinanceHynixPremiumPoint = {
@@ -50,7 +83,7 @@ export type BinanceHynixPremiumSnapshot = {
   generatedAt: string;
   source: "live" | "empty";
   provider: BinanceHynixPremiumProvider;
-  interval: "5m";
+  interval: BinanceHynixPremiumInterval;
   symbols: {
     base: string;
     benchmark: string;
@@ -61,6 +94,21 @@ export type BinanceHynixPremiumSnapshot = {
   };
   points: BinanceHynixPremiumPoint[];
   latest: BinanceHynixPremiumPoint | null;
+  errors: string[];
+};
+
+export type BinanceHynixFundingSnapshot = {
+  generatedAt: string;
+  source: "live" | "empty";
+  provider: BinanceHynixPremiumProvider;
+  symbols: {
+    base: string;
+    benchmark: string;
+  };
+  strategy: "short-base-long-benchmark";
+  records: BinanceHynixFundingRecord[];
+  daily: BinanceHynixFundingDaily[];
+  latest: BinanceHynixFundingRecord | null;
   errors: string[];
 };
 
@@ -82,6 +130,7 @@ export type BinanceFuturesWebSocketMessage =
 type SnapshotInput = {
   generatedAt?: string;
   provider?: BinanceHynixPremiumProvider;
+  interval?: BinanceHynixPremiumInterval;
   baseSymbol: string;
   benchmarkSymbol: string;
   baseKlines: BinanceKlinePoint[];
@@ -94,9 +143,19 @@ const DEFAULT_BASE_SYMBOL = "SKHYUSDT";
 const DEFAULT_BENCHMARK_SYMBOL = "SKHYNIXUSDT";
 const DEFAULT_FUTURES_REST_BASE_URL = "https://fapi.binance.com";
 const DEFAULT_FUTURES_WS_BASE_URL = "wss://fstream.binance.com";
+export const BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS = Date.parse(
+  "2026-07-13T16:00:00.000Z",
+);
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
-const INTERVAL = "5m" as const;
-const INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_INTERVAL = "5m" satisfies BinanceHynixPremiumInterval;
+const INTERVAL_MS: Record<BinanceHynixPremiumInterval, number> = {
+  "5m": 5 * 60 * 1000,
+  "1h": 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+};
+const DEFAULT_KLINE_PAGE_LIMIT = 1500;
+const MAX_KLINE_PAGE_LIMIT = 1500;
+const MAX_TOTAL_KLINES = 20000;
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -143,8 +202,75 @@ function normalizeSymbol(value: string | undefined, fallback: string) {
 }
 
 function normalizeLimit(value: number | undefined) {
-  const parsed = Math.floor(Number(value ?? 144));
-  return Number.isFinite(parsed) ? Math.max(2, Math.min(parsed, 288)) : 144;
+  const parsed = Math.floor(Number(value ?? DEFAULT_KLINE_PAGE_LIMIT));
+  return Number.isFinite(parsed)
+    ? Math.max(2, Math.min(parsed, MAX_KLINE_PAGE_LIMIT))
+    : DEFAULT_KLINE_PAGE_LIMIT;
+}
+
+function normalizeInterval(value: string | undefined): BinanceHynixPremiumInterval {
+  return value === "1h" || value === "1d" || value === "5m"
+    ? value
+    : DEFAULT_INTERVAL;
+}
+
+export function binanceHynixPremiumIntervalMs(
+  interval: BinanceHynixPremiumInterval,
+) {
+  return INTERVAL_MS[interval];
+}
+
+function normalizeStartTime(value: number | string | undefined) {
+  const parsed = Number(value ?? BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS);
+  return Number.isFinite(parsed)
+    ? Math.max(0, Math.floor(parsed))
+    : BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS;
+}
+
+function normalizeEndTime(value: number | string | undefined) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function timestampFromChartTime(value: number | string | { year: number; month: number; day: number }) {
+  if (typeof value === "number") return value * 1000;
+  if (typeof value === "string") return Date.parse(value);
+  return Date.UTC(value.year, value.month - 1, value.day);
+}
+
+export function formatShanghaiChartTime(
+  value: number | string | { year: number; month: number; day: number },
+  interval: BinanceHynixPremiumInterval = DEFAULT_INTERVAL,
+) {
+  const timestamp = timestampFromChartTime(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const options: Intl.DateTimeFormatOptions =
+    interval === "1d"
+      ? {
+          timeZone: "Asia/Shanghai",
+          month: "2-digit",
+          day: "2-digit",
+        }
+      : {
+          timeZone: "Asia/Shanghai",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        };
+  return new Intl.DateTimeFormat("zh-CN", options)
+    .format(new Date(timestamp))
+    .replace(/\//g, "-");
+}
+
+function formatShanghaiDate(timestamp: number) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(timestamp));
 }
 
 function trimBaseUrl(value: string) {
@@ -171,17 +297,25 @@ function resolveWebSocketBaseUrl(env: EnvLike) {
 function klineUrl({
   baseUrl,
   symbol,
+  interval,
+  startTime,
+  endTime,
   limit,
 }: {
   baseUrl: string;
   symbol: string;
+  interval: BinanceHynixPremiumInterval;
+  startTime?: number;
+  endTime?: number;
   limit: number;
 }) {
   const params = new URLSearchParams({
     symbol,
-    interval: INTERVAL,
+    interval,
     limit: String(limit),
   });
+  if (startTime !== undefined) params.set("startTime", String(startTime));
+  if (endTime !== undefined) params.set("endTime", String(endTime));
   return `${baseUrl}/fapi/v1/klines?${params.toString()}`;
 }
 
@@ -190,35 +324,62 @@ function premiumIndexUrl({ baseUrl, symbol }: { baseUrl: string; symbol: string 
   return `${baseUrl}/fapi/v1/premiumIndex?${params.toString()}`;
 }
 
+function fundingRateUrl({
+  baseUrl,
+  symbol,
+  startTime,
+  endTime,
+  limit,
+}: {
+  baseUrl: string;
+  symbol: string;
+  startTime?: number;
+  endTime?: number;
+  limit: number;
+}) {
+  const params = new URLSearchParams({
+    symbol,
+    limit: String(limit),
+  });
+  if (startTime !== undefined) params.set("startTime", String(startTime));
+  if (endTime !== undefined) params.set("endTime", String(endTime));
+  return `${baseUrl}/fapi/v1/fundingRate?${params.toString()}`;
+}
+
 export function binanceHynixPremiumWebSocketStreams({
   baseSymbol,
   benchmarkSymbol,
+  interval = DEFAULT_INTERVAL,
 }: {
   baseSymbol: string;
   benchmarkSymbol: string;
+  interval?: BinanceHynixPremiumInterval;
 }) {
   const base = baseSymbol.toLowerCase();
   const benchmark = benchmarkSymbol.toLowerCase();
   return [
     `${base}@markPrice`,
     `${benchmark}@markPrice`,
-    `${base}@kline_5m`,
-    `${benchmark}@kline_5m`,
+    `${base}@kline_${interval}`,
+    `${benchmark}@kline_${interval}`,
   ];
 }
 
 export function binanceHynixPremiumWebSocketUrl({
   baseSymbol = DEFAULT_BASE_SYMBOL,
   benchmarkSymbol = DEFAULT_BENCHMARK_SYMBOL,
+  interval = DEFAULT_INTERVAL,
   baseUrl = DEFAULT_FUTURES_WS_BASE_URL,
 }: {
   baseSymbol?: string;
   benchmarkSymbol?: string;
+  interval?: BinanceHynixPremiumInterval;
   baseUrl?: string;
 } = {}) {
   const streams = binanceHynixPremiumWebSocketStreams({
     baseSymbol,
     benchmarkSymbol,
+    interval,
   });
   return `${trimBaseUrl(baseUrl)}/public/stream?streams=${streams.join("/")}`;
 }
@@ -238,6 +399,7 @@ function payloadRows(payload: unknown) {
 function parseArrayKline(
   row: unknown[],
   symbol: string,
+  interval: BinanceHynixPremiumInterval,
 ): BinanceKlinePoint | null {
   const openTime = numberValue(row[0]);
   const closeTime = numberValue(row[6]);
@@ -259,7 +421,7 @@ function parseArrayKline(
   }
   return {
     symbol,
-    interval: INTERVAL,
+    interval,
     openTime,
     closeTime,
     openPrice,
@@ -273,9 +435,10 @@ function parseArrayKline(
 function parseObjectKline(
   row: Record<string, unknown>,
   symbol: string,
+  expectedInterval: BinanceHynixPremiumInterval = DEFAULT_INTERVAL,
 ): BinanceKlinePoint | null {
   const interval = stringValue(row.interval ?? row.i);
-  if (interval && interval !== INTERVAL) return null;
+  if (interval && interval !== expectedInterval) return null;
   const openTime = numberValue(row.openTime ?? row.open_time ?? row.t);
   const closeTime = numberValue(row.closeTime ?? row.close_time ?? row.T);
   const openPrice = numberValue(row.open ?? row.openPrice ?? row.o);
@@ -296,7 +459,7 @@ function parseObjectKline(
   }
   return {
     symbol,
-    interval: INTERVAL,
+    interval: expectedInterval,
     openTime,
     closeTime,
     openPrice,
@@ -310,14 +473,15 @@ function parseObjectKline(
 export function parseBinanceKlinePayload(
   payload: unknown,
   symbol: string,
+  interval: BinanceHynixPremiumInterval = DEFAULT_INTERVAL,
 ): BinanceKlinePoint[] {
   const normalizedSymbol = normalizeSymbol(symbol, symbol);
   return payloadRows(payload)
     .map((row) => {
-      if (Array.isArray(row)) return parseArrayKline(row, normalizedSymbol);
+      if (Array.isArray(row)) return parseArrayKline(row, normalizedSymbol, interval);
       const record = asRecord(row);
       return Object.keys(record).length > 0
-        ? parseObjectKline(record, normalizedSymbol)
+        ? parseObjectKline(record, normalizedSymbol, interval)
         : null;
     })
     .filter((point): point is BinanceKlinePoint => Boolean(point))
@@ -348,7 +512,8 @@ export function parseBinanceFuturesWebSocketMessage(
       stringValue(kline.s) || stringValue(message.s),
       DEFAULT_BASE_SYMBOL,
     );
-    const point = parseObjectKline(kline, symbol);
+    const interval = normalizeInterval(stringValue(kline.i) || DEFAULT_INTERVAL);
+    const point = parseObjectKline(kline, symbol, interval);
     const eventTime = numberValue(message.E) ?? point?.closeTime ?? Date.now();
     if (!point) return null;
     return {
@@ -498,17 +663,20 @@ function markPremiumPoint({
   benchmarkMark,
   baseSymbol,
   benchmarkSymbol,
+  interval,
 }: {
   baseMark: BinanceFuturesMarkPrice;
   benchmarkMark: BinanceFuturesMarkPrice;
   baseSymbol: string;
   benchmarkSymbol: string;
+  interval: BinanceHynixPremiumInterval;
 }) {
   const capturedTime = Math.min(baseMark.time, benchmarkMark.time);
-  const openTime = Math.floor(capturedTime / INTERVAL_MS) * INTERVAL_MS;
+  const intervalMs = binanceHynixPremiumIntervalMs(interval);
+  const openTime = Math.floor(capturedTime / intervalMs) * intervalMs;
   return buildBinanceHynixPremiumPoint({
     openTime,
-    closeTime: openTime + INTERVAL_MS - 1,
+    closeTime: openTime + intervalMs - 1,
     capturedAt: new Date(capturedTime).toISOString(),
     baseSymbol,
     benchmarkSymbol,
@@ -520,6 +688,7 @@ function markPremiumPoint({
 export function buildBinanceHynixPremiumSnapshot({
   generatedAt = new Date().toISOString(),
   provider = "binance-futures",
+  interval = DEFAULT_INTERVAL,
   baseSymbol,
   benchmarkSymbol,
   baseKlines,
@@ -559,13 +728,14 @@ export function buildBinanceHynixPremiumSnapshot({
   const streams = binanceHynixPremiumWebSocketStreams({
     baseSymbol,
     benchmarkSymbol,
+    interval,
   });
 
   return {
     generatedAt,
     source: points.length > 0 ? "live" : "empty",
     provider,
-    interval: INTERVAL,
+    interval,
     symbols: {
       base: baseSymbol,
       benchmark: benchmarkSymbol,
@@ -574,6 +744,7 @@ export function buildBinanceHynixPremiumSnapshot({
       url: binanceHynixPremiumWebSocketUrl({
         baseSymbol,
         benchmarkSymbol,
+        interval,
         baseUrl: websocketBaseUrl,
       }),
       streams,
@@ -601,32 +772,70 @@ function errorFromPayload(payload: unknown) {
 
 async function fetchKlines({
   fetchImpl,
-  url,
+  baseUrl,
   symbol,
+  interval,
+  startTime,
+  endTime,
+  limit,
 }: {
   fetchImpl: FetchLike;
-  url: string;
+  baseUrl: string;
   symbol: string;
+  interval: BinanceHynixPremiumInterval;
+  startTime: number;
+  endTime?: number;
+  limit: number;
 }) {
-  const response = await fetchImpl(url, {
-    cache: "no-store",
-    headers: {
-      accept: "application/json,text/plain,*/*",
-    },
-  });
-  const payload = await readPayload(response);
-  if (!response.ok) {
-    throw new Error(
-      `${symbol} Binance futures kline HTTP ${response.status}${
-        errorFromPayload(payload) ? `: ${errorFromPayload(payload)}` : ""
-      }`,
-    );
+  const points: BinanceKlinePoint[] = [];
+  let cursor = startTime;
+  let requests = 0;
+
+  while (points.length < MAX_TOTAL_KLINES) {
+    const url = klineUrl({
+      baseUrl,
+      symbol,
+      interval,
+      startTime: cursor,
+      endTime,
+      limit,
+    });
+    const response = await fetchImpl(url, {
+      cache: "no-store",
+      headers: {
+        accept: "application/json,text/plain,*/*",
+      },
+    });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(
+        `${symbol} Binance futures kline HTTP ${response.status}${
+          errorFromPayload(payload) ? `: ${errorFromPayload(payload)}` : ""
+        }`,
+      );
+    }
+    const error = errorFromPayload(payload);
+    if (error && !Array.isArray(payload)) {
+      throw new Error(`${symbol} Binance futures kline error ${error}`);
+    }
+    const page = parseBinanceKlinePayload(payload, symbol, interval);
+    points.push(...page);
+    requests += 1;
+    const last = page.at(-1);
+    if (!last) break;
+    const nextCursor = last.openTime + binanceHynixPremiumIntervalMs(interval);
+    if (nextCursor <= cursor) break;
+    if (endTime !== undefined && nextCursor > endTime) break;
+    if (page.length < limit && endTime === undefined) break;
+    cursor = nextCursor;
+    if (requests > Math.ceil(MAX_TOTAL_KLINES / Math.max(1, limit)) + 1) break;
   }
-  const error = errorFromPayload(payload);
-  if (error && !Array.isArray(payload)) {
-    throw new Error(`${symbol} Binance futures kline error ${error}`);
-  }
-  return parseBinanceKlinePayload(payload, symbol);
+
+  return points
+    .filter((point) => point.openTime >= startTime)
+    .filter((point) => endTime === undefined || point.openTime <= endTime)
+    .sort((left, right) => left.openTime - right.openTime)
+    .slice(-MAX_TOTAL_KLINES);
 }
 
 function parseMarkPricePayload(
@@ -636,12 +845,16 @@ function parseMarkPricePayload(
   const record = asRecord(payload);
   const markPrice = numberValue(record.markPrice);
   const indexPrice = numberValue(record.indexPrice);
+  const lastFundingRate = numberValue(record.lastFundingRate);
+  const nextFundingTime = numberValue(record.nextFundingTime);
   const time = numberValue(record.time);
   if (markPrice === null || time === null) return null;
   return {
     symbol: normalizeSymbol(stringValue(record.symbol), symbol),
     markPrice,
     indexPrice,
+    lastFundingRate,
+    nextFundingTime,
     time,
   };
 }
@@ -676,13 +889,184 @@ async function fetchMarkPrice({
   return parsed;
 }
 
+function parseFundingRatePayload(
+  payload: unknown,
+  symbol: string,
+): BinanceFundingRatePoint[] {
+  return payloadRows(payload)
+    .map((row): BinanceFundingRatePoint | null => {
+      const record = asRecord(row);
+      const fundingRate = numberValue(record.fundingRate);
+      const fundingTime = numberValue(record.fundingTime);
+      if (fundingRate === null || fundingTime === null) return null;
+      return {
+        symbol: normalizeSymbol(stringValue(record.symbol), symbol),
+        fundingRate,
+        fundingTime,
+        markPrice: numberValue(record.markPrice),
+      };
+    })
+    .filter((point): point is BinanceFundingRatePoint => Boolean(point))
+    .sort((left, right) => left.fundingTime - right.fundingTime);
+}
+
+async function fetchFundingRates({
+  fetchImpl,
+  baseUrl,
+  symbol,
+  startTime,
+  endTime,
+  limit,
+}: {
+  fetchImpl: FetchLike;
+  baseUrl: string;
+  symbol: string;
+  startTime: number;
+  endTime?: number;
+  limit: number;
+}) {
+  const points: BinanceFundingRatePoint[] = [];
+  let cursor = startTime;
+
+  while (points.length < MAX_TOTAL_KLINES) {
+    const url = fundingRateUrl({
+      baseUrl,
+      symbol,
+      startTime: cursor,
+      endTime,
+      limit,
+    });
+    const response = await fetchImpl(url, {
+      cache: "no-store",
+      headers: {
+        accept: "application/json,text/plain,*/*",
+      },
+    });
+    const payload = await readPayload(response);
+    if (!response.ok) {
+      throw new Error(
+        `${symbol} Binance futures fundingRate HTTP ${response.status}${
+          errorFromPayload(payload) ? `: ${errorFromPayload(payload)}` : ""
+        }`,
+      );
+    }
+    const page = parseFundingRatePayload(payload, symbol);
+    points.push(...page);
+    if (page.length < limit) break;
+    const last = page.at(-1);
+    if (!last) break;
+    const nextCursor = last.fundingTime + 1;
+    if (nextCursor <= cursor) break;
+    if (endTime !== undefined && nextCursor > endTime) break;
+    cursor = nextCursor;
+  }
+
+  return points
+    .filter((point) => point.fundingTime >= startTime)
+    .filter((point) => endTime === undefined || point.fundingTime <= endTime)
+    .sort((left, right) => left.fundingTime - right.fundingTime)
+    .slice(-MAX_TOTAL_KLINES);
+}
+
+function buildBinanceHynixFundingSnapshot({
+  generatedAt = new Date().toISOString(),
+  provider = "binance-futures",
+  baseSymbol,
+  benchmarkSymbol,
+  baseFundingRates,
+  benchmarkFundingRates,
+  errors,
+}: {
+  generatedAt?: string;
+  provider?: BinanceHynixPremiumProvider;
+  baseSymbol: string;
+  benchmarkSymbol: string;
+  baseFundingRates: BinanceFundingRatePoint[];
+  benchmarkFundingRates: BinanceFundingRatePoint[];
+  errors: string[];
+}): BinanceHynixFundingSnapshot {
+  const benchmarkByFundingTime = new Map(
+    benchmarkFundingRates.map((point) => [point.fundingTime, point]),
+  );
+  const records = baseFundingRates
+    .map((basePoint): BinanceHynixFundingRecord | null => {
+      const benchmarkPoint = benchmarkByFundingTime.get(basePoint.fundingTime);
+      if (!benchmarkPoint) return null;
+      const shortBaseFundingRate = basePoint.fundingRate;
+      const longBenchmarkFundingRate = -benchmarkPoint.fundingRate;
+      const combinedFundingRate =
+        shortBaseFundingRate + longBenchmarkFundingRate;
+      return {
+        fundingTime: basePoint.fundingTime,
+        capturedAt: new Date(basePoint.fundingTime).toISOString(),
+        shanghaiDate: formatShanghaiDate(basePoint.fundingTime),
+        baseSymbol,
+        benchmarkSymbol,
+        baseFundingRate: basePoint.fundingRate,
+        benchmarkFundingRate: benchmarkPoint.fundingRate,
+        shortBaseFundingRate,
+        longBenchmarkFundingRate,
+        combinedFundingRate: roundNumber(combinedFundingRate, 8),
+        combinedFundingRatePct: roundNumber(combinedFundingRate * 100, 4),
+        combinedFundingFeePer10kUsdt: roundNumber(combinedFundingRate * 10000, 4),
+      };
+    })
+    .filter((record): record is BinanceHynixFundingRecord => Boolean(record));
+  const dailyMap = new Map<string, BinanceHynixFundingDaily>();
+  for (const record of records) {
+    const existing = dailyMap.get(record.shanghaiDate) ?? {
+      date: record.shanghaiDate,
+      records: 0,
+      combinedFundingRate: 0,
+      combinedFundingRatePct: 0,
+      combinedFundingFeePer10kUsdt: 0,
+    };
+    existing.records += 1;
+    existing.combinedFundingRate += record.combinedFundingRate;
+    existing.combinedFundingRatePct += record.combinedFundingRatePct;
+    existing.combinedFundingFeePer10kUsdt +=
+      record.combinedFundingFeePer10kUsdt;
+    dailyMap.set(record.shanghaiDate, existing);
+  }
+  const daily = [...dailyMap.values()].map((entry) => ({
+    ...entry,
+    combinedFundingRate: roundNumber(entry.combinedFundingRate, 8),
+    combinedFundingRatePct: roundNumber(entry.combinedFundingRatePct, 4),
+    combinedFundingFeePer10kUsdt: roundNumber(
+      entry.combinedFundingFeePer10kUsdt,
+      4,
+    ),
+  }));
+
+  return {
+    generatedAt,
+    source: records.length > 0 ? "live" : "empty",
+    provider,
+    symbols: {
+      base: baseSymbol,
+      benchmark: benchmarkSymbol,
+    },
+    strategy: "short-base-long-benchmark",
+    records,
+    daily,
+    latest: records.at(-1) ?? null,
+    errors,
+  };
+}
+
 export async function fetchBinanceHynixPremiumSnapshot({
   fetchImpl = fetch,
   env = process.env,
+  interval,
+  startTime,
+  endTime,
   limit,
 }: {
   fetchImpl?: FetchLike;
   env?: EnvLike;
+  interval?: BinanceHynixPremiumInterval;
+  startTime?: number | string;
+  endTime?: number | string;
   limit?: number;
 } = {}): Promise<BinanceHynixPremiumSnapshot> {
   const provider: BinanceHynixPremiumProvider = "binance-futures";
@@ -696,23 +1080,26 @@ export async function fetchBinanceHynixPremiumSnapshot({
   );
   const restBaseUrl = resolveRestBaseUrl(env);
   const websocketBaseUrl = resolveWebSocketBaseUrl(env);
+  const normalizedInterval = normalizeInterval(interval);
+  const normalizedStartTime = normalizeStartTime(startTime);
+  const normalizedEndTime = normalizeEndTime(endTime);
   const normalizedLimit = normalizeLimit(limit);
   const klineRequests = [
     {
       symbol: baseSymbol,
-      url: klineUrl({
-        baseUrl: restBaseUrl,
-        symbol: baseSymbol,
-        limit: normalizedLimit,
-      }),
+      baseUrl: restBaseUrl,
+      interval: normalizedInterval,
+      startTime: normalizedStartTime,
+      endTime: normalizedEndTime,
+      limit: normalizedLimit,
     },
     {
       symbol: benchmarkSymbol,
-      url: klineUrl({
-        baseUrl: restBaseUrl,
-        symbol: benchmarkSymbol,
-        limit: normalizedLimit,
-      }),
+      baseUrl: restBaseUrl,
+      interval: normalizedInterval,
+      startTime: normalizedStartTime,
+      endTime: normalizedEndTime,
+      limit: normalizedLimit,
     },
   ];
   const markRequests = [
@@ -744,6 +1131,7 @@ export async function fetchBinanceHynixPremiumSnapshot({
 
   const snapshot = buildBinanceHynixPremiumSnapshot({
     provider,
+    interval: normalizedInterval,
     baseSymbol,
     benchmarkSymbol,
     baseKlines: baseResult.status === "fulfilled" ? baseResult.value : [],
@@ -763,8 +1151,74 @@ export async function fetchBinanceHynixPremiumSnapshot({
     benchmarkMark: benchmarkMarkResult.value,
     baseSymbol,
     benchmarkSymbol,
+    interval: normalizedInterval,
   });
   return latestMarkPoint
-    ? upsertBinanceHynixPremiumPoint(snapshot, latestMarkPoint, normalizedLimit)
+    ? upsertBinanceHynixPremiumPoint(snapshot, latestMarkPoint, MAX_TOTAL_KLINES)
     : snapshot;
+}
+
+export async function fetchBinanceHynixFundingSnapshot({
+  fetchImpl = fetch,
+  env = process.env,
+  startTime,
+  endTime,
+  limit,
+}: {
+  fetchImpl?: FetchLike;
+  env?: EnvLike;
+  startTime?: number | string;
+  endTime?: number | string;
+  limit?: number;
+} = {}): Promise<BinanceHynixFundingSnapshot> {
+  const provider: BinanceHynixPremiumProvider = "binance-futures";
+  const baseSymbol = normalizeSymbol(
+    env.BINANCE_HYNIX_PREMIUM_BASE_SYMBOL,
+    DEFAULT_BASE_SYMBOL,
+  );
+  const benchmarkSymbol = normalizeSymbol(
+    env.BINANCE_HYNIX_PREMIUM_BENCHMARK_SYMBOL,
+    DEFAULT_BENCHMARK_SYMBOL,
+  );
+  const restBaseUrl = resolveRestBaseUrl(env);
+  const normalizedStartTime = normalizeStartTime(startTime);
+  const normalizedEndTime = normalizeEndTime(endTime);
+  const normalizedLimit = normalizeLimit(limit);
+  const fundingRequests = [
+    {
+      symbol: baseSymbol,
+      baseUrl: restBaseUrl,
+      startTime: normalizedStartTime,
+      endTime: normalizedEndTime,
+      limit: normalizedLimit,
+    },
+    {
+      symbol: benchmarkSymbol,
+      baseUrl: restBaseUrl,
+      startTime: normalizedStartTime,
+      endTime: normalizedEndTime,
+      limit: normalizedLimit,
+    },
+  ];
+  const [baseResult, benchmarkResult] = await Promise.allSettled(
+    fundingRequests.map((request) => fetchFundingRates({ fetchImpl, ...request })),
+  );
+  const errors = [
+    baseResult,
+    benchmarkResult,
+  ]
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) =>
+      result.reason instanceof Error ? result.reason.message : String(result.reason),
+    );
+
+  return buildBinanceHynixFundingSnapshot({
+    provider,
+    baseSymbol,
+    benchmarkSymbol,
+    baseFundingRates: baseResult.status === "fulfilled" ? baseResult.value : [],
+    benchmarkFundingRates:
+      benchmarkResult.status === "fulfilled" ? benchmarkResult.value : [],
+    errors,
+  });
 }
