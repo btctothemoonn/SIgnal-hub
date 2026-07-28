@@ -21,7 +21,13 @@ assert.match(source, /window\.setInterval\(loadPremiumData,\s*60 \* 1000\)/);
 assert.match(source, /premiumPct/);
 assert.match(source, /basePrice/);
 assert.match(source, /benchmarkPrice/);
-assert.match(source, /<svg/);
-assert.match(source, /polyline/);
+assert.match(source, /lightweight-charts/);
+assert.match(source, /createChart/);
+assert.match(source, /CandlestickSeries/);
+assert.match(source, /HistogramSeries/);
+assert.match(source, /fitContent\(\)/);
+assert.match(source, /ResizeObserver/);
+assert.doesNotMatch(source, /<svg/);
+assert.doesNotMatch(source, /polyline/);
 
 console.log("ok - stocks hynix premium curve");

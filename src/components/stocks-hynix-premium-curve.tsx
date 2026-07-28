@@ -1,6 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  CandlestickSeries,
+  ColorType,
+  CrosshairMode,
+  HistogramSeries,
+  PriceScaleMode,
+  createChart,
+  type CandlestickData,
+  type HistogramData,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from "lightweight-charts";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
   buildBinanceHynixPremiumPoint,
@@ -13,7 +26,11 @@ import {
 } from "@/lib/binance-hynix-premium";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
-  "signal-hub:stocks:hynix-premium:5m:v1";
+  "signal-hub:stocks:hynix-premium:5m:v2";
+const PREMIUM_CHART_HEIGHT = 360;
+const PREMIUM_CHART_LIMIT = 288;
+const PREMIUM_UP_COLOR = "#62d6aa";
+const PREMIUM_DOWN_COLOR = "#ff7b8a";
 
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
@@ -41,35 +58,35 @@ function premiumTone(value: number | null | undefined) {
   return "text-muted";
 }
 
-function linePoints({
-  points,
-  width,
-  height,
-  left,
-  top,
-}: {
-  points: BinanceHynixPremiumPoint[];
-  width: number;
-  height: number;
-  left: number;
-  top: number;
-}) {
-  if (points.length === 0) return "";
-  const values = points.map((point) => point.premiumPct);
-  const min = Math.min(0, ...values);
-  const max = Math.max(0, ...values);
-  const pad = Math.max(0.25, (max - min) * 0.18);
-  const yMin = min - pad;
-  const yMax = max + pad;
-  const span = yMax - yMin || 1;
-  const lastIndex = Math.max(1, points.length - 1);
-  return points
-    .map((point, index) => {
-      const x = left + (index / lastIndex) * width;
-      const y = top + height - ((point.premiumPct - yMin) / span) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+function chartTime(point: BinanceHynixPremiumPoint) {
+  return Math.floor(point.openTime / 1000) as UTCTimestamp;
+}
+
+function pointToCandle(point: BinanceHynixPremiumPoint): CandlestickData {
+  const open = point.premiumOpenPct ?? point.premiumPct;
+  const high = point.premiumHighPct ?? point.premiumPct;
+  const low = point.premiumLowPct ?? point.premiumPct;
+  const close = point.premiumClosePct ?? point.premiumPct;
+  return {
+    time: chartTime(point),
+    open,
+    high: Math.max(open, high, close),
+    low: Math.min(open, low, close),
+    close,
+  };
+}
+
+function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
+  const open = point.premiumOpenPct ?? point.premiumPct;
+  const close = point.premiumClosePct ?? point.premiumPct;
+  return {
+    time: chartTime(point),
+    value: Math.max(0, point.volume ?? 0),
+    color:
+      close >= open
+        ? "rgba(98, 214, 170, 0.32)"
+        : "rgba(255, 123, 138, 0.3)",
+  };
 }
 
 export function StocksHynixPremiumCurve() {
@@ -77,6 +94,11 @@ export function StocksHynixPremiumCurve() {
     useState<BinanceHynixPremiumSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const fittedRangeRef = useRef<string | null>(null);
   const websocketKlinesRef = useRef<Record<string, BinanceKlinePoint>>({});
   const websocketMarkPricesRef = useRef<
     Record<string, { markPrice: number; eventTime: number }>
@@ -88,16 +110,13 @@ export function StocksHynixPremiumCurve() {
   const snapshot = liveSnapshot ?? cachedSnapshot;
   const points = snapshot?.points ?? [];
   const latest = snapshot?.latest ?? points.at(-1) ?? null;
-  const shownPoints = points.slice(-144);
-  const polylinePoints = useMemo(
-    () =>
-      linePoints({
-        points: shownPoints,
-        width: 624,
-        height: 120,
-        left: 42,
-        top: 24,
-      }),
+  const shownPoints = points.slice(-PREMIUM_CHART_LIMIT);
+  const candleData = useMemo(
+    () => shownPoints.map(pointToCandle),
+    [shownPoints],
+  );
+  const volumeData = useMemo(
+    () => shownPoints.map(pointToVolume),
     [shownPoints],
   );
   const firstPoint = shownPoints[0] ?? null;
@@ -107,13 +126,144 @@ export function StocksHynixPremiumCurve() {
   }, [snapshot]);
 
   useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: PREMIUM_CHART_HEIGHT,
+      layout: {
+        background: { type: ColorType.Solid, color: "#0b1211" },
+        textColor: "#c8d6d0",
+      },
+      localization: {
+        locale: "zh-CN",
+        priceFormatter: (price: number) => `${price.toFixed(2)}%`,
+      },
+      grid: {
+        vertLines: { color: "rgba(148, 163, 184, 0.12)" },
+        horzLines: { color: "rgba(148, 163, 184, 0.12)" },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: "rgba(226, 232, 240, 0.35)",
+          labelBackgroundColor: "#2a342f",
+        },
+        horzLine: {
+          color: "rgba(226, 232, 240, 0.35)",
+          labelBackgroundColor: "#2a342f",
+        },
+      },
+      rightPriceScale: {
+        borderColor: "rgba(148, 163, 184, 0.22)",
+        mode: PriceScaleMode.Normal,
+        scaleMargins: {
+          top: 0.12,
+          bottom: 0.28,
+        },
+      },
+      timeScale: {
+        borderColor: "rgba(148, 163, 184, 0.22)",
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 8,
+        barSpacing: 8,
+        minBarSpacing: 3,
+        lockVisibleTimeRangeOnResize: false,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
+      },
+      handleScroll: {
+        horzTouchDrag: true,
+        mouseWheel: true,
+        pressedMouseMove: true,
+        vertTouchDrag: false,
+      },
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: PREMIUM_UP_COLOR,
+      downColor: PREMIUM_DOWN_COLOR,
+      borderUpColor: PREMIUM_UP_COLOR,
+      borderDownColor: PREMIUM_DOWN_COLOR,
+      wickUpColor: PREMIUM_UP_COLOR,
+      wickDownColor: PREMIUM_DOWN_COLOR,
+      priceFormat: {
+        type: "custom",
+        minMove: 0.01,
+        formatter: (price: number) => `${price.toFixed(2)}%`,
+      },
+    });
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      color: "rgba(148, 163, 184, 0.25)",
+      priceFormat: {
+        type: "volume",
+      },
+      priceScaleId: "",
+    });
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.82,
+        bottom: 0,
+      },
+    });
+
+    chartRef.current = chart;
+    candleSeriesRef.current = candleSeries;
+    volumeSeriesRef.current = volumeSeries;
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(([entry]) => {
+            if (!entry) return;
+            chart.applyOptions({
+              width: Math.max(320, Math.floor(entry.contentRect.width)),
+              height: PREMIUM_CHART_HEIGHT,
+            });
+          });
+    resizeObserver?.observe(container);
+
+    return () => {
+      resizeObserver?.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      fittedRangeRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    candleSeriesRef.current?.setData(candleData);
+    volumeSeriesRef.current?.setData(volumeData);
+    const first = candleData[0]?.time;
+    const last = candleData.at(-1)?.time;
+    const rangeKey =
+      first === undefined || last === undefined
+        ? null
+        : `${first}:${last}:${candleData.length}`;
+    if (rangeKey && rangeKey !== fittedRangeRef.current) {
+      chartRef.current?.timeScale().fitContent();
+      fittedRangeRef.current = rangeKey;
+    }
+  }, [candleData, volumeData]);
+
+  useEffect(() => {
     let cancelled = false;
     async function loadPremiumData() {
       try {
         setError(null);
-        const response = await fetch("/api/stocks-hynix-premium?limit=144", {
-          cache: "no-store",
-        });
+        const response = await fetch(
+          `/api/stocks-hynix-premium?limit=${PREMIUM_CHART_LIMIT}`,
+          {
+            cache: "no-store",
+          },
+        );
         if (!response.ok) {
           throw new Error(`hynix premium HTTP ${response.status}`);
         }
@@ -154,7 +304,7 @@ export function StocksHynixPremiumCurve() {
         const nextSnapshot = upsertBinanceHynixPremiumPoint(
           baseSnapshot,
           point,
-          144,
+          PREMIUM_CHART_LIMIT,
         );
         writeCachedSnapshot(nextSnapshot);
         return nextSnapshot;
@@ -202,7 +352,16 @@ export function StocksHynixPremiumCurve() {
           baseSymbol,
           benchmarkSymbol,
           basePrice: baseKline.closePrice,
+          baseOpenPrice: baseKline.openPrice,
+          baseHighPrice: baseKline.highPrice,
+          baseLowPrice: baseKline.lowPrice,
+          baseClosePrice: baseKline.closePrice,
           benchmarkPrice: benchmarkKline.closePrice,
+          benchmarkOpenPrice: benchmarkKline.openPrice,
+          benchmarkHighPrice: benchmarkKline.highPrice,
+          benchmarkLowPrice: benchmarkKline.lowPrice,
+          benchmarkClosePrice: benchmarkKline.closePrice,
+          volume: baseKline.volume,
         }),
       );
     };
@@ -278,56 +437,23 @@ export function StocksHynixPremiumCurve() {
         </div>
       </div>
 
-      <div className="min-w-0 overflow-hidden rounded-lg border border-line/60 bg-background/35">
-        {shownPoints.length > 1 ? (
-          <svg
-            viewBox="0 0 720 178"
-            role="img"
-            aria-label="SKHYUSDT times 10 against SKHYNIXUSDT 5 minute premium curve"
-            className="block h-48 w-full"
-          >
-            <line x1="42" y1="84" x2="666" y2="84" stroke="currentColor" className="text-line" />
-            <line x1="42" y1="24" x2="42" y2="144" stroke="currentColor" className="text-line" />
-            <line x1="666" y1="24" x2="666" y2="144" stroke="currentColor" className="text-line" />
-            <polyline
-              points={polylinePoints}
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2.8"
-              className="text-accent"
-            />
-            {latest ? (
-              <>
-                <circle
-                  cx="666"
-                  cy={polylinePoints.split(" ").at(-1)?.split(",")[1] ?? "84"}
-                  r="4"
-                  fill="currentColor"
-                  className="text-accent"
-                />
-                <text x="676" y="88" className="fill-foreground text-[12px] font-semibold">
-                  {formatSignedPercent(latest.premiumPct)}
-                </text>
-              </>
-            ) : null}
-            <text x="42" y="166" className="fill-muted text-[11px]">
-              {firstPoint ? formatTime(firstPoint.capturedAt) : ""}
-            </text>
-            <text x="666" y="166" textAnchor="end" className="fill-muted text-[11px]">
-              {latest ? formatTime(latest.capturedAt) : ""}
-            </text>
-          </svg>
-        ) : (
-          <div className="flex h-48 items-center justify-center px-4 text-sm text-muted">
+      <div className="relative min-w-0 overflow-hidden rounded-lg border border-line/60 bg-background/35">
+        <div
+          ref={chartContainerRef}
+          role="img"
+          aria-label="SKHYUSDT times 10 against SKHYNIXUSDT 5 minute premium candlestick chart"
+          className="h-[360px] w-full"
+        />
+        {shownPoints.length <= 1 ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/55 px-4 text-sm text-muted">
             {error ?? "等待 Binance 5m K 线数据。"}
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
         <span>{snapshot ? `${shownPoints.length} 根 5m K 线` : "加载中"}</span>
+        {firstPoint ? <span>起点 {formatTime(firstPoint.capturedAt)}</span> : null}
         {latest ? <span>更新 {formatTime(latest.capturedAt)}</span> : null}
         {error ? <span className="text-warning">{error}</span> : null}
       </div>

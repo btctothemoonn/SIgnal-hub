@@ -58,6 +58,13 @@ assert.equal(snapshot.points.length, 2);
 assert.equal(snapshot.latest?.basePrice, 1.1);
 assert.equal(snapshot.latest?.benchmarkPrice, 10);
 assert.equal(snapshot.latest?.premiumPct, 10);
+assert.equal(snapshot.points[0].premiumOpenPct, 0);
+assert.equal(snapshot.points[0].premiumHighPct, 13.2653);
+assert.equal(snapshot.points[0].premiumLowPct, -2.9412);
+assert.equal(snapshot.points[0].premiumClosePct, 5);
+assert.equal(snapshot.points[0].baseOpenPrice, 1);
+assert.equal(snapshot.points[0].benchmarkClosePrice, 10);
+assert.equal(snapshot.points[0].volume, 100);
 assert.equal(
   binanceHynixPremiumWebSocketUrl({
     baseSymbol: "SKHYUSDT",

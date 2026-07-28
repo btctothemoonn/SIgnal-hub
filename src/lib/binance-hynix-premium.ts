@@ -29,8 +29,21 @@ export type BinanceHynixPremiumPoint = {
   baseSymbol: string;
   benchmarkSymbol: string;
   basePrice: number;
+  baseOpenPrice: number;
+  baseHighPrice: number;
+  baseLowPrice: number;
+  baseClosePrice: number;
   benchmarkPrice: number;
+  benchmarkOpenPrice: number;
+  benchmarkHighPrice: number;
+  benchmarkLowPrice: number;
+  benchmarkClosePrice: number;
   premiumPct: number;
+  premiumOpenPct: number;
+  premiumHighPct: number;
+  premiumLowPct: number;
+  premiumClosePct: number;
+  volume: number;
 };
 
 export type BinanceHynixPremiumSnapshot = {
@@ -107,6 +120,22 @@ function asRecord(value: unknown): Record<string, unknown> {
 function roundNumber(value: number, digits = 4) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function calculatePremiumPct({
+  basePrice,
+  benchmarkPrice,
+}: {
+  basePrice: number;
+  benchmarkPrice: number;
+}) {
+  if (!Number.isFinite(basePrice) || !Number.isFinite(benchmarkPrice)) {
+    return null;
+  }
+  if (benchmarkPrice === 0) return null;
+  return roundNumber(
+    ((basePrice * HYNIX_PREMIUM_BASE_MULTIPLIER) / benchmarkPrice - 1) * 100,
+  );
 }
 
 function normalizeSymbol(value: string | undefined, fallback: string) {
@@ -355,7 +384,16 @@ export function buildBinanceHynixPremiumPoint({
   baseSymbol,
   benchmarkSymbol,
   basePrice,
+  baseOpenPrice = basePrice,
+  baseHighPrice = basePrice,
+  baseLowPrice = basePrice,
+  baseClosePrice = basePrice,
   benchmarkPrice,
+  benchmarkOpenPrice = benchmarkPrice,
+  benchmarkHighPrice = benchmarkPrice,
+  benchmarkLowPrice = benchmarkPrice,
+  benchmarkClosePrice = benchmarkPrice,
+  volume = 0,
 }: {
   openTime: number;
   closeTime: number;
@@ -363,24 +401,75 @@ export function buildBinanceHynixPremiumPoint({
   baseSymbol: string;
   benchmarkSymbol: string;
   basePrice: number;
+  baseOpenPrice?: number;
+  baseHighPrice?: number;
+  baseLowPrice?: number;
+  baseClosePrice?: number;
   benchmarkPrice: number;
+  benchmarkOpenPrice?: number;
+  benchmarkHighPrice?: number;
+  benchmarkLowPrice?: number;
+  benchmarkClosePrice?: number;
+  volume?: number;
 }): BinanceHynixPremiumPoint | null {
-  if (!Number.isFinite(basePrice) || !Number.isFinite(benchmarkPrice)) {
+  const premiumOpenPct = calculatePremiumPct({
+    basePrice: baseOpenPrice,
+    benchmarkPrice: benchmarkOpenPrice,
+  });
+  const premiumHighCandidatePct = calculatePremiumPct({
+    basePrice: baseHighPrice,
+    benchmarkPrice: benchmarkLowPrice,
+  });
+  const premiumLowCandidatePct = calculatePremiumPct({
+    basePrice: baseLowPrice,
+    benchmarkPrice: benchmarkHighPrice,
+  });
+  const premiumClosePct = calculatePremiumPct({
+    basePrice: baseClosePrice,
+    benchmarkPrice: benchmarkClosePrice,
+  });
+  if (
+    premiumOpenPct === null ||
+    premiumHighCandidatePct === null ||
+    premiumLowCandidatePct === null ||
+    premiumClosePct === null
+  ) {
     return null;
   }
-  if (benchmarkPrice === 0) return null;
+  const premiumHighPct = Math.max(
+    premiumOpenPct,
+    premiumHighCandidatePct,
+    premiumLowCandidatePct,
+    premiumClosePct,
+  );
+  const premiumLowPct = Math.min(
+    premiumOpenPct,
+    premiumHighCandidatePct,
+    premiumLowCandidatePct,
+    premiumClosePct,
+  );
   return {
     openTime,
     closeTime,
     capturedAt,
     baseSymbol,
     benchmarkSymbol,
-    basePrice,
-    benchmarkPrice,
-    premiumPct: roundNumber(
-      ((basePrice * HYNIX_PREMIUM_BASE_MULTIPLIER) / benchmarkPrice - 1) *
-        100,
-    ),
+    basePrice: baseClosePrice,
+    baseOpenPrice,
+    baseHighPrice,
+    baseLowPrice,
+    baseClosePrice,
+    benchmarkPrice: benchmarkClosePrice,
+    benchmarkOpenPrice,
+    benchmarkHighPrice,
+    benchmarkLowPrice,
+    benchmarkClosePrice,
+    premiumPct: premiumClosePct,
+    premiumOpenPct,
+    premiumHighPct,
+    premiumLowPct,
+    premiumClosePct,
+    volume: Number.isFinite(volume) ? volume : 0,
   };
 }
 
@@ -454,7 +543,16 @@ export function buildBinanceHynixPremiumSnapshot({
         baseSymbol,
         benchmarkSymbol,
         basePrice: basePoint.closePrice,
+        baseOpenPrice: basePoint.openPrice,
+        baseHighPrice: basePoint.highPrice,
+        baseLowPrice: basePoint.lowPrice,
+        baseClosePrice: basePoint.closePrice,
         benchmarkPrice: benchmarkPoint.closePrice,
+        benchmarkOpenPrice: benchmarkPoint.openPrice,
+        benchmarkHighPrice: benchmarkPoint.highPrice,
+        benchmarkLowPrice: benchmarkPoint.lowPrice,
+        benchmarkClosePrice: benchmarkPoint.closePrice,
+        volume: basePoint.volume,
       });
     })
     .filter((point): point is BinanceHynixPremiumPoint => Boolean(point));
