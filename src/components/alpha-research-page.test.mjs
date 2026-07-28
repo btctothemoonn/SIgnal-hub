@@ -12,6 +12,8 @@ assert.match(source, /<section className="[^"]*lg:z-30[^"]*"/);
 assert.match(source, /<section className="[^"]*lg:backdrop-blur-xl[^"]*"/);
 assert.match(source, /StocksResearchLayout/);
 assert.match(source, /StocksSubscriptionReports/);
+assert.match(source, /StocksHynixPremiumCurve/);
+assert.match(source, /<StocksHynixPremiumCurve \/>/);
 assert.match(source, /buildStocksSubscriptionReports\(stocks\)/);
 assert.match(source, /stocksDataHealthItems/);
 assert.match(source, /数据健康中心/);

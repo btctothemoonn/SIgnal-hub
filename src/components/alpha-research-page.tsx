@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
 import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
+import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { StocksTodayChanges } from "@/components/stocks-today-changes";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
@@ -713,6 +714,7 @@ export function AlphaResearchPage() {
 
       {activeTab === "research" ? (
         <>
+          <StocksHynixPremiumCurve />
           <StocksTodayChanges
             changes={todayChanges}
             selectedTicker={selectedTicker}

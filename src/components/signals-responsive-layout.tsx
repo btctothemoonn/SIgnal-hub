@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
+import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { UnifiedNewsPanel } from "@/components/unified-news-panel";
 import type { TwitterDashboardSnapshot } from "@/lib/6551-twitter";
 import type { TelegramDashboardSnapshot } from "@/lib/telegram-channels";
@@ -39,6 +40,25 @@ const MOBILE_PANEL_ID: Record<SignalMobilePanel, string> = {
   feed: "signal-mobile-panel-feed",
   summary: "signal-mobile-panel-summary",
 };
+
+function SignalFeedStack({
+  initialTelegramSnapshot,
+  initialXSnapshot,
+  pollXSnapshot,
+  rail = false,
+}: SignalsResponsiveLayoutProps & { rail?: boolean }) {
+  return (
+    <div className="min-w-0 space-y-3">
+      <StocksHynixPremiumCurve />
+      <UnifiedNewsPanel
+        initialTelegramSnapshot={initialTelegramSnapshot}
+        initialXSnapshot={initialXSnapshot}
+        pollXSnapshot={pollXSnapshot}
+        rail={rail}
+      />
+    </div>
+  );
+}
 
 export function SignalsResponsiveLayout({
   initialTelegramSnapshot,
@@ -145,7 +165,7 @@ export function SignalsResponsiveLayout({
     return (
       <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.42fr)_minmax(26rem,0.95fr)] lg:items-start lg:gap-4 xl:grid-cols-[minmax(0,1.52fr)_minmax(30rem,0.88fr)]">
         <section id="signals" className="min-w-0">
-          <UnifiedNewsPanel
+          <SignalFeedStack
             initialTelegramSnapshot={initialTelegramSnapshot}
             initialXSnapshot={initialXSnapshot}
             pollXSnapshot={pollXSnapshot}
@@ -224,7 +244,7 @@ export function SignalsResponsiveLayout({
               : "[&_[data-signal-feed-floating-navigation]]:hidden",
           ].join(" ")}
         >
-          <UnifiedNewsPanel
+          <SignalFeedStack
             initialTelegramSnapshot={initialTelegramSnapshot}
             initialXSnapshot={initialXSnapshot}
             pollXSnapshot={pollXSnapshot}

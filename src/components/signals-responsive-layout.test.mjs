@@ -7,6 +7,19 @@ const component = readFileSync(
 );
 const page = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 
+assert.match(
+  component,
+  /import \{ StocksHynixPremiumCurve \} from "@\/components\/stocks-hynix-premium-curve";/,
+);
+assert.ok(
+  component.indexOf("<StocksHynixPremiumCurve />") >= 0,
+  "homepage renders the Binance Hynix premium curve",
+);
+assert.ok(
+  component.indexOf("<StocksHynixPremiumCurve />") <
+    component.indexOf("<UnifiedNewsPanel"),
+  "homepage premium curve appears above the signal feed",
+);
 assert.match(component, /useState<SignalMobilePanel>\("feed"\)/);
 assert.doesNotMatch(component, /OpportunityRadar|opportunityEnabled|opportunities/);
 assert.match(component, /type SignalMobilePanel = "feed" \| "summary"/);

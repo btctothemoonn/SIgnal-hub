@@ -88,6 +88,10 @@ export function StocksTodayChanges() {
   return null;
 }
 
+export function StocksHynixPremiumCurve() {
+  return null;
+}
+
 export function useBrowserJsonCache() {
   return [null, noop];
 }
