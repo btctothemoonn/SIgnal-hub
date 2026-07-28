@@ -30,6 +30,13 @@ import {
   type BinanceHynixPremiumSnapshot,
   type BinanceKlinePoint,
 } from "@/lib/binance-hynix-premium";
+import {
+  HYNIX_PREMIUM_ALERT_THRESHOLD_PCT,
+  dismissHynixPremiumAlertCycle,
+  nextHynixPremiumAlertCycle,
+  shouldShowHynixPremiumAlert,
+  type HynixPremiumAlertCycle,
+} from "@/lib/hynix-premium-alert";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
   "signal-hub:stocks:hynix-premium:v3";
@@ -114,6 +121,11 @@ export function StocksHynixPremiumCurve() {
     useState<BinanceHynixFundingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fundingError, setFundingError] = useState<string | null>(null);
+  const [premiumAlertCycle, setPremiumAlertCycle] =
+    useState<HynixPremiumAlertCycle>({
+      isOverThreshold: false,
+      dismissed: false,
+    });
   const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -143,6 +155,9 @@ export function StocksHynixPremiumCurve() {
   const latest = snapshot?.latest ?? points.at(-1) ?? null;
   const latestFunding = fundingSnapshot?.latest ?? null;
   const latestFundingDaily = fundingSnapshot?.daily.at(-1) ?? null;
+  const premiumAlertVisible =
+    latest !== null &&
+    shouldShowHynixPremiumAlert(premiumAlertCycle, latest.premiumPct);
   const shownPoints = points.slice(-PREMIUM_MAX_POINTS);
   const candleData = useMemo(
     () => shownPoints.map(pointToCandle),
@@ -307,6 +322,9 @@ export function StocksHynixPremiumCurve() {
         const snapshot = (await response.json()) as BinanceHynixPremiumSnapshot;
         if (!cancelled) {
           setLiveSnapshot(snapshot);
+          setPremiumAlertCycle((current) =>
+            nextHynixPremiumAlertCycle(current, snapshot.latest?.premiumPct),
+          );
           if (snapshot.points.length > 0) writeCachedSnapshot(snapshot);
           setError(snapshot.errors[0] ?? null);
         }
@@ -372,6 +390,9 @@ export function StocksHynixPremiumCurve() {
     websocketMarkPricesRef.current = {};
     const applyPremiumPoint = (point: BinanceHynixPremiumPoint | null) => {
       if (!point) return;
+      setPremiumAlertCycle((current) =>
+        nextHynixPremiumAlertCycle(current, point.premiumPct),
+      );
       setLiveSnapshot((current) => {
         const baseSnapshot = current ?? snapshotRef.current;
         if (!baseSnapshot) return current;
@@ -483,6 +504,43 @@ export function StocksHynixPremiumCurve() {
       data-testid="stocks-hynix-premium-curve"
       className="min-w-0 border-y border-line/60 bg-panel-strong/80 px-3 py-3 sm:px-4"
     >
+      {premiumAlertVisible ? (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="hynix-premium-alert-title"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-background/55 px-4 pt-24 backdrop-blur-sm"
+        >
+          <div className="w-full max-w-sm rounded-lg border border-danger/50 bg-panel-strong p-4 shadow-2xl shadow-danger/20">
+            <p
+              id="hynix-premium-alert-title"
+              className="text-sm font-semibold text-danger"
+            >
+              海力士溢价超过 {HYNIX_PREMIUM_ALERT_THRESHOLD_PCT}%
+            </p>
+            <p className="mt-2 text-xs leading-5 text-foreground">
+              当前溢价 {formatSignedPercent(latest.premiumPct)}，组合为
+              SKHYUSDT * 10 / SKHYNIXUSDT。
+            </p>
+            <p className="mt-1 text-[11px] text-muted">
+              本轮溢价回落到 {HYNIX_PREMIUM_ALERT_THRESHOLD_PCT}% 以下后，再次上穿会重新提醒。
+            </p>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setPremiumAlertCycle((current) =>
+                    dismissHynixPremiumAlertCycle(current),
+                  )
+                }
+                className="rounded-md bg-danger px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-danger/85"
+              >
+                知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">

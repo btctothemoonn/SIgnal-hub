@@ -29,6 +29,11 @@ assert.match(source, /startTime=\$\{BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS\
 assert.match(source, /\/api\/stocks-hynix-funding/);
 assert.match(source, /资金费/);
 assert.match(source, /溢价回归套利/);
+assert.match(source, /HYNIX_PREMIUM_ALERT_THRESHOLD_PCT/);
+assert.match(source, /role="alertdialog"/);
+assert.match(source, /aria-modal="true"/);
+assert.match(source, /shouldShowHynixPremiumAlert/);
+assert.match(source, /dismissHynixPremiumAlertCycle/);
 assert.match(source, /new WebSocket/);
 assert.match(source, /websocket\?\.url/);
 assert.match(source, /parseBinanceFuturesWebSocketMessage/);
