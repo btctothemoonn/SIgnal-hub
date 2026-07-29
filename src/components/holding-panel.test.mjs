@@ -5,6 +5,18 @@ const source = readFileSync(
   new URL("./holding-panel.tsx", import.meta.url),
   "utf8",
 );
+const pageSource = readFileSync(
+  new URL("../app/holding/page.tsx", import.meta.url),
+  "utf8",
+);
+const summaryTileSource = source.slice(
+  source.indexOf("function SummaryTile"),
+  source.indexOf("function EmptyState"),
+);
+const holdingMetricCellSource = source.slice(
+  source.indexOf("function HoldingMetricCell"),
+  source.indexOf("function BinanceSummaryGrid"),
+);
 
 assert.match(source, /FuturesEquityCurve/);
 assert.match(source, /equityHistory/);
@@ -29,6 +41,19 @@ assert.match(source, /data-holding-view-tabs/);
 assert.match(source, /data-holding-metric-strip/);
 assert.match(source, /data-holding-position-grid/);
 assert.match(source, /rounded-\[6px\]/);
+assert.match(source, /getBinanceDisplayTotalEquity/);
+assert.match(source, /label="浮盈 \/ 合约权益"/);
+assert.match(source, /label="浮盈 \/ 账户权益"/);
+assert.doesNotMatch(source, /label="盈亏比例"/);
+assert.match(source, /className="h-64 w-full overflow-visible"/);
+assert.doesNotMatch(source, /className="h-64 w-full overflow-hidden"/);
+assert.doesNotMatch(summaryTileSource, /truncate/);
+assert.match(summaryTileSource, /\[overflow-wrap:anywhere\]/);
+assert.doesNotMatch(holdingMetricCellSource, /truncate/);
+assert.match(holdingMetricCellSource, /\[overflow-wrap:anywhere\]/);
+assert.doesNotMatch(source, /bg-gradient-|from-[a-z]|to-[a-z]/);
+assert.match(pageSource, /overflow-x-hidden/);
+assert.doesNotMatch(pageSource, /overflow-x-auto/);
 assert.match(source, /合约持仓/);
 assert.match(source, /现货资产/);
 assert.doesNotMatch(source, /<FuturesHeatmap/);

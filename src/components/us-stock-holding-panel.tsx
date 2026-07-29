@@ -15,6 +15,10 @@ import {
   type UsStockHoldingBriefCard,
   type UsStockHoldingSnapshot,
 } from "@/lib/us-stock-holdings";
+import {
+  getUsHoldingEquityMetric,
+  isFiniteTigerHoldingSnapshot,
+} from "@/lib/holding-display";
 import type { TigerEquityPoint, TigerHoldingSnapshot } from "@/lib/tiger-holdings";
 
 type DisplaySnapshot = UsStockHoldingSnapshot | TigerHoldingSnapshot;
@@ -119,18 +123,6 @@ function isTigerEquityPoint(value: unknown): value is TigerEquityPoint {
   );
 }
 
-function isTigerHoldingSnapshot(value: unknown): value is TigerHoldingSnapshot {
-  if (!value || typeof value !== "object") return false;
-  const snapshot = value as Partial<TigerHoldingSnapshot>;
-  return (
-    snapshot.source === "tiger" &&
-    typeof snapshot.updatedAt === "string" &&
-    Array.isArray(snapshot.positions) &&
-    typeof snapshot.reportedMarketValue === "number" &&
-    typeof snapshot.reportedPnl === "number"
-  );
-}
-
 function readStoredTigerSnapshot(): TigerHoldingSnapshot | null {
   if (typeof window === "undefined") return null;
 
@@ -138,7 +130,7 @@ function readStoredTigerSnapshot(): TigerHoldingSnapshot | null {
     const raw = window.localStorage.getItem(TIGER_HOLDING_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
-    return isTigerHoldingSnapshot(parsed) ? parsed : null;
+    return isFiniteTigerHoldingSnapshot(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -205,7 +197,8 @@ function PositionBriefCell({
   label,
   value,
   tone = "text-foreground",
-  valueClassName = "truncate font-mono text-base font-bold leading-tight",
+  valueClassName =
+    "min-w-0 font-mono text-sm font-bold leading-tight [overflow-wrap:anywhere] sm:text-base",
 }: {
   label: string;
   value: ReactNode;
@@ -236,28 +229,32 @@ function UsHoldingSummaryCell({
   return (
     <div className="min-w-0 bg-panel-strong px-3 py-3">
       <div className="text-[11px] font-semibold uppercase text-muted">{label}</div>
-      <div className={`mt-1 truncate font-mono text-lg font-black ${tone}`}>
+      <div
+        className={`mt-1 min-w-0 font-mono text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
+      >
         {value}
       </div>
-      <div className="mt-1 truncate text-xs font-medium text-muted">{detail}</div>
+      <div className="mt-1 min-w-0 text-xs font-medium leading-snug text-muted [overflow-wrap:anywhere]">
+        {detail}
+      </div>
     </div>
   );
 }
 
 function positionLogoTone(symbol: string) {
   const tones: Record<string, string> = {
-    ARM: "from-cyan-400/85 to-sky-800/80 text-white",
-    DRAM: "from-emerald-400/80 to-teal-900/80 text-white",
-    LITE: "from-blue-400/80 to-slate-900/85 text-white",
-    MU: "from-violet-400/80 to-purple-950/85 text-white",
-    NOK: "from-sky-400/80 to-blue-950/85 text-white",
-    PENG: "from-amber-300/85 to-stone-900/85 text-stone-950",
-    PLTR: "from-zinc-300/85 to-zinc-950/85 text-white",
-    RDDT: "from-orange-300/85 to-red-900/85 text-white",
-    SNDK: "from-red-300/85 to-rose-950/85 text-white",
-    TE: "from-lime-300/85 to-emerald-950/85 text-emerald-950",
+    ARM: "border-info/30 bg-info-soft text-info",
+    DRAM: "border-success/30 bg-success-soft text-success",
+    LITE: "border-info/30 bg-info-soft text-info",
+    MU: "border-warning/30 bg-warning-soft text-warning",
+    NOK: "border-info/30 bg-info-soft text-info",
+    PENG: "border-warning/30 bg-warning-soft text-warning",
+    PLTR: "border-line bg-panel text-foreground",
+    RDDT: "border-danger/30 bg-danger-soft text-danger",
+    SNDK: "border-danger/30 bg-danger-soft text-danger",
+    TE: "border-success/30 bg-success-soft text-success",
   };
-  return tones[symbol] ?? "from-slate-300/80 to-slate-950/85 text-white";
+  return tones[symbol] ?? "border-line bg-panel text-foreground";
 }
 
 function PositionLogo({ card }: { card: UsStockHoldingBriefCard }) {
@@ -265,7 +262,7 @@ function PositionLogo({ card }: { card: UsStockHoldingBriefCard }) {
   return (
     <div
       className={[
-        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] bg-gradient-to-br shadow-sm ring-1 ring-line/70",
+        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] border shadow-sm",
         positionLogoTone(card.symbol),
       ].join(" ")}
       aria-hidden="true"
@@ -279,8 +276,8 @@ function PositionLogo({ card }: { card: UsStockHoldingBriefCard }) {
 
 function PositionBriefPnl({ card }: { card: UsStockHoldingBriefCard }) {
   return (
-    <span className="inline-flex max-w-full flex-col gap-1 overflow-hidden whitespace-nowrap">
-      <span className="truncate">{formatSignedUsd(card.unrealizedPnl)}</span>
+    <span className="inline-flex min-w-0 max-w-full flex-col gap-1 [overflow-wrap:anywhere]">
+      <span>{formatSignedUsd(card.unrealizedPnl)}</span>
       <span className="shrink-0 text-base leading-none opacity-90">
         {formatSignedPercent(card.unrealizedPnlPercent)}
       </span>
@@ -442,7 +439,7 @@ function EquityCurve({ points }: { points: TigerEquityPoint[] }) {
         </div>
       </div>
       <svg
-        className="h-56 w-full overflow-hidden"
+        className="h-56 w-full overflow-visible"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label="老虎账户权益历史曲线"
@@ -579,10 +576,11 @@ export function USStockHoldingPanel() {
       ? `${snapshot.reportedPositionCount - snapshot.positions.length} 条未展示`
       : "持仓已完整展示";
   const sourceLabel = isTiger ? "Tiger 实时" : "截图兜底";
-  const totalEquity =
-    isTiger && snapshot.netLiquidation > 0
-      ? snapshot.netLiquidation
-      : analysis.totalMarketValue;
+  const equityMetric = getUsHoldingEquityMetric({
+    source: isTiger ? "tiger" : "snapshot",
+    netLiquidation: isTiger ? snapshot.netLiquidation : 0,
+    holdingMarketValue: analysis.totalMarketValue,
+  });
   const equityDetail = isTiger
     ? `现金 ${formatUsd(snapshot.cashValue)}`
     : `持仓 ${formatUsd(analysis.totalMarketValue)}`;
@@ -645,8 +643,8 @@ export function USStockHoldingPanel() {
         className="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 lg:grid-cols-5"
       >
         <UsHoldingSummaryCell
-          label="总权益"
-          value={formatUsd(totalEquity)}
+          label={equityMetric.label}
+          value={formatUsd(equityMetric.value)}
           detail={equityDetail}
         />
         <UsHoldingSummaryCell

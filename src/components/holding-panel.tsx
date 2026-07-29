@@ -11,6 +11,7 @@ import {
 import {
   analyzeFuturesPositions,
 } from "@/lib/holding-analytics";
+import { getBinanceDisplayTotalEquity } from "@/lib/holding-display";
 import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
 import type {
   BinanceFuturesEquityPoint,
@@ -319,10 +320,14 @@ function SummaryTile({
       <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
         {label}
       </div>
-      <div className={`mt-1 truncate font-mono text-lg font-black leading-tight ${tone}`}>
+      <div
+        className={`mt-1 min-w-0 font-mono text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
+      >
         {value}
       </div>
-      <div className="mt-1 truncate text-xs text-muted">{detail}</div>
+      <div className="mt-1 min-w-0 text-xs leading-snug text-muted [overflow-wrap:anywhere]">
+        {detail}
+      </div>
     </div>
   );
 }
@@ -406,7 +411,7 @@ function FuturesEquityCurve({
           </div>
 
           <svg
-            className="h-64 w-full overflow-hidden"
+            className="h-64 w-full overflow-visible"
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label="合约账户权益历史曲线"
@@ -583,14 +588,16 @@ function HoldingMetricCell({
       <div className="text-xs font-semibold text-muted">{label}</div>
       <div
         className={[
-          "mt-1 truncate font-mono text-base font-black leading-tight tracking-normal",
+          "mt-1 min-w-0 font-mono text-sm font-black leading-tight tracking-normal [overflow-wrap:anywhere] sm:text-base",
           tone,
         ].join(" ")}
       >
         {value}
       </div>
       {detail ? (
-        <div className="mt-1 truncate text-xs font-semibold text-muted">{detail}</div>
+        <div className="mt-1 min-w-0 text-xs font-semibold leading-snug text-muted [overflow-wrap:anywhere]">
+          {detail}
+        </div>
       ) : null}
     </div>
   );
@@ -610,7 +617,11 @@ function BinanceSummaryGrid({ snapshot }: { snapshot: BinanceHoldingSnapshot }) 
     summary.futuresMarginBalance > 0
       ? (summary.futuresUnrealizedPnl / summary.futuresMarginBalance) * 100
       : 0;
-  const totalEquity = summary.futuresMarginBalance + spotTotal;
+  const totalEquity = getBinanceDisplayTotalEquity({
+    accountMode: snapshot.accountMode,
+    futuresMarginBalance: summary.futuresMarginBalance,
+    spotTotal,
+  });
   const accountMode =
     snapshot.accountMode === "portfolioMargin" ? "统一账户" : "U本位合约";
 
@@ -631,7 +642,7 @@ function BinanceSummaryGrid({ snapshot }: { snapshot: BinanceHoldingSnapshot }) 
         tone={pnlTone(summary.futuresUnrealizedPnl)}
       />
       <SummaryTile
-        label="盈亏比例"
+        label="浮盈 / 合约权益"
         value={formatSignedPercent(pnlPercent)}
         detail={`${summary.futuresPositionCount} 条合约持仓`}
         tone={pnlTone(summary.futuresUnrealizedPnl)}
@@ -1106,7 +1117,7 @@ function TrackedAccountsPanel({
                 tone={pnlTone(snapshot.summary.unrealizedPnl)}
               />
               <SummaryTile
-                label="盈亏比例"
+                label="浮盈 / 账户权益"
                 value={formatSignedPercent(pnlPercent)}
                 detail={`${snapshot.summary.positionCount} 条公开持仓`}
                 tone={pnlTone(snapshot.summary.unrealizedPnl)}
