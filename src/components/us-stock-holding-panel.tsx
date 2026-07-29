@@ -205,7 +205,7 @@ function PositionBriefCell({
   label,
   value,
   tone = "text-foreground",
-  valueClassName = "truncate font-mono text-xl font-bold leading-tight sm:text-2xl",
+  valueClassName = "truncate font-mono text-base font-bold leading-tight",
 }: {
   label: string;
   value: ReactNode;
@@ -213,11 +213,33 @@ function PositionBriefCell({
   valueClassName?: string;
 }) {
   return (
-    <div className="min-w-0 sm:px-5">
-      <div className="text-sm font-medium leading-tight text-muted">{label}</div>
+    <div className="min-w-0 border-t border-line/70 pt-3">
+      <div className="text-xs font-medium leading-tight text-muted">{label}</div>
       <div className={`mt-1 min-w-0 ${valueClassName} ${tone}`}>
         {value}
       </div>
+    </div>
+  );
+}
+
+function UsHoldingSummaryCell({
+  label,
+  value,
+  detail,
+  tone = "text-foreground",
+}: {
+  label: string;
+  value: ReactNode;
+  detail: ReactNode;
+  tone?: string;
+}) {
+  return (
+    <div className="min-w-0 bg-panel-strong px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase text-muted">{label}</div>
+      <div className={`mt-1 truncate font-mono text-lg font-black ${tone}`}>
+        {value}
+      </div>
+      <div className="mt-1 truncate text-xs font-medium text-muted">{detail}</div>
     </div>
   );
 }
@@ -243,12 +265,12 @@ function PositionLogo({ card }: { card: UsStockHoldingBriefCard }) {
   return (
     <div
       className={[
-        "flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)] ring-1 ring-white/10",
+        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] bg-gradient-to-br shadow-sm ring-1 ring-line/70",
         positionLogoTone(card.symbol),
       ].join(" ")}
       aria-hidden="true"
     >
-      <span className="text-lg font-black leading-none tracking-normal">
+      <span className="text-sm font-black leading-none tracking-normal">
         {label.toLowerCase()}
       </span>
     </div>
@@ -271,19 +293,22 @@ function PositionBriefCards({ snapshot }: { snapshot: DisplaySnapshot }) {
 
   if (cards.length === 0) {
     return (
-      <section className="flex min-h-[10rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel-strong p-4 text-sm text-muted">
+      <section className="flex min-h-[10rem] items-center justify-center rounded-[6px] border border-dashed border-line/80 bg-panel-strong p-4 text-sm text-muted">
         暂无美股持仓速览
       </section>
     );
   }
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       <div className="flex items-center justify-between gap-3 px-1">
         <h3 className="text-sm font-semibold text-foreground">持仓明细</h3>
         <span className="text-xs font-semibold text-muted">{cards.length} 条</span>
       </div>
-      <div className="grid grid-cols-1 gap-4">
+      <div
+        data-holding-position-grid
+        className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2"
+      >
         {cards.map((card) => (
           <PositionBriefCard key={card.id} card={card} />
         ))}
@@ -295,58 +320,69 @@ function PositionBriefCards({ snapshot }: { snapshot: DisplaySnapshot }) {
 function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
   const name = card.optionLabel ?? card.name;
   const kindLabel = card.kind === "option" ? "期权" : card.theme;
+  const kindTone =
+    card.kind === "option"
+      ? "border-warning/30 bg-warning-soft text-warning"
+      : "border-info/30 bg-info-soft text-info";
 
   return (
-    <article className="rounded-xl border border-white/10 bg-[radial-gradient(circle_at_8%_20%,rgba(74,112,141,0.20),transparent_32%),linear-gradient(135deg,rgba(14,21,31,0.94),rgba(10,15,23,0.98))] px-5 py-5 shadow-[0_28px_70px_-46px_rgba(0,0,0,0.95)] ring-1 ring-white/[0.03]">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,18rem)_minmax(36rem,1fr)_auto] xl:items-center">
-        <div className="flex min-w-0 items-center gap-4">
+    <article
+      data-us-position-card
+      className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-4 shadow-sm"
+    >
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex min-w-0 items-start gap-3">
           <PositionLogo card={card} />
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <h4 className="truncate text-3xl font-black leading-none text-foreground">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h4 className="truncate text-xl font-black leading-none text-foreground">
                 {card.symbol}
               </h4>
-              <span className="shrink-0 rounded-full border border-success/20 bg-success-soft px-3 py-1 text-xs font-bold text-success">
+              <span
+                className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-bold ${kindTone}`}
+              >
                 {kindLabel}
               </span>
             </div>
-            <div className="mt-3 text-base font-medium leading-snug text-muted">
+            <div className="mt-1 truncate text-sm font-medium leading-snug text-muted">
               {name}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="text-xs font-medium text-muted">市值</div>
+            <div className="mt-1 font-mono text-lg font-black leading-none text-foreground">
+              {formatUsd(card.marketValue)}
             </div>
           </div>
         </div>
 
-        <div className="order-3 grid min-w-0 grid-cols-3 gap-y-3 divide-line/70 sm:grid-cols-5 sm:divide-x xl:order-none">
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
           <PositionBriefCell
             label="数量"
             value={formatNumber(card.quantity, { maximumFractionDigits: 6 })}
-            valueClassName="truncate font-mono text-xl font-black leading-tight sm:text-2xl"
           />
           <PositionBriefCell
             label="占比"
             value={formatPercent(card.weightPercent)}
-            valueClassName="truncate font-mono text-xl font-black leading-tight sm:text-2xl"
           />
           <PositionBriefCell
             label="成本价"
             value={formatPreciseUsd(card.costBasis)}
-            valueClassName="truncate font-mono text-xl font-black leading-tight sm:text-2xl"
           />
           <PositionBriefCell
             label="市价"
             value={formatPreciseUsd(card.currentPrice)}
-            valueClassName="truncate font-mono text-xl font-black leading-tight sm:text-2xl"
+          />
+          <PositionBriefCell
+            label="费用"
+            value={card.fee === null ? "--" : formatUsd(card.fee)}
           />
           <PositionBriefCell
             label="盈亏"
             value={<PositionBriefPnl card={card} />}
             tone={pnlTone(card.unrealizedPnl)}
-            valueClassName="font-mono text-xl font-black leading-tight sm:text-2xl"
+            valueClassName="font-mono text-base font-black leading-tight"
           />
-        </div>
-
-        <div className="order-2 shrink-0 text-right font-mono text-2xl font-black leading-none text-foreground sm:text-3xl xl:order-none xl:min-w-[11rem]">
-          {formatUsd(card.marketValue)}
         </div>
       </div>
     </article>
@@ -393,7 +429,7 @@ function EquityCurve({ points }: { points: TigerEquityPoint[] }) {
     firstPoint.netLiquidation > 0 ? (change / firstPoint.netLiquidation) * 100 : 0;
 
   return (
-    <section className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+    <section className="min-w-0 py-2">
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-foreground">账户权益曲线</h3>
@@ -406,7 +442,7 @@ function EquityCurve({ points }: { points: TigerEquityPoint[] }) {
         </div>
       </div>
       <svg
-        className="h-56 w-full overflow-visible"
+        className="h-56 w-full overflow-hidden"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
         aria-label="老虎账户权益历史曲线"
@@ -543,6 +579,13 @@ export function USStockHoldingPanel() {
       ? `${snapshot.reportedPositionCount - snapshot.positions.length} 条未展示`
       : "持仓已完整展示";
   const sourceLabel = isTiger ? "Tiger 实时" : "截图兜底";
+  const totalEquity =
+    isTiger && snapshot.netLiquidation > 0
+      ? snapshot.netLiquidation
+      : analysis.totalMarketValue;
+  const equityDetail = isTiger
+    ? `现金 ${formatUsd(snapshot.cashValue)}`
+    : `持仓 ${formatUsd(analysis.totalMarketValue)}`;
   const statusTone =
     state === "error"
       ? "border-warning/30 bg-warning-soft text-warning"
@@ -551,8 +594,8 @@ export function USStockHoldingPanel() {
         : "border-line bg-panel text-muted";
 
   return (
-    <section className="rounded-2xl border border-white/10 bg-[radial-gradient(circle_at_8%_0%,rgba(60,92,130,0.22),transparent_30%),linear-gradient(180deg,rgba(8,13,22,0.98),rgba(7,11,17,0.98))] p-5 shadow-[0_32px_90px_-55px_rgba(0,0,0,1)] sm:p-7">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+    <section className="min-w-0 space-y-4">
+      <div className="flex flex-col gap-4 border-b border-line/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h2 className="text-2xl font-black leading-tight text-foreground">
             持仓状况
@@ -560,7 +603,7 @@ export function USStockHoldingPanel() {
           <p className="mt-2 text-sm font-medium text-muted">
             实时跟踪您的持仓表现，数据每 60 秒更新一次
           </p>
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>{snapshot.accountLabel}</span>
             <span className="h-1 w-1 rounded-full bg-line" />
             <span>{visibleGap}</span>
@@ -578,17 +621,11 @@ export function USStockHoldingPanel() {
         </div>
 
         <div className="flex shrink-0 items-center gap-3">
-          <div className="text-right text-sm font-semibold text-muted">
-            <span className="mr-2 text-base" aria-hidden="true">
-              ◷
-            </span>
-            最后更新：{formatTime(snapshot.updatedAt)}
-          </div>
           <button
             type="button"
             onClick={() => void loadTiger({ force: true })}
             disabled={isBusy}
-            className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] text-foreground shadow-sm transition-colors hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[6px] border border-line/70 bg-panel text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
             aria-label="刷新 Tiger 持仓"
             title={isBusy ? "刷新中" : "刷新 Tiger"}
           >
@@ -598,22 +635,55 @@ export function USStockHoldingPanel() {
       </div>
 
       {error ? (
-        <div className="mt-5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
+        <div className="rounded-[6px] border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
           Tiger 实时数据暂不可用：{error} 当前展示本地缓存或截图兜底。
         </div>
       ) : null}
 
+      <div
+        data-us-holding-summary
+        className="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 lg:grid-cols-5"
+      >
+        <UsHoldingSummaryCell
+          label="总权益"
+          value={formatUsd(totalEquity)}
+          detail={equityDetail}
+        />
+        <UsHoldingSummaryCell
+          label="未实现盈亏"
+          value={formatSignedUsd(analysis.totalPnl)}
+          detail={`${analysis.winningCount} 盈 / ${analysis.losingCount} 亏`}
+          tone={pnlTone(analysis.totalPnl)}
+        />
+        <UsHoldingSummaryCell
+          label="盈亏比例"
+          value={formatSignedPercent(analysis.totalPnlPercent)}
+          detail={`成本 ${formatUsd(analysis.totalCost)}`}
+          tone={pnlTone(analysis.totalPnl)}
+        />
+        <UsHoldingSummaryCell
+          label="集中风险"
+          value={formatPercent(analysis.topThreeWeight)}
+          detail={`期权 ${formatUsd(analysis.optionMarketValue)}`}
+        />
+        <UsHoldingSummaryCell
+          label="最后更新"
+          value={formatTime(snapshot.updatedAt)}
+          detail={`${sourceLabel} · ${visibleGap}`}
+        />
+      </div>
+
       {isTiger ? (
-        <div className="mt-5">
+        <div>
           <EquityCurve points={equityHistory} />
         </div>
       ) : null}
 
-      <div className="mt-5">
+      <div>
         <PositionBriefCards snapshot={snapshot} />
       </div>
 
-      <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] px-5 py-4 text-sm font-semibold text-muted">
+      <div className="rounded-[6px] border border-line/70 bg-panel px-4 py-3 text-xs font-semibold text-muted">
         注：以上数据仅供参考，投资有风险，入市需谨慎。
       </div>
     </section>

@@ -315,21 +315,21 @@ function SummaryTile({
   tone?: string;
 }) {
   return (
-    <div className="min-h-[7rem] rounded-lg border border-line/70 bg-panel-strong px-4 py-3 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+    <div className="min-w-0 bg-panel-strong px-3 py-3">
       <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
         {label}
       </div>
-      <div className={`mt-2 text-2xl font-semibold leading-tight ${tone}`}>
+      <div className={`mt-1 truncate font-mono text-lg font-black leading-tight ${tone}`}>
         {value}
       </div>
-      <div className="mt-2 text-xs text-muted">{detail}</div>
+      <div className="mt-1 truncate text-xs text-muted">{detail}</div>
     </div>
   );
 }
 
 function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-[12rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel/50 px-4 py-8 text-sm text-muted">
+    <div className="flex min-h-[12rem] items-center justify-center rounded-[6px] border border-dashed border-line/80 bg-panel/50 px-4 py-8 text-sm text-muted">
       {children}
     </div>
   );
@@ -381,9 +381,9 @@ function FuturesEquityCurve({
   const hasTrend = points.length >= 2;
 
   return (
-    <div className="border-b border-line/70 p-4">
+    <section className="min-w-0 py-2">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className="min-w-0 rounded-lg border border-line/70 bg-background/35 p-3">
+        <div className="min-w-0 py-3">
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
@@ -406,7 +406,7 @@ function FuturesEquityCurve({
           </div>
 
           <svg
-            className="h-64 w-full overflow-visible"
+            className="h-64 w-full overflow-hidden"
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label="合约账户权益历史曲线"
@@ -500,7 +500,7 @@ function FuturesEquityCurve({
           ) : null}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+        <div className="grid gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 sm:grid-cols-3 xl:grid-cols-1">
           <SummaryTile
             label="当前权益"
             value={formatUsd(lastPoint.marginBalance)}
@@ -520,7 +520,7 @@ function FuturesEquityCurve({
           />
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -558,7 +558,7 @@ function AssetLogo({ asset }: { asset: string }) {
   return (
     <div
       className={[
-        "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border font-mono text-base font-black uppercase shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] border font-mono text-sm font-black uppercase shadow-sm",
         assetLogoTone(asset),
       ].join(" ")}
     >
@@ -579,11 +579,11 @@ function HoldingMetricCell({
   tone?: string;
 }) {
   return (
-    <div className="min-w-0 border-line/70 sm:border-l sm:pl-5">
+    <div className="min-w-0 border-t border-line/70 pt-3">
       <div className="text-xs font-semibold text-muted">{label}</div>
       <div
         className={[
-          "mt-1 truncate font-mono text-xl font-black leading-tight tracking-normal",
+          "mt-1 truncate font-mono text-base font-black leading-tight tracking-normal",
           tone,
         ].join(" ")}
       >
@@ -610,38 +610,47 @@ function BinanceSummaryGrid({ snapshot }: { snapshot: BinanceHoldingSnapshot }) 
     summary.futuresMarginBalance > 0
       ? (summary.futuresUnrealizedPnl / summary.futuresMarginBalance) * 100
       : 0;
+  const totalEquity = summary.futuresMarginBalance + spotTotal;
+  const accountMode =
+    snapshot.accountMode === "portfolioMargin" ? "统一账户" : "U本位合约";
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+    <div
+      data-holding-metric-strip
+      className="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 lg:grid-cols-5"
+    >
       <SummaryTile
-        label="合约权益"
-        value={formatUsd(summary.futuresMarginBalance)}
-        detail={`钱包 ${formatUsd(summary.futuresWalletBalance)}`}
+        label="总权益"
+        value={formatUsd(totalEquity)}
+        detail={`合约 ${formatCompactUsd(summary.futuresMarginBalance).replace("+", "")} · 现货 ${formatCompactUsd(spotTotal).replace("+", "")}`}
       />
       <SummaryTile
         label="未实现盈亏"
         value={formatSignedUsd(summary.futuresUnrealizedPnl)}
-        detail={`占权益 ${formatSignedPercent(pnlPercent)}`}
+        detail={`钱包 ${formatUsd(summary.futuresWalletBalance)}`}
         tone={pnlTone(summary.futuresUnrealizedPnl)}
       />
       <SummaryTile
-        label="合约名义"
-        value={formatCompactUsd(summary.futuresGrossNotional).replace("+", "")}
-        detail={`${summary.futuresPositionCount} 条持仓`}
+        label="盈亏比例"
+        value={formatSignedPercent(pnlPercent)}
+        detail={`${summary.futuresPositionCount} 条合约持仓`}
+        tone={pnlTone(summary.futuresUnrealizedPnl)}
       />
       <SummaryTile
-        label="净敞口"
+        label="敞口风险"
         value={formatSignedUsd(summary.futuresNetNotional)}
         detail={`${biasLabelText(analytics.biasLabel)} · ${formatNumber(
           analytics.netExposureLeverage,
           { maximumFractionDigits: 2 },
-        )}x`}
+        )}x · 名义 ${formatCompactUsd(
+          summary.futuresGrossNotional,
+        ).replace("+", "")}`}
         tone={biasTone(analytics.biasLabel)}
       />
       <SummaryTile
-        label="现货估值"
-        value={formatUsd(spotTotal)}
-        detail={`${snapshot.summary.spotAssetCount} 个币种`}
+        label="最后更新"
+        value={formatTime(snapshot.updatedAt)}
+        detail={`${accountMode} · ${snapshot.summary.spotAssetCount} 个现货币种`}
       />
     </div>
   );
@@ -664,7 +673,10 @@ function FuturesPositionCards({
           {positions.length} 条
         </span>
       </div>
-      <div className="grid gap-3">
+      <div
+        data-holding-position-grid
+        className="grid min-w-0 gap-3 xl:grid-cols-2"
+      >
         {positions.map((position) => {
           const asset = baseAssetFromSymbol(position.symbol);
           const absNotional = Math.abs(position.notional);
@@ -674,9 +686,9 @@ function FuturesPositionCards({
           return (
             <article
               key={`${position.symbol}-${position.side}`}
-              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
+              className="min-w-0 overflow-hidden rounded-[6px] border border-line/75 bg-panel-strong p-4 shadow-sm"
             >
-              <div className="grid gap-4 xl:grid-cols-[minmax(15rem,1.1fr)_minmax(0,3.2fr)_minmax(11rem,0.9fr)] xl:items-center">
+              <div className="grid min-w-0 gap-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <AssetLogo asset={asset} />
                   <div className="min-w-0">
@@ -704,7 +716,7 @@ function FuturesPositionCards({
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+                <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
                   <HoldingMetricCell
                     label="数量"
                     value={formatNumber(Math.abs(position.amount), {
@@ -741,7 +753,7 @@ function FuturesPositionCards({
                   />
                 </div>
 
-                <div className="xl:text-right">
+                <div className="border-t border-line/70 pt-3 text-right">
                   <div className="text-xs font-semibold text-muted">名义金额</div>
                   <div className="mt-1 font-mono text-2xl font-black text-foreground">
                     {formatUsd(absNotional)}
@@ -789,7 +801,10 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
           {valuedBalances.length} 个币种
         </span>
       </div>
-      <div className="grid gap-3">
+      <div
+        data-holding-position-grid
+        className="grid min-w-0 gap-3 xl:grid-cols-2"
+      >
         {valuedBalances.map((balance) => {
           const value = balance.usdtValue ?? 0;
           const share = spotSharePercent(balance, totalUsdtValue);
@@ -797,9 +812,9 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
           return (
             <article
               key={balance.asset}
-              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
+              className="min-w-0 overflow-hidden rounded-[6px] border border-line/75 bg-panel-strong p-4 shadow-sm"
             >
-              <div className="grid gap-4 lg:grid-cols-[minmax(13rem,1fr)_minmax(0,2.7fr)_minmax(10rem,0.8fr)] lg:items-center">
+              <div className="grid min-w-0 gap-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <AssetLogo asset={balance.asset} />
                   <div className="min-w-0">
@@ -812,7 +827,7 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
                   <HoldingMetricCell
                     label="总数量"
                     value={formatNumber(balance.total, { maximumFractionDigits: 8 })}
@@ -832,7 +847,7 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
                   <HoldingMetricCell label="占比" value={formatPercent(share)} />
                 </div>
 
-                <div className="lg:text-right">
+                <div className="border-t border-line/70 pt-3 text-right">
                   <div className="text-xs font-semibold text-muted">估值</div>
                   <div className="mt-1 font-mono text-2xl font-black text-foreground">
                     {formatUsd(value)}
@@ -884,16 +899,19 @@ function TrackedPositionCards({
           {positions.length} 条
         </span>
       </div>
-      <div className="grid gap-3">
+      <div
+        data-holding-position-grid
+        className="grid min-w-0 gap-3 xl:grid-cols-2"
+      >
         {positions.map((position) => {
           const positive = position.unrealizedPnl >= 0;
 
           return (
             <article
               key={`${position.coin}-${position.side}`}
-              className="overflow-hidden rounded-xl border border-line/75 bg-background/55 p-4 shadow-[0_22px_70px_-55px_rgba(0,0,0,0.72)]"
+              className="min-w-0 overflow-hidden rounded-[6px] border border-line/75 bg-panel-strong p-4 shadow-sm"
             >
-              <div className="grid gap-4 xl:grid-cols-[minmax(13rem,1fr)_minmax(0,3.1fr)_minmax(10rem,0.9fr)] xl:items-center">
+              <div className="grid min-w-0 gap-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <AssetLogo asset={position.coin} />
                   <div className="min-w-0">
@@ -918,7 +936,7 @@ function TrackedPositionCards({
                   </div>
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
                   <HoldingMetricCell
                     label="数量"
                     value={formatNumber(Math.abs(position.size), {
@@ -959,7 +977,7 @@ function TrackedPositionCards({
                   />
                 </div>
 
-                <div className="xl:text-right">
+                <div className="border-t border-line/70 pt-3 text-right">
                   <div className="text-xs font-semibold text-muted">名义金额</div>
                   <div className="mt-1 font-mono text-2xl font-black text-foreground">
                     {formatUsd(position.notional)}
@@ -1001,9 +1019,13 @@ function TrackedAccountsPanel({
     externalUrl:
       "https://hyperdash.com/explore/track/s7owivu6si4f0qkmzsbkj1mm?previewAddress=0x87d76b68d81a3cec086e6c34afed49dbf378af8b&previewFrom=tracking",
   };
+  const pnlPercent =
+    snapshot && snapshot.summary.accountValue > 0
+      ? (snapshot.summary.unrealizedPnl / snapshot.summary.accountValue) * 100
+      : 0;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-line/70 bg-panel-strong shadow-[0_26px_90px_-70px_rgba(0,0,0,0.8)]">
+    <section className="min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-panel">
       <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-info">
@@ -1030,7 +1052,7 @@ function TrackedAccountsPanel({
             href={profile.externalUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong"
+            className="inline-flex h-9 items-center justify-center rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong"
           >
             打开 Hyperdash
           </a>
@@ -1038,7 +1060,7 @@ function TrackedAccountsPanel({
             type="button"
             onClick={onRefresh}
             disabled={isBusy}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshIcon />
             {isBusy ? "刷新中" : "刷新"}
@@ -1048,7 +1070,7 @@ function TrackedAccountsPanel({
 
       <div className="space-y-4 p-4">
         {error ? (
-          <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+          <div className="rounded-[6px] border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
             {error}
           </div>
         ) : null}
@@ -1059,7 +1081,7 @@ function TrackedAccountsPanel({
               (key) => (
                 <div
                   key={key}
-                  className="h-28 animate-pulse rounded-lg border border-line/70 bg-panel"
+                  className="h-28 animate-pulse rounded-[6px] border border-line/70 bg-panel"
                 />
               ),
             )}
@@ -1068,16 +1090,14 @@ function TrackedAccountsPanel({
 
         {snapshot ? (
           <>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <div
+              data-holding-metric-strip
+              className="grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 lg:grid-cols-5"
+            >
               <SummaryTile
                 label="账户权益"
                 value={formatUsd(snapshot.summary.accountValue)}
                 detail={`可提现 ${formatUsd(snapshot.summary.withdrawable)}`}
-              />
-              <SummaryTile
-                label="名义持仓"
-                value={formatUsd(snapshot.summary.totalNotional)}
-                detail={`${snapshot.summary.positionCount} 条公开持仓`}
               />
               <SummaryTile
                 label="未实现盈亏"
@@ -1086,24 +1106,24 @@ function TrackedAccountsPanel({
                 tone={pnlTone(snapshot.summary.unrealizedPnl)}
               />
               <SummaryTile
-                label="保证金占用"
-                value={formatUsd(snapshot.summary.totalMarginUsed)}
-                detail={`现金 ${formatUsd(snapshot.summary.totalRawUsd)}`}
+                label="盈亏比例"
+                value={formatSignedPercent(pnlPercent)}
+                detail={`${snapshot.summary.positionCount} 条公开持仓`}
+                tone={pnlTone(snapshot.summary.unrealizedPnl)}
               />
               <SummaryTile
-                label="多空名义"
-                value={`${formatCompactUsd(snapshot.summary.longNotional).replace(
-                  "+",
-                  "",
-                )} / ${formatCompactUsd(snapshot.summary.shortNotional).replace(
-                  "+",
-                  "",
-                )}`}
-                detail="多头 / 空头"
+                label="保证金 / 名义"
+                value={formatUsd(snapshot.summary.totalMarginUsed)}
+                detail={`名义 ${formatCompactUsd(snapshot.summary.totalNotional).replace("+", "")} · 多 ${formatCompactUsd(snapshot.summary.longNotional).replace("+", "")} / 空 ${formatCompactUsd(snapshot.summary.shortNotional).replace("+", "")}`}
+              />
+              <SummaryTile
+                label="最后更新"
+                value={formatTime(snapshot.updatedAt)}
+                detail={`现金 ${formatUsd(snapshot.summary.totalRawUsd)}`}
               />
             </div>
             <TrackedPositionCards positions={snapshot.positions} />
-            <div className="rounded-xl border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
+            <div className="rounded-[6px] border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
               注：该模块读取公开地址数据，仅用于观察别人持仓变化，不代表可复制交易建议。
             </div>
           </>
@@ -1281,8 +1301,8 @@ export function HoldingPanel() {
       : "U本位合约";
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-lg border border-line/70 bg-panel-strong p-3 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] sm:flex-row sm:items-center sm:justify-between">
+    <div data-holding-workspace className="min-w-0 space-y-4">
+      <div className="flex min-w-0 flex-col gap-3 rounded-[6px] border border-line/70 bg-panel-strong p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-muted">
             Holding
@@ -1291,20 +1311,29 @@ export function HoldingPanel() {
             持仓账户
           </h2>
         </div>
-        <div className="grid grid-cols-3 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[30rem]">
+        <div
+          data-holding-view-tabs
+          className="grid w-full min-w-0 grid-cols-3 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1 sm:max-w-[30rem]"
+          role="tablist"
+          aria-label="持仓账户视图"
+        >
           {[
-            { id: "us-stocks" as const, label: "美股证券" },
             { id: "binance" as const, label: "Binance" },
+            { id: "us-stocks" as const, label: "美股证券" },
             { id: "tracked-accounts" as const, label: "跟踪账户" },
           ].map((item) => {
             const selected = activeHoldingView === item.id;
             return (
               <button
                 key={item.id}
+                id={`holding-tab-${item.id}`}
                 type="button"
                 onClick={() => setActiveHoldingView(item.id)}
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`holding-panel-${item.id}`}
                 className={[
-                  "h-9 rounded-md px-3 text-xs font-semibold transition-colors",
+                  "h-9 min-w-0 rounded-[6px] px-2 text-xs font-semibold transition-colors",
                   selected
                     ? "bg-foreground text-background shadow-sm"
                     : "text-muted hover:bg-panel hover:text-foreground",
@@ -1317,19 +1346,40 @@ export function HoldingPanel() {
         </div>
       </div>
 
-      {activeHoldingView === "us-stocks" ? <USStockHoldingPanel /> : null}
+      {activeHoldingView === "us-stocks" ? (
+        <div
+          id="holding-panel-us-stocks"
+          className="min-w-0"
+          role="tabpanel"
+          aria-labelledby="holding-tab-us-stocks"
+        >
+          <USStockHoldingPanel />
+        </div>
+      ) : null}
 
       {activeHoldingView === "tracked-accounts" ? (
-        <TrackedAccountsPanel
-          snapshot={trackedSnapshot}
-          error={trackedError}
-          isBusy={trackedState === "loading" || trackedState === "refreshing"}
-          onRefresh={() => void loadTracked({ force: true })}
-        />
+        <div
+          id="holding-panel-tracked-accounts"
+          className="min-w-0"
+          role="tabpanel"
+          aria-labelledby="holding-tab-tracked-accounts"
+        >
+          <TrackedAccountsPanel
+            snapshot={trackedSnapshot}
+            error={trackedError}
+            isBusy={trackedState === "loading" || trackedState === "refreshing"}
+            onRefresh={() => void loadTracked({ force: true })}
+          />
+        </div>
       ) : null}
 
       {activeHoldingView === "binance" ? (
-        <section className="overflow-hidden rounded-2xl border border-line/70 bg-panel-strong shadow-[0_26px_90px_-70px_rgba(0,0,0,0.8)]">
+        <section
+          id="holding-panel-binance"
+          className="min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-panel"
+          role="tabpanel"
+          aria-labelledby="holding-tab-binance"
+        >
       <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-info">
@@ -1362,7 +1412,7 @@ export function HoldingPanel() {
               setSaveError(null);
               setApiDialogOpen(true);
             }}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-info/30 bg-info-soft px-3 text-xs font-semibold text-info shadow-sm transition-colors hover:border-info/50 hover:bg-info-soft/80"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-info/30 bg-info-soft px-3 text-xs font-semibold text-info shadow-sm transition-colors hover:border-info/50 hover:bg-info-soft/80"
           >
             <PlusIcon />
             添加 API
@@ -1371,7 +1421,7 @@ export function HoldingPanel() {
             type="button"
             onClick={() => void load({ force: true })}
             disabled={isBusy}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshIcon />
             {isBusy ? "刷新中" : "刷新"}
@@ -1382,13 +1432,13 @@ export function HoldingPanel() {
       <div className="space-y-4 p-4">
 
       {error ? (
-        <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+        <div className="rounded-[6px] border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : null}
 
       {snapshot?.warnings.length ? (
-        <div className="rounded-lg border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-warning">
+        <div className="rounded-[6px] border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-warning">
           <div className="font-semibold">部分数据</div>
           <div className="mt-1 space-y-1 text-xs leading-5">
             {snapshot.warnings.map((warning) => (
@@ -1407,7 +1457,7 @@ export function HoldingPanel() {
           {["a", "b", "c", "d", "e"].map((key) => (
             <div
               key={key}
-              className="h-28 animate-pulse rounded-lg border border-line/70 bg-panel"
+              className="h-28 animate-pulse rounded-[6px] border border-line/70 bg-panel"
             />
           ))}
         </div>
@@ -1419,7 +1469,7 @@ export function HoldingPanel() {
           <FuturesEquityCurve snapshot={snapshot} history={equityHistory} />
           <FuturesPositionCards positions={snapshot.futuresPositions} />
           <SpotBalanceCards balances={snapshot.spotBalances} />
-          <div className="rounded-xl border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
+          <div className="rounded-[6px] border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
             注：以上数据仅用于持仓观察；币安接口可能存在延迟，交易和风控以交易所账户为准。
           </div>
         </div>
@@ -1429,7 +1479,7 @@ export function HoldingPanel() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/72 px-3 backdrop-blur-sm">
           <form
             onSubmit={saveApiCredentials}
-            className="w-full max-w-lg rounded-lg border border-line/80 bg-panel-strong shadow-2xl"
+            className="w-full max-w-lg rounded-[6px] border border-line/80 bg-panel-strong shadow-2xl"
           >
             <div className="flex items-center justify-between gap-3 border-b border-line/70 px-4 py-3">
               <div>
@@ -1443,7 +1493,7 @@ export function HoldingPanel() {
               <button
                 type="button"
                 onClick={() => setApiDialogOpen(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line/70 bg-panel text-muted transition-colors hover:bg-panel-strong hover:text-foreground"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-line/70 bg-panel text-muted transition-colors hover:bg-panel-strong hover:text-foreground"
                 aria-label="关闭"
               >
                 <CloseIcon />
@@ -1458,7 +1508,7 @@ export function HoldingPanel() {
                   onChange={(event) => setApiKey(event.target.value)}
                   autoComplete="off"
                   spellCheck={false}
-                  className="selectable-text h-10 w-full rounded-lg border border-line/80 bg-background px-3 font-mono text-sm font-normal text-foreground outline-none transition-colors focus:border-info/60"
+                  className="selectable-text h-10 w-full rounded-[6px] border border-line/80 bg-background px-3 font-mono text-sm font-normal text-foreground outline-none transition-colors focus:border-info/60"
                   placeholder="输入 Binance API Key"
                 />
               </label>
@@ -1470,18 +1520,18 @@ export function HoldingPanel() {
                   type="password"
                   autoComplete="off"
                   spellCheck={false}
-                  className="selectable-text h-10 w-full rounded-lg border border-line/80 bg-background px-3 font-mono text-sm font-normal text-foreground outline-none transition-colors focus:border-info/60"
+                  className="selectable-text h-10 w-full rounded-[6px] border border-line/80 bg-background px-3 font-mono text-sm font-normal text-foreground outline-none transition-colors focus:border-info/60"
                   placeholder="输入 Binance API Secret"
                 />
               </label>
 
-              <div className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
+              <div className="rounded-[6px] border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
                 建议只开启读取权限，不开启交易和提现。密钥会保存到本机
                 .signal-hub/binance-api.json。
               </div>
 
               {saveError ? (
-                <div className="rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
+                <div className="rounded-[6px] border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
                   {saveError}
                 </div>
               ) : null}
@@ -1491,14 +1541,14 @@ export function HoldingPanel() {
               <button
                 type="button"
                 onClick={() => setApiDialogOpen(false)}
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-line/70 bg-panel px-3 text-xs font-semibold text-muted transition-colors hover:bg-panel-strong hover:text-foreground"
+                className="inline-flex h-9 items-center justify-center rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-muted transition-colors hover:bg-panel-strong hover:text-foreground"
               >
                 取消
               </button>
               <button
                 type="submit"
                 disabled={saveState === "saving"}
-                className="inline-flex h-9 items-center justify-center rounded-lg border border-info/30 bg-info px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-info/90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-9 items-center justify-center rounded-[6px] border border-info/30 bg-info px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-info/90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saveState === "saving" ? "保存中..." : "保存并刷新"}
               </button>
