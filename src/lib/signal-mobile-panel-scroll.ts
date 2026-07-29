@@ -9,6 +9,7 @@ type SignalMobilePanelScrollEvent =
   | {
       type: "programmatic-start";
       target: SignalMobilePanel;
+      clientWidth: number;
     }
   | {
       type: "scroll";
@@ -31,6 +32,10 @@ export function reduceSignalMobilePanelScroll(
   event: SignalMobilePanelScrollEvent,
 ): SignalMobilePanelScrollState {
   if (event.type === "programmatic-start") {
+    if (!Number.isFinite(event.clientWidth) || event.clientWidth <= 0) {
+      return state;
+    }
+
     return {
       activePanel: event.target,
       programmaticTarget: event.target,

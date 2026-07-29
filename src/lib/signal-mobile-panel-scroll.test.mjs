@@ -6,9 +6,35 @@ const idleFeed = {
   programmaticTarget: null,
 };
 
+assert.deepEqual(
+  reduceSignalMobilePanelScroll(idleFeed, {
+    type: "programmatic-start",
+    target: "summary",
+    clientWidth: 0,
+  }),
+  idleFeed,
+  "an unmeasured pager does not create a false panel switch",
+);
+
+const summaryInFlight = {
+  activePanel: "summary",
+  programmaticTarget: "summary",
+};
+
+assert.deepEqual(
+  reduceSignalMobilePanelScroll(summaryInFlight, {
+    type: "programmatic-start",
+    target: "feed",
+    clientWidth: 0,
+  }),
+  summaryInFlight,
+  "an unmeasured pager preserves the complete controller state",
+);
+
 let state = reduceSignalMobilePanelScroll(idleFeed, {
   type: "programmatic-start",
   target: "summary",
+  clientWidth: 100,
 });
 
 assert.deepEqual(state, {
@@ -49,6 +75,7 @@ assert.deepEqual(
 state = reduceSignalMobilePanelScroll(idleFeed, {
   type: "programmatic-start",
   target: "summary",
+  clientWidth: 100,
 });
 state = reduceSignalMobilePanelScroll(state, { type: "user-interrupt" });
 state = reduceSignalMobilePanelScroll(state, {
@@ -64,6 +91,37 @@ assert.deepEqual(
     programmaticTarget: null,
   },
   "user interruption returns panel selection to the scroll threshold",
+);
+
+state = reduceSignalMobilePanelScroll(summaryInFlight, {
+  type: "programmatic-start",
+  target: "feed",
+  clientWidth: 100,
+});
+state = reduceSignalMobilePanelScroll(state, {
+  type: "scroll",
+  scrollLeft: 75,
+  clientWidth: 100,
+});
+
+assert.deepEqual(state, {
+  activePanel: "feed",
+  programmaticTarget: "feed",
+});
+
+state = reduceSignalMobilePanelScroll(state, {
+  type: "scroll",
+  scrollLeft: 0,
+  clientWidth: 100,
+});
+
+assert.deepEqual(
+  state,
+  {
+    activePanel: "feed",
+    programmaticTarget: null,
+  },
+  "a measured pager completes programmatic switching in both directions",
 );
 
 console.log("ok - mobile Signal panel scroll controller");

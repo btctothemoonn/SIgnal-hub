@@ -115,33 +115,28 @@ export function SignalsResponsiveLayout({
   }, [activeMobilePanel, isDesktop]);
 
   const showMobilePanel = useCallback((panel: SignalMobilePanel) => {
+    const scroller = mobileScrollerRef.current;
+    const clientWidth = scroller?.clientWidth ?? 0;
     let nextScrollState = reduceSignalMobilePanelScroll(
       mobilePanelScrollStateRef.current,
       {
         type: "programmatic-start",
         target: panel,
+        clientWidth,
       },
     );
-    const scroller = mobileScrollerRef.current;
-    if (!scroller || scroller.clientWidth <= 0) {
-      nextScrollState = reduceSignalMobilePanelScroll(nextScrollState, {
-        type: "user-interrupt",
-      });
-      mobilePanelScrollStateRef.current = nextScrollState;
-      setActiveMobilePanel(nextScrollState.activePanel);
-      return;
-    }
+    if (!scroller || clientWidth <= 0) return;
 
     nextScrollState = reduceSignalMobilePanelScroll(nextScrollState, {
       type: "scroll",
       scrollLeft: scroller.scrollLeft,
-      clientWidth: scroller.clientWidth,
+      clientWidth,
     });
     mobilePanelScrollStateRef.current = nextScrollState;
     setActiveMobilePanel(nextScrollState.activePanel);
 
     scroller.scrollTo({
-      left: scroller.clientWidth * MOBILE_PANEL_INDEX[panel],
+      left: clientWidth * MOBILE_PANEL_INDEX[panel],
       behavior: "smooth",
     });
   }, []);
