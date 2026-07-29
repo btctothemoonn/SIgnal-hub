@@ -214,7 +214,7 @@ export default function SettingsPage() {
           <nav
             data-settings-category-tabs
             aria-label="设置分类"
-            className="flex min-w-0 gap-2 overflow-x-auto pb-1 lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0"
+            className="flex min-w-0 gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0"
           >
             {sections.map((section) => {
               const isActive = section.kind === activeKind;

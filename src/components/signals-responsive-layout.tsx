@@ -241,7 +241,7 @@ export function SignalsResponsiveLayout({
       ref={mobilePagerRef}
       data-mobile-signal-pager
       data-signal-workspace
-      className="min-w-0 scroll-mt-[5.25rem]"
+      className="min-w-0 scroll-mt-[7rem]"
     >
       <div className="mb-3 rounded-[6px] border border-workspace-line-strong bg-workspace-toolbar p-1">
         <div

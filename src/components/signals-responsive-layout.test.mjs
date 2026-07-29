@@ -59,6 +59,10 @@ assert.match(component, /mobileReturnScrollYRef\.current = window\.scrollY/);
 assert.match(component, /mobilePagerRef\.current\?\.scrollIntoView\(\{/);
 assert.match(component, /behavior: "auto"/);
 assert.match(component, /block: "start"/);
+assert.match(
+  component,
+  /data-mobile-signal-pager[\s\S]*className="min-w-0 scroll-mt-\[7rem\]"/,
+);
 assert.match(component, /window\.scrollTo\(\{\s*top: returnScrollY/);
 assert.match(component, /role="tablist"/);
 assert.match(component, /role="tab"/);

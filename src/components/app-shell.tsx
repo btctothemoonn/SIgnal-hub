@@ -209,7 +209,7 @@ export function AppShell({
                 </div>
               </div>
 
-              <div className="-mx-3 flex min-w-0 items-center gap-2 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:flex-wrap sm:px-0">
+              <div className="-mx-3 flex min-w-0 items-center gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:px-0">
                 {statusPills.map((pill) => (
                   <StatusPill key={pill.label} {...pill} />
                 ))}

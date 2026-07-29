@@ -1,22 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #101312;
-  --foreground: #f4f1ea;
-  --panel: rgba(24, 29, 28, 0.82);
-  --panel-strong: rgba(30, 36, 34, 0.96);
-  --muted: #aeb8b3;
-  --line: rgba(222, 232, 226, 0.15);
-  --accent: #d7b56d;
-  --accent-soft: rgba(215, 181, 109, 0.16);
-  --success: #75c7a2;
-  --success-soft: rgba(117, 199, 162, 0.14);
-  --warning: #e1b765;
-  --warning-soft: rgba(225, 183, 101, 0.15);
-  --danger: #ee7d70;
-  --danger-soft: rgba(238, 125, 112, 0.16);
-  --info: #8fb9d8;
-  --info-soft: rgba(143, 185, 216, 0.15);
+  --background: #f3f6f5;
+  --foreground: #1a211e;
+  --panel: rgba(255, 255, 255, 0.88);
+  --panel-strong: rgba(248, 251, 250, 0.97);
+  --muted: #5f6c66;
+  --line: rgba(36, 50, 44, 0.15);
+  --accent: #8a651f;
+  --accent-soft: rgba(138, 101, 31, 0.12);
+  --success: #28775a;
+  --success-soft: rgba(40, 119, 90, 0.12);
+  --warning: #8c650f;
+  --warning-soft: rgba(140, 101, 15, 0.12);
+  --danger: #b7483d;
+  --danger-soft: rgba(183, 72, 61, 0.12);
+  --info: #356f98;
+  --info-soft: rgba(53, 111, 152, 0.12);
   --workspace-canvas: #f3f6f5;
   --workspace-rail: #e6ece9;
   --workspace-surface: #ffffff;
