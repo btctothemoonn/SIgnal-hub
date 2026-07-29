@@ -73,11 +73,16 @@ assert.match(component, /aria-hidden=\{activeMobilePanel !== "feed"\}/);
 assert.match(component, /aria-hidden=\{activeMobilePanel !== "summary"\}/);
 assert.match(component, /inert=\{activeMobilePanel !== "feed"\}/);
 assert.match(component, /inert=\{activeMobilePanel !== "summary"\}/);
-assert.match(component, /<aside\s+id="alpha"/);
+assert.match(component, /data-signal-workspace/);
+assert.match(component, /data-signal-feed-pane/);
+assert.match(component, /data-signal-summary-pane/);
 assert.match(
   component,
-  /lg:grid-cols-\[minmax\(0,1\.42fr\)_minmax\(26rem,0\.95fr\)\]/,
+  /lg:grid-cols-\[minmax\(0,7fr\)_minmax\(20rem,3fr\)\]/,
 );
+assert.match(component, /mobilePagerRef\.current\?\.scrollIntoView/);
+assert.match(component, /window\.scrollTo\(\{\s*top: returnScrollY/);
+assert.match(component, /<aside\s+id="alpha"/);
 assert.match(page, /import \{ SignalsResponsiveLayout \}/);
 assert.match(page, /<SignalsResponsiveLayout/);
 assert.doesNotMatch(page, /OPPORTUNITY_RADAR_UI_ENABLED|opportunityEnabled/);

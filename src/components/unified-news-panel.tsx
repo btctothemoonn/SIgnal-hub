@@ -1340,11 +1340,6 @@ export function UnifiedNewsPanel({
     { id: "x", label: "X", shortLabel: "X", count: xFeedCount },
     { id: "truth", label: "Truth", shortLabel: "TS", count: truthFeedCount },
   ];
-  const telegramRefresh = telegramSnapshot.refresh;
-  const telegramLastUpdatedAt =
-    telegramRefresh?.finishedAt ||
-    telegramRefresh?.cacheFetchedAt ||
-    telegramRefresh?.servedAt;
   const telegramFirstError = telegramSnapshot.errors[0] || null;
   const xUsage = xSnapshot.usage;
 
@@ -1559,8 +1554,9 @@ export function UnifiedNewsPanel({
   return (
     <section
       data-mobile-command-feed
+      data-signal-feed-pane
       className={[
-        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel/95 shadow-[0_24px_60px_-50px_rgba(0,0,0,0.65)]",
+        "relative min-w-0 overflow-hidden rounded-[6px] border border-workspace-line-strong bg-workspace-surface",
         rail
           ? "lg:sticky lg:top-[5.25rem] lg:flex lg:h-[calc(100vh-6rem)] lg:min-h-0 lg:flex-col"
           : "",
@@ -1569,8 +1565,11 @@ export function UnifiedNewsPanel({
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="shrink-0 border-b border-line/70 bg-panel-strong/95">
-        <div className="px-3 py-3">
+      <div
+        data-signal-toolbar
+        className="shrink-0 border-b border-workspace-line-strong bg-workspace-toolbar"
+      >
+        <div className="p-2.5">
           <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold text-foreground">Signal Flow</h2>
@@ -1579,12 +1578,12 @@ export function UnifiedNewsPanel({
               </p>
             </div>
 
-            <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border border-line/70 bg-background/35 p-1 xl:w-[34rem] xl:overflow-visible">
+            <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-[6px] border border-workspace-line-strong bg-workspace-surface p-1 xl:w-[34rem] xl:overflow-visible">
               <button
                 onClick={() => selectActiveTab("all")}
                 className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                   activeTab === "all"
-                    ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                    ? "bg-foreground text-background"
                     : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
                 }`}
               >
@@ -1608,7 +1607,7 @@ export function UnifiedNewsPanel({
                     onClick={() => selectActiveTab(tab.id)}
                     className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                       activeTab === tab.id
-                        ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                        ? "bg-foreground text-background"
                         : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
                     }`}
                   >
@@ -1626,7 +1625,7 @@ export function UnifiedNewsPanel({
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-5 gap-1 rounded-lg border border-line/70 bg-background/35 p-1">
+          <div className="mt-2 grid grid-cols-5 gap-1 rounded-[6px] border border-workspace-line-strong bg-workspace-surface p-1">
             {SIGNAL_FEED_RANGE_OPTIONS.map((option) => {
               const selected = option.id === feedRange;
               return (
@@ -1637,7 +1636,7 @@ export function UnifiedNewsPanel({
                   onClick={() => setFeedRange(option.id)}
                   className={`h-8 rounded-md px-2 text-[11px] font-semibold transition-colors ${
                     selected
-                      ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                      ? "bg-foreground text-background"
                       : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
                   }`}
                 >
@@ -1653,7 +1652,7 @@ export function UnifiedNewsPanel({
               placeholder="搜索关键词..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="h-9 w-full rounded-lg border border-line/70 bg-background/55 px-3 text-xs text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
+              className="h-9 w-full rounded-[6px] border border-workspace-line-strong bg-workspace-surface px-3 text-xs text-foreground placeholder:text-muted/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
             />
             <div ref={authorMenuRef} className="relative">
               <button
@@ -1661,7 +1660,7 @@ export function UnifiedNewsPanel({
                 aria-label="按博主或频道筛选"
                 aria-expanded={authorMenuOpen}
                 onClick={() => setAuthorMenuOpen((open) => !open)}
-                className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line/70 bg-background/55 px-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-panel-strong/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
+                className="flex h-9 w-full items-center justify-between gap-2 rounded-[6px] border border-workspace-line-strong bg-workspace-surface px-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-workspace-surface-raised focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
               >
                 <span className="min-w-0 truncate">{selectedAuthorLabel}</span>
                 <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted">
@@ -1688,7 +1687,7 @@ export function UnifiedNewsPanel({
               </button>
 
               {authorMenuOpen ? (
-                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 max-h-80 w-full overflow-y-auto rounded-lg border border-line/70 bg-panel-strong p-1 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.85)]">
+                <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 max-h-80 w-full overflow-y-auto rounded-[6px] border border-workspace-line-strong bg-workspace-surface-raised p-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -1782,12 +1781,12 @@ export function UnifiedNewsPanel({
           </div>
         </div>
 
-        <div className="border-t border-line/40 px-3 py-2 text-[11px] text-muted">
+        <div className="border-t border-workspace-line-strong/70 px-2.5 py-1.5 text-[11px] text-muted">
           <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap">
             <button
               type="button"
               onClick={returnToSavedReadingPosition}
-              className="order-[-40] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground"
+              className="order-[-40] rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
             >
               返回上次阅读
             </button>
@@ -1797,7 +1796,7 @@ export function UnifiedNewsPanel({
               </span>
             ) : null}
             <span
-              className={`inline-flex items-center gap-1 rounded-md border border-line/60 bg-panel-strong px-2 py-1 font-medium ${
+              className={`inline-flex items-center gap-1 rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 font-medium ${
                 telegramSnapshot.status === "live"
                   ? "text-success"
                   : telegramSnapshot.status === "error"
@@ -1808,12 +1807,11 @@ export function UnifiedNewsPanel({
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
               TG {telegramSnapshot.status}
             </span>
-            <span className="rounded-md border border-line/60 bg-panel-strong px-2 py-1">更新 {formatStatusTime(telegramLastUpdatedAt)}</span>
             <button
               type="button"
               disabled={telegramRefreshBusy}
               onClick={() => void refreshTelegramNow()}
-              className="order-[-10] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
+              className="order-[-10] rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-60"
             >
               {telegramRefreshBusy ? "TG 刷新中..." : "刷新 TG"}
             </button>
@@ -1833,7 +1831,7 @@ export function UnifiedNewsPanel({
             {xUsage ? (
               <>
                 <span
-                  className={`inline-flex items-center gap-1 rounded-md border border-line/60 bg-panel-strong px-2 py-1 font-medium ${
+                  className={`inline-flex items-center gap-1 rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 font-medium ${
                     xUsage.blocked
                       ? "text-danger"
                       : xUsage.pointsUsed >= xUsage.limit
@@ -1844,9 +1842,6 @@ export function UnifiedNewsPanel({
                   <span className="h-1.5 w-1.5 rounded-full bg-current" />
                   X points {xUsage.pointsUsed}/{xUsage.limit}
                 </span>
-                {xUsage.authorized ? (
-                  <span className="rounded-md border border-success/30 bg-success-soft px-2 py-1 text-success">X authorized today</span>
-                ) : null}
                 {xUsage.blocked ? (
                   <button
                     type="button"
@@ -1873,7 +1868,7 @@ export function UnifiedNewsPanel({
                   type="button"
                   disabled={monitor985RefreshBusy || xCatchupBusy || xCatchupRunning}
                   onClick={() => void startXManualCatchup()}
-                  className="order-[-20] rounded-md border border-line/70 bg-panel-strong px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-panel hover:text-foreground disabled:opacity-60"
+                  className="order-[-20] rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-60"
                 >
                   {xCatchupRunning || xCatchupBusy ? "补漏中..." : "6551 补漏"}
                 </button>
@@ -1892,11 +1887,6 @@ export function UnifiedNewsPanel({
                 {xCatchupStatus}
               </span>
             ) : null}
-            {telegramFirstError ? (
-              <span className="max-w-[18rem] truncate text-danger">
-                {telegramFirstError}
-              </span>
-            ) : null}
           </div>
         </div>
       </div>
@@ -1906,7 +1896,7 @@ export function UnifiedNewsPanel({
           data-telegram-fault-alert
           className="border-b border-danger/30 bg-danger-soft/35 px-3 py-2"
         >
-          <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-xs font-medium leading-5 text-danger">
+          <p className="rounded-[6px] border border-danger/40 bg-danger-soft px-3 py-2 text-xs font-medium leading-5 text-danger">
             <span className="font-semibold">TG 采集异常</span>
             <span className="ml-2">{telegramFirstError}</span>
           </p>
@@ -1925,7 +1915,7 @@ export function UnifiedNewsPanel({
       <div
         ref={timelineRef}
         data-signal-feed-timeline
-        className={`min-h-0 space-y-2.5 bg-background/70 p-2 sm:p-3 ${
+        className={`min-h-0 space-y-1.5 bg-workspace-canvas p-1.5 sm:p-2 ${
           rail ? "lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" : ""
         }`}
       >
@@ -1970,7 +1960,7 @@ export function UnifiedNewsPanel({
                     });
                   }
                 }}
-                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2.5 rounded-lg border border-line/70 border-l-2 border-l-accent/45 bg-panel-strong/92 px-3 py-3.5 shadow-[0_16px_34px_-30px_rgba(0,0,0,0.75)] transition-all active:scale-[0.995] hover:border-accent/45 hover:bg-panel-strong focus:outline-none focus:ring-2 focus:ring-accent"
+                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-accent/45 bg-workspace-surface-raised px-2.5 py-2.5 transition-colors active:scale-[0.995] hover:border-accent/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 {/* Avatar */}
                 <div className="relative shrink-0 pt-0.5">
@@ -1983,7 +1973,7 @@ export function UnifiedNewsPanel({
                       height={36}
                       loading="lazy"
                       decoding="async"
-                      className="h-8 w-8 rounded-lg bg-panel-strong object-cover ring-1 ring-line/55"
+                      className="h-8 w-8 rounded-[6px] bg-workspace-surface-raised object-cover ring-1 ring-line/55"
                       onError={(e) => {
                         e.currentTarget.style.display = "none";
                         const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
@@ -1992,7 +1982,7 @@ export function UnifiedNewsPanel({
                     />
                   ) : null}
                   <div
-                    className={`h-8 w-8 items-center justify-center rounded-lg text-xs font-bold ring-1 ring-line/30 ${icon.tone} ${item.avatar ? "hidden" : "flex"}`}
+                    className={`h-8 w-8 items-center justify-center rounded-[6px] text-xs font-bold ring-1 ring-line/30 ${icon.tone} ${item.avatar ? "hidden" : "flex"}`}
                   >
                     {icon.letter}
                   </div>
@@ -2026,7 +2016,7 @@ export function UnifiedNewsPanel({
                     ) : null}
                     <span className="text-muted">·</span>
                     <span className="shrink-0 text-muted">{formatDisplayTime(item.createdAt)}</span>
-                    {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_0_3px_var(--accent-soft)]" />}
+                    {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-accent" />}
                   </div>
 
                   {/* Body */}
@@ -2036,7 +2026,7 @@ export function UnifiedNewsPanel({
 
                   {/* Translation */}
                   {item.translation ? (
-                    <div className="mt-2 rounded-lg border border-info/20 bg-info-soft/45 px-2.5 py-2">
+                    <div className="mt-2 rounded-[6px] border border-info/20 bg-info-soft/45 px-2.5 py-2">
                       <p className="text-[11px] font-medium text-muted">
                         {formatLanguageTag(item.translation.sourceLanguage)} → {item.translation.targetLanguage}
                       </p>
@@ -2054,7 +2044,7 @@ export function UnifiedNewsPanel({
                         e.stopPropagation();
                         setLightboxMedia(item.media);
                       }}
-                      className="mt-2.5 block w-full overflow-hidden rounded-lg border border-line/50 bg-background/35 text-left"
+                      className="mt-2.5 block w-full overflow-hidden rounded-[6px] border border-line/50 bg-background/35 text-left"
                       aria-label={`查看${item.media.label || "图片"}大图`}
                     >
                       <Image
@@ -2072,7 +2062,7 @@ export function UnifiedNewsPanel({
 
                   {/* Quoted tweet */}
                   {item.quotedTweet ? (
-                    <div className="mt-2.5 rounded-lg border border-accent/25 bg-accent/5 px-2.5 py-2">
+                    <div className="mt-2.5 rounded-[6px] border border-accent/25 bg-accent/5 px-2.5 py-2">
                       <div className="flex min-w-0 items-center gap-1.5 text-[12px] leading-5">
                         <div className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md bg-panel-strong ring-1 ring-accent/25">
                           {item.quotedTweet.avatar ? (
@@ -2277,7 +2267,7 @@ export function UnifiedNewsPanel({
                 src={lightboxMedia.previewUrl}
                 alt={lightboxMedia.label}
                 onClick={(e) => e.stopPropagation()}
-                className="max-h-[92vh] max-w-[92vw] cursor-default rounded-lg bg-white object-contain shadow-2xl"
+                className="max-h-[92vh] max-w-[92vw] cursor-default rounded-[6px] bg-white object-contain shadow-2xl"
               />
             </div>,
             portalRoot,

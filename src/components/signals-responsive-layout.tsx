@@ -157,14 +157,20 @@ export function SignalsResponsiveLayout({
 
   if (isDesktop === null) {
     return (
-      <div className="min-h-[24rem] rounded-lg border border-line/70 bg-panel/70" />
+      <div
+        data-signal-workspace
+        className="min-h-[24rem] rounded-[6px] border border-workspace-line-strong bg-workspace-surface"
+      />
     );
   }
 
   if (isDesktop) {
     return (
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.42fr)_minmax(26rem,0.95fr)] lg:items-start lg:gap-4 xl:grid-cols-[minmax(0,1.52fr)_minmax(30rem,0.88fr)]">
-        <section id="signals" className="min-w-0">
+      <div
+        data-signal-workspace
+        className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,3fr)] lg:items-start lg:gap-4"
+      >
+        <section id="signals" data-signal-feed-pane className="min-w-0">
           <SignalFeedStack
             initialTelegramSnapshot={initialTelegramSnapshot}
             initialXSnapshot={initialXSnapshot}
@@ -175,6 +181,7 @@ export function SignalsResponsiveLayout({
 
         <aside
           id="alpha"
+          data-signal-summary-pane
           className="relative z-10 min-w-0 lg:sticky lg:top-[5.25rem]"
         >
           <AlphaSummaryCard
@@ -194,9 +201,10 @@ export function SignalsResponsiveLayout({
     <section
       ref={mobilePagerRef}
       data-mobile-signal-pager
+      data-signal-workspace
       className="min-w-0 scroll-mt-[5.25rem]"
     >
-      <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
+      <div className="mb-3 rounded-[6px] border border-workspace-line-strong bg-workspace-toolbar p-1">
         <div
           role="tablist"
           aria-label="Signal Flow 移动视图"
@@ -216,8 +224,8 @@ export function SignalsResponsiveLayout({
               className={[
                 "h-9 rounded-md text-sm font-semibold transition-colors",
                 activeMobilePanel === panel.id
-                  ? "bg-foreground text-background shadow-[0_14px_30px_-25px_rgba(38,31,27,0.8)]"
-                  : "text-muted hover:bg-panel hover:text-foreground",
+                  ? "bg-foreground text-background"
+                  : "text-muted hover:bg-workspace-surface hover:text-foreground",
               ].join(" ")}
             >
               {panel.label}
@@ -233,6 +241,7 @@ export function SignalsResponsiveLayout({
       >
         <div
           id={MOBILE_PANEL_ID.feed}
+          data-signal-feed-pane
           role="tabpanel"
           aria-labelledby={MOBILE_TAB_ID.feed}
           aria-hidden={activeMobilePanel !== "feed"}
@@ -252,6 +261,7 @@ export function SignalsResponsiveLayout({
         </div>
         <div
           id={MOBILE_PANEL_ID.summary}
+          data-signal-summary-pane
           role="tabpanel"
           aria-labelledby={MOBILE_TAB_ID.summary}
           aria-hidden={activeMobilePanel !== "summary"}
