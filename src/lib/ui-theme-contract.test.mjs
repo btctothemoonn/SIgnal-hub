@@ -77,5 +77,9 @@ await test("app shell keeps undecided market navigation hidden", () => {
 await test("settings page uses the full-site redesigned surface width", () => {
   assert.match(settingsPage, /max-w-\[1180px\]/);
   assert.match(settingsPage, /font-serif/);
-  assert.match(settingsPage, /rounded-lg border border-line\/70 bg-panel-strong/);
+  assert.match(
+    settingsPage,
+    /rounded-\[6px\] border border-line\/70 bg-panel-strong/,
+  );
+  assert.doesNotMatch(settingsPage, /rounded-2xl|rounded-3xl/);
 });

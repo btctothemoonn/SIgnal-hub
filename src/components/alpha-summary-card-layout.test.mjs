@@ -27,6 +27,9 @@ assert.match(
   /<div className="border-b border-line\/60 bg-panel-strong\/72 px-4 py-3 sm:px-5">[\s\S]*\{scopeTabs\}[\s\S]*<\/div>\s*<AlphaSummaryScopeResult/,
 );
 assert.match(layoutSource, /showHeaderMeta=\{false\}/);
-assert.match(layoutSource, /minmax\(30rem,0\.88fr\)/);
+assert.match(
+  layoutSource,
+  /lg:grid-cols-\[minmax\(0,7fr\)_minmax\(20rem,3fr\)\]/,
+);
 
 console.log("ok - alpha summary card can hide low-value header metadata");
