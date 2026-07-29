@@ -42,10 +42,11 @@ await test("command workspace tokens define dark and light operational surfaces"
   assert.doesNotMatch(globals, /letter-spacing:\s*-/);
 });
 
-await test("app shell exposes the redesigned accent navigation and serif identity", () => {
-  assert.match(appShell, /border-accent\/35 bg-accent-soft text-accent/);
-  assert.match(appShell, /font-serif/);
-  assert.match(appShell, /bg-panel-strong\/90/);
+await test("app shell exposes workspace navigation and toolbar surfaces", () => {
+  assert.match(appShell, /bg-workspace-rail/);
+  assert.match(appShell, /bg-workspace-toolbar/);
+  assert.match(appShell, /border-accent\/40 bg-accent-soft text-accent/);
+  assert.doesNotMatch(appShell, /font-serif/);
   assert.doesNotMatch(appShell, /bg-info text-sm font-bold text-white/);
 });
 

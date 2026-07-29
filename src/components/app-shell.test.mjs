@@ -10,6 +10,11 @@ assert.match(source, /<form action="\/api\/logout" method="post"/);
 assert.match(source, /type="submit"/);
 
 assert.match(source, /data-mobile-command-shell/);
+assert.match(source, /data-workspace-shell/);
+assert.match(source, /data-workspace-rail/);
+assert.match(source, /data-workspace-topbar/);
+assert.match(source, /from "lucide-react"/);
+assert.doesNotMatch(source, /function ShellGlyph/);
 assert.match(source, /overflow-x-auto/);
 assert.match(source, /fixed bottom-0/);
 assert.match(source, /lg:hidden/);
