@@ -142,7 +142,7 @@ export function StocksResearchLayout({
     <div data-stocks-research-split className="min-w-0">
       <section
         data-stocks-desktop-layout
-        className="hidden min-h-0 min-w-0 gap-3 lg:grid lg:grid-cols-[minmax(18rem,0.34fr)_minmax(0,0.66fr)] lg:items-start xl:grid-cols-[minmax(25rem,28rem)_minmax(0,1fr)] xl:gap-4 2xl:grid-cols-[minmax(28rem,30rem)_minmax(0,1fr)]"
+        className="hidden min-h-0 min-w-0 gap-3 lg:grid lg:grid-cols-[minmax(18rem,0.34fr)_minmax(0,0.66fr)] lg:items-start xl:gap-4"
       >
         <div className="min-w-0">{pool}</div>
         <div className="grid min-w-0 gap-3 xl:gap-4">
