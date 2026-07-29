@@ -39,7 +39,7 @@ import {
 } from "@/lib/hynix-premium-alert";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
-  "signal-hub:stocks:hynix-premium:v3";
+  "signal-hub:stocks:hynix-premium:v4";
 const STOCKS_HYNIX_FUNDING_CACHE_KEY =
   "signal-hub:stocks:hynix-funding:v1";
 const PREMIUM_CHART_HEIGHT = 360;

@@ -3,10 +3,11 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export type BinanceHynixPremiumProvider = "binance-futures";
 export type BinanceHynixPremiumInterval = "5m" | "1h" | "1d";
+export type BinanceKlineInterval = "1m" | BinanceHynixPremiumInterval;
 
 export type BinanceKlinePoint = {
   symbol: string;
-  interval: BinanceHynixPremiumInterval;
+  interval: BinanceKlineInterval;
   openTime: number;
   closeTime: number;
   openPrice: number;
@@ -148,7 +149,9 @@ export const BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS = Date.parse(
 );
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
 const DEFAULT_INTERVAL = "5m" satisfies BinanceHynixPremiumInterval;
-const INTERVAL_MS: Record<BinanceHynixPremiumInterval, number> = {
+const SOURCE_KLINE_INTERVAL = "1m" satisfies BinanceKlineInterval;
+const INTERVAL_MS: Record<BinanceKlineInterval, number> = {
+  "1m": 60 * 1000,
   "5m": 5 * 60 * 1000,
   "1h": 60 * 60 * 1000,
   "1d": 24 * 60 * 60 * 1000,
@@ -156,6 +159,7 @@ const INTERVAL_MS: Record<BinanceHynixPremiumInterval, number> = {
 const DEFAULT_KLINE_PAGE_LIMIT = 1500;
 const MAX_KLINE_PAGE_LIMIT = 1500;
 const MAX_TOTAL_KLINES = 20000;
+const MAX_SOURCE_KLINES = 100000;
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -217,6 +221,10 @@ function normalizeInterval(value: string | undefined): BinanceHynixPremiumInterv
 export function binanceHynixPremiumIntervalMs(
   interval: BinanceHynixPremiumInterval,
 ) {
+  return INTERVAL_MS[interval];
+}
+
+function binanceKlineIntervalMs(interval: BinanceKlineInterval) {
   return INTERVAL_MS[interval];
 }
 
@@ -304,7 +312,7 @@ function klineUrl({
 }: {
   baseUrl: string;
   symbol: string;
-  interval: BinanceHynixPremiumInterval;
+  interval: BinanceKlineInterval;
   startTime?: number;
   endTime?: number;
   limit: number;
@@ -399,7 +407,7 @@ function payloadRows(payload: unknown) {
 function parseArrayKline(
   row: unknown[],
   symbol: string,
-  interval: BinanceHynixPremiumInterval,
+  interval: BinanceKlineInterval,
 ): BinanceKlinePoint | null {
   const openTime = numberValue(row[0]);
   const closeTime = numberValue(row[6]);
@@ -435,7 +443,7 @@ function parseArrayKline(
 function parseObjectKline(
   row: Record<string, unknown>,
   symbol: string,
-  expectedInterval: BinanceHynixPremiumInterval = DEFAULT_INTERVAL,
+  expectedInterval: BinanceKlineInterval = DEFAULT_INTERVAL,
 ): BinanceKlinePoint | null {
   const interval = stringValue(row.interval ?? row.i);
   if (interval && interval !== expectedInterval) return null;
@@ -473,7 +481,7 @@ function parseObjectKline(
 export function parseBinanceKlinePayload(
   payload: unknown,
   symbol: string,
-  interval: BinanceHynixPremiumInterval = DEFAULT_INTERVAL,
+  interval: BinanceKlineInterval = DEFAULT_INTERVAL,
 ): BinanceKlinePoint[] {
   const normalizedSymbol = normalizeSymbol(symbol, symbol);
   return payloadRows(payload)
@@ -581,38 +589,15 @@ export function buildBinanceHynixPremiumPoint({
     basePrice: baseOpenPrice,
     benchmarkPrice: benchmarkOpenPrice,
   });
-  const premiumHighCandidatePct = calculatePremiumPct({
-    basePrice: baseHighPrice,
-    benchmarkPrice: benchmarkLowPrice,
-  });
-  const premiumLowCandidatePct = calculatePremiumPct({
-    basePrice: baseLowPrice,
-    benchmarkPrice: benchmarkHighPrice,
-  });
   const premiumClosePct = calculatePremiumPct({
     basePrice: baseClosePrice,
     benchmarkPrice: benchmarkClosePrice,
   });
-  if (
-    premiumOpenPct === null ||
-    premiumHighCandidatePct === null ||
-    premiumLowCandidatePct === null ||
-    premiumClosePct === null
-  ) {
+  if (premiumOpenPct === null || premiumClosePct === null) {
     return null;
   }
-  const premiumHighPct = Math.max(
-    premiumOpenPct,
-    premiumHighCandidatePct,
-    premiumLowCandidatePct,
-    premiumClosePct,
-  );
-  const premiumLowPct = Math.min(
-    premiumOpenPct,
-    premiumHighCandidatePct,
-    premiumLowCandidatePct,
-    premiumClosePct,
-  );
+  const premiumHighPct = Math.max(premiumOpenPct, premiumClosePct);
+  const premiumLowPct = Math.min(premiumOpenPct, premiumClosePct);
   return {
     openTime,
     closeTime,
@@ -699,32 +684,94 @@ export function buildBinanceHynixPremiumSnapshot({
   const benchmarkByOpenTime = new Map(
     benchmarkKlines.map((point) => [point.openTime, point]),
   );
-  const points = baseKlines
-    .map((basePoint): BinanceHynixPremiumPoint | null => {
-      const benchmarkPoint = benchmarkByOpenTime.get(basePoint.openTime);
-      if (!benchmarkPoint) return null;
-      return buildBinanceHynixPremiumPoint({
-        openTime: basePoint.openTime,
-        closeTime: Math.min(basePoint.closeTime, benchmarkPoint.closeTime),
-        capturedAt: new Date(
-          Math.min(basePoint.closeTime, benchmarkPoint.closeTime),
-        ).toISOString(),
-        baseSymbol,
-        benchmarkSymbol,
-        basePrice: basePoint.closePrice,
-        baseOpenPrice: basePoint.openPrice,
+  const intervalMs = binanceHynixPremiumIntervalMs(interval);
+  const pointsByBucket = new Map<number, BinanceHynixPremiumPoint>();
+
+  for (const basePoint of [...baseKlines].sort(
+    (left, right) => left.openTime - right.openTime,
+  )) {
+    const benchmarkPoint = benchmarkByOpenTime.get(basePoint.openTime);
+    if (!benchmarkPoint) continue;
+    const alignedPoint = buildBinanceHynixPremiumPoint({
+      openTime: basePoint.openTime,
+      closeTime: Math.min(basePoint.closeTime, benchmarkPoint.closeTime),
+      capturedAt: new Date(
+        Math.min(basePoint.closeTime, benchmarkPoint.closeTime),
+      ).toISOString(),
+      baseSymbol,
+      benchmarkSymbol,
+      basePrice: basePoint.closePrice,
+      baseOpenPrice: basePoint.openPrice,
+      baseClosePrice: basePoint.closePrice,
+      benchmarkPrice: benchmarkPoint.closePrice,
+      benchmarkOpenPrice: benchmarkPoint.openPrice,
+      benchmarkClosePrice: benchmarkPoint.closePrice,
+      volume: basePoint.volume,
+    });
+    if (!alignedPoint) continue;
+
+    const bucketOpenTime =
+      Math.floor(basePoint.openTime / intervalMs) * intervalMs;
+    const current = pointsByBucket.get(bucketOpenTime);
+    if (!current) {
+      pointsByBucket.set(bucketOpenTime, {
+        ...alignedPoint,
+        openTime: bucketOpenTime,
+        closeTime: Math.min(
+          bucketOpenTime + intervalMs - 1,
+          alignedPoint.closeTime,
+        ),
         baseHighPrice: basePoint.highPrice,
         baseLowPrice: basePoint.lowPrice,
-        baseClosePrice: basePoint.closePrice,
-        benchmarkPrice: benchmarkPoint.closePrice,
-        benchmarkOpenPrice: benchmarkPoint.openPrice,
         benchmarkHighPrice: benchmarkPoint.highPrice,
         benchmarkLowPrice: benchmarkPoint.lowPrice,
-        benchmarkClosePrice: benchmarkPoint.closePrice,
-        volume: basePoint.volume,
       });
-    })
-    .filter((point): point is BinanceHynixPremiumPoint => Boolean(point));
+      continue;
+    }
+
+    pointsByBucket.set(bucketOpenTime, {
+      ...current,
+      closeTime: Math.min(
+        bucketOpenTime + intervalMs - 1,
+        Math.max(current.closeTime, alignedPoint.closeTime),
+      ),
+      capturedAt: alignedPoint.capturedAt,
+      basePrice: alignedPoint.baseClosePrice,
+      baseHighPrice: Math.max(
+        current.baseHighPrice,
+        basePoint.highPrice,
+      ),
+      baseLowPrice: Math.min(current.baseLowPrice, basePoint.lowPrice),
+      baseClosePrice: alignedPoint.baseClosePrice,
+      benchmarkPrice: alignedPoint.benchmarkClosePrice,
+      benchmarkHighPrice: Math.max(
+        current.benchmarkHighPrice,
+        benchmarkPoint.highPrice,
+      ),
+      benchmarkLowPrice: Math.min(
+        current.benchmarkLowPrice,
+        benchmarkPoint.lowPrice,
+      ),
+      benchmarkClosePrice: alignedPoint.benchmarkClosePrice,
+      premiumPct: alignedPoint.premiumClosePct,
+      premiumHighPct: Math.max(
+        current.premiumHighPct,
+        alignedPoint.premiumOpenPct,
+        alignedPoint.premiumClosePct,
+      ),
+      premiumLowPct: Math.min(
+        current.premiumLowPct,
+        alignedPoint.premiumOpenPct,
+        alignedPoint.premiumClosePct,
+      ),
+      premiumClosePct: alignedPoint.premiumClosePct,
+      volume: current.volume + alignedPoint.volume,
+    });
+  }
+
+  const points = [...pointsByBucket.values()].sort(
+    (left, right) => left.openTime - right.openTime,
+  );
   const streams = binanceHynixPremiumWebSocketStreams({
     baseSymbol,
     benchmarkSymbol,
@@ -782,7 +829,7 @@ async function fetchKlines({
   fetchImpl: FetchLike;
   baseUrl: string;
   symbol: string;
-  interval: BinanceHynixPremiumInterval;
+  interval: BinanceKlineInterval;
   startTime: number;
   endTime?: number;
   limit: number;
@@ -791,7 +838,7 @@ async function fetchKlines({
   let cursor = startTime;
   let requests = 0;
 
-  while (points.length < MAX_TOTAL_KLINES) {
+  while (points.length < MAX_SOURCE_KLINES) {
     const url = klineUrl({
       baseUrl,
       symbol,
@@ -823,19 +870,19 @@ async function fetchKlines({
     requests += 1;
     const last = page.at(-1);
     if (!last) break;
-    const nextCursor = last.openTime + binanceHynixPremiumIntervalMs(interval);
+    const nextCursor = last.openTime + binanceKlineIntervalMs(interval);
     if (nextCursor <= cursor) break;
     if (endTime !== undefined && nextCursor > endTime) break;
     if (page.length < limit && endTime === undefined) break;
     cursor = nextCursor;
-    if (requests > Math.ceil(MAX_TOTAL_KLINES / Math.max(1, limit)) + 1) break;
+    if (requests > Math.ceil(MAX_SOURCE_KLINES / Math.max(1, limit)) + 1) break;
   }
 
   return points
     .filter((point) => point.openTime >= startTime)
     .filter((point) => endTime === undefined || point.openTime <= endTime)
     .sort((left, right) => left.openTime - right.openTime)
-    .slice(-MAX_TOTAL_KLINES);
+    .slice(-MAX_SOURCE_KLINES);
 }
 
 function parseMarkPricePayload(
@@ -1084,11 +1131,18 @@ export async function fetchBinanceHynixPremiumSnapshot({
   const normalizedStartTime = normalizeStartTime(startTime);
   const normalizedEndTime = normalizeEndTime(endTime);
   const normalizedLimit = normalizeLimit(limit);
-  const klineRequests = [
+  const klineRequests: Array<{
+    symbol: string;
+    baseUrl: string;
+    interval: BinanceKlineInterval;
+    startTime: number;
+    endTime?: number;
+    limit: number;
+  }> = [
     {
       symbol: baseSymbol,
       baseUrl: restBaseUrl,
-      interval: normalizedInterval,
+      interval: SOURCE_KLINE_INTERVAL,
       startTime: normalizedStartTime,
       endTime: normalizedEndTime,
       limit: normalizedLimit,
@@ -1096,7 +1150,7 @@ export async function fetchBinanceHynixPremiumSnapshot({
     {
       symbol: benchmarkSymbol,
       baseUrl: restBaseUrl,
-      interval: normalizedInterval,
+      interval: SOURCE_KLINE_INTERVAL,
       startTime: normalizedStartTime,
       endTime: normalizedEndTime,
       limit: normalizedLimit,

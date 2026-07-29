@@ -38,6 +38,7 @@ assert.match(source, /new WebSocket/);
 assert.match(source, /websocket\?\.url/);
 assert.match(source, /parseBinanceFuturesWebSocketMessage/);
 assert.match(source, /STOCKS_HYNIX_PREMIUM_CACHE_KEY/);
+assert.match(source, /signal-hub:stocks:hynix-premium:v4/);
 assert.match(source, /useBrowserJsonCache<BinanceHynixPremiumSnapshot>/);
 assert.match(source, /useBrowserJsonCache<BinanceHynixFundingSnapshot>/);
 assert.match(source, /window\.setInterval\(loadPremiumData,\s*60 \* 1000\)/);
