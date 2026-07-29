@@ -34,7 +34,7 @@ export function StocksSubscriptionReports({
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
 
   return (
-    <section className="min-w-0 rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+    <section className="min-w-0 rounded-md border border-line/70 bg-panel-strong">
       <div className="flex flex-col gap-2 border-b border-line/60 px-4 py-3 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-foreground">订阅研报</h2>
@@ -59,6 +59,8 @@ export function StocksSubscriptionReports({
           reports.map((report) => {
             const isExpanded = expandedReportId === report.id;
             const reportInsight = buildSubscriptionReportInsight(report);
+            const summaryStatus = reportInsight.fallbackUsed ? "fallback" : "ready";
+            const sourceUrl = report.link;
             const summaryText = isExpanded
               ? report.fullSummary || report.summary
               : report.summary;
@@ -66,7 +68,9 @@ export function StocksSubscriptionReports({
             return (
               <article
                 key={report.id}
-                className="rounded-lg border border-line/60 bg-background/35 p-4"
+                data-subscription-report
+                data-summary-status={summaryStatus}
+                className="rounded-md border border-line/60 bg-background/35 p-4"
               >
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0">
@@ -94,7 +98,7 @@ export function StocksSubscriptionReports({
                       {report.title}
                     </h3>
                     <p className="mt-2 break-words text-sm leading-6 text-muted">
-                      {report.summary}
+                      {reportInsight.coreConclusion}
                     </p>
                   </div>
 
@@ -112,8 +116,7 @@ export function StocksSubscriptionReports({
                   </div>
                 </div>
 
-                {isExpanded ? (
-                  <div className="mt-4 grid gap-3 rounded-lg border border-line/60 bg-panel/70 p-3">
+                <div className="mt-4 grid gap-3 border-t border-line/60 pt-3">
                     <div>
                       <p className="text-xs font-semibold text-muted">
                         核心结论
@@ -153,7 +156,8 @@ export function StocksSubscriptionReports({
                         总结未生成，下面保留原文摘录。
                       </p>
                     ) : null}
-                    <details className="rounded-md border border-line/60 bg-background/30 px-3 py-2">
+                    {isExpanded ? (
+                    <details open className="rounded-md border border-line/60 bg-background/30 px-3 py-2">
                       <summary className="cursor-pointer select-none text-xs font-semibold text-muted hover:text-foreground">
                         原文摘录
                       </summary>
@@ -161,8 +165,8 @@ export function StocksSubscriptionReports({
                         {summaryText || "n/a"}
                       </p>
                     </details>
-                  </div>
-                ) : null}
+                    ) : null}
+                </div>
 
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <button
@@ -175,9 +179,9 @@ export function StocksSubscriptionReports({
                   >
                     {isExpanded ? "收起" : "展开总结"}
                   </button>
-                  {report.link ? (
+                  {sourceUrl ? (
                     <a
-                      href={report.link}
+                      href={sourceUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-md border border-line/70 bg-panel px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:border-accent/60 hover:text-accent"
@@ -190,7 +194,7 @@ export function StocksSubscriptionReports({
             );
           })
         ) : (
-          <div className="rounded-lg border border-line/60 bg-background/35 px-4 py-10 text-center">
+          <div className="rounded-md border border-line/60 bg-background/35 px-4 py-10 text-center">
             <p className="text-sm font-semibold text-foreground">暂无订阅研报</p>
             <p className="mt-2 text-xs text-muted">
               后台会继续刷新 Patreon；有匹配内容后会在这里集中显示。

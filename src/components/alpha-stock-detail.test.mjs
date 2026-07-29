@@ -10,6 +10,9 @@ assert.match(source, /dataQualityLabel/);
 assert.match(source, /providerTrace/);
 assert.match(source, /buildStocksIntelligence/);
 assert.match(source, /buildSubscriptionReportInsight/);
+assert.match(source, /data-stock-intelligence/);
+assert.match(source, /data-stock-primary-context/);
+assert.match(source, /data-stock-supporting-research/);
 assert.match(source, /tickerContext/);
 assert.match(source, /earningsBrief/);
 assert.match(source, /riskTags/);
@@ -42,5 +45,6 @@ assert.doesNotMatch(source, /Priority \{stock\.priority\}/);
 assert.doesNotMatch(source, /sessionLabel/);
 assert.doesNotMatch(source, /CandlestickChart/);
 assert.doesNotMatch(source, /candles3d/);
+assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
 console.log("ok - alpha stock detail research review UI");

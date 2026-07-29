@@ -195,7 +195,7 @@ export function AlphaSectorList({
                     type="button"
                     onClick={() => onSelectTicker(stock.ticker)}
                     className={[
-                      "grid w-full min-w-0 grid-cols-[3.75rem_minmax(8rem,1fr)_5.25rem] items-center gap-2 rounded-[6px] border px-2.5 py-2 text-left transition-colors",
+                      "grid w-full min-w-0 grid-cols-[3.5rem_minmax(0,1fr)_4.75rem] items-center gap-1.5 rounded-[6px] border px-2 py-2 text-left transition-colors",
                       selected
                         ? "border-accent/45 bg-accent-soft"
                         : "border-line/60 bg-panel-strong/70 hover:border-line hover:bg-panel-strong",

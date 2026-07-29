@@ -68,7 +68,7 @@ export function StocksResearchStatePanel({
     !onSave
   ) {
     return (
-      <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
+      <section className="rounded-md border border-line/60 bg-background/30 px-3 py-2.5 text-sm text-muted">
         {panelMode === "loading" ? "研究状态加载中" : "研究状态暂不可用"}
       </section>
     );
@@ -137,7 +137,7 @@ function StocksResearchStateEditor({
   return (
     <section
       aria-label="研究状态"
-      className="rounded-lg border border-line/60 bg-panel/70 p-4"
+      className="rounded-md border border-line/60 bg-panel/70 p-3"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>

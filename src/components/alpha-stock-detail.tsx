@@ -126,8 +126,8 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-line/60 bg-panel-strong/80 p-4">
-      <h3 className="text-[13px] font-semibold uppercase tracking-normal text-muted">
+    <section className="rounded-md border border-line/60 bg-panel-strong/80 p-4">
+      <h3 className="text-[13px] font-semibold text-muted">
         {title}
       </h3>
       <div className="mt-3">{children}</div>
@@ -159,7 +159,7 @@ function MetricTile({
   tone?: string;
 }) {
   return (
-    <div className="rounded-lg border border-line/60 bg-background/35 p-3">
+    <div className="rounded-md border border-line/60 bg-background/35 p-3">
       <p className="text-[11px] font-semibold text-muted">{label}</p>
       <p className={`mt-2 min-w-0 break-words font-mono text-xl font-semibold ${tone}`}>
         {value}
@@ -183,7 +183,7 @@ function IntelligenceMetricTile({
   tone: StocksIntelligenceTone;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-line/60 bg-background/35 px-3 py-2.5">
+    <div className="min-w-0 rounded-md border border-line/60 bg-background/35 px-3 py-2.5">
       <p className="text-[11px] font-semibold text-muted">{label}</p>
       <p
         className={`mt-1 min-w-0 break-words font-mono text-base font-semibold ${intelligenceTextTone(
@@ -210,7 +210,7 @@ export function AlphaStockDetail({
 }: AlphaStockDetailProps) {
   if (!stock) {
     return (
-      <article className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+      <article className="rounded-md border border-line/70 bg-panel-strong p-5">
         <div className="flex min-h-[20rem] items-center justify-center text-sm text-muted">
           暂无可展示 ticker
         </div>
@@ -221,16 +221,18 @@ export function AlphaStockDetail({
   const sector = getAlphaResearchSectorById(stock.sectorId);
   const intelligence = buildStocksIntelligence(stock);
   const { tickerContext, earningsBrief, riskTags, structure } = intelligence;
-  const intelligenceMetrics = [
+  const primaryIntelligenceMetrics = [
     tickerContext.price,
     tickerContext.dayMove,
     tickerContext.sevenDay,
     tickerContext.earningsWindow,
+    tickerContext.dataHealth,
+  ];
+  const financialIntelligenceMetrics = [
     tickerContext.revenue,
     tickerContext.eps,
     tickerContext.grossMargin,
     tickerContext.freeCashFlow,
-    tickerContext.dataHealth,
   ];
   const stockMarketIsLive = stock.market.source === "live";
   const stockMarketIsLoading = marketDataLoading && !stockMarketIsLive;
@@ -282,7 +284,8 @@ export function AlphaStockDetail({
   });
 
   return (
-    <article className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+    <article className="rounded-md border border-line/70 bg-panel-strong p-5">
+      <div data-stock-primary-context>
       <div className="grid gap-5 border-b border-line/60 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:items-start">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold text-muted">研究结论</p>
@@ -349,7 +352,94 @@ export function AlphaStockDetail({
         </div>
       </div>
 
-      <div className="mt-5">
+      <div
+        data-stock-intelligence
+        className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(22rem,0.88fr)]"
+      >
+        <Section title="Ticker Intelligence">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {primaryIntelligenceMetrics.map((metric) => (
+              <IntelligenceMetricTile
+                key={metric.label}
+                label={metric.label}
+                value={metric.value}
+                note={metric.note}
+                tone={metric.tone}
+              />
+            ))}
+          </div>
+          <div className="mt-4 border-t border-line/60 pt-3">
+            <p className="text-[11px] font-semibold text-muted">Core driver</p>
+            <div className="mt-2">
+              <BulletList items={stock.thesis.slice(0, 2)} />
+            </div>
+          </div>
+        </Section>
+
+        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-1">
+          <Section title="Structure Snapshot">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span
+                className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
+                  structure.tone,
+                )}`}
+              >
+                {structure.label}
+              </span>
+              <span className="font-mono text-xs text-muted">Score {structure.score}</span>
+            </div>
+            <div className="mt-3 space-y-1">
+              {structure.points.map((point) => (
+                <p key={point} className="text-sm leading-6 text-muted">
+                  {point}
+                </p>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Earnings Brief">
+            <p
+              className={`text-sm font-semibold ${intelligenceTextTone(
+                earningsBrief.confidence === "normal" ? "info" : "warning",
+              )}`}
+            >
+              {earningsBrief.title}
+            </p>
+            <div className="mt-3 space-y-2">
+              {earningsBrief.points.map((point) => (
+                <p key={point} className="break-words text-sm leading-6 text-foreground">
+                  {point}
+                </p>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Impact & Risk Tags">
+            <div className="flex flex-wrap gap-2">
+              {riskTags.map((tag) => (
+                <span
+                  key={`${tag.label}-${tag.reason}`}
+                  className={`rounded-md border px-2 py-1 text-xs font-semibold ${intelligenceBadgeTone(
+                    tag.tone,
+                  )}`}
+                  title={tag.reason}
+                >
+                  {tag.label}
+                </span>
+              ))}
+              {riskTags.length === 0 ? (
+                <span className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-xs text-muted">
+                  暂无显著风险标签
+                </span>
+              ) : null}
+            </div>
+          </Section>
+        </div>
+      </div>
+      </div>
+
+      <div data-stock-supporting-research className="mt-5">
+      <div>
         {researchStatePanelMode === "editor" && researchState && onSaveResearchState ? (
           <StocksResearchStatePanel
             ticker={stock.ticker}
@@ -358,7 +448,7 @@ export function AlphaStockDetail({
             onSave={onSaveResearchState}
           />
         ) : (
-          <section className="rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
+          <section className="rounded-md border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
             {researchStatePanelMode === "loading"
               ? "研究状态加载中"
               : researchStateError
@@ -370,9 +460,9 @@ export function AlphaStockDetail({
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
         <div className="space-y-5">
-          <Section title="Ticker Intelligence">
+          <Section title="Financial Snapshot">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {intelligenceMetrics.map((metric) => (
+              {financialIntelligenceMetrics.map((metric) => (
                 <IntelligenceMetricTile
                   key={metric.label}
                   label={metric.label}
@@ -396,10 +486,10 @@ export function AlphaStockDetail({
                   return (
                   <article
                     key={`${report.date}-${report.title}-${reportIndex}`}
-                    className="rounded-lg border border-accent/45 bg-accent-soft/20 px-4 py-3"
+                    className="rounded-md border border-accent/45 bg-accent-soft/20 px-4 py-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] font-semibold text-warning">
+                      <span className="rounded-md bg-warning-soft px-1.5 py-0.5 text-[11px] font-semibold text-warning">
                         Patreon
                       </span>
                       <span className="text-[11px] text-muted">
@@ -470,10 +560,10 @@ export function AlphaStockDetail({
               {visibleCatalysts.map((catalyst, catalystIndex) => (
                 <article
                   key={`${catalyst.date}-${catalyst.title}-${catalystIndex}`}
-                  className="rounded-lg border border-line/60 bg-panel px-4 py-3"
+                  className="rounded-md border border-line/60 bg-panel px-4 py-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info">
+                    <span className="rounded-md bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info">
                       {catalystLabel(catalyst.type)}
                     </span>
                     <span className={`text-[11px] font-semibold ${impactTone(catalyst.impact)}`}>
@@ -510,7 +600,7 @@ export function AlphaStockDetail({
               ))}
             </div>
             {hiddenCatalysts.length > 0 ? (
-              <details className="mt-3 rounded-lg border border-line/60 bg-background/30 px-4 py-3 text-sm">
+              <details className="mt-3 rounded-md border border-line/60 bg-background/30 px-4 py-3 text-sm">
                 <summary className="cursor-pointer select-none font-semibold text-muted hover:text-foreground">
                   更多普通新闻 {hiddenCatalysts.length} 条
                 </summary>
@@ -530,69 +620,6 @@ export function AlphaStockDetail({
         </div>
 
         <div className="space-y-5">
-          <Section title="Impact & Risk Tags">
-            <div className="flex flex-wrap gap-2">
-              {riskTags.map((tag) => (
-                <span
-                  key={`${tag.label}-${tag.reason}`}
-                  className={`rounded-md border px-2 py-1 text-xs font-semibold ${intelligenceBadgeTone(
-                    tag.tone,
-                  )}`}
-                  title={tag.reason}
-                >
-                  {tag.label}
-                </span>
-              ))}
-              {riskTags.length === 0 ? (
-                <span className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-xs text-muted">
-                  暂无显著风险标签
-                </span>
-              ) : null}
-            </div>
-          </Section>
-
-          <Section title="Earnings Brief">
-            <div className="rounded-lg border border-line/60 bg-background/35 p-3">
-              <p className={`text-sm font-semibold ${intelligenceTextTone(earningsBrief.confidence === "normal" ? "info" : "warning")}`}>
-                {earningsBrief.title}
-              </p>
-              <div className="mt-3 space-y-2">
-                {earningsBrief.points.map((point) => (
-                  <p
-                    key={point}
-                    className="break-words text-sm leading-6 text-foreground"
-                  >
-                    {point}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </Section>
-
-          <Section title="Structure Snapshot">
-            <div className="rounded-lg border border-line/60 bg-background/35 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span
-                  className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
-                    structure.tone,
-                  )}`}
-                >
-                  {structure.label}
-                </span>
-                <span className="font-mono text-xs text-muted">
-                  Score {structure.score}
-                </span>
-              </div>
-              <div className="mt-3 space-y-1">
-                {structure.points.map((point) => (
-                  <p key={point} className="text-sm leading-6 text-muted">
-                    {point}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </Section>
-
           <Section title="财报复盘">
             <div className="grid gap-2 text-sm">
               {financialRows.map(([label, value]) => (
@@ -649,6 +676,7 @@ export function AlphaStockDetail({
             </div>
           </Section>
         </div>
+      </div>
       </div>
     </article>
   );
