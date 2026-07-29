@@ -11,9 +11,12 @@ import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { UnifiedNewsPanel } from "@/components/unified-news-panel";
 import type { TwitterDashboardSnapshot } from "@/lib/6551-twitter";
+import {
+  reduceSignalMobilePanelScroll,
+  type SignalMobilePanel,
+  type SignalMobilePanelScrollState,
+} from "@/lib/signal-mobile-panel-scroll";
 import type { TelegramDashboardSnapshot } from "@/lib/telegram-channels";
-
-type SignalMobilePanel = "feed" | "summary";
 
 type SignalsResponsiveLayoutProps = {
   initialTelegramSnapshot: TelegramDashboardSnapshot;
@@ -69,6 +72,10 @@ export function SignalsResponsiveLayout({
   const mobileScrollerRef = useRef<HTMLDivElement | null>(null);
   const mobileReturnScrollYRef = useRef<number | null>(null);
   const previousMobilePanelRef = useRef<SignalMobilePanel>("feed");
+  const mobilePanelScrollStateRef = useRef<SignalMobilePanelScrollState>({
+    activePanel: "feed",
+    programmaticTarget: null,
+  });
   const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
   const [activeMobilePanel, setActiveMobilePanel] =
     useState<SignalMobilePanel>("feed");
@@ -108,9 +115,30 @@ export function SignalsResponsiveLayout({
   }, [activeMobilePanel, isDesktop]);
 
   const showMobilePanel = useCallback((panel: SignalMobilePanel) => {
-    setActiveMobilePanel(panel);
+    let nextScrollState = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      {
+        type: "programmatic-start",
+        target: panel,
+      },
+    );
     const scroller = mobileScrollerRef.current;
-    if (!scroller) return;
+    if (!scroller || scroller.clientWidth <= 0) {
+      nextScrollState = reduceSignalMobilePanelScroll(nextScrollState, {
+        type: "user-interrupt",
+      });
+      mobilePanelScrollStateRef.current = nextScrollState;
+      setActiveMobilePanel(nextScrollState.activePanel);
+      return;
+    }
+
+    nextScrollState = reduceSignalMobilePanelScroll(nextScrollState, {
+      type: "scroll",
+      scrollLeft: scroller.scrollLeft,
+      clientWidth: scroller.clientWidth,
+    });
+    mobilePanelScrollStateRef.current = nextScrollState;
+    setActiveMobilePanel(nextScrollState.activePanel);
 
     scroller.scrollTo({
       left: scroller.clientWidth * MOBILE_PANEL_INDEX[panel],
@@ -148,10 +176,26 @@ export function SignalsResponsiveLayout({
     const scroller = mobileScrollerRef.current;
     if (!scroller) return;
 
-    const nextPanel =
-      scroller.scrollLeft >= scroller.clientWidth * 0.5 ? "summary" : "feed";
+    const nextScrollState = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      {
+        type: "scroll",
+        scrollLeft: scroller.scrollLeft,
+        clientWidth: scroller.clientWidth,
+      },
+    );
+    mobilePanelScrollStateRef.current = nextScrollState;
     setActiveMobilePanel((current) =>
-      current === nextPanel ? current : nextPanel,
+      current === nextScrollState.activePanel
+        ? current
+        : nextScrollState.activePanel,
+    );
+  }, []);
+
+  const handleMobileScrollStart = useCallback(() => {
+    mobilePanelScrollStateRef.current = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      { type: "user-interrupt" },
     );
   }, []);
 
@@ -237,6 +281,8 @@ export function SignalsResponsiveLayout({
       <div
         ref={mobileScrollerRef}
         onScroll={handleMobileScroll}
+        onPointerDown={handleMobileScrollStart}
+        onTouchStart={handleMobileScrollStart}
         className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <div

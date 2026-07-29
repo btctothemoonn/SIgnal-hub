@@ -22,7 +22,7 @@ assert.ok(
 );
 assert.match(component, /useState<SignalMobilePanel>\("feed"\)/);
 assert.doesNotMatch(component, /OpportunityRadar|opportunityEnabled|opportunities/);
-assert.match(component, /type SignalMobilePanel = "feed" \| "summary"/);
+assert.match(component, /type SignalMobilePanel,/);
 assert.match(component, /const MOBILE_PANEL_INDEX = \{/);
 assert.match(component, /feed: 0/);
 assert.match(component, /summary: 1/);
@@ -41,6 +41,9 @@ assert.match(component, /behavior: "smooth"/);
 assert.equal(component.match(/scroll-smooth/g)?.length, 1);
 assert.match(component, /snap-x snap-mandatory/);
 assert.match(component, /onScroll=\{handleMobileScroll\}/);
+assert.match(component, /mobilePanelScrollStateRef/);
+assert.match(component, /onPointerDown=\{handleMobileScrollStart\}/);
+assert.match(component, /onTouchStart=\{handleMobileScrollStart\}/);
 assert.match(component, /const mobilePagerRef = useRef<HTMLElement \| null>\(null\)/);
 assert.match(
   component,

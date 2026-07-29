@@ -28,7 +28,7 @@ assert.match(
   source,
   /rounded-\[6px\] border border-workspace-line-strong bg-workspace-surface/,
 );
-assert.match(source, /bg-background\/70/);
+assert.match(source, /bg-workspace-canvas/);
 assert.match(source, /active:scale-\[0\.995\]/);
 assert.match(source, /border-l-2 border-l-accent\/45/);
 assert.match(source, /data-telegram-fault-alert/);
