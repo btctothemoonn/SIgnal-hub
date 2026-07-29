@@ -17,6 +17,14 @@
   --danger-soft: rgba(238, 125, 112, 0.16);
   --info: #8fb9d8;
   --info-soft: rgba(143, 185, 216, 0.15);
+  --workspace-canvas: #f3f6f5;
+  --workspace-rail: #e6ece9;
+  --workspace-surface: #ffffff;
+  --workspace-surface-raised: #f8fbfa;
+  --workspace-toolbar: #edf2f0;
+  --workspace-line-strong: #b8c4bf;
+  --workspace-radius: 6px;
+  --workspace-gutter: 20px;
   --app-font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "PingFang SC",
     "HarmonyOS Sans SC", "Microsoft YaHei UI", "Microsoft YaHei",
@@ -46,6 +54,14 @@ html.dark {
   --danger-soft: rgba(240, 135, 121, 0.16);
   --info: #95c0df;
   --info-soft: rgba(149, 192, 223, 0.15);
+  --workspace-canvas: #0c0f0e;
+  --workspace-rail: #121816;
+  --workspace-surface: #171d1b;
+  --workspace-surface-raised: #1d2421;
+  --workspace-toolbar: #131a17;
+  --workspace-line-strong: #3b4641;
+  --workspace-radius: 6px;
+  --workspace-gutter: 20px;
 }
 
 @theme inline {
@@ -65,6 +81,12 @@ html.dark {
   --color-danger-soft: var(--danger-soft);
   --color-info: var(--info);
   --color-info-soft: var(--info-soft);
+  --color-workspace-canvas: var(--workspace-canvas);
+  --color-workspace-rail: var(--workspace-rail);
+  --color-workspace-surface: var(--workspace-surface);
+  --color-workspace-surface-raised: var(--workspace-surface-raised);
+  --color-workspace-toolbar: var(--workspace-toolbar);
+  --color-workspace-line-strong: var(--workspace-line-strong);
   --font-sans: var(--app-font-sans);
   --font-mono: var(--app-font-mono);
   --font-serif: var(--app-font-serif);

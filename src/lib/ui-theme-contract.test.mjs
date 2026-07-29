@@ -25,6 +25,23 @@ await test("global theme uses the mobile command dark palette", () => {
   assert.doesNotMatch(globals, /28px 28px/);
 });
 
+await test("command workspace tokens define dark and light operational surfaces", () => {
+  assert.match(globals, /--workspace-canvas:/);
+  assert.match(globals, /--workspace-rail:/);
+  assert.match(globals, /--workspace-surface:/);
+  assert.match(globals, /--workspace-surface-raised:/);
+  assert.match(globals, /--workspace-toolbar:/);
+  assert.match(globals, /--workspace-line-strong:/);
+  assert.match(globals, /--workspace-radius:\s*6px;/);
+  assert.match(globals, /--workspace-gutter:/);
+  assert.match(
+    globals,
+    /html\.dark\s*\{[\s\S]*--workspace-canvas:/,
+  );
+  assert.match(globals, /--color-workspace-canvas:/);
+  assert.doesNotMatch(globals, /letter-spacing:\s*-/);
+});
+
 await test("app shell exposes the redesigned accent navigation and serif identity", () => {
   assert.match(appShell, /border-accent\/35 bg-accent-soft text-accent/);
   assert.match(appShell, /font-serif/);
