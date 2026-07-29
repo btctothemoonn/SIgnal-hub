@@ -22,5 +22,7 @@ assert.equal(shouldShowHynixPremiumAlert(cycle, 29.5), false);
 
 cycle = nextHynixPremiumAlertCycle(cycle, 30.2);
 assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2), true);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, false), false);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, true), true);
 
 console.log("ok - hynix premium alert cycle");

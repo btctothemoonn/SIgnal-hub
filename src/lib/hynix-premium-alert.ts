@@ -48,6 +48,7 @@ export function dismissHynixPremiumAlertCycle(
 export function shouldShowHynixPremiumAlert(
   current: HynixPremiumAlertCycle,
   premiumPct: number | null | undefined,
+  enabled = true,
 ) {
-  return isBreached(premiumPct) && !current.dismissed;
+  return enabled && isBreached(premiumPct) && !current.dismissed;
 }
