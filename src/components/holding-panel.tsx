@@ -350,7 +350,7 @@ function FuturesEquityCurve({
   const points = equityHistoryWithCurrent({ history, snapshot });
   const width = 720;
   const height = 240;
-  const padX = 34;
+  const padX = 48;
   const padY = 24;
   const chartWidth = width - padX * 2;
   const chartHeight = height - padY * 2;
@@ -411,7 +411,7 @@ function FuturesEquityCurve({
           </div>
 
           <svg
-            className="h-64 w-full overflow-visible"
+            className="h-64 w-full overflow-hidden"
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label="合约账户权益历史曲线"
@@ -441,8 +441,9 @@ function FuturesEquityCurve({
                     strokeDasharray={ratio === 0.5 ? "4 6" : undefined}
                   />
                   <text
-                    x={width - padX + 8}
+                    x={width - 4}
                     y={y + 4}
+                    textAnchor="end"
                     fill="currentColor"
                     className="text-[10px] font-semibold text-muted"
                   >

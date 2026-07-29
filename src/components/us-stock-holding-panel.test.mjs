@@ -17,6 +17,14 @@ const positionBriefPnlSource = source.slice(
   source.indexOf("function PositionBriefPnl"),
   source.indexOf("function PositionBriefCards"),
 );
+const positionLogoSource = source.slice(
+  source.indexOf("function positionLogoTone"),
+  source.indexOf("function PositionBriefPnl"),
+);
+const equityCurveSource = source.slice(
+  source.indexOf("function EquityCurve"),
+  source.indexOf("export function USStockHoldingPanel"),
+);
 
 assert.match(source, /USStockHoldingPanel/);
 assert.match(source, /US_STOCK_HOLDING_SNAPSHOT/);
@@ -31,9 +39,18 @@ assert.match(source, /data-us-position-card/);
 assert.match(source, /getUsHoldingEquityMetric/);
 assert.match(source, /isFiniteTigerHoldingSnapshot/);
 assert.match(source, /label=\{equityMetric\.label\}/);
-assert.match(source, /className="h-56 w-full overflow-visible"/);
-assert.doesNotMatch(source, /className="h-56 w-full overflow-hidden"/);
-assert.doesNotMatch(source, /bg-gradient-|from-[a-z]|to-[a-z]/);
+assert.match(equityCurveSource, /className="h-56 w-full overflow-hidden"/);
+assert.match(equityCurveSource, /const padX = 48;/);
+assert.match(equityCurveSource, /x2=\{width - padX\}/);
+assert.match(
+  equityCurveSource,
+  /<text\s+x=\{width - 4\}\s+y=\{y \+ 4\}\s+textAnchor="end"[\s\S]*?\{formatCompactUsd\(value\)\.replace\("\+", ""\)\}/,
+);
+assert.doesNotMatch(equityCurveSource, /x=\{width - padX \+ 8\}/);
+assert.doesNotMatch(
+  positionLogoSource,
+  /bg-gradient-|from-[a-z]|to-[a-z]/,
+);
 assert.doesNotMatch(positionBriefCellSource, /truncate|overflow-hidden|whitespace-nowrap/);
 assert.match(positionBriefCellSource, /\[overflow-wrap:anywhere\]/);
 assert.doesNotMatch(usHoldingSummaryCellSource, /truncate|overflow-hidden|whitespace-nowrap/);

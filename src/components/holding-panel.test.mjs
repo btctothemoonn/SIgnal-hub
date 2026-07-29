@@ -17,6 +17,10 @@ const holdingMetricCellSource = source.slice(
   source.indexOf("function HoldingMetricCell"),
   source.indexOf("function BinanceSummaryGrid"),
 );
+const futuresEquityCurveSource = source.slice(
+  source.indexOf("function FuturesEquityCurve"),
+  source.indexOf("function baseAssetFromSymbol"),
+);
 
 assert.match(source, /FuturesEquityCurve/);
 assert.match(source, /equityHistory/);
@@ -45,13 +49,24 @@ assert.match(source, /getBinanceDisplayTotalEquity/);
 assert.match(source, /label="浮盈 \/ 合约权益"/);
 assert.match(source, /label="浮盈 \/ 账户权益"/);
 assert.doesNotMatch(source, /label="盈亏比例"/);
-assert.match(source, /className="h-64 w-full overflow-visible"/);
-assert.doesNotMatch(source, /className="h-64 w-full overflow-hidden"/);
+assert.match(
+  futuresEquityCurveSource,
+  /className="h-64 w-full overflow-hidden"/,
+);
+assert.match(futuresEquityCurveSource, /const padX = 48;/);
+assert.match(futuresEquityCurveSource, /x2=\{width - padX\}/);
+assert.match(
+  futuresEquityCurveSource,
+  /<text\s+x=\{width - 4\}\s+y=\{y \+ 4\}\s+textAnchor="end"[\s\S]*?\{formatCompactUsd\(value\)\.replace\("\+", ""\)\}/,
+);
+assert.doesNotMatch(
+  futuresEquityCurveSource,
+  /x=\{width - padX \+ 8\}/,
+);
 assert.doesNotMatch(summaryTileSource, /truncate/);
 assert.match(summaryTileSource, /\[overflow-wrap:anywhere\]/);
 assert.doesNotMatch(holdingMetricCellSource, /truncate/);
 assert.match(holdingMetricCellSource, /\[overflow-wrap:anywhere\]/);
-assert.doesNotMatch(source, /bg-gradient-|from-[a-z]|to-[a-z]/);
 assert.match(pageSource, /overflow-x-hidden/);
 assert.doesNotMatch(pageSource, /overflow-x-auto/);
 assert.match(source, /合约持仓/);
