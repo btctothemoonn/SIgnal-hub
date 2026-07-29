@@ -23,11 +23,18 @@ type RuntimeConfig = {
   douyinCreators: WatchItem[];
 };
 
+type ConfigurationStatus = {
+  summaryConfigured: boolean;
+  translationConfigured: boolean;
+  adminAccessConfigured: boolean;
+};
+
 type SyncResult = { username: string; warning: string | null };
 
 type ApiResponse = {
   success: boolean;
   config?: RuntimeConfig;
+  configuration?: ConfigurationStatus;
   error?: string;
   warning?: string | null;
   syncResults?: SyncResult[];
@@ -37,6 +44,12 @@ const emptyConfig: RuntimeConfig = {
   telegramChannels: [],
   twitterAccounts: [],
   douyinCreators: [],
+};
+
+const emptyConfiguration: ConfigurationStatus = {
+  summaryConfigured: false,
+  translationConfigured: false,
+  adminAccessConfigured: false,
 };
 
 async function callSettings(body: unknown): Promise<ApiResponse> {
@@ -100,13 +113,15 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-type Kind = "telegram" | "twitter" | "douyin" | "health";
-type WatchKind = Exclude<Kind, "health">;
+type Kind = "telegram" | "twitter" | "douyin" | "ai" | "health" | "general";
+type WatchKind = Exclude<Kind, "ai" | "health" | "general">;
 
 export default function SettingsPage() {
   const router = useRouter();
   const [navigating, startNavigation] = useTransition();
   const [config, setConfig] = useState<RuntimeConfig>(emptyConfig);
+  const [configuration, setConfiguration] =
+    useState<ConfigurationStatus>(emptyConfiguration);
   const [activeKind, setActiveKind] = useState<Kind>("telegram");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -124,6 +139,7 @@ export default function SettingsPage() {
     void fetchSettings().then((result) => {
       if (result.success && result.config) {
         setConfig(result.config);
+        if (result.configuration) setConfiguration(result.configuration);
       } else if (result.error) {
         setError(result.error);
       }
@@ -162,11 +178,13 @@ export default function SettingsPage() {
   const twitterItems = config.twitterAccounts;
   const douyinItems = config.douyinCreators;
 
-  const sections: Array<{ kind: Kind; title: string; count: number }> = [
+  const sections: Array<{ kind: Kind; title: string; count?: number }> = [
     { kind: "telegram", title: "Telegram 频道", count: telegramItems.length },
     { kind: "twitter", title: "X 博主", count: twitterItems.length },
     { kind: "douyin", title: "抖音博主", count: douyinItems.length },
-    { kind: "health", title: "信息健康", count: 0 },
+    { kind: "ai", title: "AI 配置" },
+    { kind: "health", title: "信息健康" },
+    { kind: "general", title: "通用" },
   ];
 
   return (
@@ -212,16 +230,18 @@ export default function SettingsPage() {
                   }
                 >
                   <span className="font-medium">{section.title}</span>
-                  <span
-                    className={
-                      "ml-2 rounded-[6px] px-2 py-0.5 text-[11px] " +
-                      (isActive
-                        ? "bg-foreground/10 text-foreground"
-                        : "bg-line/60 text-muted")
-                    }
-                  >
-                    {section.count}
-                  </span>
+                  {section.count === undefined ? null : (
+                    <span
+                      className={
+                        "ml-2 rounded-[6px] px-2 py-0.5 text-[11px] " +
+                        (isActive
+                          ? "bg-foreground/10 text-foreground"
+                          : "bg-line/60 text-muted")
+                      }
+                    >
+                      {section.count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -234,6 +254,32 @@ export default function SettingsPage() {
               </div>
             ) : activeKind === "health" ? (
               <SystemHealthPanel />
+            ) : activeKind === "ai" ? (
+              <ConfigurationStatusPanel
+                title="AI 配置"
+                description="凭据状态由服务器环境读取，不会向浏览器返回密钥。"
+                items={[
+                  {
+                    label: "摘要生成",
+                    configured: configuration.summaryConfigured,
+                  },
+                  {
+                    label: "内容翻译",
+                    configured: configuration.translationConfigured,
+                  },
+                ]}
+              />
+            ) : activeKind === "general" ? (
+              <ConfigurationStatusPanel
+                title="通用"
+                description="环境变量由 VPS 管理，需在服务器上修改，无法在浏览器中编辑。"
+                items={[
+                  {
+                    label: "管理员密码与访问",
+                    configured: configuration.adminAccessConfigured,
+                  },
+                ]}
+              />
             ) : activeKind === "telegram" ? (
               <WatchListPanel
                 key="telegram"
@@ -270,6 +316,47 @@ export default function SettingsPage() {
             )}
           </section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type ConfigurationStatusPanelProps = {
+  title: string;
+  description: string;
+  items: Array<{ label: string; configured: boolean }>;
+};
+
+function ConfigurationStatusPanel({
+  title,
+  description,
+  items,
+}: ConfigurationStatusPanelProps) {
+  return (
+    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
+      <div className="border-b border-line/70 pb-4">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+      </div>
+      <div className="mt-4 divide-y divide-line/70 rounded-[6px] border border-line/70 bg-panel">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between gap-3 px-3 py-3"
+          >
+            <span className="text-sm font-medium text-foreground">{item.label}</span>
+            <span
+              className={
+                "shrink-0 rounded-[6px] border px-2 py-1 text-xs font-semibold " +
+                (item.configured
+                  ? "border-success/35 bg-success-soft text-success"
+                  : "border-line/70 bg-background text-muted")
+              }
+            >
+              {item.configured ? "已配置" : "未配置"}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -623,9 +710,15 @@ function WatchItemRow({
           ))
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div
+        data-settings-item-actions
+        className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+      >
         {editing ? (
-          <>
+          <div
+            data-settings-edit-controls
+            className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+          >
             <input
               type="text"
               value={input}
@@ -638,7 +731,7 @@ function WatchItemRow({
                 }
               }}
               placeholder="多个 tag 用逗号分隔"
-              className="w-full rounded-[6px] border border-line/70 bg-background/60 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none sm:w-48"
+              className="min-w-0 w-full rounded-[6px] border border-line/70 bg-background/60 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none sm:w-48"
               autoFocus
             />
             <button
@@ -659,7 +752,7 @@ function WatchItemRow({
               <X aria-hidden="true" size={14} />
               取消
             </button>
-          </>
+          </div>
         ) : (
           <>
             <CopyWatchListButton text={copyText} />
