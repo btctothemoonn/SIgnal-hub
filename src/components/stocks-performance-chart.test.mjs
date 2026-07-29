@@ -18,6 +18,8 @@ assert.match(source, /seriesLabelItems/);
 assert.match(source, /data-chart-rank-list/);
 assert.match(source, /compact \? "0 0 720 220" : "0 0 720 260"/);
 assert.match(source, /compact \? "min-h-\[14rem\]" : "min-h-\[17rem\]"/);
+assert.match(source, /data-stocks-performance-chart/);
+assert.match(source, /className="min-h-\[22rem\][^"]*rounded-\[6px\]/);
 assert.match(source, /sectors\.map/);
 assert.match(source, /aria-pressed=\{selected\}/);
 assert.match(source, /onSelectSector\(sector\.id\)/);

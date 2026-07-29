@@ -16,7 +16,7 @@ export default function StocksPage() {
     <AppShell
       activeNav="stocks"
       subtitle="AI / 算力链美股投研池 · 消息汇总辅助视图"
-      mainClassName="mx-auto w-full max-w-[1780px] min-h-0 px-3 py-4 sm:px-5"
+      mainClassName="mx-auto min-h-0 w-full max-w-[1780px] overflow-x-clip px-3 py-4 sm:px-5"
       statusPills={[
         {
           label: "Pool",
