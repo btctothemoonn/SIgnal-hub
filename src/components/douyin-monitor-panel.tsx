@@ -67,16 +67,16 @@ function DetailList({ items }: { items: string[] }) {
 function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
   if (!summary) {
     return (
-      <div className="rounded-lg border border-line/70 bg-background/45 p-3 text-sm text-muted">
+      <div className="rounded-[6px] border border-line/70 bg-background/45 p-3 text-sm text-muted">
         摘要等待生成。若 AI 失败，会保留公开视频标题和简介。
       </div>
     );
   }
 
   return (
-    <div className="grid gap-3 rounded-lg border border-line/70 bg-background/45 p-3 md:grid-cols-[1.25fr_1fr]">
+    <div className="grid gap-3 rounded-[6px] border border-line/70 bg-background/45 p-3 md:grid-cols-[1.25fr_1fr]">
       <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-normal text-muted">
           投研摘要
           <span className={`ml-2 ${summaryTone(summary)}`}>
             {summary.status === "generated"
@@ -88,7 +88,7 @@ function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
         </div>
         <p className="text-sm leading-6 text-foreground">{summary.coreView}</p>
         <div className="mt-3 rounded-md border border-line/60 bg-panel/45 p-3">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-normal text-muted">
             为什么推荐 / 看好
           </div>
           <DetailList items={summary.recommendationReasons} />
@@ -104,11 +104,15 @@ function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
         </div>
         <div>
           <div className="mb-1 font-semibold text-muted">炒作逻辑 / 催化</div>
-          <TagList items={[...summary.catalysts, ...summary.followUps].slice(0, 6)} />
+          <TagList items={summary.catalysts} />
         </div>
         <div>
           <div className="mb-1 font-semibold text-muted">风险</div>
           <TagList items={summary.risks} />
+        </div>
+        <div>
+          <div className="mb-1 font-semibold text-muted">后续跟踪</div>
+          <TagList items={summary.followUps} />
         </div>
       </div>
     </div>
@@ -117,42 +121,47 @@ function SummaryBlock({ summary }: { summary: DouyinVideoSummary | null }) {
 
 function VideoCard({ video }: { video: DouyinVideoRecord }) {
   return (
-    <article className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-52px_rgba(0,0,0,0.85)]">
-      <div className="flex flex-col gap-4 lg:flex-row">
-        {video.coverUrl ? (
-          <a
-            href={video.videoUrl}
-            target="_blank"
-            rel="noreferrer"
-            aria-label={`打开视频：${video.title}`}
-            className="aspect-video w-full shrink-0 overflow-hidden rounded-lg border border-line/70 bg-background/50 transition-colors hover:border-accent/45 lg:w-56"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={video.coverUrl}
-              alt=""
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </a>
-        ) : null}
-        <div className="min-w-0 flex-1">
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+    <article
+      data-douyin-video
+      className="rounded-[6px] border border-line/70 bg-panel-strong p-3"
+    >
+      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(16rem,0.34fr)_minmax(0,0.66fr)] lg:items-start">
+        <div className="grid min-w-0 content-start gap-3">
+          {video.coverUrl ? (
+            <a
+              href={video.videoUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`打开视频：${video.title}`}
+              className="aspect-video w-full overflow-hidden rounded-[6px] border border-line/70 bg-background/50 transition-colors hover:border-accent/45"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={video.coverUrl}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            </a>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <span className="rounded-md bg-accent-soft px-2 py-1 font-semibold text-accent">
               抖音
             </span>
             <span>{video.creatorName}</span>
             <span>·</span>
             <span>{formatTime(video.publishedAt || video.firstSeenAt)}</span>
-            <a
-              href={video.videoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto rounded-md border border-line/70 px-2 py-1 text-xs font-semibold text-foreground hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
-            >
-              打开视频
-            </a>
           </div>
+          <a
+            href={video.videoUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="w-fit rounded-md border border-line/70 px-2 py-1 text-xs font-semibold text-foreground hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+          >
+            打开视频
+          </a>
+        </div>
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold leading-7 text-foreground">
             <a
               href={video.videoUrl}
@@ -222,32 +231,32 @@ export function DouyinMonitorPanel({
   }
 
   return (
-    <section className="flex flex-col gap-4">
-      <div className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-[0_24px_60px_-52px_rgba(0,0,0,0.85)]">
+    <section data-douyin-workspace className="flex min-w-0 flex-col gap-3">
+      <div data-douyin-toolbar className="rounded-[6px] border border-line/70 bg-panel-strong p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-foreground">抖音订阅</h1>
-            <p className="mt-1 text-sm text-muted">
+            <h1 className="text-xl font-semibold text-foreground">抖音订阅</h1>
+            <p className="mt-1 text-xs text-muted">
               公开视频低频监控 · {creatorCount} 个博主 · 最新 {videos.length} 条 · 更新{" "}
               {formatTime(snapshot.lastUpdatedAt)}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-lg border border-line/70 bg-background/45 px-3 py-2 text-xs text-muted">
+            <span className="rounded-[6px] border border-line/70 bg-background/45 px-3 py-2 text-xs text-muted">
               状态 <b className="ml-1 text-foreground">{statusText(snapshot.status)}</b>
             </span>
             <button
               type="button"
               onClick={refreshNow}
               disabled={isPending || creatorCount === 0}
-              className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="rounded-[6px] bg-foreground px-3 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
             >
               {isPending ? "刷新中..." : "手动刷新"}
             </button>
           </div>
         </div>
         {error ? (
-          <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+          <p className="mt-3 rounded-[6px] bg-danger-soft px-3 py-2 text-sm text-danger">
             {error}
           </p>
         ) : null}
@@ -256,7 +265,7 @@ export function DouyinMonitorPanel({
             {snapshot.errors.slice(0, 3).map((item) => (
               <p
                 key={`${item.creatorRef}-${item.fetchedAt}`}
-                className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning"
+                className="rounded-[6px] bg-warning-soft px-3 py-2 text-xs text-warning"
               >
                 {item.creatorRef}: {item.error || "公开页面暂未解析到视频"}
               </p>
@@ -266,24 +275,24 @@ export function DouyinMonitorPanel({
       </div>
 
       {creatorCount === 0 ? (
-        <div className="rounded-lg border border-dashed border-line/70 bg-panel-strong p-8 text-center">
+        <div className="rounded-[6px] border border-dashed border-line/70 bg-panel-strong p-8 text-center">
           <h2 className="text-lg font-semibold text-foreground">还没有配置抖音博主</h2>
           <p className="mt-2 text-sm text-muted">
             到设置页添加抖音主页链接后，后台每小时抓取公开视频并生成投研摘要。
           </p>
           <a
             href="/settings"
-            className="mt-4 inline-flex rounded-lg border border-line/70 bg-background/45 px-4 py-2 text-sm font-semibold text-foreground hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+            className="mt-4 inline-flex rounded-[6px] border border-line/70 bg-background/45 px-4 py-2 text-sm font-semibold text-foreground hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
           >
             打开设置
           </a>
         </div>
       ) : videos.length === 0 ? (
-        <div className="rounded-lg border border-line/70 bg-panel-strong p-8 text-center text-sm text-muted">
+        <div className="rounded-[6px] border border-line/70 bg-panel-strong p-8 text-center text-sm text-muted">
           暂无缓存视频。可以先点手动刷新；如果公开页面受限，页面会显示失败原因。
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div data-douyin-video-list className="flex min-w-0 flex-col gap-3">
           {videos.map((video) => (
             <VideoCard key={video.id} video={video} />
           ))}

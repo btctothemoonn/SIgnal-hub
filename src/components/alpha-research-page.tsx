@@ -547,9 +547,12 @@ export function AlphaResearchPage() {
   }, [writeCatalystSnapshotCache]);
 
   return (
-    <div className="grid min-h-0 gap-4">
-      <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl">
-        <div className="flex flex-col gap-3 border-b border-line/60 px-3 py-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
+    <div
+      data-stocks-workspace
+      className="grid min-h-0 min-w-0 gap-3 overflow-x-clip"
+    >
+      <section className="rounded-[6px] border border-line/70 bg-panel-strong lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl">
+        <div className="grid gap-3 border-b border-line/60 px-3 py-3 sm:px-4 xl:grid-cols-[minmax(14rem,0.34fr)_minmax(0,0.66fr)] xl:items-center">
           <div className="min-w-0">
             <h1 className="font-serif text-2xl font-medium text-foreground">
               STOCKS 美股投研池
@@ -558,111 +561,7 @@ export function AlphaResearchPage() {
               行情和财报尝试接入 Yahoo 数据源，失败时自动回落本地 mock。
             </p>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span
-              className={[
-                "rounded-md px-2 py-1 text-[11px] font-semibold",
-                marketSnapshot?.source === "live"
-                  ? "bg-success-soft text-success"
-                  : marketSnapshot?.source === "mock"
-                    ? "bg-warning-soft text-warning"
-                    : "bg-info-soft text-info",
-              ].join(" ")}
-              title={snapshotStatusTitle(marketSnapshot, marketStatus)}
-            >
-              {marketStatus}
-            </span>
-            <span
-              className={[
-                "rounded-md px-2 py-1 text-[11px] font-semibold",
-                financialSnapshot?.source === "live"
-                  ? "bg-success-soft text-success"
-                  : financialSnapshot?.source === "mock"
-                    ? "bg-warning-soft text-warning"
-                    : "bg-info-soft text-info",
-              ].join(" ")}
-              title={snapshotStatusTitle(financialSnapshot, financialStatus)}
-            >
-              {financialStatus}
-            </span>
-            <span
-              className={[
-                "rounded-md px-2 py-1 text-[11px] font-semibold",
-                catalystSnapshot?.source === "live"
-                  ? "bg-success-soft text-success"
-                  : catalystSnapshot?.source === "mock"
-                    ? "bg-warning-soft text-warning"
-                    : "bg-info-soft text-info",
-              ].join(" ")}
-              title={snapshotStatusTitle(catalystSnapshot, catalystStatus)}
-            >
-              {catalystStatus}
-            </span>
-            {marketSnapshot ? (
-              <span className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-[11px] text-muted">
-                {new Date(marketSnapshot.generatedAt).toLocaleTimeString(
-                  "zh-CN",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                )}
-              </span>
-            ) : null}
-            {marketError ? (
-              <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {marketError}
-              </span>
-            ) : null}
-            {marketIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(marketSnapshot, marketIssue)}
-              >
-                {marketIssue}
-              </span>
-            ) : null}
-            {financialError ? (
-              <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {financialError}
-              </span>
-            ) : null}
-            {financialIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(financialSnapshot, financialIssue)}
-              >
-                {financialIssue}
-              </span>
-            ) : null}
-            {catalystError ? (
-              <span className="max-w-[18rem] truncate rounded-md border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {catalystError}
-              </span>
-            ) : null}
-            {catalystIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-md border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(catalystSnapshot, catalystIssue)}
-              >
-                {catalystIssue}
-              </span>
-            ) : null}
-            {performanceError ? (
-              <span
-                className={[
-                  "max-w-[18rem] truncate rounded-md border px-2 py-1 text-[11px]",
-                  isPerformanceCacheNotice(performanceError)
-                    ? "border-warning/30 bg-warning-soft text-warning"
-                    : "border-danger/30 bg-danger-soft text-danger",
-                ].join(" ")}
-                title={performanceError}
-              >
-                {performanceIssueLabel(performanceError)}
-              </span>
-            ) : null}
-          </div>
-          <div className="grid grid-cols-3 gap-1 rounded-lg border border-line/70 bg-background/45 p-1 sm:w-[32rem]">
+          <div className="grid min-w-0 grid-cols-3 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1">
             {tabs.map((tab) => {
               const selected = activeTab === tab.id;
               return (
@@ -672,9 +571,9 @@ export function AlphaResearchPage() {
                   aria-pressed={selected}
                   onClick={() => setActiveTab(tab.id)}
                   className={[
-                    "min-h-10 rounded-md px-2 py-1.5 text-left transition-colors",
+                    "min-h-10 rounded-[6px] px-2 py-1.5 text-left transition-colors",
                     selected
-                      ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
+                      ? "bg-foreground text-background"
                       : "text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >
@@ -687,17 +586,20 @@ export function AlphaResearchPage() {
             })}
           </div>
         </div>
-        <div className="flex flex-col gap-2 px-3 py-2 sm:px-4 lg:flex-row lg:items-center">
+        <div
+          data-stocks-health-strip
+          className="flex flex-col gap-2 px-3 py-2 sm:px-4 lg:flex-row lg:items-center"
+        >
           <span className="text-[11px] font-semibold uppercase tracking-normal text-muted">
             数据健康中心
           </span>
-          <div className="flex min-w-0 flex-wrap gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-2">
             {stocksDataHealthItems.map((item) => (
               <span
                 key={item.label}
                 title={item.detail}
                 className={[
-                  "max-w-[16rem] truncate rounded-md border px-2 py-1 text-[11px] font-semibold",
+                  "max-w-[16rem] truncate rounded-[6px] border px-2 py-1 text-[11px] font-semibold",
                   item.tone === "success"
                     ? "border-success/30 bg-success-soft text-success"
                     : item.tone === "warning"
@@ -708,47 +610,115 @@ export function AlphaResearchPage() {
                 {item.label}：{item.value}
               </span>
             ))}
+            {marketSnapshot ? (
+              <span className="rounded-[6px] border border-line/60 bg-background/45 px-2 py-1 text-[11px] text-muted">
+                {new Date(marketSnapshot.generatedAt).toLocaleTimeString(
+                  "zh-CN",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  },
+                )}
+              </span>
+            ) : null}
+            {marketError ? (
+              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
+                {marketError}
+              </span>
+            ) : null}
+            {marketIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotStatusTitle(marketSnapshot, marketIssue)}
+              >
+                {marketIssue}
+              </span>
+            ) : null}
+            {financialError ? (
+              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
+                {financialError}
+              </span>
+            ) : null}
+            {financialIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotStatusTitle(financialSnapshot, financialIssue)}
+              >
+                {financialIssue}
+              </span>
+            ) : null}
+            {catalystError ? (
+              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
+                {catalystError}
+              </span>
+            ) : null}
+            {catalystIssue ? (
+              <span
+                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
+                title={snapshotStatusTitle(catalystSnapshot, catalystIssue)}
+              >
+                {catalystIssue}
+              </span>
+            ) : null}
+            {performanceError ? (
+              <span
+                className={[
+                  "max-w-[18rem] truncate rounded-[6px] border px-2 py-1 text-[11px]",
+                  isPerformanceCacheNotice(performanceError)
+                    ? "border-warning/30 bg-warning-soft text-warning"
+                    : "border-danger/30 bg-danger-soft text-danger",
+                ].join(" ")}
+                title={performanceError}
+              >
+                {performanceIssueLabel(performanceError)}
+              </span>
+            ) : null}
           </div>
         </div>
       </section>
 
       {activeTab === "research" ? (
-        <>
+        <section
+          data-stocks-chart-band
+          className="grid min-w-0 gap-3"
+        >
           <StocksHynixPremiumCurve />
           <StocksTodayChanges
             changes={todayChanges}
             selectedTicker={selectedTicker}
             onSelectTicker={setSelectedTicker}
           />
-          <StocksResearchLayout
-            performanceSnapshot={performanceSnapshot}
-            stocks={stocks}
-            selectedStock={selectedStock}
-            selectedTicker={selectedTicker}
-            performanceTickers={performanceTickers}
-            sectors={ALPHA_RESEARCH_SECTORS}
-            activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
-            onSelectSector={(sectorId) => {
-              const sector = ALPHA_RESEARCH_SECTORS.find(
-                (item) => item.id === sectorId,
-              );
-              if (!sector) {
-                return;
-              }
-              setSelectedTicker(sector.tickers[0]);
-            }}
-            onSelectTicker={setSelectedTicker}
-            marketDataLabel={marketDataLabel}
-            marketDataLoading={marketDataLoading}
-            performanceLoading={performanceSnapshot === null && performanceError === null}
-            researchStates={researchStates}
-            researchStatesLoading={researchStatesLoading}
-            researchStatesError={researchStatesError}
-            researchStatusFilter={researchStatusFilter}
-            onResearchStatusFilterChange={setResearchStatusFilter}
-            onSaveResearchState={saveResearchState}
-          />
-        </>
+          <div data-stocks-research-split className="min-w-0">
+            <StocksResearchLayout
+              performanceSnapshot={performanceSnapshot}
+              stocks={stocks}
+              selectedStock={selectedStock}
+              selectedTicker={selectedTicker}
+              performanceTickers={performanceTickers}
+              sectors={ALPHA_RESEARCH_SECTORS}
+              activeSectorId={selectedSector?.id ?? ALPHA_RESEARCH_SECTORS[0]?.id ?? ""}
+              onSelectSector={(sectorId) => {
+                const sector = ALPHA_RESEARCH_SECTORS.find(
+                  (item) => item.id === sectorId,
+                );
+                if (!sector) {
+                  return;
+                }
+                setSelectedTicker(sector.tickers[0]);
+              }}
+              onSelectTicker={setSelectedTicker}
+              marketDataLabel={marketDataLabel}
+              marketDataLoading={marketDataLoading}
+              performanceLoading={performanceSnapshot === null && performanceError === null}
+              researchStates={researchStates}
+              researchStatesLoading={researchStatesLoading}
+              researchStatesError={researchStatesError}
+              researchStatusFilter={researchStatusFilter}
+              onResearchStatusFilterChange={setResearchStatusFilter}
+              onSaveResearchState={saveResearchState}
+            />
+          </div>
+        </section>
       ) : activeTab === "reports" ? (
         <StocksSubscriptionReports
           reports={subscriptionReports}

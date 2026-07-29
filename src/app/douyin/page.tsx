@@ -14,7 +14,7 @@ export default async function DouyinPage() {
     <AppShell
       activeNav="douyin"
       subtitle="抖音公开视频监控 · 投研摘要 · 独立缓存"
-      mainClassName="mx-auto w-full max-w-[1500px] min-h-0 px-3 py-4 sm:px-5"
+      mainClassName="mx-auto min-h-0 w-full max-w-[1600px] px-3 py-3 sm:px-4"
       statusPills={[
         {
           label: "Douyin",

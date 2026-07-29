@@ -139,10 +139,10 @@ export function StocksResearchLayout({
   );
 
   return (
-    <>
+    <div data-stocks-research-split className="min-w-0">
       <section
         data-stocks-desktop-layout
-        className="hidden min-h-0 gap-3 lg:grid lg:grid-cols-[minmax(22rem,24rem)_minmax(0,1fr)] lg:items-start xl:grid-cols-[minmax(25rem,28rem)_minmax(0,1fr)] xl:gap-4 2xl:grid-cols-[minmax(28rem,30rem)_minmax(0,1fr)]"
+        className="hidden min-h-0 min-w-0 gap-3 lg:grid lg:grid-cols-[minmax(18rem,0.34fr)_minmax(0,0.66fr)] lg:items-start xl:gap-4"
       >
         <div className="min-w-0">{pool}</div>
         <div className="grid min-w-0 gap-3 xl:gap-4">
@@ -152,7 +152,7 @@ export function StocksResearchLayout({
       </section>
 
       <section data-mobile-stocks-pager className="min-w-0 lg:hidden">
-        <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
+        <div className="mb-3 rounded-[6px] border border-line/70 bg-panel-strong/95 p-1">
           <div className="grid grid-cols-3 gap-1">
             {mobilePanels.map((panel) => (
               <button
@@ -161,9 +161,9 @@ export function StocksResearchLayout({
                 aria-pressed={activeMobilePanel === panel.id}
                 onClick={() => showMobilePanel(panel.id)}
                 className={[
-                  "h-9 rounded-md text-sm font-semibold transition-colors",
+                  "h-9 rounded-[6px] text-sm font-semibold transition-colors",
                   activeMobilePanel === panel.id
-                    ? "bg-foreground text-background shadow-[0_14px_30px_-25px_rgba(38,31,27,0.8)]"
+                    ? "bg-foreground text-background"
                     : "text-muted hover:bg-panel hover:text-foreground",
                 ].join(" ")}
               >
@@ -176,13 +176,13 @@ export function StocksResearchLayout({
         <div
           ref={mobileScrollerRef}
           onScroll={handleMobileScroll}
-          className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex w-full max-w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          <div className="w-full shrink-0 snap-start">{pool}</div>
-          <div className="w-full shrink-0 snap-start pl-3">{chart}</div>
-          <div className="w-full shrink-0 snap-start pl-3">{detail}</div>
+          <div className="min-w-0 basis-full shrink-0 snap-start">{pool}</div>
+          <div className="min-w-0 basis-full shrink-0 snap-start pl-3">{chart}</div>
+          <div className="min-w-0 basis-full shrink-0 snap-start pl-3">{detail}</div>
         </div>
       </section>
-    </>
+    </div>
   );
 }

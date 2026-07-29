@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 type SystemHealthStatus = "ok" | "unknown" | "warning" | "error";
 
@@ -92,7 +93,7 @@ export function SystemHealthPanel() {
   }, [snapshot]);
 
   return (
-    <div className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-48px_rgba(38,31,27,0.55)]">
+    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
       <div className="flex flex-col gap-3 border-b border-line/70 pb-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-foreground">信息健康中心</h2>
@@ -103,7 +104,7 @@ export function SystemHealthPanel() {
         <div className="flex items-center gap-2">
           {snapshot ? (
             <span
-              className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(
+              className={`rounded-[6px] border px-3 py-1 text-xs font-semibold ${statusClass(
                 snapshot.status,
               )}`}
             >
@@ -113,9 +114,11 @@ export function SystemHealthPanel() {
           <button
             type="button"
             onClick={() => void load()}
-            className="rounded-lg border border-line/70 bg-panel px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+            aria-label="重试健康检查"
+            title="重试健康检查"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-[6px] border border-line/70 bg-panel text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
           >
-            刷新
+            <RefreshCw aria-hidden="true" size={15} />
           </button>
         </div>
       </div>
@@ -123,7 +126,7 @@ export function SystemHealthPanel() {
       {loading ? (
         <p className="py-6 text-sm text-muted">加载中...</p>
       ) : error ? (
-        <p className="mt-4 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
+        <p className="mt-4 rounded-[6px] bg-danger-soft px-3 py-2 text-xs text-danger">
           {error}
         </p>
       ) : null}
@@ -131,15 +134,15 @@ export function SystemHealthPanel() {
       {snapshot ? (
         <>
           <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-            <div className="rounded-lg border border-danger/25 bg-danger-soft px-3 py-2 text-danger">
+            <div className="rounded-[6px] border border-danger/25 bg-danger-soft px-3 py-2 text-danger">
               <div className="text-lg font-semibold">{grouped.errors.length}</div>
               <div>故障</div>
             </div>
-            <div className="rounded-lg border border-warning/25 bg-warning-soft px-3 py-2 text-warning">
+            <div className="rounded-[6px] border border-warning/25 bg-warning-soft px-3 py-2 text-warning">
               <div className="text-lg font-semibold">{grouped.warnings.length}</div>
               <div>注意</div>
             </div>
-            <div className="rounded-lg border border-success/25 bg-success-soft px-3 py-2 text-success">
+            <div className="rounded-[6px] border border-success/25 bg-success-soft px-3 py-2 text-success">
               <div className="text-lg font-semibold">{grouped.healthy.length}</div>
               <div>正常</div>
             </div>
@@ -149,7 +152,7 @@ export function SystemHealthPanel() {
             {snapshot.items.map((item) => (
               <div
                 key={item.id}
-                className="rounded-lg border border-line/70 bg-panel px-3 py-3"
+                className="rounded-[6px] border border-line/70 bg-panel px-3 py-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
@@ -158,14 +161,14 @@ export function SystemHealthPanel() {
                         {item.label}
                       </span>
                       <span
-                        className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClass(
+                        className={`rounded-[6px] border px-2 py-0.5 text-[11px] font-semibold ${statusClass(
                           item.status,
                         )}`}
                       >
                         {statusLabel(item.status)}
                       </span>
                       {item.stale ? (
-                        <span className="rounded-full bg-warning-soft px-2 py-0.5 text-[11px] text-warning">
+                        <span className="rounded-[6px] bg-warning-soft px-2 py-0.5 text-[11px] text-warning">
                           stale
                         </span>
                       ) : null}
@@ -181,7 +184,7 @@ export function SystemHealthPanel() {
                     {metaChips(item.meta).map((chip) => (
                       <span
                         key={chip}
-                        className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-[11px] text-muted"
+                        className="rounded-[6px] border border-line/60 bg-background/45 px-2 py-1 text-[11px] text-muted"
                       >
                         {chip}
                       </span>

@@ -32,6 +32,7 @@ import {
   buildMonitor985UnfollowBody,
 } from "@/lib/monitor985-watch-config";
 import { isMonitor985Enabled, isXPipelineEnabled } from "@/lib/x-pipeline-config";
+import { getSettingsConfigurationStatus } from "@/lib/settings-configuration";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,11 @@ type TwitterSyncResult = { username: string; warning: string | null };
 
 export async function GET() {
   const config = await loadRuntimeConfig();
-  return NextResponse.json({ success: true, config });
+  return NextResponse.json({
+    success: true,
+    config,
+    configuration: getSettingsConfigurationStatus(),
+  });
 }
 
 const WATCH_PLAN_GATE = /upgrade|higher plan|403/i;

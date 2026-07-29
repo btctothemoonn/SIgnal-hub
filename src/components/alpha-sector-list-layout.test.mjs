@@ -6,7 +6,8 @@ const source = readFileSync(
   "utf8",
 );
 
-assert.match(source, /grid-cols-\[3\.75rem_minmax\(8rem,1fr\)_5\.25rem\]/);
+assert.match(source, /grid-cols-\[3\.5rem_minmax\(0,1fr\)_4\.75rem\]/);
+assert.doesNotMatch(source, /minmax\(8rem,1fr\)/);
 assert.match(source, /{stock\.companyNameZh}\s*<\/span>/);
 assert.match(source, /{stock\.companyName}\s*<\/span>/);
 assert.doesNotMatch(source, /{stock\.companyNameZh} 路 {stock\.companyName}/);

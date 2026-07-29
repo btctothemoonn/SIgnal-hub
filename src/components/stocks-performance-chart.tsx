@@ -314,7 +314,10 @@ export function StocksPerformanceChart({
   };
 
   return (
-    <section className="overflow-hidden rounded-lg border border-line/70 bg-[#10141f] shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)]">
+    <section
+      data-stocks-performance-chart
+      className="min-h-[22rem] min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-[#10141f]"
+    >
       <div className="flex flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-start lg:gap-3">
           <div className="w-full min-w-0 lg:w-auto lg:min-w-[12rem]">
@@ -323,7 +326,7 @@ export function StocksPerformanceChart({
               {tickers.join(", ")} · 基准起点 {ALPHA_RESEARCH_POOL_TRACKING_START_DATE} 的首条本地缓存价
             </p>
           </div>
-          <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-md border border-white/10 bg-white/5 p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
+          <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-[6px] border border-white/10 bg-white/5 p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
             {sectors.map((sector) => {
               const selected = sector.id === activeSectorId;
               return (
@@ -334,7 +337,7 @@ export function StocksPerformanceChart({
                   onClick={() => onSelectSector(sector.id)}
                   title={sector.tickers.join(", ")}
                   className={[
-                    "shrink-0 whitespace-nowrap rounded px-2 py-1 text-[11px] font-semibold transition-colors",
+                    "shrink-0 whitespace-nowrap rounded-[6px] px-2 py-1 text-[11px] font-semibold transition-colors",
                     selected
                       ? "bg-white text-[#10141f]"
                       : "text-slate-300 hover:bg-white/10 hover:text-white",
@@ -347,7 +350,7 @@ export function StocksPerformanceChart({
           </div>
         </div>
         <div className="flex w-full flex-wrap gap-2 text-[11px] font-medium lg:w-auto lg:justify-end">
-          <div className="flex overflow-hidden rounded-md border border-white/10 bg-white/5 text-slate-200">
+          <div className="flex overflow-hidden rounded-[6px] border border-white/10 bg-white/5 text-slate-200">
             <button
               type="button"
               aria-label="Zoom out chart"
@@ -379,10 +382,10 @@ export function StocksPerformanceChart({
               1x
             </button>
           </div>
-          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
+          <span className="rounded-[6px] border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
             {snapshot?.marketDate ?? "等待缓存"}
           </span>
-          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
+          <span className="rounded-[6px] border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
             {hasData ? `更新 ${formatTime(newestAt)}` : loading ? "加载中" : "暂无数据"}
           </span>
         </div>
@@ -421,7 +424,7 @@ export function StocksPerformanceChart({
             className={[
               "h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing",
               usesRankedList
-                ? "rounded-md border border-white/10 bg-[#10141f]"
+                ? "rounded-[6px] border border-white/10 bg-[#10141f]"
                 : "",
             ].join(" ")}
           >
@@ -613,7 +616,7 @@ export function StocksPerformanceChart({
       </div>
 
       {hasData ? (
-        <div className="grid gap-1 border-t border-white/10 px-4 py-3 text-[11px] text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-1 border-t border-white/10 px-3 py-3 text-[11px] text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
           {series.map((item, index) => (
             <div key={item.ticker} className="flex min-w-0 items-center gap-2">
               <span

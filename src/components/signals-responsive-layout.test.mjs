@@ -22,7 +22,7 @@ assert.ok(
 );
 assert.match(component, /useState<SignalMobilePanel>\("feed"\)/);
 assert.doesNotMatch(component, /OpportunityRadar|opportunityEnabled|opportunities/);
-assert.match(component, /type SignalMobilePanel = "feed" \| "summary"/);
+assert.match(component, /type SignalMobilePanel,/);
 assert.match(component, /const MOBILE_PANEL_INDEX = \{/);
 assert.match(component, /feed: 0/);
 assert.match(component, /summary: 1/);
@@ -41,6 +41,9 @@ assert.match(component, /behavior: "smooth"/);
 assert.equal(component.match(/scroll-smooth/g)?.length, 1);
 assert.match(component, /snap-x snap-mandatory/);
 assert.match(component, /onScroll=\{handleMobileScroll\}/);
+assert.match(component, /mobilePanelScrollStateRef/);
+assert.match(component, /onPointerDown=\{handleMobileScrollStart\}/);
+assert.match(component, /onTouchStart=\{handleMobileScrollStart\}/);
 assert.match(component, /const mobilePagerRef = useRef<HTMLElement \| null>\(null\)/);
 assert.match(
   component,
@@ -56,6 +59,10 @@ assert.match(component, /mobileReturnScrollYRef\.current = window\.scrollY/);
 assert.match(component, /mobilePagerRef\.current\?\.scrollIntoView\(\{/);
 assert.match(component, /behavior: "auto"/);
 assert.match(component, /block: "start"/);
+assert.match(
+  component,
+  /data-mobile-signal-pager[\s\S]*className="min-w-0 scroll-mt-\[7rem\]"/,
+);
 assert.match(component, /window\.scrollTo\(\{\s*top: returnScrollY/);
 assert.match(component, /role="tablist"/);
 assert.match(component, /role="tab"/);
@@ -73,11 +80,16 @@ assert.match(component, /aria-hidden=\{activeMobilePanel !== "feed"\}/);
 assert.match(component, /aria-hidden=\{activeMobilePanel !== "summary"\}/);
 assert.match(component, /inert=\{activeMobilePanel !== "feed"\}/);
 assert.match(component, /inert=\{activeMobilePanel !== "summary"\}/);
-assert.match(component, /<aside\s+id="alpha"/);
+assert.match(component, /data-signal-workspace/);
+assert.match(component, /data-signal-feed-pane/);
+assert.match(component, /data-signal-summary-pane/);
 assert.match(
   component,
-  /lg:grid-cols-\[minmax\(0,1\.42fr\)_minmax\(26rem,0\.95fr\)\]/,
+  /lg:grid-cols-\[minmax\(0,7fr\)_minmax\(20rem,3fr\)\]/,
 );
+assert.match(component, /mobilePagerRef\.current\?\.scrollIntoView/);
+assert.match(component, /window\.scrollTo\(\{\s*top: returnScrollY/);
+assert.match(component, /<aside\s+id="alpha"/);
 assert.match(page, /import \{ SignalsResponsiveLayout \}/);
 assert.match(page, /<SignalsResponsiveLayout/);
 assert.doesNotMatch(page, /OPPORTUNITY_RADAR_UI_ENABLED|opportunityEnabled/);

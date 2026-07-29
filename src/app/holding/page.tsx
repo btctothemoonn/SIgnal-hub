@@ -8,7 +8,7 @@ export default function HoldingPage() {
     <AppShell
       activeNav="holding"
       subtitle="美股证券快照 / Binance 现货与合约持仓 · 只读面板"
-      mainClassName="mx-auto w-full max-w-[1780px] min-h-0 px-3 py-4 sm:px-5"
+      mainClassName="mx-auto min-h-0 w-full max-w-[1780px] overflow-x-hidden px-3 py-4 sm:px-5"
       statusPills={[
         {
           label: "Holding",

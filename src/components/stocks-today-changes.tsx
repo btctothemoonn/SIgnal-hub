@@ -40,7 +40,7 @@ export function StocksTodayChanges({
   return (
     <section
       data-testid="stocks-today-changes"
-      className="min-w-0 border-y border-line/60 bg-panel-strong/70 px-3 py-2.5 sm:px-4"
+      className="min-w-0 border-y border-line/60 bg-panel-strong/70 px-3 py-2 sm:px-4"
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="min-w-0">
@@ -64,7 +64,7 @@ export function StocksTodayChanges({
               aria-pressed={selected}
               onClick={() => onSelectTicker(item.ticker)}
               className={[
-                "min-w-0 rounded-md border px-3 py-2 text-left transition-colors",
+                "min-w-0 rounded-md border px-2.5 py-2 text-left transition-colors",
                 selected
                   ? "border-accent/55 bg-accent-soft"
                   : "border-line/60 bg-background/35 hover:border-accent/40 hover:bg-background/55",
@@ -75,7 +75,7 @@ export function StocksTodayChanges({
                   {item.ticker}
                 </span>
                 <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${toneClasses(item.tone)}`}
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${toneClasses(item.tone)}`}
                 >
                   {kindLabel(item.kind)}
                 </span>

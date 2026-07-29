@@ -11,9 +11,12 @@ import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { UnifiedNewsPanel } from "@/components/unified-news-panel";
 import type { TwitterDashboardSnapshot } from "@/lib/6551-twitter";
+import {
+  reduceSignalMobilePanelScroll,
+  type SignalMobilePanel,
+  type SignalMobilePanelScrollState,
+} from "@/lib/signal-mobile-panel-scroll";
 import type { TelegramDashboardSnapshot } from "@/lib/telegram-channels";
-
-type SignalMobilePanel = "feed" | "summary";
 
 type SignalsResponsiveLayoutProps = {
   initialTelegramSnapshot: TelegramDashboardSnapshot;
@@ -69,6 +72,10 @@ export function SignalsResponsiveLayout({
   const mobileScrollerRef = useRef<HTMLDivElement | null>(null);
   const mobileReturnScrollYRef = useRef<number | null>(null);
   const previousMobilePanelRef = useRef<SignalMobilePanel>("feed");
+  const mobilePanelScrollStateRef = useRef<SignalMobilePanelScrollState>({
+    activePanel: "feed",
+    programmaticTarget: null,
+  });
   const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
   const [activeMobilePanel, setActiveMobilePanel] =
     useState<SignalMobilePanel>("feed");
@@ -108,12 +115,28 @@ export function SignalsResponsiveLayout({
   }, [activeMobilePanel, isDesktop]);
 
   const showMobilePanel = useCallback((panel: SignalMobilePanel) => {
-    setActiveMobilePanel(panel);
     const scroller = mobileScrollerRef.current;
-    if (!scroller) return;
+    const clientWidth = scroller?.clientWidth ?? 0;
+    let nextScrollState = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      {
+        type: "programmatic-start",
+        target: panel,
+        clientWidth,
+      },
+    );
+    if (!scroller || clientWidth <= 0) return;
+
+    nextScrollState = reduceSignalMobilePanelScroll(nextScrollState, {
+      type: "scroll",
+      scrollLeft: scroller.scrollLeft,
+      clientWidth,
+    });
+    mobilePanelScrollStateRef.current = nextScrollState;
+    setActiveMobilePanel(nextScrollState.activePanel);
 
     scroller.scrollTo({
-      left: scroller.clientWidth * MOBILE_PANEL_INDEX[panel],
+      left: clientWidth * MOBILE_PANEL_INDEX[panel],
       behavior: "smooth",
     });
   }, []);
@@ -148,23 +171,45 @@ export function SignalsResponsiveLayout({
     const scroller = mobileScrollerRef.current;
     if (!scroller) return;
 
-    const nextPanel =
-      scroller.scrollLeft >= scroller.clientWidth * 0.5 ? "summary" : "feed";
+    const nextScrollState = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      {
+        type: "scroll",
+        scrollLeft: scroller.scrollLeft,
+        clientWidth: scroller.clientWidth,
+      },
+    );
+    mobilePanelScrollStateRef.current = nextScrollState;
     setActiveMobilePanel((current) =>
-      current === nextPanel ? current : nextPanel,
+      current === nextScrollState.activePanel
+        ? current
+        : nextScrollState.activePanel,
+    );
+  }, []);
+
+  const handleMobileScrollStart = useCallback(() => {
+    mobilePanelScrollStateRef.current = reduceSignalMobilePanelScroll(
+      mobilePanelScrollStateRef.current,
+      { type: "user-interrupt" },
     );
   }, []);
 
   if (isDesktop === null) {
     return (
-      <div className="min-h-[24rem] rounded-lg border border-line/70 bg-panel/70" />
+      <div
+        data-signal-workspace
+        className="min-h-[24rem] rounded-[6px] border border-workspace-line-strong bg-workspace-surface"
+      />
     );
   }
 
   if (isDesktop) {
     return (
-      <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1.42fr)_minmax(26rem,0.95fr)] lg:items-start lg:gap-4 xl:grid-cols-[minmax(0,1.52fr)_minmax(30rem,0.88fr)]">
-        <section id="signals" className="min-w-0">
+      <div
+        data-signal-workspace
+        className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,3fr)] lg:items-start lg:gap-4"
+      >
+        <section id="signals" data-signal-feed-pane className="min-w-0">
           <SignalFeedStack
             initialTelegramSnapshot={initialTelegramSnapshot}
             initialXSnapshot={initialXSnapshot}
@@ -175,6 +220,7 @@ export function SignalsResponsiveLayout({
 
         <aside
           id="alpha"
+          data-signal-summary-pane
           className="relative z-10 min-w-0 lg:sticky lg:top-[5.25rem]"
         >
           <AlphaSummaryCard
@@ -194,9 +240,10 @@ export function SignalsResponsiveLayout({
     <section
       ref={mobilePagerRef}
       data-mobile-signal-pager
-      className="min-w-0 scroll-mt-[5.25rem]"
+      data-signal-workspace
+      className="min-w-0 scroll-mt-[7rem]"
     >
-      <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.7)]">
+      <div className="mb-3 rounded-[6px] border border-workspace-line-strong bg-workspace-toolbar p-1">
         <div
           role="tablist"
           aria-label="Signal Flow 移动视图"
@@ -216,8 +263,8 @@ export function SignalsResponsiveLayout({
               className={[
                 "h-9 rounded-md text-sm font-semibold transition-colors",
                 activeMobilePanel === panel.id
-                  ? "bg-foreground text-background shadow-[0_14px_30px_-25px_rgba(38,31,27,0.8)]"
-                  : "text-muted hover:bg-panel hover:text-foreground",
+                  ? "bg-foreground text-background"
+                  : "text-muted hover:bg-workspace-surface hover:text-foreground",
               ].join(" ")}
             >
               {panel.label}
@@ -229,10 +276,13 @@ export function SignalsResponsiveLayout({
       <div
         ref={mobileScrollerRef}
         onScroll={handleMobileScroll}
+        onPointerDown={handleMobileScrollStart}
+        onTouchStart={handleMobileScrollStart}
         className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <div
           id={MOBILE_PANEL_ID.feed}
+          data-signal-feed-pane
           role="tabpanel"
           aria-labelledby={MOBILE_TAB_ID.feed}
           aria-hidden={activeMobilePanel !== "feed"}
@@ -252,6 +302,7 @@ export function SignalsResponsiveLayout({
         </div>
         <div
           id={MOBILE_PANEL_ID.summary}
+          data-signal-summary-pane
           role="tabpanel"
           aria-labelledby={MOBILE_TAB_ID.summary}
           aria-hidden={activeMobilePanel !== "summary"}

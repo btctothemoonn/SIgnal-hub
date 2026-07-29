@@ -25,19 +25,19 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         : null;
 
   return (
-    <main className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
-      <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-md flex-col justify-center">
-        <div className="mb-8">
-          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-foreground text-sm font-bold text-background shadow-[0_18px_36px_-28px_rgba(38,31,27,0.8)]">
+    <main data-login-workspace className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
+      <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-sm flex-col justify-center">
+        <div className="mb-6 border-b border-line/70 pb-5">
+          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-[6px] bg-foreground text-sm font-bold text-background">
             SH
           </div>
-          <h1 className="font-serif text-3xl font-medium leading-tight">
+          <h1 className="text-2xl font-semibold leading-tight">
             Signal Hub
           </h1>
-          <p className="mt-2 text-sm text-muted">Private admin access</p>
+          <p className="mt-2 text-sm text-muted">Admin access</p>
         </div>
 
-        <div className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-48px_rgba(38,31,27,0.55)]">
+        <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
           <LoginForm error={error} nextPath={nextPath} />
         </div>
       </section>

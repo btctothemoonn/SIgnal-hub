@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
 
 type Theme = "light" | "dark" | "system";
 
@@ -67,18 +68,18 @@ export function ThemeToggle() {
 
   const label =
     theme === "light" ? "浅色" : theme === "dark" ? "深色" : "跟随系统";
+  const Icon: LucideIcon =
+    theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
 
   return (
     <button
       onClick={cycle}
-      className="inline-flex h-9 items-center gap-2 rounded-lg border border-line/70 bg-panel-strong/90 px-3 text-xs font-semibold text-muted shadow-[0_12px_28px_-24px_rgba(38,31,27,0.55)] transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-workspace-line-strong bg-workspace-surface-raised text-muted transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
       aria-label={`切换主题，当前：${label}`}
       title={label}
     >
-      <span className="font-mono text-[11px]">
-        {theme === "light" ? "L" : theme === "dark" ? "D" : "S"}
-      </span>
-      <span className="hidden sm:inline">{label}</span>
+      <Icon aria-hidden className="h-4 w-4" />
+      <span className="sr-only">{label}</span>
     </button>
   );
 }

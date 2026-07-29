@@ -2,6 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  ArrowLeft,
+  Clipboard,
+  ClipboardCheck,
+  ListPlus,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { SystemHealthPanel } from "@/components/system-health-panel";
 
 type WatchItem = { ref: string; tags: string[] };
@@ -12,11 +23,18 @@ type RuntimeConfig = {
   douyinCreators: WatchItem[];
 };
 
+type ConfigurationStatus = {
+  summaryConfigured: boolean;
+  translationConfigured: boolean;
+  adminAccessConfigured: boolean;
+};
+
 type SyncResult = { username: string; warning: string | null };
 
 type ApiResponse = {
   success: boolean;
   config?: RuntimeConfig;
+  configuration?: ConfigurationStatus;
   error?: string;
   warning?: string | null;
   syncResults?: SyncResult[];
@@ -26,6 +44,12 @@ const emptyConfig: RuntimeConfig = {
   telegramChannels: [],
   twitterAccounts: [],
   douyinCreators: [],
+};
+
+const emptyConfiguration: ConfigurationStatus = {
+  summaryConfigured: false,
+  translationConfigured: false,
+  adminAccessConfigured: false,
 };
 
 async function callSettings(body: unknown): Promise<ApiResponse> {
@@ -89,13 +113,15 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-type Kind = "telegram" | "twitter" | "douyin" | "health";
-type WatchKind = Exclude<Kind, "health">;
+type Kind = "telegram" | "twitter" | "douyin" | "ai" | "health" | "general";
+type WatchKind = Exclude<Kind, "ai" | "health" | "general">;
 
 export default function SettingsPage() {
   const router = useRouter();
   const [navigating, startNavigation] = useTransition();
   const [config, setConfig] = useState<RuntimeConfig>(emptyConfig);
+  const [configuration, setConfiguration] =
+    useState<ConfigurationStatus>(emptyConfiguration);
   const [activeKind, setActiveKind] = useState<Kind>("telegram");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -113,6 +139,7 @@ export default function SettingsPage() {
     void fetchSettings().then((result) => {
       if (result.success && result.config) {
         setConfig(result.config);
+        if (result.configuration) setConfiguration(result.configuration);
       } else if (result.error) {
         setError(result.error);
       }
@@ -151,15 +178,17 @@ export default function SettingsPage() {
   const twitterItems = config.twitterAccounts;
   const douyinItems = config.douyinCreators;
 
-  const sections: Array<{ kind: Kind; title: string; count: number }> = [
+  const sections: Array<{ kind: Kind; title: string; count?: number }> = [
     { kind: "telegram", title: "Telegram 频道", count: telegramItems.length },
     { kind: "twitter", title: "X 博主", count: twitterItems.length },
     { kind: "douyin", title: "抖音博主", count: douyinItems.length },
-    { kind: "health", title: "信息健康", count: 0 },
+    { kind: "ai", title: "AI 配置" },
+    { kind: "health", title: "信息健康" },
+    { kind: "general", title: "通用" },
   ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div data-settings-workspace className="min-h-screen overflow-x-hidden bg-background text-foreground">
       <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 px-4 py-5 sm:px-6 lg:py-7">
         <header className="flex items-center justify-between gap-4 border-b border-line/70 pb-4">
           <div className="flex items-baseline gap-3">
@@ -167,9 +196,10 @@ export default function SettingsPage() {
               type="button"
               onClick={goHome}
               disabled={navigating}
-              className="rounded-lg border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-[6px] border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-60"
             >
-              {navigating ? "返回中..." : "← 返回面板"}
+              <ArrowLeft aria-hidden="true" size={14} />
+              {navigating ? "返回中..." : "返回面板"}
             </button>
             <h1 className="font-serif text-2xl font-medium text-foreground">
               监控设置
@@ -180,8 +210,12 @@ export default function SettingsPage() {
           </p>
         </header>
 
-        <div className="flex flex-col gap-4 md:flex-row">
-          <nav className="flex gap-2 overflow-x-auto md:w-44 md:flex-col md:gap-1 md:overflow-visible">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <nav
+            data-settings-category-tabs
+            aria-label="设置分类"
+            className="flex min-w-0 gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0"
+          >
             {sections.map((section) => {
               const isActive = section.kind === activeKind;
               return (
@@ -189,35 +223,63 @@ export default function SettingsPage() {
                   key={section.kind}
                   onClick={() => setActiveKind(section.kind)}
                   className={
-                    "flex items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors md:w-full " +
+                    "flex shrink-0 items-center justify-between rounded-[6px] border px-3 py-2 text-sm transition-colors lg:w-full " +
                     (isActive
                       ? "border-accent/45 bg-accent-soft text-accent"
                       : "border-line/70 bg-panel-strong/90 text-muted hover:border-accent/30 hover:bg-panel hover:text-foreground")
                   }
                 >
                   <span className="font-medium">{section.title}</span>
-                  <span
-                    className={
-                      "ml-2 rounded-full px-2 py-0.5 text-[11px] " +
-                      (isActive
-                        ? "bg-foreground/10 text-foreground"
-                        : "bg-line/60 text-muted")
-                    }
-                  >
-                    {section.count}
-                  </span>
+                  {section.count === undefined ? null : (
+                    <span
+                      className={
+                        "ml-2 rounded-[6px] px-2 py-0.5 text-[11px] " +
+                        (isActive
+                          ? "bg-foreground/10 text-foreground"
+                          : "bg-line/60 text-muted")
+                      }
+                    >
+                      {section.count}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </nav>
 
-          <section className="flex-1">
+          <section data-settings-editor className="min-w-0">
             {loading ? (
-              <div className="rounded-lg border border-line/70 bg-panel-strong p-6 text-sm text-muted shadow-[0_24px_60px_-48px_rgba(38,31,27,0.55)]">
+              <div className="rounded-[6px] border border-line/70 bg-panel-strong p-6 text-sm text-muted">
                 加载中...
               </div>
             ) : activeKind === "health" ? (
               <SystemHealthPanel />
+            ) : activeKind === "ai" ? (
+              <ConfigurationStatusPanel
+                title="AI 配置"
+                description="凭据状态由服务器环境读取，不会向浏览器返回密钥。"
+                items={[
+                  {
+                    label: "摘要生成",
+                    configured: configuration.summaryConfigured,
+                  },
+                  {
+                    label: "内容翻译",
+                    configured: configuration.translationConfigured,
+                  },
+                ]}
+              />
+            ) : activeKind === "general" ? (
+              <ConfigurationStatusPanel
+                title="通用"
+                description="环境变量由 VPS 管理，需在服务器上修改，无法在浏览器中编辑。"
+                items={[
+                  {
+                    label: "管理员密码与访问",
+                    configured: configuration.adminAccessConfigured,
+                  },
+                ]}
+              />
             ) : activeKind === "telegram" ? (
               <WatchListPanel
                 key="telegram"
@@ -254,6 +316,47 @@ export default function SettingsPage() {
             )}
           </section>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type ConfigurationStatusPanelProps = {
+  title: string;
+  description: string;
+  items: Array<{ label: string; configured: boolean }>;
+};
+
+function ConfigurationStatusPanel({
+  title,
+  description,
+  items,
+}: ConfigurationStatusPanelProps) {
+  return (
+    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
+      <div className="border-b border-line/70 pb-4">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
+      </div>
+      <div className="mt-4 divide-y divide-line/70 rounded-[6px] border border-line/70 bg-panel">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between gap-3 px-3 py-3"
+          >
+            <span className="text-sm font-medium text-foreground">{item.label}</span>
+            <span
+              className={
+                "shrink-0 rounded-[6px] border px-2 py-1 text-xs font-semibold " +
+                (item.configured
+                  ? "border-success/35 bg-success-soft text-success"
+                  : "border-line/70 bg-background text-muted")
+              }
+            >
+              {item.configured ? "已配置" : "未配置"}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -376,7 +479,7 @@ function WatchListPanel({
       : splitInput(batchInput);
 
   return (
-    <div className="rounded-lg border border-line/70 bg-panel-strong p-5 shadow-[0_24px_60px_-48px_rgba(38,31,27,0.55)]">
+    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-foreground">
           {label}
@@ -384,7 +487,7 @@ function WatchListPanel({
             {items.length} 条
           </span>
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <CopyWatchListButton
             disabled={filtered.length === 0}
             label={copyAllLabel}
@@ -395,12 +498,12 @@ function WatchListPanel({
           placeholder="搜索 名称 / tag"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="w-48 rounded-lg border border-line/70 bg-background/55 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none"
+          className="w-full rounded-[6px] border border-line/70 bg-background/55 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none sm:w-48"
         />
         </div>
       </div>
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
           placeholder={placeholder}
@@ -410,25 +513,27 @@ function WatchListPanel({
             if (e.key === "Enter") void addSingle();
           }}
           disabled={busy}
-          className="flex-1 rounded-lg border border-line/70 bg-background/55 px-4 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+          className="min-w-0 flex-1 rounded-[6px] border border-line/70 bg-background/55 px-4 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
         <button
           onClick={addSingle}
           disabled={busy || !singleInput.trim()}
-          className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+          className="inline-flex items-center justify-center gap-1.5 rounded-[6px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
         >
+          <Plus aria-hidden="true" size={15} />
           添加
         </button>
         <button
           onClick={() => setBatchOpen((v) => !v)}
-          className="rounded-lg border border-line/70 bg-panel px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+          className="inline-flex items-center justify-center gap-1.5 rounded-[6px] border border-line/70 bg-panel px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
         >
+          <ListPlus aria-hidden="true" size={15} />
           {batchOpen ? "收起批量" : "批量粘贴"}
         </button>
       </div>
 
       {batchOpen ? (
-        <div className="mt-3 rounded-lg border border-line/70 bg-panel p-3">
+        <div className="mt-3 rounded-[6px] border border-line/70 bg-panel p-3">
           <textarea
             value={batchInput}
             onChange={(e) => setBatchInput(e.target.value)}
@@ -441,7 +546,7 @@ function WatchListPanel({
                   ? "多个账号用逗号/换行分隔\nelonmusk, VitalikButerin\ncz_binance"
                   : "多个抖音博主主页链接用逗号/换行分隔\nhttps://www.douyin.com/user/..."
             }
-            className="w-full resize-y rounded-lg border border-line/70 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+            className="w-full resize-y rounded-[6px] border border-line/70 bg-background/60 px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
             <p className="text-xs text-muted">
@@ -452,8 +557,9 @@ function WatchListPanel({
             <button
               onClick={addBatch}
               disabled={busy || previewBatch.length === 0}
-              className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-[6px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
             >
+              <Plus aria-hidden="true" size={15} />
               添加 {previewBatch.length} 条
             </button>
           </div>
@@ -461,17 +567,17 @@ function WatchListPanel({
       ) : null}
 
       {error ? (
-        <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
+        <p className="mt-3 rounded-[6px] bg-danger-soft px-3 py-2 text-xs text-danger">
           {error}
         </p>
       ) : null}
       {warning ? (
-        <p className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+        <p className="mt-3 rounded-[6px] bg-warning-soft px-3 py-2 text-xs text-warning">
           {warning}
         </p>
       ) : null}
       {failedSyncs.length > 0 ? (
-        <details className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+        <details className="mt-3 rounded-[6px] bg-warning-soft px-3 py-2 text-xs text-warning">
           <summary className="cursor-pointer font-medium">
             {failedSyncs.length} 条已保存但 6551 同步失败,点开查看
           </summary>
@@ -487,7 +593,7 @@ function WatchListPanel({
 
       <div className="mt-4 flex flex-col gap-2">
         {filtered.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line/70 bg-panel px-3 py-6 text-center text-xs text-muted">
+          <p className="rounded-[6px] border border-dashed border-line/70 bg-panel px-3 py-6 text-center text-xs text-muted">
             {items.length === 0
               ? `还没添加 ${label}。`
               : "没有匹配的条目。"}
@@ -546,8 +652,13 @@ function CopyWatchListButton({
         });
       }}
       disabled={disabled || !text.trim()}
-      className="rounded-lg border border-line/70 bg-panel px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-40"
+      className="inline-flex items-center gap-1.5 rounded-[6px] border border-line/70 bg-panel px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-40"
     >
+      {status === "copied" ? (
+        <ClipboardCheck aria-hidden="true" size={14} />
+      ) : (
+        <Clipboard aria-hidden="true" size={14} />
+      )}
       {buttonText}
     </button>
   );
@@ -583,7 +694,7 @@ function WatchItemRow({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line/70 bg-panel px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 rounded-[6px] border border-line/70 bg-panel px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-sm text-foreground">{displayName}</span>
         {editing ? null : item.tags.length === 0 ? (
@@ -592,16 +703,22 @@ function WatchItemRow({
           item.tags.map((tag) => (
             <span
               key={tag}
-              className="inline-flex items-center rounded-full bg-accent-soft px-2 py-0.5 text-[11px] text-accent"
+              className="inline-flex items-center rounded-[6px] bg-accent-soft px-2 py-0.5 text-[11px] text-accent"
             >
               {tag}
             </span>
           ))
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div
+        data-settings-item-actions
+        className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+      >
         {editing ? (
-          <>
+          <div
+            data-settings-edit-controls
+            className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+          >
             <input
               type="text"
               value={input}
@@ -614,14 +731,15 @@ function WatchItemRow({
                 }
               }}
               placeholder="多个 tag 用逗号分隔"
-              className="w-48 rounded-lg border border-line/70 bg-background/60 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none"
+              className="min-w-0 w-full rounded-[6px] border border-line/70 bg-background/60 px-3 py-1.5 text-xs text-foreground focus:border-accent focus:outline-none sm:w-48"
               autoFocus
             />
             <button
               onClick={save}
               disabled={busy}
-              className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-[6px] bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
             >
+              <Save aria-hidden="true" size={14} />
               保存
             </button>
             <button
@@ -629,11 +747,12 @@ function WatchItemRow({
                 setInput(item.tags.join(", "));
                 setEditing(false);
               }}
-              className="text-xs text-muted hover:text-foreground"
+              className="inline-flex items-center gap-1 text-xs text-muted hover:text-foreground"
             >
+              <X aria-hidden="true" size={14} />
               取消
             </button>
-          </>
+          </div>
         ) : (
           <>
             <CopyWatchListButton text={copyText} />
@@ -643,15 +762,17 @@ function WatchItemRow({
                 setEditing(true);
               }}
               disabled={busy}
-              className="rounded-lg border border-line/70 bg-panel-strong px-3 py-1.5 text-xs text-muted hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
+              className="inline-flex items-center gap-1.5 rounded-[6px] border border-line/70 bg-panel-strong px-3 py-1.5 text-xs text-muted hover:border-accent/35 hover:bg-accent-soft hover:text-accent"
             >
+              <Pencil aria-hidden="true" size={14} />
               编辑 tag
             </button>
             <button
               onClick={() => void onRemove()}
               disabled={busy}
-              className="rounded-lg border border-line/70 bg-panel-strong px-3 py-1.5 text-xs text-muted hover:bg-danger-soft hover:text-danger"
+              className="inline-flex items-center gap-1.5 rounded-[6px] border border-line/70 bg-panel-strong px-3 py-1.5 text-xs text-muted hover:bg-danger-soft hover:text-danger"
             >
+              <Trash2 aria-hidden="true" size={14} />
               删除
             </button>
           </>
