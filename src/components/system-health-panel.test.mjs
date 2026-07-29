@@ -10,5 +10,7 @@ assert.match(source, /statusLabel/);
 assert.match(source, /formatTime\(item\.updatedAt\)/);
 assert.match(source, /window\.setTimeout\(\(\) => void load\(\), 0\)/);
 assert.doesNotMatch(source, /useEffect\(\(\) => \{\s*void load\(\)/);
+assert.match(source, /RefreshCw/);
+assert.match(source, /rounded-\[6px\]/);
 
 console.log("ok - system health panel contract");
