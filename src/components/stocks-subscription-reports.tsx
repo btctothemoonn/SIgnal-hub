@@ -61,9 +61,7 @@ export function StocksSubscriptionReports({
             const reportInsight = buildSubscriptionReportInsight(report);
             const summaryStatus = reportInsight.fallbackUsed ? "fallback" : "ready";
             const sourceUrl = report.link;
-            const summaryText = isExpanded
-              ? report.fullSummary || report.summary
-              : report.summary;
+            const summaryText = report.fullSummary || report.summary;
 
             return (
               <article
@@ -97,6 +95,9 @@ export function StocksSubscriptionReports({
                     <h3 className="mt-3 break-words text-base font-semibold leading-6 text-foreground sm:text-lg">
                       {report.title}
                     </h3>
+                    <p className="mt-3 text-xs font-semibold text-muted">
+                      核心结论
+                    </p>
                     <p className="mt-2 break-words text-sm leading-6 text-muted">
                       {reportInsight.coreConclusion}
                     </p>
@@ -116,15 +117,11 @@ export function StocksSubscriptionReports({
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 border-t border-line/60 pt-3">
-                    <div>
-                      <p className="text-xs font-semibold text-muted">
-                        核心结论
-                      </p>
-                      <p className="mt-2 whitespace-pre-line break-words text-sm leading-6 text-foreground">
-                        {reportInsight.coreConclusion}
-                      </p>
-                    </div>
+                {isExpanded ? (
+                  <div
+                    data-report-expanded-summary
+                    className="mt-4 grid gap-3 border-t border-line/60 pt-3"
+                  >
                     <div className="grid gap-2 lg:grid-cols-3">
                       <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
                         <p className="text-[11px] font-semibold text-muted">
@@ -156,7 +153,6 @@ export function StocksSubscriptionReports({
                         总结未生成，下面保留原文摘录。
                       </p>
                     ) : null}
-                    {isExpanded ? (
                     <details open className="rounded-md border border-line/60 bg-background/30 px-3 py-2">
                       <summary className="cursor-pointer select-none text-xs font-semibold text-muted hover:text-foreground">
                         原文摘录
@@ -165,8 +161,8 @@ export function StocksSubscriptionReports({
                         {summaryText || "n/a"}
                       </p>
                     </details>
-                    ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <button

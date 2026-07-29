@@ -221,13 +221,7 @@ export function AlphaStockDetail({
   const sector = getAlphaResearchSectorById(stock.sectorId);
   const intelligence = buildStocksIntelligence(stock);
   const { tickerContext, earningsBrief, riskTags, structure } = intelligence;
-  const primaryIntelligenceMetrics = [
-    tickerContext.price,
-    tickerContext.dayMove,
-    tickerContext.sevenDay,
-    tickerContext.earningsWindow,
-    tickerContext.dataHealth,
-  ];
+  const primaryIntelligenceMetrics = [tickerContext.dataHealth];
   const financialIntelligenceMetrics = [
     tickerContext.revenue,
     tickerContext.eps,
@@ -346,7 +340,7 @@ export function AlphaStockDetail({
           <MetricTile
             label="财报窗口"
             value={earningsLabel(stock.market.earningsStatus)}
-            note={stock.financialSnapshot.nextEarningsDate}
+            note={stock.financialSnapshot.nextEarningsDate || "n/a"}
             tone="text-warning"
           />
         </div>
@@ -391,23 +385,6 @@ export function AlphaStockDetail({
             <div className="mt-3 space-y-1">
               {structure.points.map((point) => (
                 <p key={point} className="text-sm leading-6 text-muted">
-                  {point}
-                </p>
-              ))}
-            </div>
-          </Section>
-
-          <Section title="Earnings Brief">
-            <p
-              className={`text-sm font-semibold ${intelligenceTextTone(
-                earningsBrief.confidence === "normal" ? "info" : "warning",
-              )}`}
-            >
-              {earningsBrief.title}
-            </p>
-            <div className="mt-3 space-y-2">
-              {earningsBrief.points.map((point) => (
-                <p key={point} className="break-words text-sm leading-6 text-foreground">
                   {point}
                 </p>
               ))}
@@ -460,6 +437,23 @@ export function AlphaStockDetail({
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
         <div className="space-y-5">
+          <Section title="Earnings Brief">
+            <p
+              className={`text-sm font-semibold ${intelligenceTextTone(
+                earningsBrief.confidence === "normal" ? "info" : "warning",
+              )}`}
+            >
+              {earningsBrief.title}
+            </p>
+            <div className="mt-3 space-y-2">
+              {earningsBrief.points.map((point) => (
+                <p key={point} className="break-words text-sm leading-6 text-foreground">
+                  {point}
+                </p>
+              ))}
+            </div>
+          </Section>
+
           <Section title="Financial Snapshot">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {financialIntelligenceMetrics.map((metric) => (

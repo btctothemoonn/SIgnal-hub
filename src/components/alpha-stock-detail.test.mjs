@@ -6,6 +6,35 @@ const source = readFileSync(
   "utf8",
 );
 
+const primaryMetricsMatch = source.match(
+  /const primaryIntelligenceMetrics = \[([\s\S]*?)\];/,
+);
+assert.ok(primaryMetricsMatch, "primary intelligence metrics must be explicit");
+const primaryMetrics = primaryMetricsMatch[1];
+const primaryContextIndex = source.indexOf("data-stock-primary-context");
+const intelligenceIndex = source.indexOf("data-stock-intelligence");
+const supportingResearchIndex = source.indexOf(
+  "data-stock-supporting-research",
+);
+
+assert.ok(primaryContextIndex >= 0, "primary stock context must exist");
+assert.ok(
+  primaryContextIndex < intelligenceIndex &&
+    intelligenceIndex < supportingResearchIndex,
+  "primary context and intelligence must precede supporting research",
+);
+assert.match(primaryMetrics, /tickerContext\.dataHealth/);
+assert.doesNotMatch(
+  primaryMetrics,
+  /tickerContext\.(price|dayMove|sevenDay|earningsWindow)/,
+  "price, move, strength, and earnings must render only in the top tiles",
+);
+assert.match(
+  source,
+  /note=\{stock\.financialSnapshot\.nextEarningsDate \|\| "n\/a"\}/,
+  "missing earnings dates must retain the n/a fallback",
+);
+
 assert.match(source, /dataQualityLabel/);
 assert.match(source, /providerTrace/);
 assert.match(source, /buildStocksIntelligence/);
