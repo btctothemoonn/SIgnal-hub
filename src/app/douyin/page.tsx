@@ -19,7 +19,9 @@ export default async function DouyinPage() {
         {
           label: "Douyin",
           status:
-            snapshot.status === "ok"
+            !snapshot.enabled
+              ? "已暂停"
+              : snapshot.status === "ok"
               ? "在线"
               : snapshot.status === "partial"
                 ? "部分失败"
@@ -27,7 +29,9 @@ export default async function DouyinPage() {
                   ? "待刷新"
                   : "待配置",
           tone:
-            snapshot.status === "ok"
+            !snapshot.enabled
+              ? "text-muted"
+              : snapshot.status === "ok"
               ? "text-success"
               : snapshot.status === "error"
                 ? "text-danger"
