@@ -13,6 +13,11 @@ assert.match(source, /data-douyin-workspace/);
 assert.match(source, /data-douyin-toolbar/);
 assert.match(source, /data-douyin-video-list/);
 assert.match(source, /data-douyin-video/);
+assert.match(source, /data-douyin-enabled-toggle/);
+assert.match(source, /role="switch"/);
+assert.match(source, /action: "douyin\.setEnabled"/);
+assert.match(source, /data-douyin-paused-notice/);
+assert.match(source, /!snapshot\.enabled/);
 assert.match(source, /lg:grid-cols-\[minmax\(16rem,0\.34fr\)_minmax\(0,0\.66fr\)\]/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 

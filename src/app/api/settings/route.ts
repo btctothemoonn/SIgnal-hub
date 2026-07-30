@@ -11,6 +11,7 @@ import {
   removeTelegramChannel,
   removeTwitterAccount,
   setDouyinCreatorTags,
+  setDouyinEnabled,
   setTelegramChannelTags,
   setTwitterAccountTags,
   type RuntimeConfig,
@@ -48,7 +49,8 @@ type ActionBody =
   | { action: "douyin.add"; ref: string }
   | { action: "douyin.remove"; ref: string }
   | { action: "douyin.batchAdd"; refs: string[] }
-  | { action: "douyin.setTags"; ref: string; tags: string[] };
+  | { action: "douyin.setTags"; ref: string; tags: string[] }
+  | { action: "douyin.setEnabled"; enabled: boolean };
 
 type TwitterSyncResult = { username: string; warning: string | null };
 
@@ -354,6 +356,16 @@ export async function POST(request: Request) {
         }
         const tags = Array.isArray(body.tags) ? body.tags : [];
         config = await setDouyinCreatorTags(body.ref, tags);
+        break;
+      }
+      case "douyin.setEnabled": {
+        if (typeof body.enabled !== "boolean") {
+          return NextResponse.json(
+            { success: false, error: "抖音模块开关必须是布尔值。" },
+            { status: 400 },
+          );
+        }
+        config = await setDouyinEnabled(body.enabled);
         break;
       }
       default: {
