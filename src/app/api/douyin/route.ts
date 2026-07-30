@@ -12,6 +12,7 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
+        enabled: false,
         configured: false,
         status: "error",
         generatedAt: new Date().toISOString(),
