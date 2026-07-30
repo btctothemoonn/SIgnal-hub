@@ -195,6 +195,7 @@ export function DouyinMonitorPanel({
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [error, setError] = useState<string | null>(null);
+  const [togglePending, setTogglePending] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const creatorCount = snapshot.creators.length;
@@ -230,6 +231,34 @@ export function DouyinMonitorPanel({
     });
   }
 
+  async function toggleEnabled() {
+    setTogglePending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "douyin.setEnabled",
+          enabled: !snapshot.enabled,
+        }),
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.error || `Settings API HTTP ${response.status}`);
+      }
+      await reload("GET");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTogglePending(false);
+    }
+  }
+
   return (
     <section data-douyin-workspace className="flex min-w-0 flex-col gap-3">
       <div data-douyin-toolbar className="rounded-[6px] border border-line/70 bg-panel-strong p-3">
@@ -242,13 +271,47 @@ export function DouyinMonitorPanel({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={snapshot.enabled}
+              data-douyin-enabled-toggle
+              onClick={toggleEnabled}
+              disabled={togglePending}
+              className={
+                "inline-flex items-center gap-2 rounded-[6px] border px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-50 " +
+                (snapshot.enabled
+                  ? "border-success/35 bg-success-soft text-success"
+                  : "border-line/70 bg-background/45 text-muted")
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={
+                  "relative h-4 w-7 rounded-full transition-colors " +
+                  (snapshot.enabled ? "bg-success" : "bg-line")
+                }
+              >
+                <span
+                  className={
+                    "absolute top-0.5 h-3 w-3 rounded-full bg-white transition-transform " +
+                    (snapshot.enabled ? "translate-x-3.5" : "translate-x-0.5")
+                  }
+                />
+              </span>
+              {togglePending
+                ? "保存中..."
+                : snapshot.enabled
+                  ? "监控已开启"
+                  : "监控已暂停"}
+            </button>
             <span className="rounded-[6px] border border-line/70 bg-background/45 px-3 py-2 text-xs text-muted">
               状态 <b className="ml-1 text-foreground">{statusText(snapshot.status)}</b>
             </span>
             <button
               type="button"
               onClick={refreshNow}
-              disabled={isPending || creatorCount === 0}
+              disabled={isPending || creatorCount === 0 || !snapshot.enabled}
               className="rounded-[6px] bg-foreground px-3 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
             >
               {isPending ? "刷新中..." : "手动刷新"}
@@ -258,6 +321,11 @@ export function DouyinMonitorPanel({
         {error ? (
           <p className="mt-3 rounded-[6px] bg-danger-soft px-3 py-2 text-sm text-danger">
             {error}
+          </p>
+        ) : null}
+        {!snapshot.enabled ? (
+          <p data-douyin-paused-notice className="mt-3 rounded-[6px] bg-warning-soft px-3 py-2 text-sm text-warning">
+            抖音监控已暂停。不会抓取新视频或生成 AI 摘要；订阅清单与历史数据均已保留。
           </p>
         ) : null}
         {snapshot.errors.length > 0 ? (
