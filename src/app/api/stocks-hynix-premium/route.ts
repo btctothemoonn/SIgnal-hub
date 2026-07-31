@@ -15,9 +15,12 @@ function requestedLimit(url: URL) {
 
 function requestedInterval(url: URL): BinanceHynixPremiumInterval {
   const interval = url.searchParams.get("interval");
-  return interval === "1h" || interval === "1d" || interval === "5m"
+  return interval === "1m" ||
+    interval === "5m" ||
+    interval === "1h" ||
+    interval === "1d"
     ? interval
-    : "5m";
+    : "1m";
 }
 
 function requestedTimestamp(url: URL, key: string, fallback?: number) {

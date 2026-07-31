@@ -9,6 +9,8 @@ const source = readFileSync(
 assert.match(source, /币安海力士溢价曲线/);
 assert.match(source, /SKHYUSDT/);
 assert.match(source, /PREMIUM_INTERVAL_OPTIONS/);
+assert.match(source, /\{ value: "1m",/);
+assert.match(source, /useState<BinanceHynixPremiumInterval>\("1m"\)/);
 assert.match(source, /5m/);
 assert.match(source, /1h/);
 assert.match(source, /1d/);

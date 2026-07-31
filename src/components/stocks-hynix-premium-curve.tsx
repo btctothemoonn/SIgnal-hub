@@ -50,6 +50,7 @@ const PREMIUM_MAX_POINTS = 20000;
 const PREMIUM_UP_COLOR = "#62d6aa";
 const PREMIUM_DOWN_COLOR = "#ff7b8a";
 const PREMIUM_INTERVAL_OPTIONS = [
+  { value: "1m", label: "1分钟" },
   { value: "5m", label: "5分钟" },
   { value: "1h", label: "1小时" },
   { value: "1d", label: "1天" },
@@ -116,7 +117,7 @@ function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
 
 export function StocksHynixPremiumCurve() {
   const [selectedInterval, setSelectedInterval] =
-    useState<BinanceHynixPremiumInterval>("5m");
+    useState<BinanceHynixPremiumInterval>("1m");
   const [liveSnapshot, setLiveSnapshot] =
     useState<BinanceHynixPremiumSnapshot | null>(null);
   const [liveFundingSnapshot, setLiveFundingSnapshot] =

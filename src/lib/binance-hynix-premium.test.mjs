@@ -24,7 +24,7 @@ const skhyKlines = parseBinanceKlinePayload(
 
 assert.equal(skhyKlines.length, 2);
 assert.equal(skhyKlines[0].symbol, "SKHYUSDT");
-assert.equal(skhyKlines[0].interval, "5m");
+assert.equal(skhyKlines[0].interval, "1m");
 assert.equal(skhyKlines[0].closePrice, 1.05);
 assert.equal(skhyKlines[0].openTime, 1760000000000);
 assert.equal(
@@ -121,7 +121,7 @@ function minuteKline({
   const openTime = alignedMinuteStart + minute * 60 * 1000;
   return {
     symbol,
-    interval: "5m",
+    interval: "1m",
     openTime,
     closeTime: openTime + 60 * 1000 - 1,
     openPrice: open,
@@ -234,6 +234,52 @@ assert.equal(minuteAlignedSnapshot.points[0].premiumHighPct, 4);
 assert.equal(minuteAlignedSnapshot.points[0].premiumLowPct, 0);
 assert.equal(minuteAlignedSnapshot.points[0].premiumClosePct, 4);
 assert.equal(minuteAlignedSnapshot.points[0].volume, 5);
+
+const oneMinuteSnapshot = buildBinanceHynixPremiumSnapshot({
+  generatedAt: "2026-07-28T00:02:00.000Z",
+  baseSymbol: "SKHYUSDT",
+  benchmarkSymbol: "SKHYNIXUSDT",
+  baseKlines: [
+    minuteKline({
+      symbol: "SKHYUSDT",
+      minute: 0,
+      open: 1,
+      high: 1.1,
+      low: 0.9,
+      close: 1,
+    }),
+    minuteKline({
+      symbol: "SKHYUSDT",
+      minute: 1,
+      open: 1,
+      high: 1.2,
+      low: 1,
+      close: 1.1,
+    }),
+  ],
+  benchmarkKlines: [
+    minuteKline({
+      symbol: "SKHYNIXUSDT",
+      minute: 0,
+      open: 10,
+      high: 10,
+      low: 10,
+      close: 10,
+    }),
+    minuteKline({
+      symbol: "SKHYNIXUSDT",
+      minute: 1,
+      open: 10,
+      high: 10,
+      low: 10,
+      close: 10,
+    }),
+  ],
+  errors: [],
+});
+assert.equal(oneMinuteSnapshot.interval, "1m");
+assert.equal(oneMinuteSnapshot.points.length, 2);
+assert.equal(oneMinuteSnapshot.points[1].premiumClosePct, 10);
 assert.equal(
   binanceHynixPremiumWebSocketUrl({
     baseSymbol: "SKHYUSDT",
@@ -241,6 +287,10 @@ assert.equal(
     interval: "1h",
   }),
   "wss://fstream.binance.com/public/stream?streams=skhyusdt@markPrice/skhynixusdt@markPrice/skhyusdt@kline_1h/skhynixusdt@kline_1h",
+);
+assert.equal(
+  binanceHynixPremiumWebSocketUrl(),
+  "wss://fstream.binance.com/public/stream?streams=skhyusdt@markPrice/skhynixusdt@markPrice/skhyusdt@kline_1m/skhynixusdt@kline_1m",
 );
 
 const requestedUrls = [];
