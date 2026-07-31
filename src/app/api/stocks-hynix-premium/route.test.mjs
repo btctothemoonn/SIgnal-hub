@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 const previousFetch = globalThis.fetch;
 const previousRestBaseUrl = process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL;
 const requests = [];
+const requestStartedAt = Date.now();
 
 process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL = "https://fapi.binance.test";
 globalThis.fetch = async (url) => {
@@ -49,6 +50,15 @@ try {
     requests
       .filter((url) => url.includes("/fapi/v1/klines"))
       .every((url) => url.includes("interval=1m")),
+  );
+  assert.ok(
+    requests
+      .filter((url) => url.includes("/fapi/v1/klines"))
+      .every(
+        (url) =>
+          Number(new URL(url).searchParams.get("startTime")) >=
+          requestStartedAt - 3 * 24 * 60 * 60 * 1000,
+      ),
   );
   assert.ok(payload.websocket.url.includes("kline_1m"));
 } finally {

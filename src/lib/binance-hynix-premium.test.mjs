@@ -7,6 +7,7 @@ import {
   fetchBinanceHynixPremiumSnapshot,
   fetchBinanceHynixFundingSnapshot,
   formatShanghaiChartTime,
+  getBinanceHynixPremiumStartTimeMs,
   parseBinanceFuturesWebSocketMessage,
   parseBinanceKlinePayload,
 } from "./binance-hynix-premium.ts";
@@ -30,6 +31,20 @@ assert.equal(skhyKlines[0].openTime, 1760000000000);
 assert.equal(
   BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
   Date.parse("2026-07-13T16:00:00.000Z"),
+);
+assert.equal(
+  getBinanceHynixPremiumStartTimeMs(
+    "1m",
+    Date.parse("2026-07-31T00:00:00.000Z"),
+  ),
+  Date.parse("2026-07-28T00:00:00.000Z"),
+);
+assert.equal(
+  getBinanceHynixPremiumStartTimeMs(
+    "5m",
+    Date.parse("2026-07-31T00:00:00.000Z"),
+  ),
+  BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
 );
 assert.equal(
   formatShanghaiChartTime(Date.parse("2026-07-14T01:05:00.000Z") / 1000, "5m"),

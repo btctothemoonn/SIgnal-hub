@@ -21,6 +21,7 @@ import {
   binanceHynixPremiumIntervalMs,
   buildBinanceHynixPremiumPoint,
   formatShanghaiChartTime,
+  getBinanceHynixPremiumStartTimeMs,
   parseBinanceFuturesWebSocketMessage,
   upsertBinanceHynixPremiumPoint,
   type BinanceFuturesWebSocketMessage,
@@ -322,8 +323,9 @@ export function StocksHynixPremiumCurve() {
     async function loadPremiumData() {
       try {
         setError(null);
+        const startTime = getBinanceHynixPremiumStartTimeMs(selectedInterval);
         const response = await fetch(
-          `/api/stocks-hynix-premium?interval=${selectedInterval}&startTime=${BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS}&limit=${PREMIUM_KLINE_PAGE_LIMIT}`,
+          `/api/stocks-hynix-premium?interval=${selectedInterval}&startTime=${startTime}&limit=${PREMIUM_KLINE_PAGE_LIMIT}`,
           {
             cache: "no-store",
           },
@@ -567,7 +569,7 @@ export function StocksHynixPremiumCurve() {
           </h2>
           <p className="mt-0.5 text-[11px] text-muted">
             SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
-            2026-07-14 起
+            {selectedInterval === "1m" ? "最近3天" : "2026-07-14 起"}
           </p>
           <div className="mt-2 inline-flex rounded-[6px] border border-line/70 bg-background/45 p-1">
             {PREMIUM_INTERVAL_OPTIONS.map((option) => (

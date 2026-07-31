@@ -2,6 +2,7 @@ import { NextResponse } from "next/server.js";
 import {
   BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
   fetchBinanceHynixPremiumSnapshot,
+  getBinanceHynixPremiumStartTimeMs,
   type BinanceHynixPremiumInterval,
 } from "../../../lib/binance-hynix-premium.ts";
 
@@ -30,14 +31,25 @@ function requestedTimestamp(url: URL, key: string, fallback?: number) {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const snapshot = await fetchBinanceHynixPremiumSnapshot({
-    interval: requestedInterval(url),
-    startTime: requestedTimestamp(
+  const interval = requestedInterval(url);
+  const endTime = requestedTimestamp(url, "endTime");
+  const requestedStartTime =
+    requestedTimestamp(
       url,
       "startTime",
       BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
-    ),
-    endTime: requestedTimestamp(url, "endTime"),
+    ) ?? BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS;
+  const startTime =
+    interval === "1m"
+      ? Math.max(
+          requestedStartTime,
+          getBinanceHynixPremiumStartTimeMs(interval, endTime ?? Date.now()),
+        )
+      : requestedStartTime;
+  const snapshot = await fetchBinanceHynixPremiumSnapshot({
+    interval,
+    startTime,
+    endTime,
     limit: requestedLimit(url),
   });
   return NextResponse.json(snapshot);
