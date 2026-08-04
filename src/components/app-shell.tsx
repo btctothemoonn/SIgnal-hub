@@ -157,7 +157,7 @@ export function AppShell({
     <div
       data-mobile-command-shell
       data-workspace-shell
-      className="min-h-screen bg-workspace-canvas pb-20 lg:pb-0 text-foreground"
+      className="min-h-screen bg-workspace-canvas pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0 text-foreground"
     >
       <div className="flex min-h-screen">
         <aside className="hidden w-[6.25rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-2 py-4 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-center lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>

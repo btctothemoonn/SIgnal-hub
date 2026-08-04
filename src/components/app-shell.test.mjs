@@ -18,7 +18,7 @@ assert.doesNotMatch(source, /function ShellGlyph/);
 assert.match(source, /overflow-x-auto/);
 assert.match(source, /fixed bottom-0/);
 assert.match(source, /lg:hidden/);
-assert.match(source, /pb-20 lg:pb-0/);
+assert.match(source, /pb-\[calc\(5rem\+env\(safe-area-inset-bottom\)\)\] lg:pb-0/);
 assert.match(source, /\{subtitle \? \(/);
 assert.match(source, /router\.prefetch\("\/settings"\)/);
 assert.match(source, /label: "抖音"/);
