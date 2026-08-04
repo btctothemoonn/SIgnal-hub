@@ -42,6 +42,8 @@ const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
   "signal-hub:stocks:hynix-premium:v4";
 const STOCKS_HYNIX_FUNDING_CACHE_KEY =
   "signal-hub:stocks:hynix-funding:v1";
+const STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY =
+  "signal-hub:stocks:hynix-premium:alert-enabled:v1";
 const PREMIUM_CHART_HEIGHT = 360;
 const PREMIUM_KLINE_PAGE_LIMIT = 1500;
 const PREMIUM_MAX_POINTS = 20000;
@@ -144,6 +146,11 @@ export function StocksHynixPremiumCurve() {
     useBrowserJsonCache<BinanceHynixFundingSnapshot>(
       STOCKS_HYNIX_FUNDING_CACHE_KEY,
     );
+  const [cachedPremiumAlertEnabled, writeCachedAlertEnabled] =
+    useBrowserJsonCache<boolean>(
+      STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY,
+    );
+  const premiumAlertEnabled = cachedPremiumAlertEnabled ?? true;
   const snapshot =
     liveSnapshot?.interval === selectedInterval
       ? liveSnapshot
@@ -157,7 +164,11 @@ export function StocksHynixPremiumCurve() {
   const latestFundingDaily = fundingSnapshot?.daily.at(-1) ?? null;
   const premiumAlertVisible =
     latest !== null &&
-    shouldShowHynixPremiumAlert(premiumAlertCycle, latest.premiumPct);
+    shouldShowHynixPremiumAlert(
+      premiumAlertCycle,
+      latest.premiumPct,
+      premiumAlertEnabled,
+    );
   const shownPoints = points.slice(-PREMIUM_MAX_POINTS);
   const candleData = useMemo(
     () => shownPoints.map(pointToCandle),
@@ -525,7 +536,14 @@ export function StocksHynixPremiumCurve() {
             <p className="mt-1 text-[11px] text-muted">
               本轮溢价回落到 {HYNIX_PREMIUM_ALERT_THRESHOLD_PCT}% 以下后，再次上穿会重新提醒。
             </p>
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => writeCachedAlertEnabled(false)}
+                className="rounded-md border border-line/70 px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-foreground"
+              >
+                关闭提醒
+              </button>
               <button
                 type="button"
                 onClick={() =>
@@ -566,6 +584,24 @@ export function StocksHynixPremiumCurve() {
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={premiumAlertEnabled}
+            onClick={() => writeCachedAlertEnabled(!premiumAlertEnabled)}
+            className={`mt-2 inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
+              premiumAlertEnabled
+                ? "border-success/45 bg-success/10 text-success"
+                : "border-line/70 bg-background/45 text-muted hover:text-foreground"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                premiumAlertEnabled ? "bg-success" : "bg-muted"
+              }`}
+            />
+            30% 溢价提醒 {premiumAlertEnabled ? "开" : "关"}
+          </button>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:min-w-[30rem]">
           <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-2">
