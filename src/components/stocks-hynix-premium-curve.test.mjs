@@ -9,6 +9,8 @@ const source = readFileSync(
 assert.match(source, /币安海力士溢价曲线/);
 assert.match(source, /SKHYUSDT/);
 assert.match(source, /PREMIUM_INTERVAL_OPTIONS/);
+assert.match(source, /\{ value: "1m",/);
+assert.match(source, /useState<BinanceHynixPremiumInterval>\("1m"\)/);
 assert.match(source, /5m/);
 assert.match(source, /1h/);
 assert.match(source, /1d/);
@@ -25,7 +27,8 @@ assert.match(source, /1小时/);
 assert.match(source, /1天/);
 assert.match(source, /\/api\/stocks-hynix-premium/);
 assert.match(source, /interval=\$\{selectedInterval\}/);
-assert.match(source, /startTime=\$\{BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS\}/);
+assert.match(source, /getBinanceHynixPremiumStartTimeMs\(selectedInterval\)/);
+assert.match(source, /startTime=\$\{startTime\}/);
 assert.match(source, /\/api\/stocks-hynix-funding/);
 assert.match(source, /资金费/);
 assert.match(source, /溢价回归套利/);

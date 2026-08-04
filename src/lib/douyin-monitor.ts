@@ -55,6 +55,7 @@ export type DouyinRefreshResult = {
 
 export type DouyinSnapshot = {
   success: boolean;
+  enabled: boolean;
   configured: boolean;
   status: "empty" | "ok" | "partial" | "error";
   generatedAt: string;
@@ -1443,6 +1444,9 @@ export async function refreshDouyinMonitor({
   creators?: RuntimeWatchItem[];
 } = {}): Promise<DouyinSnapshot> {
   const config = await loadRuntimeConfig();
+  if (!config.douyinEnabled) {
+    return getDouyinSnapshot({ env });
+  }
   const activeCreators = (creators ?? config.douyinCreators).filter((item) =>
     item.ref.trim(),
   );
@@ -1516,6 +1520,7 @@ export async function getDouyinSnapshot({
     const hasOk = videos.length > 0;
     return {
       success: true,
+      enabled: config.douyinEnabled,
       configured,
       status: !configured
         ? "empty"

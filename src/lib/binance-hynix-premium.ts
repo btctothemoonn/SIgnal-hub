@@ -2,8 +2,8 @@ type EnvLike = Record<string, string | undefined>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export type BinanceHynixPremiumProvider = "binance-futures";
-export type BinanceHynixPremiumInterval = "5m" | "1h" | "1d";
-export type BinanceKlineInterval = "1m" | BinanceHynixPremiumInterval;
+export type BinanceHynixPremiumInterval = "1m" | "5m" | "1h" | "1d";
+export type BinanceKlineInterval = BinanceHynixPremiumInterval;
 
 export type BinanceKlinePoint = {
   symbol: string;
@@ -147,8 +147,9 @@ const DEFAULT_FUTURES_WS_BASE_URL = "wss://fstream.binance.com";
 export const BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS = Date.parse(
   "2026-07-13T16:00:00.000Z",
 );
+export const BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
-const DEFAULT_INTERVAL = "5m" satisfies BinanceHynixPremiumInterval;
+const DEFAULT_INTERVAL = "1m" satisfies BinanceHynixPremiumInterval;
 const SOURCE_KLINE_INTERVAL = "1m" satisfies BinanceKlineInterval;
 const INTERVAL_MS: Record<BinanceKlineInterval, number> = {
   "1m": 60 * 1000,
@@ -156,6 +157,18 @@ const INTERVAL_MS: Record<BinanceKlineInterval, number> = {
   "1h": 60 * 60 * 1000,
   "1d": 24 * 60 * 60 * 1000,
 };
+
+export function getBinanceHynixPremiumStartTimeMs(
+  interval: BinanceHynixPremiumInterval,
+  referenceTimeMs = Date.now(),
+) {
+  return interval === "1m"
+    ? Math.max(
+        BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
+        referenceTimeMs - BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS,
+      )
+    : BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS;
+}
 const DEFAULT_KLINE_PAGE_LIMIT = 1500;
 const MAX_KLINE_PAGE_LIMIT = 1500;
 const MAX_TOTAL_KLINES = 20000;
@@ -213,7 +226,7 @@ function normalizeLimit(value: number | undefined) {
 }
 
 function normalizeInterval(value: string | undefined): BinanceHynixPremiumInterval {
-  return value === "1h" || value === "1d" || value === "5m"
+  return value === "1m" || value === "5m" || value === "1h" || value === "1d"
     ? value
     : DEFAULT_INTERVAL;
 }

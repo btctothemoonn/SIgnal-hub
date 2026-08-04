@@ -9,6 +9,7 @@ export type RuntimeConfig = {
   telegramChannels: RuntimeWatchItem[];
   twitterAccounts: RuntimeWatchItem[];
   douyinCreators: RuntimeWatchItem[];
+  douyinEnabled: boolean;
 };
 
 type RawItem = string | { ref?: unknown; tags?: unknown } | null | undefined;
@@ -16,12 +17,14 @@ type RawRuntimeConfig = {
   telegramChannels?: unknown;
   twitterAccounts?: unknown;
   douyinCreators?: unknown;
+  douyinEnabled?: unknown;
 };
 
 const emptyConfig: RuntimeConfig = {
   telegramChannels: [],
   twitterAccounts: [],
   douyinCreators: [],
+  douyinEnabled: true,
 };
 
 let cache: RuntimeConfig | null = null;
@@ -77,6 +80,7 @@ function normalize(raw: RawRuntimeConfig | null | undefined): RuntimeConfig {
     telegramChannels: sanitizeWatchList(raw.telegramChannels),
     twitterAccounts: sanitizeWatchList(raw.twitterAccounts),
     douyinCreators: sanitizeWatchList(raw.douyinCreators),
+    douyinEnabled: raw.douyinEnabled !== false,
   };
 }
 
@@ -317,5 +321,12 @@ export async function setDouyinCreatorTags(
   return mutate((current) => ({
     ...current,
     douyinCreators: setItemTags(current.douyinCreators, ref, tags),
+  }));
+}
+
+export async function setDouyinEnabled(enabled: boolean): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    douyinEnabled: enabled,
   }));
 }
