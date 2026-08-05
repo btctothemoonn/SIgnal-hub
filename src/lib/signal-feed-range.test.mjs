@@ -27,8 +27,11 @@ assert.equal(
 );
 assert.equal(getSignalFeedRangeLimit("latest", "telegram"), 300);
 assert.equal(getSignalFeedRangeLimit("latest", "x"), 200);
-assert.equal(getSignalFeedRangeLimit("7d", "telegram"), 1000);
-assert.equal(getSignalFeedRangeLimit("7d", "x"), 1000);
-assert.equal(getSignalFeedRangeLimit("7d", "all"), 1000);
+assert.equal(getSignalFeedRangeLimit("12h", "all"), 1500);
+assert.equal(getSignalFeedRangeLimit("24h", "all"), 2500);
+assert.equal(getSignalFeedRangeLimit("3d", "all"), 5000);
+assert.equal(getSignalFeedRangeLimit("7d", "telegram"), 7000);
+assert.equal(getSignalFeedRangeLimit("7d", "x"), 7000);
+assert.equal(getSignalFeedRangeLimit("7d", "all"), 10000);
 
 console.log("ok - signal feed range options");

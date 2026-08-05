@@ -11,6 +11,10 @@ const telegramStoreSource = await readFile(
 
 assert.match(
   telegramStoreSource,
+  /TELEGRAM_SNAPSHOT_FEED_FETCH_LIMIT\s*=\s*10000/,
+);
+assert.match(
+  telegramStoreSource,
   /order by telegram_messages\.created_at desc,\s*telegram_messages\.message_id desc\s+limit \?/s,
 );
 

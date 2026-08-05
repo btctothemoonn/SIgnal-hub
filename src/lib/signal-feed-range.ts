@@ -29,10 +29,14 @@ const LATEST_LIMITS: Record<SignalFeedLimitSource, number> = {
   x: 200,
 };
 
-const RANGE_LIMITS: Record<SignalFeedLimitSource, number> = {
-  all: 1000,
-  telegram: 1000,
-  x: 1000,
+const RANGE_LIMITS: Record<
+  Exclude<SignalFeedRange, "latest">,
+  Record<SignalFeedLimitSource, number>
+> = {
+  "12h": { all: 1500, telegram: 1000, x: 1000 },
+  "24h": { all: 2500, telegram: 1600, x: 1600 },
+  "3d": { all: 5000, telegram: 3500, x: 3500 },
+  "7d": { all: 10000, telegram: 7000, x: 7000 },
 };
 
 const RANGE_SET = new Set<string>(SIGNAL_FEED_RANGES);
@@ -59,7 +63,8 @@ export function getSignalFeedRangeLimit(
   range: unknown,
   source: SignalFeedLimitSource,
 ) {
-  return normalizeSignalFeedRange(range) === "latest"
+  const normalized = normalizeSignalFeedRange(range);
+  return normalized === "latest"
     ? LATEST_LIMITS[source]
-    : RANGE_LIMITS[source];
+    : RANGE_LIMITS[normalized][source];
 }

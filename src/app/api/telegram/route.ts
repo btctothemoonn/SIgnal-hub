@@ -12,11 +12,13 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const range = normalizeSignalFeedRange(new URL(request.url).searchParams.get("range"));
+  const feedLimit = getSignalFeedRangeLimit(range, "telegram");
   return NextResponse.json(
     prepareTelegramSnapshotForClient(
-      getTelegramPipelineSnapshot(getSignalFeedRangeLimit(range, "telegram"), undefined, {
+      getTelegramPipelineSnapshot(feedLimit, undefined, {
         since: getSignalFeedRangeSince(range),
       }),
+      { feedLimit },
     ),
   );
 }
