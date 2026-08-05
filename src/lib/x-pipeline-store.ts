@@ -1329,7 +1329,11 @@ export function getXPipelineSnapshot(
     from x_feed f
     inner join x_accounts a on a.username_key = f.account_username_key
     where a.enabled = 1
-      ${since ? "and f.created_at >= ?" : ""}
+      ${
+        since
+          ? "and f.created_at >= ? and f.created_at glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'"
+          : ""
+      }
     order by f.created_at desc, f.updated_at desc
     limit ?
   `;

@@ -481,6 +481,10 @@ const fallbackIncomingItem = getXPipelineSnapshot(100, db).feed.find(
   (item) => item.id === "fallback-avatar-incoming",
 );
 assert.equal(fallbackIncomingItem?.userAvatar, "https://cdn.example/avatar.jpg");
+db.prepare("update x_feed set created_at = ? where id = ?").run(
+  "Wed Feb 04 22:22:46 +0000 2026",
+  "old-twitter-date",
+);
 const rangeSnapshot = getXPipelineSnapshot(100, db, {
   since: "2026-04-28T02:30:00.000Z",
 });
