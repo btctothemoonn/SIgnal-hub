@@ -1,30 +1,32 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { getAlphaResearchStockByTicker } from "./alpha-research-pool.ts";
 import { buildStocksTodayChanges } from "./stocks-changes.ts";
 
-const now = new Date("2026-07-24T12:00:00.000Z");
 const nvda = getAlphaResearchStockByTicker("NVDA");
 const amd = getAlphaResearchStockByTicker("AMD");
 const arm = getAlphaResearchStockByTicker("ARM");
 const intel = getAlphaResearchStockByTicker("INTC");
 assert.ok(nvda && amd && arm && intel);
 
-const stocks = [
-  {
-    ...nvda,
-    catalysts: [
-      {
-        title: "New Blackwell supply update",
-        type: "supply-chain",
-        date: "07/24 18:00",
-        createdAt: "2026-07-24T10:00:00.000Z",
-        impact: "positive",
-        summary: "Supply expectations moved higher.",
-        source: "Patreon",
-        sourceRole: "subscription",
-      },
-    ],
+const catalystSentinelStock = {
+  ...nvda,
+  market: {
+    ...nvda.market,
+    source: "live",
+    dayChangePct: 4.8,
+    sevenDayChangePct: 6.2,
+    earningsStatus: "quiet",
   },
+};
+Object.defineProperty(catalystSentinelStock, "catalysts", {
+  get() {
+    throw new Error("today changes must not read catalysts");
+  },
+});
+
+const changes = buildStocksTodayChanges([
+  catalystSentinelStock,
   {
     ...amd,
     market: {
@@ -34,7 +36,15 @@ const stocks = [
       sevenDayChangePct: -8.1,
       earningsStatus: "quiet",
     },
-    catalysts: [],
+    catalysts: [
+      {
+        title: "HISTORICAL_CATALYST_MUST_NOT_RENDER",
+        type: "earnings",
+        date: "2026-07-24",
+        impact: "negative",
+        summary: "old item",
+      },
+    ],
   },
   {
     ...arm,
@@ -42,7 +52,7 @@ const stocks = [
       ...arm.market,
       source: "live",
       dayChangePct: 0.8,
-      sevenDayChangePct: 2.2,
+      sevenDayChangePct: -12.3,
       earningsStatus: "upcoming",
     },
     catalysts: [],
@@ -52,44 +62,41 @@ const stocks = [
     market: {
       ...intel.market,
       source: "mock",
-      earningsStatus: "quiet",
+      dayChangePct: 8.2,
+      sevenDayChangePct: -12.4,
+      earningsStatus: "upcoming",
     },
     catalysts: [],
   },
-];
+]);
 
-const changes = buildStocksTodayChanges(stocks, { now, limit: 8 });
 assert.deepEqual(
   changes.map((item) => item.ticker),
-  ["NVDA", "ARM", "AMD", "INTC"],
+  ["AMD", "NVDA", "ARM"],
 );
-assert.equal(changes[0].kind, "catalyst");
-assert.match(changes[0].title, /Blackwell/);
-assert.equal(changes.find((item) => item.ticker === "ARM")?.kind, "earnings");
-assert.equal(changes.find((item) => item.ticker === "AMD")?.kind, "risk");
-assert.equal(changes.find((item) => item.ticker === "INTC")?.kind, "data");
-
-const oldCatalystChanges = buildStocksTodayChanges(
-  [
-    {
-      ...nvda,
-      market: {
-        ...nvda.market,
-        source: "live",
-        dayChangePct: 0,
-        sevenDayChangePct: 0,
-        earningsStatus: "quiet",
-      },
-      catalysts: [
-        {
-          ...stocks[0].catalysts[0],
-          createdAt: "2026-07-20T10:00:00.000Z",
-        },
-      ],
-    },
-  ],
-  { now },
+assert.equal(changes.length, new Set(changes.map((item) => item.ticker)).size);
+assert.ok(changes.every((item) => !("kind" in item)));
+assert.equal(changes.find((item) => item.ticker === "NVDA")?.tone, "positive");
+assert.equal(changes.find((item) => item.ticker === "AMD")?.tone, "negative");
+assert.equal(changes.find((item) => item.ticker === "ARM")?.tone, "negative");
+assert.match(changes.find((item) => item.ticker === "AMD")?.title ?? "", /下跌/);
+assert.match(changes.find((item) => item.ticker === "ARM")?.title ?? "", /走弱/);
+assert.ok(
+  changes.every(
+    (item) =>
+      !`${item.title} ${item.detail}`.includes(
+        "HISTORICAL_CATALYST_MUST_NOT_RENDER",
+      ),
+  ),
 );
-assert.equal(oldCatalystChanges.length, 0);
+assert.ok(changes.every((item) => item.ticker !== "INTC"));
 
-console.log("ok - stocks today changes ranking");
+const source = readFileSync(new URL("./stocks-changes.ts", import.meta.url), "utf8");
+assert.doesNotMatch(source, /StocksTodayChangeKind/);
+assert.doesNotMatch(source, /stock\.catalysts/);
+assert.doesNotMatch(source, /catalystWindowHours/);
+assert.doesNotMatch(source, /catalystChange/);
+assert.doesNotMatch(source, /earningsChange/);
+assert.doesNotMatch(source, /recentTimestamp/);
+
+console.log("ok - stocks today changes are market moves only");

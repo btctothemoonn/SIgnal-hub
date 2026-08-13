@@ -10,24 +10,10 @@ type StocksTodayChangesProps = {
 
 function toneClasses(tone: StocksTodayChange["tone"]) {
   const classes = {
-    success: "border-success/30 bg-success-soft text-success",
-    warning: "border-warning/30 bg-warning-soft text-warning",
-    danger: "border-danger/30 bg-danger-soft text-danger",
-    info: "border-info/30 bg-info-soft text-info",
-    muted: "border-line/70 bg-background/45 text-muted",
+    positive: "border-success/30 bg-success-soft text-success",
+    negative: "border-danger/30 bg-danger-soft text-danger",
   };
   return classes[tone];
-}
-
-function kindLabel(kind: StocksTodayChange["kind"]) {
-  const labels = {
-    catalyst: "新催化",
-    earnings: "财报",
-    move: "走强",
-    risk: "风险",
-    data: "数据",
-  };
-  return labels[kind];
 }
 
 export function StocksTodayChanges({
@@ -77,7 +63,7 @@ export function StocksTodayChanges({
                 <span
                   className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${toneClasses(item.tone)}`}
                 >
-                  {kindLabel(item.kind)}
+                  {item.tone === "positive" ? "上涨" : "下跌"}
                 </span>
               </span>
               <span className="mt-1 block truncate text-xs font-semibold text-foreground">
