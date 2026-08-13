@@ -20,10 +20,8 @@ assert.match(
 );
 assert.match(source, /行情加载中/);
 assert.match(source, /stockPriceLabel/);
-assert.match(source, /全部/);
-assert.match(source, /观察/);
-assert.match(source, /等待/);
-assert.match(source, /持有/);
-assert.match(source, /回避/);
+assert.doesNotMatch(source, /研究状态筛选/);
+assert.doesNotMatch(source, /RESEARCH_STATUS_FILTERS/);
+assert.doesNotMatch(source, /StocksResearchState/);
 
 console.log("ok - alpha sector list sticky layout");

@@ -5,10 +5,6 @@ const layout = readFileSync(
   new URL("./stocks-research-layout.tsx", import.meta.url),
   "utf8",
 );
-const page = readFileSync(
-  new URL("./alpha-research-page.tsx", import.meta.url),
-  "utf8",
-);
 
 assert.match(layout, /type StocksMobilePanel = "pool" \| "chart" \| "detail"/);
 assert.match(layout, /useState<StocksMobilePanel>\("pool"\)/);
@@ -27,11 +23,8 @@ assert.match(layout, /<StocksPerformanceChart/);
 assert.match(layout, /<AlphaStockDetail/);
 assert.match(layout, /compact/);
 assert.match(layout, /labelMode="ranked-list"/);
-assert.match(layout, /researchStatusFilter/);
-assert.match(layout, /researchStatesError/);
-assert.match(page, /import \{ StocksResearchLayout \}/);
-assert.match(page, /<StocksResearchLayout/);
-assert.match(page, /researchStatesError=\{researchStatesError\}/);
-assert.doesNotMatch(page, /<AlphaResearchPool/);
+assert.doesNotMatch(layout, /researchStates/);
+assert.doesNotMatch(layout, /researchStatusFilter/);
+assert.doesNotMatch(layout, /onSaveResearchState/);
 
 console.log("ok - stocks research layout uses desktop split and mobile pager");

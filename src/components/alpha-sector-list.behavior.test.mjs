@@ -27,7 +27,7 @@ try {
     );
   writeFileSync(temporaryModulePath, output, "utf8");
 
-  const { filterResearchPoolSectors } = await import(
+  const { groupResearchPoolSectors } = await import(
     `${pathToFileURL(temporaryModulePath).href}?run=${Date.now()}`,
   );
   const sectors = [
@@ -40,66 +40,11 @@ try {
     { ticker: "INTC", sectorId: "semiconductors" },
     { ticker: "LITE", sectorId: "optical" },
   ];
-  const researchStates = {
-    NVDA: { status: "holding" },
-    AMD: { status: "waiting" },
-    LITE: { status: "avoid" },
-  };
 
   assert.deepEqual(
-    filterResearchPoolSectors({
+    groupResearchPoolSectors({
       sectors,
       stocks,
-      researchStates,
-      researchStatusFilter: "watch",
-    }).map((sector) => ({
-      id: sector.id,
-      tickers: sector.stocks.map((stock) => stock.ticker),
-    })),
-    [{ id: "semiconductors", tickers: ["INTC"] }],
-  );
-  assert.deepEqual(
-    filterResearchPoolSectors({
-      sectors,
-      stocks,
-      researchStates,
-      researchStatusFilter: "holding",
-    }).map((sector) => ({
-      id: sector.id,
-      tickers: sector.stocks.map((stock) => stock.ticker),
-    })),
-    [{ id: "semiconductors", tickers: ["NVDA"] }],
-  );
-  assert.deepEqual(
-    filterResearchPoolSectors({
-      sectors,
-      stocks,
-      researchStates,
-      researchStatusFilter: "waiting",
-    }).map((sector) => ({
-      id: sector.id,
-      tickers: sector.stocks.map((stock) => stock.ticker),
-    })),
-    [{ id: "semiconductors", tickers: ["AMD"] }],
-  );
-  assert.deepEqual(
-    filterResearchPoolSectors({
-      sectors,
-      stocks,
-      researchStates,
-      researchStatusFilter: "avoid",
-    }).map((sector) => ({
-      id: sector.id,
-      tickers: sector.stocks.map((stock) => stock.ticker),
-    })),
-    [{ id: "optical", tickers: ["LITE"] }],
-  );
-  assert.deepEqual(
-    filterResearchPoolSectors({
-      sectors,
-      stocks,
-      researchStates,
-      researchStatusFilter: "all",
     }).map((sector) => ({
       id: sector.id,
       tickers: sector.stocks.map((stock) => stock.ticker),
@@ -113,4 +58,4 @@ try {
   rmSync(temporaryModulePath, { force: true });
 }
 
-console.log("ok - alpha sector list research-status filtering");
+console.log("ok - alpha sector list keeps fixed sector and ticker order");
