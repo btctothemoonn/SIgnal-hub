@@ -5,6 +5,15 @@ const source = readFileSync(
   new URL("./alpha-research-page.tsx", import.meta.url),
   "utf8",
 );
+const pageSource = readFileSync(
+  new URL("../app/stocks/page.tsx", import.meta.url),
+  "utf8",
+);
+
+assert.doesNotMatch(pageSource, /statusPills=/);
+assert.doesNotMatch(pageSource, /strongCount/);
+assert.doesNotMatch(pageSource, /upcomingEarnings/);
+assert.doesNotMatch(pageSource, /ALPHA_RESEARCH_STOCKS/);
 
 assert.match(source, /<section className="[^"]*lg:sticky[^"]*"/);
 assert.match(source, /<section className="[^"]*lg:top-\[5\.25rem\][^"]*"/);
