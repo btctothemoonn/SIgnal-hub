@@ -63,6 +63,12 @@ export type DouyinSnapshot = {
   creators: RuntimeWatchItem[];
   videos: DouyinVideoRecord[];
   errors: DouyinRefreshResult[];
+  pagination?: {
+    limit: number;
+    returned: number;
+    total: number;
+    hasMore: boolean;
+  };
 };
 
 type RawDouyinVideo = Omit<DouyinVideoRecord, "firstSeenAt" | "updatedAt" | "summary" | "summaryStatus" | "error">;
@@ -1124,6 +1130,22 @@ export function listDouyinVideos(
   return rows.map(rowToVideo);
 }
 
+export function countDouyinVideos(
+  db: DatabaseSync,
+  { minPublishedAt }: { minPublishedAt?: string | null } = {},
+) {
+  const normalizedMinPublishedAt = normalizeIsoDate(minPublishedAt);
+  const query = `
+    select count(*) as total
+    from douyin_videos
+    ${normalizedMinPublishedAt ? "where published_at is not null and published_at >= ?" : ""}
+  `;
+  const row = normalizedMinPublishedAt
+    ? db.prepare(query).get(normalizedMinPublishedAt)
+    : db.prepare(query).get();
+  return numberValue(row?.total);
+}
+
 function writeRefreshLog(db: DatabaseSync, result: DouyinRefreshResult) {
   db.prepare(`
     insert into douyin_refresh_log (
@@ -1501,17 +1523,27 @@ export async function refreshDouyinMonitor({
 export async function getDouyinSnapshot({
   env = process.env,
   refreshResults,
+  limit,
 }: {
   env?: EnvLike;
   refreshResults?: DouyinRefreshResult[];
+  limit?: number;
 } = {}): Promise<DouyinSnapshot> {
   const config = await loadRuntimeConfig();
   const db = openDouyinDb(getDouyinDbPath(env));
   try {
+    const minPublishedAt = env.DOUYIN_MIN_PUBLISHED_AT;
+    const snapshotLimit =
+      Number.isInteger(limit) && Number(limit) > 0
+        ? Math.min(Number(limit), 200)
+        : positiveInt(env.DOUYIN_SNAPSHOT_LIMIT, 80);
     const videos = listDouyinVideos(db, {
-      limit: positiveInt(env.DOUYIN_SNAPSHOT_LIMIT, 80),
-      minPublishedAt: env.DOUYIN_MIN_PUBLISHED_AT,
+      limit: snapshotLimit,
+      minPublishedAt,
     });
+    const totalVideos = limit === undefined
+      ? videos.length
+      : countDouyinVideos(db, { minPublishedAt });
     const errors = refreshResults
       ? collapseDouyinRefreshErrors(refreshResults)
       : listRefreshErrors(db);
@@ -1536,6 +1568,16 @@ export async function getDouyinSnapshot({
       creators: config.douyinCreators,
       videos,
       errors,
+      ...(limit !== undefined
+        ? {
+            pagination: {
+              limit: snapshotLimit,
+              returned: videos.length,
+              total: totalVideos,
+              hasMore: videos.length < totalVideos,
+            },
+          }
+        : {}),
     };
   } finally {
     db.close();

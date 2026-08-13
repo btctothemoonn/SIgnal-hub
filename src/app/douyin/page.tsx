@@ -6,9 +6,10 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const API_ENDPOINT = "/api/douyin";
+const DOUYIN_INITIAL_PAGE_SIZE = 10;
 
 export default async function DouyinPage() {
-  const snapshot = await getDouyinSnapshot();
+  const snapshot = await getDouyinSnapshot({ limit: DOUYIN_INITIAL_PAGE_SIZE });
 
   return (
     <AppShell
@@ -36,7 +37,7 @@ export default async function DouyinPage() {
               : snapshot.status === "error"
                 ? "text-danger"
                 : "text-warning",
-          children: `${snapshot.creators.length} 博主 · ${snapshot.videos.length} 条`,
+          children: `${snapshot.creators.length} 博主 · ${snapshot.pagination?.total ?? snapshot.videos.length} 条`,
         },
       ]}
     >

@@ -27,6 +27,11 @@ function statusText(status: DouyinSnapshot["status"]) {
   return "待配置";
 }
 
+function snapshotUrl(endpoint: string, limit: number) {
+  const separator = endpoint.includes("?") ? "&" : "?";
+  return `${endpoint}${separator}limit=${encodeURIComponent(String(limit))}`;
+}
+
 function summaryTone(summary: DouyinVideoSummary | null) {
   if (!summary) return "text-muted";
   if (summary.status === "generated") return "text-success";
@@ -196,15 +201,38 @@ export function DouyinMonitorPanel({
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [error, setError] = useState<string | null>(null);
   const [togglePending, setTogglePending] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadedLimit, setLoadedLimit] = useState(
+    initialSnapshot.pagination?.limit ?? Math.max(initialSnapshot.videos.length, 10),
+  );
   const [isPending, startTransition] = useTransition();
 
   const creatorCount = snapshot.creators.length;
   const videos = useMemo(() => snapshot.videos, [snapshot.videos]);
+  const totalVideos = snapshot.pagination?.total ?? videos.length;
 
-  const reload = useCallback(async (method: "GET" | "POST" = "GET") => {
+  const reload = useCallback(async (
+    method: "GET" | "POST" = "GET",
+    limit = loadedLimit,
+  ) => {
     setError(null);
-    const response = await fetch(method === "POST" ? refreshEndpoint : apiEndpoint, {
-      method,
+    if (method === "POST") {
+      const refreshResponse = await fetch(refreshEndpoint, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const refreshPayload = (await refreshResponse.json()) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!refreshResponse.ok || refreshPayload.success === false) {
+        throw new Error(
+          refreshPayload.error || `Douyin API HTTP ${refreshResponse.status}`,
+        );
+      }
+    }
+    const response = await fetch(snapshotUrl(apiEndpoint, limit), {
+      method: "GET",
       cache: "no-store",
     });
     const payload = (await response.json()) as DouyinSnapshot & {
@@ -214,7 +242,7 @@ export function DouyinMonitorPanel({
       throw new Error(payload.error || `Douyin API HTTP ${response.status}`);
     }
     setSnapshot(payload);
-  }, [apiEndpoint, refreshEndpoint]);
+  }, [apiEndpoint, loadedLimit, refreshEndpoint]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -229,6 +257,19 @@ export function DouyinMonitorPanel({
         setError(err instanceof Error ? err.message : String(err));
       });
     });
+  }
+
+  async function loadMore() {
+    const nextLimit = loadedLimit + 10;
+    setLoadingMore(true);
+    try {
+      await reload("GET", nextLimit);
+      setLoadedLimit(nextLimit);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function toggleEnabled() {
@@ -266,7 +307,7 @@ export function DouyinMonitorPanel({
           <div>
             <h1 className="text-xl font-semibold text-foreground">抖音订阅</h1>
             <p className="mt-1 text-xs text-muted">
-              公开视频低频监控 · {creatorCount} 个博主 · 最新 {videos.length} 条 · 更新{" "}
+              公开视频低频监控 · {creatorCount} 个博主 · 已载入 {videos.length}/{totalVideos} 条 · 更新{" "}
               {formatTime(snapshot.lastUpdatedAt)}
             </p>
           </div>
@@ -360,10 +401,23 @@ export function DouyinMonitorPanel({
           暂无缓存视频。可以先点手动刷新；如果公开页面受限，页面会显示失败原因。
         </div>
       ) : (
-        <div data-douyin-video-list className="flex min-w-0 flex-col gap-3">
-          {videos.map((video) => (
-            <VideoCard key={video.id} video={video} />
-          ))}
+        <div className="flex min-w-0 flex-col gap-3">
+          <div data-douyin-video-list className="flex min-w-0 flex-col gap-3">
+            {videos.map((video) => (
+              <VideoCard key={video.id} video={video} />
+            ))}
+          </div>
+          {snapshot.pagination?.hasMore ? (
+            <button
+              type="button"
+              data-douyin-load-more
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="self-center rounded-[6px] border border-line/70 bg-panel-strong px-5 py-2 text-sm font-semibold text-foreground transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50"
+            >
+              {loadingMore ? "加载中..." : `加载更多（剩余 ${Math.max(0, totalVideos - videos.length)} 条）`}
+            </button>
+          ) : null}
         </div>
       )}
     </section>

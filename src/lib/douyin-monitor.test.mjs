@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 const {
   buildDouyinResearchSummary,
   collapseDouyinRefreshErrors,
+  countDouyinVideos,
   extractDouyinVideosFromHtml,
   fetchDouyinCreatorVideos,
   initDouyinMonitorDb,
@@ -267,12 +268,17 @@ try {
   ]);
   const rows = listDouyinVideos(db, { limit: 10 });
   assert.equal(rows.length, 4);
+  assert.equal(countDouyinVideos(db), 4);
   assert.equal(rows.find((row) => row.id === "745600001")?.summary?.status, "limited");
   const filteredRows = listDouyinVideos(db, {
     limit: 10,
     minPublishedAt: "2026-05-24T00:00:00+08:00",
   });
   assert.deepEqual(filteredRows.map((row) => row.id), ["after-cutoff"]);
+  assert.equal(
+    countDouyinVideos(db, { minPublishedAt: "2026-05-24T00:00:00+08:00" }),
+    1,
+  );
 } finally {
   db.close();
   await rm(dir, { recursive: true, force: true });

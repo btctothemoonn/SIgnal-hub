@@ -96,6 +96,15 @@ export function useBrowserJsonCache() {
   return [null, noop];
 }
 
+export function expandCompactStocksPerformanceSnapshot(snapshot) {
+  return snapshot;
+}
+
+export function scheduleDeferredBrowserTask(callback) {
+  callback();
+  return noop;
+}
+
 export const ALPHA_RESEARCH_DEFAULT_TICKER = "NVDA";
 export const ALPHA_RESEARCH_POOL_TRACKING_START_DATE = "2026-05-06";
 export const ALPHA_RESEARCH_SECTORS = [

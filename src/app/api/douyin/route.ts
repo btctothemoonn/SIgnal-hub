@@ -4,9 +4,14 @@ import { getDouyinSnapshot } from "@/lib/douyin-monitor";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const snapshot = await getDouyinSnapshot();
+    const requestedLimit = Number(new URL(request.url).searchParams.get("limit"));
+    const limit =
+      Number.isInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 200)
+        : undefined;
+    const snapshot = await getDouyinSnapshot({ limit });
     return NextResponse.json(snapshot);
   } catch (error) {
     return NextResponse.json(

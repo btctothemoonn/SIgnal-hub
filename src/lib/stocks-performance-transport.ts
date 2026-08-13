@@ -27,6 +27,15 @@ export type CompactStocksPerformanceSnapshot = Omit<
   >;
 };
 
+function isCompactStocksPerformanceSnapshot(
+  snapshot: StocksPerformanceSnapshot | CompactStocksPerformanceSnapshot,
+): snapshot is CompactStocksPerformanceSnapshot {
+  return (
+    (snapshot as { format?: unknown }).format ===
+    STOCKS_PERFORMANCE_COMPACT_FORMAT
+  );
+}
+
 export function compactStocksPerformanceSnapshot(
   snapshot: StocksPerformanceSnapshot,
 ): CompactStocksPerformanceSnapshot {
@@ -51,7 +60,7 @@ export function compactStocksPerformanceSnapshot(
 export function expandCompactStocksPerformanceSnapshot(
   snapshot: StocksPerformanceSnapshot | CompactStocksPerformanceSnapshot,
 ): StocksPerformanceSnapshot {
-  if (!("format" in snapshot) || snapshot.format !== STOCKS_PERFORMANCE_COMPACT_FORMAT) {
+  if (!isCompactStocksPerformanceSnapshot(snapshot)) {
     return snapshot;
   }
 
