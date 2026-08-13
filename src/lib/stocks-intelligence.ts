@@ -137,13 +137,6 @@ function marketSourceLabel(stock: AlphaResearchStock) {
   return `${provider} / ${freshness}`;
 }
 
-function latestCatalystByType(
-  catalysts: AlphaResearchCatalyst[],
-  type: AlphaResearchCatalyst["type"],
-) {
-  return catalysts.find((catalyst) => catalyst.type === type);
-}
-
 function buildTickerContext(stock: AlphaResearchStock): StocksTickerContext {
   const financial = stock.financialSnapshot;
   const financialSource =
@@ -260,7 +253,6 @@ function buildEarningsBrief(stock: AlphaResearchStock): StocksEarningsBrief {
   const mode = earningsMode(stock.market.earningsStatus);
   const financial = stock.financialSnapshot;
   const guidance = normalizeTextValue(financial.guidance);
-  const earningsCatalyst = latestCatalystByType(stock.catalysts, "earnings");
   const hasFinancialData =
     hasUsableValue(financial.revenue) || hasUsableValue(financial.eps);
 
@@ -277,10 +269,6 @@ function buildEarningsBrief(stock: AlphaResearchStock): StocksEarningsBrief {
         )}，7日 ${formatSignedPercent(stock.market.sevenDayChangePct)}。`
       : "价格反应：行情源未确认，先不做强弱判断。",
   ];
-
-  if (earningsCatalyst) {
-    points.push(`相关催化：${earningsCatalyst.title}`);
-  }
 
   const titles: Record<StocksEarningsBrief["mode"], string> = {
     pre: "财报前：重点看预期、指引和价格是否提前反应",

@@ -3,31 +3,18 @@
 import type { ReactNode } from "react";
 import {
   getAlphaResearchSectorById,
-  type AlphaCatalystType,
   type AlphaResearchEarningsStatus,
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
-import { splitStocksCatalystsForDisplay } from "@/lib/stocks-catalyst-display";
 import {
   buildStocksIntelligence,
-  buildSubscriptionReportInsight,
   type StocksIntelligenceTone,
 } from "@/lib/stocks-intelligence";
-import {
-  type StocksResearchState,
-  type StocksResearchStateInput,
-} from "@/lib/stocks-research-state";
-import { StocksResearchStatePanel } from "@/components/stocks-research-state-panel";
-import { getResearchStatePanelMode } from "@/components/stocks-research-state-form";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
   marketDataLabel: string;
   marketDataLoading: boolean;
-  researchState?: StocksResearchState | null;
-  researchStateLoading?: boolean;
-  researchStateError?: string | null;
-  onSaveResearchState?: (input: StocksResearchStateInput) => Promise<void>;
 };
 
 function formatSignedPercent(value: number) {
@@ -49,34 +36,6 @@ function earningsLabel(status: AlphaResearchEarningsStatus) {
     quiet: "平静",
   };
   return labels[status];
-}
-
-function catalystLabel(type: AlphaCatalystType) {
-  const labels: Record<AlphaCatalystType, string> = {
-    earnings: "财报",
-    product: "产品",
-    "supply-chain": "供应链",
-    analyst: "机构",
-    macro: "宏观",
-    regulatory: "监管",
-    "industry-event": "行业事件",
-  };
-  return labels[type];
-}
-
-function impactLabel(impact: "positive" | "neutral" | "negative") {
-  const labels = {
-    positive: "正向",
-    neutral: "中性",
-    negative: "负向",
-  };
-  return labels[impact];
-}
-
-function impactTone(impact: "positive" | "neutral" | "negative") {
-  if (impact === "positive") return "text-success";
-  if (impact === "negative") return "text-danger";
-  return "text-muted";
 }
 
 function intelligenceTextTone(tone: StocksIntelligenceTone) {
@@ -101,21 +60,11 @@ function intelligenceBadgeTone(tone: StocksIntelligenceTone) {
   return classes[tone];
 }
 
-function providerTraceLabel(
-  trace: AlphaResearchStock["market"]["providerTrace"],
-) {
-  if (!trace?.length) return "";
-  return trace
-    .map((item) => {
-      const status =
-        item.status === "success"
-          ? "成功"
-          : item.status === "failed"
-            ? "失败"
-            : "跳过";
-      return `${item.provider}: ${status}`;
-    })
-    .join(" / ");
+function compactTrackingPoints(stock: AlphaResearchStock) {
+  return [...new Set([...stock.watchPoints, ...stock.risks])]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
 }
 
 function Section({
@@ -127,9 +76,7 @@ function Section({
 }) {
   return (
     <section className="rounded-md border border-line/60 bg-panel-strong/80 p-4">
-      <h3 className="text-[13px] font-semibold text-muted">
-        {title}
-      </h3>
+      <h3 className="text-[13px] font-semibold text-muted">{title}</h3>
       <div className="mt-3">{children}</div>
     </section>
   );
@@ -161,38 +108,12 @@ function MetricTile({
   return (
     <div className="rounded-md border border-line/60 bg-background/35 p-3">
       <p className="text-[11px] font-semibold text-muted">{label}</p>
-      <p className={`mt-2 min-w-0 break-words font-mono text-xl font-semibold ${tone}`}>
-        {value}
-      </p>
-      <p className="mt-1 min-w-0 break-words text-xs leading-5 text-muted">
-        {note}
-      </p>
-    </div>
-  );
-}
-
-function IntelligenceMetricTile({
-  label,
-  value,
-  note,
-  tone,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  tone: StocksIntelligenceTone;
-}) {
-  return (
-    <div className="min-w-0 rounded-md border border-line/60 bg-background/35 px-3 py-2.5">
-      <p className="text-[11px] font-semibold text-muted">{label}</p>
       <p
-        className={`mt-1 min-w-0 break-words font-mono text-base font-semibold ${intelligenceTextTone(
-          tone,
-        )}`}
+        className={`mt-2 min-w-0 break-words font-mono text-xl font-semibold ${tone}`}
       >
         {value}
       </p>
-      <p className="mt-1 min-w-0 break-words text-[11px] leading-4 text-muted">
+      <p className="mt-1 min-w-0 break-words text-xs leading-5 text-muted">
         {note}
       </p>
     </div>
@@ -203,10 +124,6 @@ export function AlphaStockDetail({
   stock,
   marketDataLabel,
   marketDataLoading,
-  researchState = null,
-  researchStateLoading = false,
-  researchStateError = null,
-  onSaveResearchState,
 }: AlphaStockDetailProps) {
   if (!stock) {
     return (
@@ -219,49 +136,25 @@ export function AlphaStockDetail({
   }
 
   const sector = getAlphaResearchSectorById(stock.sectorId);
-  const intelligence = buildStocksIntelligence(stock);
-  const { tickerContext, earningsBrief, riskTags, structure } = intelligence;
-  const primaryIntelligenceMetrics = [tickerContext.dataHealth];
-  const financialIntelligenceMetrics = [
-    tickerContext.revenue,
-    tickerContext.eps,
-    tickerContext.grossMargin,
-    tickerContext.freeCashFlow,
-  ];
+  const { tickerContext, earningsBrief, structure } =
+    buildStocksIntelligence(stock);
   const stockMarketIsLive = stock.market.source === "live";
   const stockMarketIsLoading = marketDataLoading && !stockMarketIsLive;
   const stockCandlesAreLive =
     stock.market.source === "live" && stock.market.candlesSource === "live";
-  const stockProviderTraceLabel = providerTraceLabel(stock.market.providerTrace);
-  const stockMarketLabel = stockMarketIsLive
-    ? (stock.market.dataQualityLabel ??
-      `${(stock.market.provider ?? "live").toUpperCase()} live`)
-    : stockMarketIsLoading
-      ? "行情加载中"
-      : "未获取实时价";
-  const stockPrePostLabel = stockMarketIsLive
-    ? "盘前/盘后未获取"
-    : marketDataLabel;
-  const stockPriceLabel = stockMarketIsLive
-    ? tickerContext.price.value
-    : stockMarketIsLoading
-      ? "行情加载中"
-      : tickerContext.price.value;
-  const { subscriptionReports, visibleCatalysts, hiddenCatalysts } =
-    splitStocksCatalystsForDisplay(stock.catalysts, 5);
-  const businessTags = stock.businessTags.slice(0, 3);
-  const dataStatusLabel = stockMarketIsLive
-    ? (stock.market.dataQualityLabel ?? stockMarketLabel)
-    : stockPrePostLabel;
+  const stockPriceLabel = stockMarketIsLoading
+    ? "行情加载中"
+    : tickerContext.price.value;
   const dayChangeLabel = stockMarketIsLive
     ? formatSignedPercent(stock.market.dayChangePct)
-    : "待获取";
+    : marketDataLabel;
   const strengthLabel = stockCandlesAreLive
     ? formatSignedPercent(stock.market.sevenDayChangePct)
     : "K 线待补";
   const strengthNote = stockCandlesAreLive
     ? stock.market.relativeStrengthLabel
     : "暂无可用 7 日走势";
+  const businessTags = stock.businessTags.slice(0, 3);
   const financialRows = [
     ["营收", stock.financialSnapshot.revenue],
     ["营收同比", stock.financialSnapshot.revenueYoY],
@@ -270,20 +163,16 @@ export function AlphaStockDetail({
     ["自由现金流", stock.financialSnapshot.freeCashFlow],
     ["指引", stock.financialSnapshot.guidance],
   ];
-  const researchStatePanelMode = getResearchStatePanelMode({
-    ticker: stock.ticker,
-    researchState,
-    loading: researchStateLoading,
-    hasSaveHandler: Boolean(onSaveResearchState),
-  });
+  const trackingPoints = compactTrackingPoints(stock);
 
   return (
     <article className="rounded-md border border-line/70 bg-panel-strong p-5">
-      <div data-stock-primary-context>
-      <div className="grid gap-5 border-b border-line/60 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:items-start">
+      <div
+        data-stock-primary-context
+        className="grid gap-5 border-b border-line/60 pb-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:items-start"
+      >
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold text-muted">研究结论</p>
-          <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
             <h2 className="font-mono text-2xl font-semibold text-foreground">
               {stock.ticker}
             </h2>
@@ -294,9 +183,6 @@ export function AlphaStockDetail({
               {stock.companyName}
             </span>
           </div>
-          <p className="mt-3 max-w-5xl text-sm leading-6 text-foreground">
-            {stock.summary}
-          </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             <span className="rounded-md bg-info-soft px-2 py-1 text-xs font-semibold text-info">
               {sector?.name ?? stock.sectorId}
@@ -313,15 +199,6 @@ export function AlphaStockDetail({
               </span>
             ))}
           </div>
-          <details className="mt-3 max-w-5xl text-xs text-muted">
-            <summary className="cursor-pointer select-none hover:text-foreground">
-              数据状态
-            </summary>
-            <p className="mt-2 leading-5">
-              {dataStatusLabel}
-              {stockProviderTraceLabel ? ` · 链路：${stockProviderTraceLabel}` : ""}
-            </p>
-          </details>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
@@ -329,13 +206,21 @@ export function AlphaStockDetail({
             label="价格 / 今日"
             value={stockPriceLabel}
             note={dayChangeLabel}
-            tone={stockMarketIsLive ? changeTone(stock.market.dayChangePct) : "text-muted"}
+            tone={
+              stockMarketIsLive
+                ? changeTone(stock.market.dayChangePct)
+                : "text-muted"
+            }
           />
           <MetricTile
             label="7 日强弱"
             value={strengthLabel}
             note={strengthNote}
-            tone={stockCandlesAreLive ? changeTone(stock.market.sevenDayChangePct) : "text-muted"}
+            tone={
+              stockCandlesAreLive
+                ? changeTone(stock.market.sevenDayChangePct)
+                : "text-muted"
+            }
           />
           <MetricTile
             label="财报窗口"
@@ -346,331 +231,87 @@ export function AlphaStockDetail({
         </div>
       </div>
 
-      <div
-        data-stock-intelligence
-        className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(22rem,0.88fr)]"
-      >
-        <Section title="Ticker Intelligence">
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {primaryIntelligenceMetrics.map((metric) => (
-              <IntelligenceMetricTile
-                key={metric.label}
-                label={metric.label}
-                value={metric.value}
-                note={metric.note}
-                tone={metric.tone}
-              />
-            ))}
-          </div>
-          <div className="mt-4 border-t border-line/60 pt-3">
-            <p className="text-[11px] font-semibold text-muted">Core driver</p>
-            <div className="mt-2">
+      <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(22rem,0.88fr)]">
+        <div className="space-y-5">
+          <Section title="研究结论">
+            <p className="text-sm leading-6 text-foreground">
+              {stock.summary}
+            </p>
+            <div className="mt-3 border-t border-line/60 pt-3">
               <BulletList items={stock.thesis.slice(0, 2)} />
             </div>
-          </div>
-        </Section>
+          </Section>
 
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-1">
-          <Section title="Structure Snapshot">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span
-                className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
-                  structure.tone,
+          <Section title="结构与财报">
+            <div>
+              <p className="text-[11px] font-semibold text-muted">
+                Structure Snapshot
+              </p>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
+                    structure.tone,
+                  )}`}
+                >
+                  {structure.label}
+                </span>
+                <span className="font-mono text-xs text-muted">
+                  Score {structure.score}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1">
+                {structure.points.map((point) => (
+                  <p key={point} className="text-sm leading-6 text-muted">
+                    {point}
+                  </p>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-line/60 pt-4">
+              <p className="text-[11px] font-semibold text-muted">
+                Earnings Brief
+              </p>
+              <p
+                className={`mt-2 text-sm font-semibold ${intelligenceTextTone(
+                  earningsBrief.confidence === "normal" ? "info" : "warning",
                 )}`}
               >
-                {structure.label}
-              </span>
-              <span className="font-mono text-xs text-muted">Score {structure.score}</span>
-            </div>
-            <div className="mt-3 space-y-1">
-              {structure.points.map((point) => (
-                <p key={point} className="text-sm leading-6 text-muted">
-                  {point}
-                </p>
-              ))}
-            </div>
-          </Section>
-
-          <Section title="Impact & Risk Tags">
-            <div className="flex flex-wrap gap-2">
-              {riskTags.map((tag) => (
-                <span
-                  key={`${tag.label}-${tag.reason}`}
-                  className={`rounded-md border px-2 py-1 text-xs font-semibold ${intelligenceBadgeTone(
-                    tag.tone,
-                  )}`}
-                  title={tag.reason}
-                >
-                  {tag.label}
-                </span>
-              ))}
-              {riskTags.length === 0 ? (
-                <span className="rounded-md border border-line/60 bg-background/45 px-2 py-1 text-xs text-muted">
-                  暂无显著风险标签
-                </span>
-              ) : null}
-            </div>
-          </Section>
-        </div>
-      </div>
-      </div>
-
-      <div data-stock-supporting-research className="mt-5">
-      <div>
-        {researchStatePanelMode === "editor" && researchState && onSaveResearchState ? (
-          <StocksResearchStatePanel
-            ticker={stock.ticker}
-            researchState={researchState}
-            loading={researchStateLoading}
-            onSave={onSaveResearchState}
-          />
-        ) : (
-          <section className="rounded-md border border-line/60 bg-background/30 px-4 py-3 text-sm text-muted">
-            {researchStatePanelMode === "loading"
-              ? "研究状态加载中"
-              : researchStateError
-                ? `研究状态暂不可用：${researchStateError}`
-                : "研究状态暂不可用"}
-          </section>
-        )}
-      </div>
-
-      <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(24rem,0.88fr)]">
-        <div className="space-y-5">
-          <Section title="Earnings Brief">
-            <p
-              className={`text-sm font-semibold ${intelligenceTextTone(
-                earningsBrief.confidence === "normal" ? "info" : "warning",
-              )}`}
-            >
-              {earningsBrief.title}
-            </p>
-            <div className="mt-3 space-y-2">
-              {earningsBrief.points.map((point) => (
-                <p key={point} className="break-words text-sm leading-6 text-foreground">
-                  {point}
-                </p>
-              ))}
-            </div>
-          </Section>
-
-          <Section title="Financial Snapshot">
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {financialIntelligenceMetrics.map((metric) => (
-                <IntelligenceMetricTile
-                  key={metric.label}
-                  label={metric.label}
-                  value={metric.value}
-                  note={metric.note}
-                  tone={metric.tone}
-                />
-              ))}
-            </div>
-          </Section>
-
-          {subscriptionReports.length > 0 ? (
-            <Section title="订阅研报">
-              <div className="space-y-3">
-                {subscriptionReports.map((report, reportIndex) => {
-                  const reportInsight = buildSubscriptionReportInsight({
-                    ...report,
-                    tickers: [stock.ticker],
-                  });
-
-                  return (
-                  <article
-                    key={`${report.date}-${report.title}-${reportIndex}`}
-                    className="rounded-md border border-accent/45 bg-accent-soft/20 px-4 py-3"
+                {earningsBrief.title}
+              </p>
+              <div className="mt-3 space-y-2">
+                {earningsBrief.points.map((point) => (
+                  <p
+                    key={point}
+                    className="break-words text-sm leading-6 text-foreground"
                   >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-md bg-warning-soft px-1.5 py-0.5 text-[11px] font-semibold text-warning">
-                        Patreon
-                      </span>
-                      <span className="text-[11px] text-muted">
-                        {report.date}
-                      </span>
-                      {report.author ? (
-                        <span className="text-[11px] text-muted">
-                          {report.author}
-                        </span>
-                      ) : null}
-                    </div>
-                    <h4 className="mt-2 text-base font-semibold leading-6 text-foreground">
-                      {report.link ? (
-                        <a
-                          href={report.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:text-accent"
-                        >
-                          {report.title}
-                        </a>
-                      ) : (
-                        report.title
-                      )}
-                    </h4>
-                    <div className="mt-3 grid gap-2 text-sm">
-                      <div className="rounded-md border border-line/60 bg-panel/70 px-3 py-2">
-                        <p className="text-[11px] font-semibold text-muted">
-                          核心结论
-                        </p>
-                        <p className="mt-1 leading-6 text-foreground">
-                          {reportInsight.coreConclusion}
-                        </p>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
-                          <p className="text-[11px] font-semibold text-muted">
-                            影响链条
-                          </p>
-                          <p className="mt-1 leading-5 text-muted">
-                            {reportInsight.impactChain}
-                          </p>
-                        </div>
-                        <div className="rounded-md border border-line/60 bg-background/35 px-3 py-2">
-                          <p className="text-[11px] font-semibold text-muted">
-                            风险点
-                          </p>
-                          <p className="mt-1 leading-5 text-muted">
-                            {reportInsight.riskNote}
-                          </p>
-                        </div>
-                      </div>
-                      {reportInsight.fallbackUsed ? (
-                        <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
-                          总结未生成，当前显示为原始研报入口。
-                        </p>
-                      ) : null}
-                    </div>
-                  </article>
-                  );
-                })}
-              </div>
-            </Section>
-          ) : null}
-
-          <Section title="今日催化">
-            <div className="space-y-3">
-              {visibleCatalysts.map((catalyst, catalystIndex) => (
-                <article
-                  key={`${catalyst.date}-${catalyst.title}-${catalystIndex}`}
-                  className="rounded-md border border-line/60 bg-panel px-4 py-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info">
-                      {catalystLabel(catalyst.type)}
-                    </span>
-                    <span className={`text-[11px] font-semibold ${impactTone(catalyst.impact)}`}>
-                      {impactLabel(catalyst.impact)}
-                    </span>
-                    <span className="text-[11px] text-muted">
-                      {catalyst.date}
-                    </span>
-                    {catalyst.source ? (
-                      <span className="text-[11px] text-muted">
-                        {catalyst.source}
-                        {catalyst.author ? ` · ${catalyst.author}` : ""}
-                      </span>
-                    ) : null}
-                  </div>
-                  <h4 className="mt-2 text-base font-semibold leading-6 text-foreground">
-                    {catalyst.link ? (
-                      <a
-                        href={catalyst.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hover:text-accent"
-                      >
-                        {catalyst.title}
-                      </a>
-                    ) : (
-                      catalyst.title
-                    )}
-                  </h4>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    {catalyst.summary}
+                    {point}
                   </p>
-                </article>
-              ))}
+                ))}
+              </div>
             </div>
-            {hiddenCatalysts.length > 0 ? (
-              <details className="mt-3 rounded-md border border-line/60 bg-background/30 px-4 py-3 text-sm">
-                <summary className="cursor-pointer select-none font-semibold text-muted hover:text-foreground">
-                  更多普通新闻 {hiddenCatalysts.length} 条
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {hiddenCatalysts.map((catalyst, catalystIndex) => (
-                    <p
-                      key={`${catalyst.date}-${catalyst.title}-${catalystIndex}`}
-                      className="break-words text-sm leading-6 text-muted"
-                    >
-                      {catalyst.date} · {catalyst.title}
-                    </p>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-          </Section>
-        </div>
 
-        <div className="space-y-5">
-          <Section title="财报复盘">
-            <div className="grid gap-2 text-sm">
+            <dl className="mt-4 grid gap-2 border-t border-line/60 pt-4 sm:grid-cols-2 xl:grid-cols-3">
               {financialRows.map(([label, value]) => (
                 <div
                   key={label}
-                  className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2 rounded-md bg-background/45 px-3 py-2"
+                  className="rounded-md bg-background/45 px-3 py-2"
                 >
-                  <span className="text-muted">{label}</span>
-                  <span className="min-w-0 break-words font-medium text-foreground">
-                    {value}
-                  </span>
+                  <dt className="text-[11px] font-semibold text-muted">
+                    {label}
+                  </dt>
+                  <dd className="text-sm font-semibold text-foreground">
+                    {value?.trim() || "n/a"}
+                  </dd>
                 </div>
               ))}
-            </div>
-          </Section>
-
-          <Section title="主线验证">
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-[11px] font-semibold text-muted">
-                  财报 / 经营
-                </p>
-                <BulletList items={stock.financialReadthrough} />
-              </div>
-              <div>
-                <p className="mb-2 text-[11px] font-semibold text-muted">
-                  产业主线
-                </p>
-                <BulletList items={stock.thesis} />
-              </div>
-            </div>
-          </Section>
-
-          <Section title="接下来盯什么">
-            <div className="space-y-4">
-              <div>
-                <p className="mb-2 text-[11px] font-semibold text-muted">
-                  验证点
-                </p>
-                <BulletList items={stock.watchPoints} />
-              </div>
-              <div>
-                <p className="mb-2 text-[11px] font-semibold text-muted">
-                  反证 / 风险
-                </p>
-                <div className="space-y-2">
-                  {stock.risks.map((risk) => (
-                    <p key={risk} className="text-sm leading-6 text-warning">
-                      {risk}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </div>
+            </dl>
           </Section>
         </div>
-      </div>
+
+        <Section title="跟踪要点">
+          <BulletList items={trackingPoints} />
+        </Section>
       </div>
     </article>
   );

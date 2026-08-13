@@ -40,6 +40,24 @@ const upcomingHighMomentum = {
 
 const intelligence = buildStocksIntelligence(upcomingHighMomentum);
 
+const noHistoricalCatalystLeak = buildStocksIntelligence({
+  ...upcomingHighMomentum,
+  catalysts: [
+    {
+      title: "HISTORICAL_CATALYST_MUST_NOT_RENDER",
+      type: "earnings",
+      date: "2026-05-01",
+      impact: "positive",
+      summary: "old item",
+    },
+  ],
+});
+assert.ok(
+  noHistoricalCatalystLeak.earningsBrief.points.every(
+    (point) => !point.includes("HISTORICAL_CATALYST_MUST_NOT_RENDER"),
+  ),
+);
+
 assert.equal(intelligence.tickerContext.price.value, "$921.40");
 assert.equal(intelligence.earningsBrief.mode, "pre");
 assert.match(intelligence.earningsBrief.title, /财报前/);
