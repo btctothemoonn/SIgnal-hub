@@ -22,6 +22,10 @@ assert.match(source, /aria-pressed=\{isFavorite\}/);
 assert.match(source, /setAuthorFilter\(option\.value\)/);
 assert.match(source, /data-signal-toolbar/);
 assert.match(source, /data-signal-feed-pane/);
+assert.match(source, /shouldRefreshSignalSnapshotsOnEffect/);
+assert.match(source, /signalRefreshRangeRef/);
+assert.match(source, /contentVisibility:\s*"auto"/);
+assert.match(source, /containIntrinsicSize:\s*"0 420px"/);
 assert.match(source, /rounded-\[6px\]/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 assert.match(

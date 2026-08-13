@@ -4,6 +4,7 @@ import {
   ALPHA_RESEARCH_STOCK_UNIVERSE,
 } from "@/lib/alpha-research-pool";
 import { getStocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import { compactStocksPerformanceSnapshot } from "@/lib/stocks-performance-transport";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,5 +47,9 @@ export async function GET(request: Request) {
     maxPoints: requestedMaxPoints(url),
     ...(marketDate ? { marketDate } : {}),
   });
-  return NextResponse.json(snapshot);
+  const responseSnapshot =
+    url.searchParams.get("format") === "compact"
+      ? compactStocksPerformanceSnapshot(snapshot)
+      : snapshot;
+  return NextResponse.json(responseSnapshot);
 }

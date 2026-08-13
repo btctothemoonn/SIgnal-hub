@@ -26,6 +26,11 @@ import {
   type StocksCatalystSnapshot,
 } from "@/lib/stocks-catalyst-data";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
+import {
+  expandCompactStocksPerformanceSnapshot,
+  type CompactStocksPerformanceSnapshot,
+} from "@/lib/stocks-performance-transport";
+import { scheduleDeferredBrowserTask } from "@/lib/deferred-browser-task";
 import { buildStocksTodayChanges } from "@/lib/stocks-changes";
 import { buildStocksSubscriptionReports } from "@/lib/stocks-subscription-reports";
 import type {
@@ -445,13 +450,17 @@ export function AlphaResearchPage() {
         const response = await fetch(
           `/api/stocks-performance?tickers=${encodeURIComponent(
             performanceTickersKey,
-          )}&startDate=${ALPHA_RESEARCH_POOL_TRACKING_START_DATE}&maxPoints=240`,
+          )}&startDate=${ALPHA_RESEARCH_POOL_TRACKING_START_DATE}&maxPoints=240&format=compact`,
           { cache: "no-store" },
         );
         if (!response.ok) {
           throw new Error(`performance data HTTP ${response.status}`);
         }
-        const snapshot = (await response.json()) as StocksPerformanceSnapshot;
+        const snapshot = expandCompactStocksPerformanceSnapshot(
+          (await response.json()) as
+            | StocksPerformanceSnapshot
+            | CompactStocksPerformanceSnapshot,
+        );
         if (!cancelled) {
           if (hasPerformanceSeries(snapshot)) {
             setLivePerformanceSnapshot({ cacheKey, snapshot });
@@ -505,10 +514,11 @@ export function AlphaResearchPage() {
         }
       }
     }
-    void loadFinancialData();
+    const cancelInitialLoad = scheduleDeferredBrowserTask(loadFinancialData);
     const timer = window.setInterval(loadFinancialData, 30 * 60 * 1000);
     return () => {
       cancelled = true;
+      cancelInitialLoad();
       window.clearInterval(timer);
     };
   }, [writeFinancialSnapshotCache]);
@@ -538,10 +548,11 @@ export function AlphaResearchPage() {
         }
       }
     }
-    void loadCatalystData();
+    const cancelInitialLoad = scheduleDeferredBrowserTask(loadCatalystData);
     const timer = window.setInterval(loadCatalystData, 2 * 60 * 1000);
     return () => {
       cancelled = true;
+      cancelInitialLoad();
       window.clearInterval(timer);
     };
   }, [writeCatalystSnapshotCache]);

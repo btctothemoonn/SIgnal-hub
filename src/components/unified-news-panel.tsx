@@ -42,6 +42,7 @@ import {
   getSignalFeedRangeLimit,
   type SignalFeedRange,
 } from "@/lib/signal-feed-range";
+import { shouldRefreshSignalSnapshotsOnEffect } from "@/lib/signal-snapshot-refresh";
 import {
   calculateSignalFeedScrollDelta,
   parseSignalFeedReadingAnchor,
@@ -1085,6 +1086,7 @@ export function UnifiedNewsPanel({
 
   const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef(false);
+  const signalRefreshRangeRef = useRef<SignalFeedRange | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -1293,7 +1295,13 @@ export function UnifiedNewsPanel({
 
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    void refreshSources({ ignoreThrottle: true, replace: true });
+    const previousRange = signalRefreshRangeRef.current;
+    signalRefreshRangeRef.current = feedRange;
+    if (shouldRefreshSignalSnapshotsOnEffect(previousRange, feedRange)) {
+      void refreshSources({ ignoreThrottle: true, replace: true });
+    } else if (previousRange === null) {
+      lastRefreshAtRef.current = Date.now();
+    }
     return () => {
       isActive = false;
       window.clearInterval(refreshTimer);
@@ -1938,6 +1946,10 @@ export function UnifiedNewsPanel({
               <article
                 key={item.id}
                 data-signal-feed-item-id={item.id}
+                style={{
+                  contentVisibility: "auto",
+                  containIntrinsicSize: "0 420px",
+                }}
                 role="button"
                 tabIndex={0}
                 onClick={() => {
