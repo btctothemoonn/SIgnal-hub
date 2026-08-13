@@ -3,11 +3,57 @@ import {
   BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
   fetchBinanceHynixPremiumSnapshot,
   getBinanceHynixPremiumStartTimeMs,
+  type BinanceHynixPremiumSnapshot,
   type BinanceHynixPremiumInterval,
 } from "../../../lib/binance-hynix-premium.ts";
+import {
+  createSnapshotCache,
+  type SnapshotCache,
+} from "../../../lib/snapshot-cache.ts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const PREMIUM_SNAPSHOT_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_PREMIUM_SNAPSHOT_CACHES = 4;
+const premiumSnapshotCaches = new Map<
+  string,
+  SnapshotCache<BinanceHynixPremiumSnapshot>
+>();
+
+function snapshotCacheKey({
+  interval,
+  startTime,
+  endTime,
+  limit,
+}: {
+  interval: BinanceHynixPremiumInterval;
+  startTime: number;
+  endTime?: number;
+  limit: number;
+}) {
+  const rollingStartBucket = Math.floor(
+    startTime / PREMIUM_SNAPSHOT_CACHE_TTL_MS,
+  );
+  return `${interval}:${rollingStartBucket}:${endTime ?? "latest"}:${limit}`;
+}
+
+function getPremiumSnapshotCache(
+  key: string,
+  fetcher: () => Promise<BinanceHynixPremiumSnapshot>,
+) {
+  const existing = premiumSnapshotCaches.get(key);
+  if (existing) return existing;
+
+  while (premiumSnapshotCaches.size >= MAX_PREMIUM_SNAPSHOT_CACHES) {
+    const oldestKey = premiumSnapshotCaches.keys().next().value;
+    if (oldestKey === undefined) break;
+    premiumSnapshotCaches.delete(oldestKey);
+  }
+  const cache = createSnapshotCache(fetcher, PREMIUM_SNAPSHOT_CACHE_TTL_MS);
+  premiumSnapshotCaches.set(key, cache);
+  return cache;
+}
 
 function requestedLimit(url: URL) {
   const parsed = Number(url.searchParams.get("limit"));
@@ -33,6 +79,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const interval = requestedInterval(url);
   const endTime = requestedTimestamp(url, "endTime");
+  const limit = requestedLimit(url);
   const requestedStartTime =
     requestedTimestamp(
       url,
@@ -46,11 +93,16 @@ export async function GET(request: Request) {
           getBinanceHynixPremiumStartTimeMs(interval, endTime ?? Date.now()),
         )
       : requestedStartTime;
-  const snapshot = await fetchBinanceHynixPremiumSnapshot({
-    interval,
-    startTime,
-    endTime,
-    limit: requestedLimit(url),
-  });
+  const cache = getPremiumSnapshotCache(
+    snapshotCacheKey({ interval, startTime, endTime, limit }),
+    () =>
+      fetchBinanceHynixPremiumSnapshot({
+        interval,
+        startTime,
+        endTime,
+        limit,
+      }),
+  );
+  const snapshot = await cache.get();
   return NextResponse.json(snapshot);
 }

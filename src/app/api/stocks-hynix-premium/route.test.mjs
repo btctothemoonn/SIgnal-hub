@@ -61,6 +61,15 @@ try {
       ),
   );
   assert.ok(payload.websocket.url.includes("kline_1m"));
+
+  const requestCountAfterFirstLoad = requests.length;
+  const cachedResponse = await GET(
+    new Request(
+      "http://signal-hub.test/api/stocks-hynix-premium?startTime=1783958400000",
+    ),
+  );
+  assert.equal(cachedResponse.status, 200);
+  assert.equal(requests.length, requestCountAfterFirstLoad);
 } finally {
   globalThis.fetch = previousFetch;
   if (previousRestBaseUrl === undefined) {
