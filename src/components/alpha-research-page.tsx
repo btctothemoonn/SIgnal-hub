@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
-import { StocksSubscriptionReports } from "@/components/stocks-subscription-reports";
 import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { StocksTodayChanges } from "@/components/stocks-today-changes";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
@@ -21,10 +20,6 @@ import {
   mergeStocksFinancialSnapshot,
   type StocksFinancialSnapshot,
 } from "@/lib/stocks-financial-data";
-import {
-  mergeStocksCatalystSnapshot,
-  type StocksCatalystSnapshot,
-} from "@/lib/stocks-catalyst-data";
 import type { StocksPerformanceSnapshot } from "@/lib/stocks-performance-data";
 import {
   expandCompactStocksPerformanceSnapshot,
@@ -32,30 +27,19 @@ import {
 } from "@/lib/stocks-performance-transport";
 import { scheduleDeferredBrowserTask } from "@/lib/deferred-browser-task";
 import { buildStocksTodayChanges } from "@/lib/stocks-changes";
-import { buildStocksSubscriptionReports } from "@/lib/stocks-subscription-reports";
-import type {
-  StocksResearchState,
-  StocksResearchStateInput,
-  StocksResearchStatus,
-} from "@/lib/stocks-research-state";
 
-type AlphaTab = "research" | "reports" | "messages";
+type AlphaTab = "research" | "messages";
 
 const tabs: { id: AlphaTab; label: string; description: string }[] = [
   {
     id: "research",
     label: "美股投研池",
-    description: "AI / 算力链股票池、催化事件和财报速览",
-  },
-  {
-    id: "reports",
-    label: "订阅研报",
-    description: "Patreon 研报列表、主题和 ticker 归因",
+    description: "AI / 算力链股票池和财报速览",
   },
   {
     id: "messages",
     label: "STOCKS 投研总结",
-    description: "行情/财报/新闻优先，TG/X 补充信号",
+    description: "行情和财报优先，整理投研结论",
   },
 ];
 
@@ -63,8 +47,7 @@ const STOCKS_MARKET_SNAPSHOT_CACHE_KEY =
   "signal-hub:stocks:market-snapshot:v1";
 const STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY =
   "signal-hub:stocks:financial-snapshot:v1";
-const STOCKS_CATALYST_SNAPSHOT_CACHE_KEY =
-  "signal-hub:stocks:catalyst-snapshot:v1";
+
 function performanceSnapshotCacheKey(tickersKey: string) {
   return `signal-hub:stocks:performance-snapshot:v1:${encodeURIComponent(
     tickersKey,
@@ -93,73 +76,8 @@ function snapshotIssueLabel(
     : null;
 }
 
-function snapshotStatusTitle(
-  snapshot: { errors: string[] } | null,
-  fallback: string,
-) {
-  const errors = snapshot?.errors.filter(Boolean) ?? [];
-  return errors.length > 0 ? errors.join(" | ") : fallback;
-}
-
 function isPerformanceCacheNotice(message: string | null) {
   return Boolean(message?.startsWith("No performance cache "));
-}
-
-function performanceIssueLabel(message: string) {
-  const match = message.match(
-    /^No performance cache for ([^;]+); using latest cached market date ([^.]+)\.$/,
-  );
-  return match ? `使用最近缓存 ${match[2]}` : message;
-}
-
-function researchStateErrorMessage(payload: unknown, fallback: string) {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "error" in payload &&
-    payload.error &&
-    typeof payload.error === "object" &&
-    "message" in payload.error &&
-    typeof payload.error.message === "string"
-  ) {
-    return payload.error.message;
-  }
-  return fallback;
-}
-
-const RESEARCH_STATE_STATUSES = new Set<string>([
-  "watch",
-  "waiting",
-  "holding",
-  "avoid",
-]);
-
-function isStocksResearchState(value: unknown): value is StocksResearchState {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const state = value as Record<string, unknown>;
-  const convictionIsValid =
-    state.conviction === null ||
-    (typeof state.conviction === "number" &&
-      Number.isInteger(state.conviction) &&
-      state.conviction >= 1 &&
-      state.conviction <= 5);
-
-  return (
-    typeof state.ticker === "string" &&
-    state.ticker.length > 0 &&
-    typeof state.status === "string" &&
-    RESEARCH_STATE_STATUSES.has(state.status) &&
-    convictionIsValid &&
-    typeof state.entryZone === "string" &&
-    typeof state.invalidation === "string" &&
-    typeof state.nextCatalyst === "string" &&
-    typeof state.thesis === "string" &&
-    (state.updatedAt === null || typeof state.updatedAt === "string") &&
-    typeof state.persisted === "boolean"
-  );
 }
 
 export function AlphaResearchPage() {
@@ -173,56 +91,27 @@ export function AlphaResearchPage() {
   const [liveFinancialSnapshot, setLiveFinancialSnapshot] =
     useState<StocksFinancialSnapshot | null>(null);
   const [financialError, setFinancialError] = useState<string | null>(null);
-  const [liveCatalystSnapshot, setLiveCatalystSnapshot] =
-    useState<StocksCatalystSnapshot | null>(null);
-  const [catalystError, setCatalystError] = useState<string | null>(null);
   const [livePerformanceSnapshot, setLivePerformanceSnapshot] =
     useState<KeyedPerformanceSnapshot | null>(null);
   const [performanceError, setPerformanceError] = useState<string | null>(null);
-  const [researchStates, setResearchStates] = useState<
-    Record<string, StocksResearchState>
-  >({});
-  const [researchStatesLoading, setResearchStatesLoading] = useState(true);
-  const [researchStatesError, setResearchStatesError] = useState<string | null>(
-    null,
-  );
-  const [researchStatusFilter, setResearchStatusFilter] = useState<
-    StocksResearchStatus | "all"
-  >("all");
   const [cachedMarketSnapshot, writeMarketSnapshotCache] =
     useBrowserJsonCache<StocksMarketSnapshot>(STOCKS_MARKET_SNAPSHOT_CACHE_KEY);
   const [cachedFinancialSnapshot, writeFinancialSnapshotCache] =
     useBrowserJsonCache<StocksFinancialSnapshot>(
       STOCKS_FINANCIAL_SNAPSHOT_CACHE_KEY,
     );
-  const [cachedCatalystSnapshot, writeCatalystSnapshotCache] =
-    useBrowserJsonCache<StocksCatalystSnapshot>(
-      STOCKS_CATALYST_SNAPSHOT_CACHE_KEY,
-    );
   const marketSnapshot = liveMarketSnapshot ?? cachedMarketSnapshot;
   const financialSnapshot = liveFinancialSnapshot ?? cachedFinancialSnapshot;
-  const catalystSnapshot = liveCatalystSnapshot ?? cachedCatalystSnapshot;
   const stocks = useMemo(() => {
     const withMarket = mergeStocksMarketSnapshot(
       ALPHA_RESEARCH_STOCKS,
       marketSnapshot,
     );
-    const withFinancials = mergeStocksFinancialSnapshot(
-      withMarket,
-      financialSnapshot,
-    );
-    return mergeStocksCatalystSnapshot(
-      withFinancials,
-      catalystSnapshot,
-    );
-  }, [catalystSnapshot, financialSnapshot, marketSnapshot]);
+    return mergeStocksFinancialSnapshot(withMarket, financialSnapshot);
+  }, [financialSnapshot, marketSnapshot]);
   const selectedStock = useMemo(
     () => stocks.find((stock) => stock.ticker === selectedTicker) ?? null,
     [selectedTicker, stocks],
-  );
-  const subscriptionReports = useMemo(
-    () => buildStocksSubscriptionReports(stocks),
-    [stocks],
   );
   const todayChanges = useMemo(
     () => buildStocksTodayChanges(stocks),
@@ -247,13 +136,6 @@ export function AlphaResearchPage() {
       : hasPerformanceSeries(cachedPerformanceSnapshot)
         ? cachedPerformanceSnapshot
         : null;
-  const marketStatus =
-    marketSnapshot?.source === "live"
-      ? "Live 行情"
-      : marketSnapshot?.source === "mock"
-        ? "Mock 回落"
-        : "行情加载中";
-
   const marketDataIsLive = marketSnapshot?.source === "live";
   const marketDataLoading = marketSnapshot === null && marketError === null;
   const marketDataLabel = marketDataIsLive
@@ -263,152 +145,15 @@ export function AlphaResearchPage() {
     : marketSnapshot?.source === "mock"
       ? "基线价 / 非实时"
       : "行情加载中";
-
-  const financialStatus =
-    financialSnapshot?.source === "live"
-      ? "Live 财报"
-      : financialSnapshot?.source === "mock"
-        ? "Mock 财报"
-        : "财报加载中";
-  const catalystStatus =
-    catalystSnapshot?.source === "live"
-      ? catalystSnapshot.provider === "all-sources"
-        ? "订阅+外部新闻+信号"
-        : catalystSnapshot.provider === "external-plus-supplemental"
-        ? "外部新闻+信号"
-        : catalystSnapshot.provider === "external-plus-subscription"
-          ? "订阅+外部新闻"
-          : catalystSnapshot.provider === "subscription-plus-supplemental"
-            ? "订阅+信号"
-            : catalystSnapshot.provider === "subscription-research"
-              ? "订阅研报"
-        : catalystSnapshot.provider === "external-news"
-          ? "外部新闻"
-          : "补充信号"
-      : catalystSnapshot?.source === "mock"
-        ? "Mock 新闻"
-        : "新闻加载中";
-
   const marketIssue = snapshotIssueLabel("行情", marketSnapshot);
   const financialIssue = snapshotIssueLabel("财报", financialSnapshot);
-  const catalystIssue = snapshotIssueLabel("新闻", catalystSnapshot);
-  const stocksDataHealthItems = [
-    {
-      label: "行情",
-      value: marketStatus,
-      detail: marketError ?? marketIssue ?? snapshotStatusTitle(marketSnapshot, marketStatus),
-      tone:
-        marketError || marketIssue
-          ? "warning"
-          : marketSnapshot?.source === "live"
-            ? "success"
-            : "info",
-    },
-    {
-      label: "财报",
-      value: financialStatus,
-      detail:
-        financialError ??
-        financialIssue ??
-        snapshotStatusTitle(financialSnapshot, financialStatus),
-      tone:
-        financialError || financialIssue
-          ? "warning"
-          : financialSnapshot?.source === "live"
-            ? "success"
-            : "info",
-    },
-    {
-      label: "新闻",
-      value: catalystStatus,
-      detail:
-        catalystError ??
-        catalystIssue ??
-        snapshotStatusTitle(catalystSnapshot, catalystStatus),
-      tone:
-        catalystError || catalystIssue
-          ? "warning"
-          : catalystSnapshot?.source === "live"
-            ? "success"
-            : "info",
-    },
-  ];
-
-  const saveResearchState = useCallback(
-    async (input: StocksResearchStateInput) => {
-      try {
-        const response = await fetch("/api/stocks-research-state", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        });
-        const payload = (await response.json()) as {
-          state?: StocksResearchState;
-          error?: { message?: string };
-        };
-        if (!response.ok) {
-          throw new Error(
-            researchStateErrorMessage(payload, "Unable to save research state."),
-          );
-        }
-        const saved = payload.state;
-        if (!isStocksResearchState(saved) || saved.ticker !== input.ticker) {
-          throw new Error("Research state save returned an invalid response.");
-        }
-        setResearchStates((current) => ({
-          ...current,
-          [saved.ticker]: saved,
-        }));
-        setResearchStatesError(null);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setResearchStatesError(message);
-        throw new Error(message);
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadResearchStates() {
-      try {
-        setResearchStatesLoading(true);
-        setResearchStatesError(null);
-        const response = await fetch("/api/stocks-research-state", {
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as {
-          states?: Record<string, StocksResearchState>;
-          error?: { message?: string };
-        };
-        if (!response.ok) {
-          throw new Error(
-            researchStateErrorMessage(payload, "Unable to load research states."),
-          );
-        }
-        if (!payload.states || Array.isArray(payload.states)) {
-          throw new Error("Research state load returned an invalid response.");
-        }
-        if (!cancelled) {
-          setResearchStates(payload.states);
-          setResearchStatesError(null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setResearchStatesError(
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-      } finally {
-        if (!cancelled) setResearchStatesLoading(false);
-      }
-    }
-    void loadResearchStates();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const activeErrors = [
+    marketError ?? marketIssue,
+    financialError ?? financialIssue,
+    performanceError && !isPerformanceCacheNotice(performanceError)
+      ? performanceError
+      : null,
+  ].filter((message): message is string => Boolean(message));
 
   useEffect(() => {
     let cancelled = false;
@@ -523,40 +268,6 @@ export function AlphaResearchPage() {
     };
   }, [writeFinancialSnapshotCache]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadCatalystData() {
-      try {
-        setCatalystError(null);
-        const response = await fetch("/api/stocks-catalysts", {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          throw new Error(`catalyst data HTTP ${response.status}`);
-        }
-        const snapshot = (await response.json()) as StocksCatalystSnapshot;
-        if (!cancelled) {
-          setLiveCatalystSnapshot(snapshot);
-          writeCatalystSnapshotCache(snapshot);
-          setCatalystError(null);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setCatalystError(
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-      }
-    }
-    const cancelInitialLoad = scheduleDeferredBrowserTask(loadCatalystData);
-    const timer = window.setInterval(loadCatalystData, 2 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      cancelInitialLoad();
-      window.clearInterval(timer);
-    };
-  }, [writeCatalystSnapshotCache]);
-
   return (
     <div
       data-stocks-workspace
@@ -572,7 +283,7 @@ export function AlphaResearchPage() {
               行情和财报尝试接入 Yahoo 数据源，失败时自动回落本地 mock。
             </p>
           </div>
-          <div className="grid min-w-0 grid-cols-3 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1">
+          <div className="grid min-w-0 grid-cols-2 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1">
             {tabs.map((tab) => {
               const selected = activeTab === tab.id;
               return (
@@ -597,102 +308,18 @@ export function AlphaResearchPage() {
             })}
           </div>
         </div>
-        <div
-          data-stocks-health-strip
-          className="flex flex-col gap-2 px-3 py-2 sm:px-4 lg:flex-row lg:items-center"
-        >
-          <span className="text-[11px] font-semibold uppercase tracking-normal text-muted">
-            数据健康中心
-          </span>
-          <div className="flex min-w-0 flex-1 flex-wrap gap-2">
-            {stocksDataHealthItems.map((item) => (
-              <span
-                key={item.label}
-                title={item.detail}
-                className={[
-                  "max-w-[16rem] truncate rounded-[6px] border px-2 py-1 text-[11px] font-semibold",
-                  item.tone === "success"
-                    ? "border-success/30 bg-success-soft text-success"
-                    : item.tone === "warning"
-                      ? "border-warning/30 bg-warning-soft text-warning"
-                      : "border-info/30 bg-info-soft text-info",
-                ].join(" ")}
-              >
-                {item.label}：{item.value}
-              </span>
-            ))}
-            {marketSnapshot ? (
-              <span className="rounded-[6px] border border-line/60 bg-background/45 px-2 py-1 text-[11px] text-muted">
-                {new Date(marketSnapshot.generatedAt).toLocaleTimeString(
-                  "zh-CN",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                )}
-              </span>
-            ) : null}
-            {marketError ? (
-              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {marketError}
-              </span>
-            ) : null}
-            {marketIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(marketSnapshot, marketIssue)}
-              >
-                {marketIssue}
-              </span>
-            ) : null}
-            {financialError ? (
-              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {financialError}
-              </span>
-            ) : null}
-            {financialIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(financialSnapshot, financialIssue)}
-              >
-                {financialIssue}
-              </span>
-            ) : null}
-            {catalystError ? (
-              <span className="max-w-[18rem] truncate rounded-[6px] border border-danger/30 bg-danger-soft px-2 py-1 text-[11px] text-danger">
-                {catalystError}
-              </span>
-            ) : null}
-            {catalystIssue ? (
-              <span
-                className="max-w-[12rem] truncate rounded-[6px] border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning"
-                title={snapshotStatusTitle(catalystSnapshot, catalystIssue)}
-              >
-                {catalystIssue}
-              </span>
-            ) : null}
-            {performanceError ? (
-              <span
-                className={[
-                  "max-w-[18rem] truncate rounded-[6px] border px-2 py-1 text-[11px]",
-                  isPerformanceCacheNotice(performanceError)
-                    ? "border-warning/30 bg-warning-soft text-warning"
-                    : "border-danger/30 bg-danger-soft text-danger",
-                ].join(" ")}
-                title={performanceError}
-              >
-                {performanceIssueLabel(performanceError)}
-              </span>
-            ) : null}
+        {activeErrors.length > 0 ? (
+          <div
+            data-stocks-error-alert
+            className="border-t border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-warning sm:px-4"
+          >
+            {[...new Set(activeErrors)].join(" | ")}
           </div>
-        </div>
+        ) : null}
       </section>
 
       {activeTab === "research" ? (
-        <section
-          data-stocks-chart-band
-          className="grid min-w-0 gap-3"
-        >
+        <section data-stocks-chart-band className="grid min-w-0 gap-3">
           <StocksHynixPremiumCurve />
           <StocksTodayChanges
             changes={todayChanges}
@@ -712,40 +339,25 @@ export function AlphaResearchPage() {
                 const sector = ALPHA_RESEARCH_SECTORS.find(
                   (item) => item.id === sectorId,
                 );
-                if (!sector) {
-                  return;
-                }
+                if (!sector) return;
                 setSelectedTicker(sector.tickers[0]);
+                setActiveTab("research");
               }}
               onSelectTicker={setSelectedTicker}
               marketDataLabel={marketDataLabel}
               marketDataLoading={marketDataLoading}
               performanceLoading={performanceSnapshot === null && performanceError === null}
-              researchStates={researchStates}
-              researchStatesLoading={researchStatesLoading}
-              researchStatesError={researchStatesError}
-              researchStatusFilter={researchStatusFilter}
-              onResearchStatusFilterChange={setResearchStatusFilter}
-              onSaveResearchState={saveResearchState}
             />
           </div>
         </section>
-      ) : activeTab === "reports" ? (
-        <StocksSubscriptionReports
-          reports={subscriptionReports}
-          generatedAt={catalystSnapshot?.generatedAt ?? null}
-          onSelectTicker={(ticker) => {
-            setSelectedTicker(ticker);
-            setActiveTab("research");
-          }}
-        />
-      ) : (
+      ) : null}
+      {activeTab === "messages" ? (
         <AlphaSummaryCard
           audience="stocks"
           deskLabel="STOCKS Research AI"
           endpoint="/api/stocks-summary"
         />
-      )}
+      ) : null}
     </div>
   );
 }

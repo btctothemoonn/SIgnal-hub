@@ -10,14 +10,9 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const pagePath = join(directory, "alpha-research-page.tsx");
-const panelPath = join(directory, "stocks-research-state-panel.tsx");
 const temporaryPagePath = join(
   directory,
   `alpha-research-page.runtime-${process.pid}.mjs`,
-);
-const temporaryPanelPath = join(
-  directory,
-  `stocks-research-state-panel.page-runtime-${process.pid}.mjs`,
 );
 const temporaryStubsPath = join(
   directory,
@@ -25,30 +20,11 @@ const temporaryStubsPath = join(
 );
 const temporaryStubsImport = `./alpha-research-page.runtime-stubs-${process.pid}.mjs`;
 
-function researchState(ticker, overrides = {}) {
-  return {
-    ticker,
-    status: "watch",
-    conviction: null,
-    entryZone: "",
-    invalidation: "",
-    nextCatalyst: "",
-    thesis: "",
-    updatedAt: "2026-07-26T09:00:00.000Z",
-    persisted: true,
-    ...overrides,
-  };
-}
-
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-function visibleText(renderer) {
-  return JSON.stringify(renderer.toJSON());
 }
 
 async function flushAsyncWork() {
@@ -60,10 +36,7 @@ const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
 const requests = [];
 const intervalCallbacks = [];
-let nextResearchPutResponse = () =>
-  jsonResponse({ ok: false, error: { message: "PUT response not configured" } }, 500);
 let pageRenderer;
-let panelRenderer;
 
 try {
   const stubsSource = `
@@ -76,7 +49,7 @@ export function AlphaSummaryCard() {
 }
 
 export function StocksResearchLayout(props) {
-  globalThis.__task6StocksResearchLayoutProps = props;
+  globalThis.__task2StocksResearchLayoutProps = props;
   return null;
 }
 
@@ -152,23 +125,8 @@ export function buildStocksSubscriptionReports() {
       },
       fileName: pagePath,
     })
-    .outputText.replaceAll(/from "@\/[^"]+";/g, `from "${temporaryStubsImport}";`);
+    .outputText.replaceAll(/from "@\/[^\"]+";/g, `from "${temporaryStubsImport}";`);
   writeFileSync(temporaryPagePath, pageOutput, "utf8");
-
-  const panelOutput = ts
-    .transpileModule(readFileSync(panelPath, "utf8"), {
-      compilerOptions: {
-        jsx: ts.JsxEmit.ReactJSX,
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ES2022,
-      },
-      fileName: panelPath,
-    })
-    .outputText.replaceAll(
-      '"@/components/stocks-research-state-form"',
-      '"./stocks-research-state-form.ts"',
-    );
-  writeFileSync(temporaryPanelPath, panelOutput, "utf8");
 
   globalThis.window = {
     setInterval(callback) {
@@ -178,24 +136,11 @@ export function buildStocksSubscriptionReports() {
     clearInterval() {},
   };
 
-  const initialStates = {
-    NVDA: researchState("NVDA"),
-    AMD: researchState("AMD", {
-      status: "waiting",
-      thesis: "Keep AMD unchanged",
-    }),
-  };
-
   globalThis.fetch = async (input, init = {}) => {
     const url = String(input);
     const method = init.method ?? "GET";
     requests.push({ url, method, init });
 
-    if (url === "/api/stocks-research-state") {
-      return method === "PUT"
-        ? nextResearchPutResponse()
-        : jsonResponse({ generatedAt: "2026-07-26T09:00:00.000Z", states: initialStates });
-    }
     if (url === "/api/stocks-market-data") {
       return jsonResponse({
         source: "mock",
@@ -206,13 +151,6 @@ export function buildStocksSubscriptionReports() {
       });
     }
     if (url === "/api/stocks-financial-data") {
-      return jsonResponse({
-        source: "mock",
-        generatedAt: "2026-07-26T09:00:00.000Z",
-        errors: [],
-      });
-    }
-    if (url === "/api/stocks-catalysts") {
       return jsonResponse({
         source: "mock",
         generatedAt: "2026-07-26T09:00:00.000Z",
@@ -233,139 +171,31 @@ export function buildStocksSubscriptionReports() {
   const { AlphaResearchPage } = await import(
     `${pathToFileURL(temporaryPagePath).href}?run=${Date.now()}`,
   );
-  const { StocksResearchStatePanel } = await import(
-    `${pathToFileURL(temporaryPanelPath).href}?run=${Date.now()}`,
-  );
 
   await act(async () => {
     pageRenderer = TestRenderer.create(React.createElement(AlphaResearchPage));
     await flushAsyncWork();
   });
 
-  const researchGets = () =>
-    requests.filter(
-      (request) =>
-        request.url === "/api/stocks-research-state" &&
-        request.method === "GET",
-    );
-  assert.equal(researchGets().length, 1);
+  assert.ok(requests.some(({ url }) => url === "/api/stocks-market-data"));
+  assert.ok(requests.some(({ url }) => url === "/api/stocks-financial-data"));
+  assert.ok(requests.some(({ url }) => url.startsWith("/api/stocks-performance?")));
+  assert.ok(requests.every(({ url }) => !url.includes("stocks-catalysts")));
+  assert.ok(requests.every(({ url }) => !url.includes("stocks-research-state")));
+
+  const initialLayoutProps = globalThis.__task2StocksResearchLayoutProps;
+  assert.equal("researchStates" in initialLayoutProps, false);
+  assert.equal("onSaveResearchState" in initialLayoutProps, false);
 
   const scheduledCallbacks = [...intervalCallbacks];
   await act(async () => {
     await Promise.all(scheduledCallbacks.map((callback) => callback()));
     await flushAsyncWork();
   });
-  assert.equal(researchGets().length, 1);
 
-  const initialLayoutProps = globalThis.__task6StocksResearchLayoutProps;
-  assert.deepEqual(initialLayoutProps.researchStates, initialStates);
-  const unchangedAmd = initialLayoutProps.researchStates.AMD;
-
-  const completeInput = {
-    ticker: "NVDA",
-    status: "holding",
-    conviction: 5,
-    entryZone: "$180-$190",
-    invalidation: "Close below $170",
-    nextCatalyst: "Next earnings",
-    thesis: "Demand remains strong",
-  };
-  const savedNvda = researchState("NVDA", {
-    ...completeInput,
-    updatedAt: "2026-07-26T09:05:00.000Z",
-  });
-  nextResearchPutResponse = () => jsonResponse({ ok: true, state: savedNvda });
-
-  await act(async () => {
-    await initialLayoutProps.onSaveResearchState(completeInput);
-  });
-
-  const successfulPut = requests.find(
-    (request) =>
-      request.url === "/api/stocks-research-state" &&
-      request.method === "PUT",
-  );
-  assert.deepEqual(JSON.parse(successfulPut.init.body), completeInput);
-  const savedLayoutProps = globalThis.__task6StocksResearchLayoutProps;
-  assert.deepEqual(savedLayoutProps.researchStates.NVDA, savedNvda);
-  assert.strictEqual(savedLayoutProps.researchStates.AMD, unchangedAmd);
-
-  const beforeMalformedSave = savedLayoutProps.researchStates;
-  const malformedSavedStates = [
-    ["ticker", { ...savedNvda, ticker: 42 }],
-    ["status", { ...savedNvda, status: "not-a-research-status" }],
-    ["conviction", { ...savedNvda, conviction: "5" }],
-    ["entryZone", { ...savedNvda, entryZone: null }],
-    ["invalidation", { ...savedNvda, invalidation: 17 }],
-    ["nextCatalyst", { ...savedNvda, nextCatalyst: {} }],
-    ["thesis", { ...savedNvda, thesis: false }],
-    ["updatedAt", { ...savedNvda, updatedAt: 123 }],
-    ["persisted", { ...savedNvda, persisted: "true" }],
-  ];
-  for (const [field, malformedSavedState] of malformedSavedStates) {
-    nextResearchPutResponse = () =>
-      jsonResponse({ ok: true, state: malformedSavedState });
-    let malformedSaveError = null;
-    await act(async () => {
-      try {
-        await savedLayoutProps.onSaveResearchState(completeInput);
-      } catch (error) {
-        malformedSaveError = error;
-      }
-    });
-    assert.match(
-      String(malformedSaveError),
-      /invalid response/i,
-      `${field} must be validated`,
-    );
-    assert.strictEqual(
-      globalThis.__task6StocksResearchLayoutProps.researchStates,
-      beforeMalformedSave,
-      `${field} must not enter page state`,
-    );
-  }
-
-  nextResearchPutResponse = () =>
-    jsonResponse(
-      { ok: false, error: { message: "Persistence unavailable" } },
-      503,
-    );
-  const editorLayoutProps = globalThis.__task6StocksResearchLayoutProps;
-  await act(async () => {
-    panelRenderer = TestRenderer.create(
-      React.createElement(StocksResearchStatePanel, {
-        ticker: "NVDA",
-        researchState: editorLayoutProps.researchStates.NVDA,
-        loading: false,
-        onSave: editorLayoutProps.onSaveResearchState,
-      }),
-    );
-  });
-  await act(async () => {
-    panelRenderer.root.findByType("textarea").props.onChange({
-      target: { value: "Preserve this rejected draft" },
-    });
-  });
-  await act(async () => {
-    panelRenderer.root.findByType("form").props.onSubmit({
-      preventDefault() {},
-    });
-    await flushAsyncWork();
-  });
-
-  assert.equal(
-    panelRenderer.root.findByType("textarea").props.value,
-    "Preserve this rejected draft",
-  );
-  assert.match(visibleText(panelRenderer), /Persistence unavailable/);
-  assert.equal(
-    globalThis.__task6StocksResearchLayoutProps.researchStatesError,
-    "Persistence unavailable",
-  );
+  assert.ok(requests.every(({ url }) => !url.includes("stocks-catalysts")));
+  assert.ok(requests.every(({ url }) => !url.includes("stocks-research-state")));
 } finally {
-  if (panelRenderer) {
-    await act(async () => panelRenderer.unmount());
-  }
   if (pageRenderer) {
     await act(async () => pageRenderer.unmount());
   }
@@ -375,10 +205,9 @@ export function buildStocksSubscriptionReports() {
   } else {
     globalThis.window = originalWindow;
   }
-  delete globalThis.__task6StocksResearchLayoutProps;
+  delete globalThis.__task2StocksResearchLayoutProps;
   rmSync(temporaryPagePath, { force: true });
-  rmSync(temporaryPanelPath, { force: true });
   rmSync(temporaryStubsPath, { force: true });
 }
 
-console.log("ok - alpha research page research-state workflow behavior");
+console.log("ok - alpha research page retained endpoint behavior");
