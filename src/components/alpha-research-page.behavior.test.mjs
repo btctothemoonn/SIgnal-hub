@@ -36,6 +36,7 @@ const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
 const requests = [];
 const intervalCallbacks = [];
+let snapshotErrorMode = "generic";
 let pageRenderer;
 
 try {
@@ -143,18 +144,24 @@ export function buildStocksSubscriptionReports() {
 
     if (url === "/api/stocks-market-data") {
       return jsonResponse({
-        source: "mock",
-        provider: "mock",
-        freshness: "mock",
+        source: "live",
+        provider: "fmp",
+        freshness: "realtime",
         generatedAt: "2026-07-26T09:00:00.000Z",
-        errors: [],
+        errors:
+          snapshotErrorMode === "generic"
+            ? ["NVDA provider request timed out after 10000ms"]
+            : ["refresh failed; using cached snapshot"],
       });
     }
     if (url === "/api/stocks-financial-data") {
       return jsonResponse({
-        source: "mock",
+        source: "live",
         generatedAt: "2026-07-26T09:00:00.000Z",
-        errors: [],
+        errors:
+          snapshotErrorMode === "generic"
+            ? ["Yahoo chart returned provider diagnostic details"]
+            : ["refresh failed; using cached snapshot"],
       });
     }
     if (url.startsWith("/api/stocks-performance?")) {
@@ -183,15 +190,31 @@ export function buildStocksSubscriptionReports() {
   assert.ok(requests.every(({ url }) => !url.includes("stocks-catalysts")));
   assert.ok(requests.every(({ url }) => !url.includes("stocks-research-state")));
 
+  const genericErrorAlert = pageRenderer.root.findByProps({
+    "data-stocks-error-alert": true,
+  });
+  const genericErrorText = genericErrorAlert.children.join("");
+  assert.match(genericErrorText, /行情部分数据不可用/);
+  assert.match(genericErrorText, /财报部分数据不可用/);
+  assert.doesNotMatch(genericErrorText, /NVDA|timed out|Yahoo|diagnostic/);
+
   const initialLayoutProps = globalThis.__task2StocksResearchLayoutProps;
   assert.equal("researchStates" in initialLayoutProps, false);
   assert.equal("onSaveResearchState" in initialLayoutProps, false);
 
   const scheduledCallbacks = [...intervalCallbacks];
+  snapshotErrorMode = "cached";
   await act(async () => {
     await Promise.all(scheduledCallbacks.map((callback) => callback()));
     await flushAsyncWork();
   });
+
+  const cachedErrorAlert = pageRenderer.root.findByProps({
+    "data-stocks-error-alert": true,
+  });
+  const cachedErrorText = cachedErrorAlert.children.join("");
+  assert.match(cachedErrorText, /行情刷新失败，使用缓存/);
+  assert.match(cachedErrorText, /财报刷新失败，使用缓存/);
 
   assert.ok(requests.every(({ url }) => !url.includes("stocks-catalysts")));
   assert.ok(requests.every(({ url }) => !url.includes("stocks-research-state")));

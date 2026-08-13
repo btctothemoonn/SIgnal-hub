@@ -73,7 +73,9 @@ function snapshotIssueLabel(
     error.includes("refresh failed; using cached snapshot"),
   )
     ? `${label}刷新失败，使用缓存`
-    : null;
+    : snapshot.errors.length > 0
+      ? `${label}部分数据不可用`
+      : null;
 }
 
 function isPerformanceCacheNotice(message: string | null) {

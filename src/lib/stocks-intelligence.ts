@@ -19,12 +19,6 @@ export type StocksIntelligenceMetric = {
   tone: StocksIntelligenceTone;
 };
 
-export type StocksRiskTag = {
-  label: string;
-  tone: StocksIntelligenceTone;
-  reason: string;
-};
-
 export type StocksEarningsBrief = {
   mode: "pre" | "post" | "watch" | "quiet";
   title: string;
@@ -54,7 +48,6 @@ export type StocksTickerContext = {
 export type StocksIntelligence = {
   tickerContext: StocksTickerContext;
   earningsBrief: StocksEarningsBrief;
-  riskTags: StocksRiskTag[];
   structure: StocksStructureSnapshot;
 };
 
@@ -285,85 +278,6 @@ function buildEarningsBrief(stock: AlphaResearchStock): StocksEarningsBrief {
   };
 }
 
-function buildRiskTags(stock: AlphaResearchStock): StocksRiskTag[] {
-  const tags: StocksRiskTag[] = [];
-  const financial = stock.financialSnapshot;
-
-  if (
-    stock.market.source !== "live" ||
-    financial.source === "mock" ||
-    !hasUsableValue(financial.revenue) ||
-    !hasUsableValue(financial.eps)
-  ) {
-    tags.push({
-      label: "数据不足",
-      tone: "danger",
-      reason: "行情或关键财务字段不是实时/可用数据。",
-    });
-  }
-
-  if (stock.market.earningsStatus === "upcoming") {
-    tags.push({
-      label: "财报临近",
-      tone: "warning",
-      reason: "财报前价格和预期容易放大波动。",
-    });
-  } else if (stock.market.earningsStatus === "recent") {
-    tags.push({
-      label: "财报刚过",
-      tone: "info",
-      reason: "需要确认涨跌来自业绩、指引还是估值重定价。",
-    });
-  }
-
-  if (stock.market.dayChangePct > 5 || stock.market.sevenDayChangePct > 12) {
-    tags.push({
-      label: "追高风险",
-      tone: "warning",
-      reason: "短线涨幅已经偏大，继续追入需要等待新催化确认。",
-    });
-  }
-
-  if (
-    stock.catalysts.some((catalyst) =>
-      ["subscription", "external", "supplemental"].includes(
-        catalyst.sourceRole ?? "",
-      ),
-    ) ||
-    stock.catalysts.length > 0
-  ) {
-    tags.push({
-      label: "消息驱动",
-      tone: "info",
-      reason: "当前判断包含新闻、订阅研报或补充信号。",
-    });
-  }
-
-  if (stock.market.source === "live" && stock.market.candlesSource === "live") {
-    if (stock.market.sevenDayChangePct >= 5 && stock.market.dayChangePct >= -1) {
-      tags.push({
-        label: "趋势偏强",
-        tone: "success",
-        reason: "7日表现强于普通观察阈值，且当日没有明显破坏。",
-      });
-    }
-  }
-
-  if (
-    /-\d/.test(financial.revenueYoY) ||
-    /^-/.test(financial.freeCashFlow.trim()) ||
-    !hasUsableValue(financial.grossMargin)
-  ) {
-    tags.push({
-      label: "估值/利润率风险",
-      tone: "warning",
-      reason: "增长、现金流或利润率质量需要进一步核对。",
-    });
-  }
-
-  return tags;
-}
-
 function buildStructureSnapshot(stock: AlphaResearchStock): StocksStructureSnapshot {
   const points = [
     `今日 ${formatSignedPercent(stock.market.dayChangePct)}`,
@@ -419,7 +333,6 @@ export function buildStocksIntelligence(
   return {
     tickerContext: buildTickerContext(stock),
     earningsBrief: buildEarningsBrief(stock),
-    riskTags: buildRiskTags(stock),
     structure: buildStructureSnapshot(stock),
   };
 }

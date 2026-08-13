@@ -14,8 +14,9 @@ const catalystSentinelStock = {
   market: {
     ...nvda.market,
     source: "live",
+    candlesSource: "mock",
     dayChangePct: 4.8,
-    sevenDayChangePct: 6.2,
+    sevenDayChangePct: 0,
     earningsStatus: "quiet",
   },
 };
@@ -51,6 +52,7 @@ const changes = buildStocksTodayChanges([
     market: {
       ...arm.market,
       source: "live",
+      candlesSource: "live",
       dayChangePct: 0.8,
       sevenDayChangePct: -12.3,
       earningsStatus: "upcoming",
@@ -61,8 +63,9 @@ const changes = buildStocksTodayChanges([
     ...intel,
     market: {
       ...intel.market,
-      source: "mock",
-      dayChangePct: 8.2,
+      source: "live",
+      candlesSource: "mock",
+      dayChangePct: 0.2,
       sevenDayChangePct: -12.4,
       earningsStatus: "upcoming",
     },
@@ -77,6 +80,10 @@ assert.deepEqual(
 assert.equal(changes.length, new Set(changes.map((item) => item.ticker)).size);
 assert.ok(changes.every((item) => !("kind" in item)));
 assert.equal(changes.find((item) => item.ticker === "NVDA")?.tone, "positive");
+assert.equal(
+  changes.find((item) => item.ticker === "NVDA")?.detail,
+  "7日 n/a，K线未确认。",
+);
 assert.equal(changes.find((item) => item.ticker === "AMD")?.tone, "negative");
 assert.equal(changes.find((item) => item.ticker === "ARM")?.tone, "negative");
 assert.match(changes.find((item) => item.ticker === "AMD")?.title ?? "", /下跌/);

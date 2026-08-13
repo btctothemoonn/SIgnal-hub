@@ -24,6 +24,12 @@ function marketMoveChange(stock: AlphaResearchStock): StocksTodayChange | null {
   if (stock.market.source !== "live") return null;
 
   const dayMove = stock.market.dayChangePct;
+  const candlesAreLive = stock.market.candlesSource === "live";
+  const dayMoveDetail = candlesAreLive
+    ? `7日 ${signedPercent(stock.market.sevenDayChangePct)}，相对${
+        dayMove < 0 ? "走弱" : "走强"
+      }。`
+    : "7日 n/a，K线未确认。";
   if (dayMove <= -4) {
     return {
       id: `${stock.ticker}:move:day`,
@@ -32,7 +38,7 @@ function marketMoveChange(stock: AlphaResearchStock): StocksTodayChange | null {
       tone: "negative",
       score: 70 + Math.min(15, Math.abs(dayMove)),
       title: `当日下跌 ${signedPercent(dayMove)}`,
-      detail: `7日 ${signedPercent(stock.market.sevenDayChangePct)}，相对走弱。`,
+      detail: dayMoveDetail,
     };
   }
   if (dayMove >= 4) {
@@ -43,10 +49,11 @@ function marketMoveChange(stock: AlphaResearchStock): StocksTodayChange | null {
       tone: "positive",
       score: 70 + Math.min(15, dayMove),
       title: `当日上涨 ${signedPercent(dayMove)}`,
-      detail: `7日 ${signedPercent(stock.market.sevenDayChangePct)}，相对走强。`,
+      detail: dayMoveDetail,
     };
   }
 
+  if (!candlesAreLive) return null;
   const sevenDayMove = stock.market.sevenDayChangePct;
   if (Math.abs(sevenDayMove) < 10) return null;
   const positive = sevenDayMove > 0;

@@ -40,39 +40,21 @@ const upcomingHighMomentum = {
 
 const intelligence = buildStocksIntelligence(upcomingHighMomentum);
 
-const noHistoricalCatalystLeak = buildStocksIntelligence({
+const catalystSentinelStock = {
   ...upcomingHighMomentum,
-  catalysts: [
-    {
-      title: "HISTORICAL_CATALYST_MUST_NOT_RENDER",
-      type: "earnings",
-      date: "2026-05-01",
-      impact: "positive",
-      summary: "old item",
-    },
-  ],
+};
+Object.defineProperty(catalystSentinelStock, "catalysts", {
+  get() {
+    throw new Error("stocks intelligence must not read catalyst history");
+  },
 });
-assert.ok(
-  noHistoricalCatalystLeak.earningsBrief.points.every(
-    (point) => !point.includes("HISTORICAL_CATALYST_MUST_NOT_RENDER"),
-  ),
-);
+assert.doesNotThrow(() => buildStocksIntelligence(catalystSentinelStock));
 
 assert.equal(intelligence.tickerContext.price.value, "$921.40");
 assert.equal(intelligence.earningsBrief.mode, "pre");
 assert.match(intelligence.earningsBrief.title, /财报前/);
-assert.ok(
-  intelligence.riskTags.some((tag) => tag.label === "财报临近"),
-  "upcoming earnings should produce 财报临近",
-);
-assert.ok(
-  intelligence.riskTags.some((tag) => tag.label === "追高风险"),
-  "high day/seven-day move should produce 追高风险",
-);
-assert.ok(
-  intelligence.riskTags.some((tag) => tag.label === "趋势偏强"),
-  "live strong candles should produce 趋势偏强",
-);
+assert.match(intelligence.earningsBrief.points[0], /当前状态为临近/);
+assert.match(intelligence.earningsBrief.points[2], /今日 \+6\.2%，7日 \+13\.4%/);
 assert.equal(intelligence.structure.label, "强势");
 assert.ok(intelligence.structure.points.some((point) => point.includes("7日")));
 
@@ -96,11 +78,9 @@ const mockWeakData = {
 };
 
 const weakIntelligence = buildStocksIntelligence(mockWeakData);
-assert.ok(
-  weakIntelligence.riskTags.some((tag) => tag.label === "数据不足"),
-  "mock/missing data should produce 数据不足",
-);
 assert.equal(weakIntelligence.structure.label, "结构未确认");
+assert.equal(weakIntelligence.structure.score, 0);
+assert.equal(weakIntelligence.earningsBrief.confidence, "limited");
 assert.equal(weakIntelligence.tickerContext.revenue.value, "n/a");
 
 const subscriptionInsight = buildSubscriptionReportInsight({
