@@ -929,6 +929,9 @@ export function mergeStocksFinancialSnapshot(
         periodLabel: financial.periodLabel,
         source: financial.source,
         updatedAt: financial.updatedAt,
+        latestEarnings: financial.latestEarnings ?? null,
+        earningsHistory: financial.earningsHistory ?? [],
+        earningsInsight: financial.earningsInsight ?? null,
       },
     };
   });

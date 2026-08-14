@@ -1,3 +1,6 @@
+import type { StocksEarningsComparison } from "./stocks-earnings-comparison.ts";
+import type { StocksEarningsInsight } from "./stocks-earnings-insight.ts";
+
 export const ALPHA_RESEARCH_DEFAULT_TICKER = "NVDA";
 export const ALPHA_RESEARCH_POOL_TRACKING_START_DATE = "2026-05-06";
 
@@ -98,6 +101,9 @@ export type AlphaResearchFinancialSnapshot = {
   periodLabel?: string;
   source?: "live" | "mock";
   updatedAt?: string;
+  latestEarnings?: StocksEarningsComparison | null;
+  earningsHistory?: StocksEarningsComparison[];
+  earningsInsight?: StocksEarningsInsight | null;
 };
 
 export type AlphaResearchCandle = {

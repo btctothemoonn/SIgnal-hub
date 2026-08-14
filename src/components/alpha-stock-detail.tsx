@@ -6,10 +6,8 @@ import {
   type AlphaResearchEarningsStatus,
   type AlphaResearchStock,
 } from "@/lib/alpha-research-pool";
-import {
-  buildStocksIntelligence,
-  type StocksIntelligenceTone,
-} from "@/lib/stocks-intelligence";
+import { buildStocksIntelligence } from "@/lib/stocks-intelligence";
+import { StocksEarningsBrief } from "@/components/stocks-earnings-brief";
 
 type AlphaStockDetailProps = {
   stock: AlphaResearchStock | null;
@@ -36,28 +34,6 @@ function earningsLabel(status: AlphaResearchEarningsStatus) {
     quiet: "平静",
   };
   return labels[status];
-}
-
-function intelligenceTextTone(tone: StocksIntelligenceTone) {
-  const classes: Record<StocksIntelligenceTone, string> = {
-    success: "text-success",
-    warning: "text-warning",
-    danger: "text-danger",
-    info: "text-info",
-    muted: "text-muted",
-  };
-  return classes[tone];
-}
-
-function intelligenceBadgeTone(tone: StocksIntelligenceTone) {
-  const classes: Record<StocksIntelligenceTone, string> = {
-    success: "border-success/40 bg-success-soft text-success",
-    warning: "border-warning/40 bg-warning-soft text-warning",
-    danger: "border-danger/40 bg-danger-soft text-danger",
-    info: "border-info/40 bg-info-soft text-info",
-    muted: "border-line/60 bg-background/45 text-muted",
-  };
-  return classes[tone];
 }
 
 function compactTrackingPoints(stock: AlphaResearchStock) {
@@ -136,8 +112,7 @@ export function AlphaStockDetail({
   }
 
   const sector = getAlphaResearchSectorById(stock.sectorId);
-  const { tickerContext, earningsBrief, structure } =
-    buildStocksIntelligence(stock);
+  const { tickerContext } = buildStocksIntelligence(stock);
   const stockMarketIsLive = stock.market.source === "live";
   const stockMarketIsLoading = marketDataLoading && !stockMarketIsLive;
   const stockCandlesAreLive =
@@ -155,14 +130,6 @@ export function AlphaStockDetail({
     ? stock.market.relativeStrengthLabel
     : "暂无可用 7 日走势";
   const businessTags = stock.businessTags.slice(0, 3);
-  const financialRows = [
-    ["营收", stock.financialSnapshot.revenue],
-    ["营收同比", stock.financialSnapshot.revenueYoY],
-    ["EPS", stock.financialSnapshot.eps],
-    ["毛利率", stock.financialSnapshot.grossMargin],
-    ["自由现金流", stock.financialSnapshot.freeCashFlow],
-    ["指引", stock.financialSnapshot.guidance],
-  ];
   const trackingPoints = compactTrackingPoints(stock);
 
   return (
@@ -242,71 +209,12 @@ export function AlphaStockDetail({
             </div>
           </Section>
 
-          <Section title="结构与财报">
-            <div>
-              <p className="text-[11px] font-semibold text-muted">
-                Structure Snapshot
-              </p>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                <span
-                  className={`rounded-md border px-2 py-1 text-sm font-semibold ${intelligenceBadgeTone(
-                    structure.tone,
-                  )}`}
-                >
-                  {structure.label}
-                </span>
-                <span className="font-mono text-xs text-muted">
-                  Score {structure.score}
-                </span>
-              </div>
-              <div className="mt-3 space-y-1">
-                {structure.points.map((point) => (
-                  <p key={point} className="text-sm leading-6 text-muted">
-                    {point}
-                  </p>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 border-t border-line/60 pt-4">
-              <p className="text-[11px] font-semibold text-muted">
-                Earnings Brief
-              </p>
-              <p
-                className={`mt-2 text-sm font-semibold ${intelligenceTextTone(
-                  earningsBrief.confidence === "normal" ? "info" : "warning",
-                )}`}
-              >
-                {earningsBrief.title}
-              </p>
-              <div className="mt-3 space-y-2">
-                {earningsBrief.points.map((point) => (
-                  <p
-                    key={point}
-                    className="break-words text-sm leading-6 text-foreground"
-                  >
-                    {point}
-                  </p>
-                ))}
-              </div>
-            </div>
-
-            <dl className="mt-4 grid gap-2 border-t border-line/60 pt-4 sm:grid-cols-2 xl:grid-cols-3">
-              {financialRows.map(([label, value]) => (
-                <div
-                  key={label}
-                  className="rounded-md bg-background/45 px-3 py-2"
-                >
-                  <dt className="text-[11px] font-semibold text-muted">
-                    {label}
-                  </dt>
-                  <dd className="text-sm font-semibold text-foreground">
-                    {value?.trim() || "n/a"}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </Section>
+          <StocksEarningsBrief
+            comparison={stock.financialSnapshot.latestEarnings ?? null}
+            insight={stock.financialSnapshot.earningsInsight ?? null}
+            updatedAt={stock.financialSnapshot.updatedAt}
+            source={stock.financialSnapshot.source}
+          />
         </div>
 
         <Section title="跟踪要点">

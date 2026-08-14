@@ -24,18 +24,11 @@ const source = readFileSync(detailPath, "utf8");
 
 assert.match(source, /data-stock-primary-context/);
 assert.match(source, /研究结论/);
-assert.match(source, /结构与财报/);
 assert.match(source, /跟踪要点/);
-assert.match(source, /Structure Snapshot/);
-assert.match(source, /Earnings Brief/);
+assert.match(source, /StocksEarningsBrief/);
 assert.match(source, /stock\.summary/);
 assert.match(source, /stock\.thesis\.slice\(0, 2\)/);
 assert.match(source, /compactTrackingPoints\(stock\)/);
-assert.match(
-  source,
-  /<dd className="text-sm font-semibold text-foreground">\s*\{value\?\.trim\(\) \|\| "n\/a"\}\s*<\/dd>/,
-  "empty financial values must use the required n/a display fallback",
-);
 assert.match(
   source,
   /note=\{stock\.financialSnapshot\.nextEarningsDate \|\| "n\/a"\}/,
@@ -60,6 +53,9 @@ assert.doesNotMatch(source, /Priority \{stock\.priority\}/);
 assert.doesNotMatch(source, /sessionLabel/);
 assert.doesNotMatch(source, /CandlestickChart/);
 assert.doesNotMatch(source, /candles3d/);
+assert.doesNotMatch(source, /Structure Snapshot/);
+assert.doesNotMatch(source, /Earnings Brief/);
+assert.doesNotMatch(source, /结构与财报/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
 let detailRenderer;
@@ -71,6 +67,10 @@ export { buildStocksIntelligence } from "../lib/stocks-intelligence.ts";
 
 export function getAlphaResearchSectorById() {
   return { name: "Semiconductors" };
+}
+
+export function StocksEarningsBrief() {
+  return "Stocks Earnings Brief";
 }
 `,
     "utf8",
@@ -85,7 +85,7 @@ export function getAlphaResearchSectorById() {
       fileName: detailPath,
     })
     .outputText.replaceAll(
-      /from "@\/lib\/(?:alpha-research-pool|stocks-intelligence)";/g,
+      /from "@\/(?:lib\/(?:alpha-research-pool|stocks-intelligence)|components\/stocks-earnings-brief)";/g,
       `from "${temporaryStubsImport}";`,
     );
   writeFileSync(temporaryDetailPath, detailOutput, "utf8");
@@ -111,7 +111,7 @@ export function getAlphaResearchSectorById() {
       }),
     );
   });
-  assert.match(JSON.stringify(detailRenderer.toJSON()), /Structure Snapshot/);
+  assert.match(JSON.stringify(detailRenderer.toJSON()), /Stocks Earnings Brief/);
 } finally {
   if (detailRenderer) {
     await act(async () => detailRenderer.unmount());
