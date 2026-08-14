@@ -282,7 +282,7 @@ export function AlphaResearchPage() {
               STOCKS 美股投研池
             </h1>
             <p className="mt-1 text-xs text-muted">
-              行情和财报尝试接入 Yahoo 数据源，失败时自动回落本地 mock。
+              行情尝试接入 Yahoo，财报采用 FMP 标准化数据；失败时保留最近缓存。
             </p>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1">

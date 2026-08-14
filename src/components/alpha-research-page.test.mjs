@@ -27,6 +27,7 @@ assert.match(source, /StocksHynixPremiumCurve/);
 assert.match(source, /<StocksHynixPremiumCurve \/>/);
 assert.match(source, /StocksTodayChanges/);
 assert.match(source, /AlphaSummaryCard/);
+assert.match(source, /行情尝试接入 Yahoo，财报采用 FMP 标准化数据/);
 assert.match(source, /data-stocks-workspace/);
 assert.match(source, /data-stocks-chart-band/);
 assert.match(source, /data-stocks-research-split/);
