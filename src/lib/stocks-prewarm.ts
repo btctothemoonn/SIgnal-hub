@@ -8,9 +8,14 @@ import { getStocksCatalystSnapshot } from "./stocks-catalyst-source.ts";
 import type { StocksCatalystSnapshot } from "./stocks-catalyst-data.ts";
 import {
   getStocksFinancialSnapshot,
+  type StocksFinancialStatement,
   type StocksFinancialSnapshot,
 } from "./stocks-financial-data.ts";
 import { enrichStocksFinancialSnapshotWithInsights } from "./stocks-earnings-insight.ts";
+import {
+  calculateComparisonMetric,
+  type StocksEarningsComparison,
+} from "./stocks-earnings-comparison.ts";
 import {
   getStocksMarketSnapshot,
   type StocksMarketDataProvider,
@@ -182,6 +187,114 @@ function shouldCacheSnapshot(snapshot: CacheableStocksSnapshot) {
   return snapshot.source === "live" && Boolean(snapshot.generatedAt);
 }
 
+function sameEarningsPeriod(
+  left: StocksEarningsComparison,
+  right: StocksEarningsComparison,
+) {
+  return (
+    left.ticker === right.ticker &&
+    left.fiscalYear === right.fiscalYear &&
+    left.quarter === right.quarter
+  );
+}
+
+function mergeEarningsComparison(
+  previous: StocksEarningsComparison | null | undefined,
+  next: StocksEarningsComparison | null | undefined,
+) {
+  if (!next) return previous ?? null;
+  if (!previous || !sameEarningsPeriod(previous, next)) return next;
+  const mergeMetric = (
+    prior: StocksEarningsComparison["revenue"],
+    current: StocksEarningsComparison["revenue"],
+  ) => {
+    if (current.estimate !== null) return current;
+    return calculateComparisonMetric(
+      current.actual,
+      prior.estimate,
+      current.previousYearActual ?? prior.previousYearActual,
+    );
+  };
+  return {
+    ...next,
+    revenue: mergeMetric(previous.revenue, next.revenue),
+    netIncome: mergeMetric(previous.netIncome, next.netIncome),
+  };
+}
+
+function mergeFinancialStatement(
+  previous: StocksFinancialStatement | undefined,
+  next: StocksFinancialStatement,
+): StocksFinancialStatement {
+  if (!previous) return next;
+  const latestEarnings = mergeEarningsComparison(
+    previous.latestEarnings,
+    next.latestEarnings,
+  );
+  const consensusRegressed = Boolean(
+    next.latestEarnings &&
+      previous.latestEarnings &&
+      sameEarningsPeriod(next.latestEarnings, previous.latestEarnings) &&
+      ((next.latestEarnings.revenue.estimate === null &&
+        previous.latestEarnings.revenue.estimate !== null) ||
+        (next.latestEarnings.netIncome.estimate === null &&
+          previous.latestEarnings.netIncome.estimate !== null)),
+  );
+  const priorHistory = new Map(
+    (previous.earningsHistory ?? []).map((item) => [
+      `${item.fiscalYear}-${item.quarter}`,
+      item,
+    ]),
+  );
+  const history = (next.earningsHistory ?? []).map((item) =>
+    mergeEarningsComparison(
+      priorHistory.get(`${item.fiscalYear}-${item.quarter}`),
+      item,
+    ),
+  );
+  for (const item of previous.earningsHistory ?? []) {
+    const key = `${item.fiscalYear}-${item.quarter}`;
+    if (!(next.earningsHistory ?? []).some(
+      (candidate) => `${candidate.fiscalYear}-${candidate.quarter}` === key,
+    )) {
+      history.push(item);
+    }
+  }
+  return {
+    ...next,
+    latestEarnings,
+    earningsHistory: history
+      .filter((item): item is StocksEarningsComparison => item !== null)
+      .sort(
+        (left, right) =>
+          Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
+      )
+      .slice(0, 8),
+    earningsInsight:
+      (consensusRegressed ? previous.earningsInsight : next.earningsInsight) ??
+      (latestEarnings &&
+      previous.latestEarnings &&
+      sameEarningsPeriod(latestEarnings, previous.latestEarnings)
+        ? previous.earningsInsight
+        : null),
+  };
+}
+
+export function preserveSuccessfulFinancialEntries(
+  previous: StocksFinancialSnapshot | null,
+  next: StocksFinancialSnapshot,
+): StocksFinancialSnapshot {
+  if (!previous) return next;
+  const financials = { ...previous.financials };
+  for (const [ticker, statement] of Object.entries(next.financials)) {
+    financials[ticker] = mergeFinancialStatement(
+      previous.financials[ticker],
+      statement,
+    );
+  }
+  return { ...next, financials };
+}
+
 export function isStocksCachePrewarmEnabled(env: EnvLike = process.env) {
   return isEnabled(env.STOCKS_CACHE_PREWARM_ENABLED, true);
 }
@@ -298,9 +411,16 @@ export async function getCachedStocksSnapshot<
 
   try {
     const snapshot = await loader();
-    if (shouldCacheSnapshot(snapshot)) {
-      await writeStocksSnapshotCache({ kind, env, snapshot });
-      return snapshot;
+    const candidate =
+      kind === "financial" && cached
+        ? (preserveSuccessfulFinancialEntries(
+            cached as unknown as StocksFinancialSnapshot,
+            snapshot as unknown as StocksFinancialSnapshot,
+          ) as unknown as T)
+        : snapshot;
+    if (shouldCacheSnapshot(candidate)) {
+      await writeStocksSnapshotCache({ kind, env, snapshot: candidate });
+      return candidate;
     }
     if (cached) {
       const reason =

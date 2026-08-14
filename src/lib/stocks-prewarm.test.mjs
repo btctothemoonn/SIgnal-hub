@@ -14,12 +14,132 @@ const {
   getStocksSnapshotHealth,
   getStocksSnapshotCachePath,
   isStocksCachePrewarmEnabled,
+  preserveSuccessfulFinancialEntries,
   prewarmStocksCaches,
   resolveStocksMarketProvider,
   writeStocksSnapshotCache,
 } = await import(moduleUrl);
 const prewarmSource = readFileSync(moduleUrl, "utf8");
 assert.match(prewarmSource, /enrichStocksFinancialSnapshotWithInsights/);
+
+const priorComparison = {
+  ticker: "NBIS",
+  fiscalYear: 2026,
+  quarter: "Q2",
+  fiscalDateEnding: "2026-06-30",
+  reportDate: "2026-08-12",
+  reportTiming: "before-market",
+  currency: "USD",
+  accountingBasis: "FMP standardized",
+  provider: "fmp",
+  generatedAt: "2026-08-14T00:00:00.000Z",
+  revenue: {
+    estimate: 573_937_500,
+    actual: 582_300_000,
+    previousYearActual: 105_100_000,
+    estimateYoYPct: 446.087,
+    actualYoYPct: 454.044,
+    surprise: 8_362_500,
+    surprisePct: 1.457,
+  },
+  netIncome: {
+    estimate: -273_800_000,
+    actual: -190_400_000,
+    previousYearActual: -143_600_000,
+    estimateYoYPct: -90.669,
+    actualYoYPct: -32.591,
+    surprise: 83_400_000,
+    surprisePct: 30.46,
+  },
+};
+const previousFinancial = {
+  generatedAt: "2026-08-14T00:00:00.000Z",
+  source: "live",
+  provider: "fmp",
+  errors: [],
+  financials: {
+    NBIS: {
+      ticker: "NBIS",
+      source: "live",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+      revenue: "$582.30M",
+      revenueYoY: "454.0%",
+      eps: "n/a",
+      grossMargin: "n/a",
+      freeCashFlow: "n/a",
+      nextEarningsDate: "2026-08-12",
+      guidance: "No forward estimate",
+      periodLabel: "Q2 2026",
+      latestEarnings: priorComparison,
+      earningsHistory: [priorComparison],
+      earningsInsight: {
+        conclusion: "cached conclusion",
+        driver: "cached driver",
+        risk: "cached risk",
+        source: "ai",
+        model: "MiniMax-M2.7",
+        generatedAt: "2026-08-14T00:00:00.000Z",
+      },
+    },
+    CBRS: {
+      ticker: "CBRS",
+      source: "live",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+      revenue: "$209.90M",
+      revenueYoY: "n/a",
+      eps: "n/a",
+      grossMargin: "n/a",
+      freeCashFlow: "n/a",
+      nextEarningsDate: "2026-08-12",
+      guidance: "No forward estimate",
+      periodLabel: "Q2 2026",
+    },
+  },
+};
+const partialFinancial = {
+  generatedAt: "2026-08-14T01:00:00.000Z",
+  source: "live",
+  provider: "fmp",
+  errors: ["NBIS: FMP analyst-estimates HTTP 402"],
+  financials: {
+    NBIS: {
+      ...previousFinancial.financials.NBIS,
+      updatedAt: "2026-08-14T01:00:00.000Z",
+      latestEarnings: {
+        ...priorComparison,
+        generatedAt: "2026-08-14T01:00:00.000Z",
+        revenue: {
+          ...priorComparison.revenue,
+          estimate: null,
+          estimateYoYPct: null,
+          surprise: null,
+          surprisePct: null,
+        },
+      },
+      earningsInsight: {
+        conclusion: "temporary rules fallback",
+        driver: "missing estimates",
+        risk: "missing estimates",
+        source: "rules",
+        model: null,
+        generatedAt: "2026-08-14T01:00:00.000Z",
+      },
+    },
+  },
+};
+const preservedFinancial = preserveSuccessfulFinancialEntries(
+  previousFinancial,
+  partialFinancial,
+);
+assert.ok(preservedFinancial.financials.CBRS);
+assert.equal(
+  preservedFinancial.financials.NBIS.latestEarnings.revenue.estimate,
+  573_937_500,
+);
+assert.equal(
+  preservedFinancial.financials.NBIS.earningsInsight.conclusion,
+  "cached conclusion",
+);
 
 const runtimeDir = mkdtempSync(join(tmpdir(), "signal-hub-stocks-prewarm-"));
 const env = {
