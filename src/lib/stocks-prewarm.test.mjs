@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -296,6 +302,56 @@ try {
       .accountingBasis,
     "FMP standardized",
   );
+
+  const freshLegacyFinancial = structuredClone(legacyPreviousFinancial);
+  freshLegacyFinancial.generatedAt = new Date().toISOString();
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env,
+    snapshot: freshLegacyFinancial,
+  });
+  let freshLoaderCalls = 0;
+  const freshHit = await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: false,
+    loader: async () => {
+      freshLoaderCalls += 1;
+      return partialFinancial;
+    },
+  });
+  assert.equal(freshLoaderCalls, 0);
+  assert.equal(
+    freshHit.financials.NBIS.latestEarnings.revenue.estimate,
+    573_937_500,
+  );
+  assert.equal(
+    freshHit.financials.NBIS.latestEarnings.revenue.estimateSource.method,
+    "direct",
+  );
+  assert.equal(
+    freshHit.financials.NBIS.latestEarnings.revenue.estimateSource
+      .accountingBasis,
+    "FMP standardized",
+  );
+  const freshCachePath = getStocksSnapshotCachePath("financial", env);
+  assert.equal(
+    JSON.parse(readFileSync(freshCachePath, "utf8"))
+      .financials.NBIS.latestEarnings.revenue.estimateSource.accountingBasis,
+    "FMP standardized",
+  );
+  const migratedMtimeMs = statSync(freshCachePath).mtimeMs;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: false,
+    loader: async () => {
+      freshLoaderCalls += 1;
+      return partialFinancial;
+    },
+  });
+  assert.equal(statSync(freshCachePath).mtimeMs, migratedMtimeMs);
 
   const cachedMarket = {
     generatedAt: "2026-05-14T01:00:00.000Z",

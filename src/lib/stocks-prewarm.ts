@@ -261,6 +261,44 @@ function normalizeEarningsComparison(
   };
 }
 
+function normalizeStocksFinancialStatement(
+  statement: StocksFinancialStatement,
+) {
+  return {
+    ...statement,
+    ...(statement.latestEarnings === undefined
+      ? {}
+      : { latestEarnings: normalizeEarningsComparison(statement.latestEarnings) }),
+    ...(statement.earningsHistory === undefined
+      ? {}
+      : {
+          earningsHistory: statement.earningsHistory
+            .map((item) => normalizeEarningsComparison(item))
+            .filter(
+              (item): item is StocksEarningsComparison => item !== null,
+            ),
+        }),
+  };
+}
+
+function normalizeStocksFinancialSnapshot(
+  snapshot: StocksFinancialSnapshot,
+) {
+  const normalized = {
+    ...snapshot,
+    financials: Object.fromEntries(
+      Object.entries(snapshot.financials).map(([ticker, statement]) => [
+        ticker,
+        normalizeStocksFinancialStatement(statement),
+      ]),
+    ),
+  };
+  return {
+    snapshot: normalized,
+    changed: JSON.stringify(snapshot) !== JSON.stringify(normalized),
+  };
+}
+
 function mergeEarningsComparison(
   previous: StocksEarningsComparison | null | undefined,
   next: StocksEarningsComparison | null | undefined,
@@ -452,7 +490,18 @@ export async function readStocksSnapshotCache<
     }
     const ageMs = Date.now() - snapshotTime(snapshot);
     if (!allowStale && ageMs > maxAgeMs) return null;
-    return snapshot;
+    if (kind !== "financial") return snapshot;
+    const migration = normalizeStocksFinancialSnapshot(
+      snapshot as unknown as StocksFinancialSnapshot,
+    );
+    if (migration.changed) {
+      await writeStocksSnapshotCache({
+        kind,
+        env,
+        snapshot: migration.snapshot,
+      });
+    }
+    return migration.snapshot as unknown as T;
   } catch {
     return null;
   }
