@@ -6,6 +6,7 @@ import {
   parseAlphaVantageEarningsCandidate,
   parseEodhdEarningsCandidate,
   parseFinnhubEarningsCandidate,
+  parseYahooEarningsCandidate,
 } from "./stocks-earnings-fallback.ts";
 
 const target = {
@@ -30,6 +31,9 @@ const finnhubPayload = {
       revenueEstimate: 573_937_500,
       epsActual: -1.9,
       epsEstimate: -2.74,
+      currency: "USD",
+      revenueUnit: "raw",
+      epsUnit: "per-share",
     },
   ],
 };
@@ -43,6 +47,34 @@ const eodhdPayload = {
       revenueEstimate: 573_937_500,
       epsEstimate: -2.74,
     },
+  ],
+};
+
+const eodhdNestedPayload = {
+  type: "Trends",
+  symbols: "NBIS.US,OTHER.US",
+  trends: [
+    [
+      {
+        code: "NBIS.US",
+        date: "2026-06-30",
+        period: "0q",
+        currency: "USD",
+        revenueUnit: "raw",
+        epsUnit: "per-share",
+        revenueEstimateAvg: "573937500.00",
+        earningsEstimateAvg: "-2.74",
+      },
+    ],
+    [
+      {
+        code: "OTHER.US",
+        date: "2026-06-30",
+        period: "0q",
+        revenueEstimateAvg: "1.00",
+        earningsEstimateAvg: "0.01",
+      },
+    ],
   ],
 };
 
@@ -76,10 +108,44 @@ assert.equal(
   parseEodhdEarningsCandidate(eodhdPayload, target)?.epsEstimate,
   -2.74,
 );
+assert.equal(parseEodhdEarningsCandidate(eodhdPayload, target)?.currency, null);
+assert.equal(parseEodhdEarningsCandidate(eodhdPayload, target)?.revenueUnit, null);
+assert.equal(
+  parseEodhdEarningsCandidate(eodhdNestedPayload, target)?.revenueEstimate,
+  573_937_500,
+);
+assert.equal(
+  parseEodhdEarningsCandidate(eodhdNestedPayload, target)?.epsEstimate,
+  -2.74,
+);
 assert.equal(
   parseAlphaVantageEarningsCandidate(alphaVantagePayload, target)
     ?.netIncomeActual,
   -190_400_000,
+);
+assert.equal(
+  parseYahooEarningsCandidate(
+    {
+      quoteSummary: {
+        result: [
+          {
+            currency: "USD",
+            incomeStatementHistoryQuarterly: {
+              incomeStatementHistory: [
+                {
+                  endDate: { raw: 1782777600 },
+                  totalRevenue: { raw: 582_300_000 },
+                  netIncome: { raw: -190_400_000 },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    target,
+  )?.revenueActual,
+  582_300_000,
 );
 assert.equal(deriveNetIncome(-2.74, 100_000_000), -274_000_000);
 assert.equal(
@@ -124,24 +190,34 @@ function metric(actual, estimate, source = "direct") {
   };
 }
 
-function baseCandidate({ revenueEstimate = 573_937_500, netIncomeEstimate = -274_000_000 } = {}) {
+function baseCandidate({
+  revenueActual = 582_300_000,
+  revenueEstimate = 573_937_500,
+  netIncomeActual = -190_400_000,
+  netIncomeEstimate = -274_000_000,
+} = {}) {
   return {
     ...target,
     provider: "fmp",
-    revenueActual: 582_300_000,
+    revenueActual,
     revenueEstimate,
-    netIncomeActual: -190_400_000,
+    netIncomeActual,
     netIncomeEstimate,
     epsActual: -1.9,
     epsEstimate: netIncomeEstimate === null ? null : -2.74,
     dilutedShares: 100_000_000,
+    revenueUnit: "raw",
+    netIncomeUnit: "raw",
+    epsCurrency: "USD",
+    epsUnit: "per-share",
+    dilutedSharesUnit: "shares",
     comparison: {
       ...target,
       provider: "fmp",
       generatedAt: "2026-08-15T00:00:00.000Z",
       accountingBasis: "FMP standardized",
-      revenue: metric(582_300_000, revenueEstimate),
-      netIncome: metric(-190_400_000, netIncomeEstimate),
+      revenue: metric(revenueActual, revenueEstimate),
+      netIncome: metric(netIncomeActual, netIncomeEstimate),
     },
   };
 }
@@ -179,6 +255,8 @@ const fallback = await completeStocksEarningsComparison({
     assert.equal(url.hostname, "finnhub.io");
     assert.equal(url.pathname, "/api/v1/calendar/earnings");
     assert.equal(url.searchParams.get("symbol"), "NBIS");
+    assert.equal(url.searchParams.get("from"), "2026-08-12");
+    assert.equal(url.searchParams.get("to"), "2026-08-12");
     return Response.json(finnhubPayload);
   },
 });
@@ -197,6 +275,141 @@ assert.deepEqual(fallback.comparison.netIncome.estimateSource, {
 });
 assert.deepEqual(fallback.errors, []);
 
+const noReportDateUrls = [];
+const withoutReportDate = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: {
+    ...baseCandidate({ revenueEstimate: null }),
+    reportDate: null,
+    comparison: { ...baseCandidate({ revenueEstimate: null }).comparison, reportDate: null },
+  },
+  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    noReportDateUrls.push(url);
+    return Response.json(finnhubPayload);
+  },
+});
+assert.equal(noReportDateUrls[0]?.searchParams.get("from"), "2026-07-14");
+assert.equal(noReportDateUrls[0]?.searchParams.get("to"), "2026-10-28");
+assert.equal(withoutReportDate.comparison.revenue.estimate, 573_937_500);
+
+const normalizedUnit = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null }),
+  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
+  fetchImpl: async () =>
+    Response.json({
+      earningsCalendar: [
+        {
+          ...finnhubPayload.earningsCalendar[0],
+          revenueEstimate: 573.9375,
+          revenueUnit: "millions",
+        },
+      ],
+    }),
+});
+assert.equal(normalizedUnit.comparison.revenue.estimate, 573_937_500);
+
+const incompatibleCurrency = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null }),
+  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
+  fetchImpl: async () =>
+    Response.json({
+      earningsCalendar: [
+        {
+          ...finnhubPayload.earningsCalendar[0],
+          currency: "KRW",
+        },
+      ],
+    }),
+});
+assert.equal(incompatibleCurrency.comparison.revenue.estimate, null);
+assert.ok(incompatibleCurrency.errors.some((error) => /currency/i.test(error)));
+assert.ok(
+  incompatibleCurrency.errors.every((error) => !error.includes("finnhub-secret")),
+);
+
+const yahooUrls = [];
+const yahooFallback = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueActual: null, netIncomeActual: null }),
+  env: {},
+  fetchImpl: async (input) => {
+    yahooUrls.push(new URL(String(input)));
+    return Response.json({
+      quoteSummary: {
+        result: [
+          {
+            currency: "USD",
+            incomeStatementHistoryQuarterly: {
+              incomeStatementHistory: [
+                {
+                  endDate: { fmt: "2026-06-30", raw: 1782777600 },
+                  totalRevenue: { raw: 582_300_000 },
+                  netIncome: { raw: -190_400_000 },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+  },
+});
+assert.equal(yahooUrls.length, 1);
+assert.equal(yahooFallback.comparison.revenue.actual, 582_300_000);
+assert.equal(yahooFallback.comparison.netIncome.actual, -190_400_000);
+
+const noKeyUrls = [];
+const noKeys = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null, netIncomeEstimate: null }),
+  env: {},
+  fetchImpl: async (input) => {
+    noKeyUrls.push(String(input));
+    throw new Error("No keyed provider should be requested");
+  },
+});
+assert.equal(noKeyUrls.length, 0);
+assert.deepEqual(noKeys.errors, []);
+
+let emptyResultRequests = 0;
+const emptyResults = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null, netIncomeEstimate: null }),
+  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
+  fetchImpl: async () => {
+    emptyResultRequests += 1;
+    return Response.json({ earningsCalendar: [] });
+  },
+});
+assert.equal(emptyResultRequests, 1);
+assert.deepEqual(emptyResults.errors, []);
+
+const isolatedProviderErrors = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null, netIncomeEstimate: null }),
+  env: {
+    STOCKS_FINNHUB_API_KEY: "finnhub-secret",
+    STOCKS_EODHD_API_KEY: "eodhd-secret",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    return new Response("provider failure", {
+      status: url.hostname === "finnhub.io" ? 429 : 400,
+    });
+  },
+});
+assert.ok(isolatedProviderErrors.errors.some((error) => /finnhub.*429/i.test(error)));
+assert.ok(isolatedProviderErrors.errors.some((error) => /eodhd.*400/i.test(error)));
+assert.ok(
+  isolatedProviderErrors.errors.every(
+    (error) => !error.includes("finnhub-secret") && !error.includes("eodhd-secret"),
+  ),
+);
+
 const protectedErrors = await completeStocksEarningsComparison({
   ticker: "NBIS",
   base: baseCandidate({ revenueEstimate: null, netIncomeEstimate: null }),
@@ -213,13 +426,19 @@ assert.ok(
 const derivedCandidate = {
   ...target,
   provider: "finnhub",
+  currency: "USD",
   revenueActual: null,
   revenueEstimate: null,
+  revenueUnit: "raw",
   netIncomeActual: null,
   netIncomeEstimate: null,
+  netIncomeUnit: "raw",
   epsActual: null,
   epsEstimate: -2.74,
+  epsCurrency: "USD",
+  epsUnit: "per-share",
   dilutedShares: 100_000_000,
+  dilutedSharesUnit: "shares",
 };
 const directCandidate = {
   ...derivedCandidate,
@@ -231,6 +450,11 @@ const derivedFirst = mergeStocksEarningsFallbackCandidate(
   baseCandidate({ netIncomeEstimate: null }),
   derivedCandidate,
 );
+const incompatibleEpsBasis = mergeStocksEarningsFallbackCandidate(
+  baseCandidate({ netIncomeEstimate: null }),
+  { ...derivedCandidate, epsCurrency: "KRW" },
+);
+assert.equal(incompatibleEpsBasis.comparison.netIncome.estimate, null);
 const directWins = mergeStocksEarningsFallbackCandidate(derivedFirst, directCandidate);
 assert.equal(directWins.comparison.netIncome.estimate, -260_000_000);
 assert.equal(directWins.comparison.netIncome.estimateSource?.method, "direct");

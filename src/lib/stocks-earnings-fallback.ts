@@ -20,18 +20,33 @@ export type StocksEarningsFallbackTarget = {
   currency: string;
 };
 
-export type StocksEarningsFallbackCandidate = StocksEarningsFallbackTarget & {
+type StocksEarningsAmountUnit = "raw" | "thousands" | "millions" | "billions" | null;
+
+export type StocksEarningsFallbackCandidate = Omit<
+  StocksEarningsFallbackTarget,
+  "currency"
+> & {
+  currency: string | null;
   provider: StocksEarningsProvider;
   revenueActual: number | null;
   revenueEstimate: number | null;
+  revenueUnit: StocksEarningsAmountUnit;
   netIncomeActual: number | null;
   netIncomeEstimate: number | null;
+  netIncomeUnit: StocksEarningsAmountUnit;
   epsActual: number | null;
   epsEstimate: number | null;
+  epsCurrency: string | null;
+  epsUnit: "per-share" | null;
   dilutedShares: number | null;
+  dilutedSharesUnit: "shares" | null;
 };
 
-export type StocksEarningsFallbackBase = StocksEarningsFallbackCandidate & {
+export type StocksEarningsFallbackBase = Omit<
+  StocksEarningsFallbackCandidate,
+  "currency"
+> & {
+  currency: string;
   comparison: StocksEarningsComparison;
 };
 
@@ -81,6 +96,33 @@ function dateValue(record: JsonRecord) {
   );
 }
 
+function fiscalDateValue(record: JsonRecord) {
+  return stringValue(record.fiscalDateEnding) || stringValue(record.fiscalDate);
+}
+
+function currencyValue(record: JsonRecord) {
+  const value =
+    stringValue(record.currency) ||
+    stringValue(record.reportedCurrency) ||
+    stringValue(record.financialCurrency);
+  return value ? value.toUpperCase() : null;
+}
+
+function amountUnitValue(value: unknown): StocksEarningsAmountUnit {
+  const normalized = stringValue(value).toLowerCase();
+  if (["raw", "unit", "units"].includes(normalized)) return "raw";
+  if (["thousand", "thousands", "k"].includes(normalized)) return "thousands";
+  if (["million", "millions", "m"].includes(normalized)) return "millions";
+  if (["billion", "billions", "b"].includes(normalized)) return "billions";
+  return null;
+}
+
+function sourceAmountUnit(record: JsonRecord, metric: "revenue" | "netIncome") {
+  return amountUnitValue(
+    record[`${metric}Unit`] ?? record.amountUnit ?? record.unit ?? record.scale,
+  );
+}
+
 function hasMatchingFiscalIdentity(
   record: JsonRecord,
   target: StocksEarningsFallbackTarget,
@@ -88,7 +130,7 @@ function hasMatchingFiscalIdentity(
 ) {
   const fiscalYear = recordNumber(record, ["fiscalYear", "year"]);
   const quarter = quarterValue(record.quarter ?? record.period);
-  const fiscalDateEnding = useDate ? dateValue(record) : "";
+  const fiscalDateEnding = useDate ? dateValue(record) : fiscalDateValue(record);
   if (fiscalYear !== null && fiscalYear !== target.fiscalYear) return false;
   if (quarter !== null && quarter !== target.quarter) return false;
   if (fiscalDateEnding && fiscalDateEnding !== target.fiscalDateEnding) return false;
@@ -115,14 +157,20 @@ function emptyCandidate(
 ): StocksEarningsFallbackCandidate {
   return {
     ...target,
+    currency: null,
     provider,
     revenueActual: null,
     revenueEstimate: null,
+    revenueUnit: null,
     netIncomeActual: null,
     netIncomeEstimate: null,
+    netIncomeUnit: null,
     epsActual: null,
     epsEstimate: null,
+    epsCurrency: null,
+    epsUnit: null,
     dilutedShares: null,
+    dilutedSharesUnit: null,
   };
 }
 
@@ -132,12 +180,34 @@ function candidateFromRecord(
   record: JsonRecord,
   values: Partial<StocksEarningsFallbackCandidate>,
 ) {
+  const currency = currencyValue(record);
+  const epsActual = values.epsActual ?? null;
+  const epsEstimate = values.epsEstimate ?? null;
+  const dilutedShares = values.dilutedShares ?? null;
   return {
     ...emptyCandidate(target, provider),
     ...values,
+    currency: values.currency ?? currency,
+    revenueUnit: values.revenueUnit ?? sourceAmountUnit(record, "revenue"),
+    netIncomeUnit: values.netIncomeUnit ?? sourceAmountUnit(record, "netIncome"),
+    epsCurrency: values.epsCurrency ?? currency,
+    epsUnit: values.epsUnit ?? (epsActual !== null || epsEstimate !== null ? "per-share" : null),
+    dilutedSharesUnit:
+      values.dilutedSharesUnit ?? (dilutedShares !== null ? "shares" : null),
     reportDate: stringValue(record.date) || target.reportDate,
     reportTiming: reportTiming(record.hour ?? record.time) || target.reportTiming,
   };
+}
+
+function matchesFinnhubFiscalPeriod(
+  record: JsonRecord,
+  target: StocksEarningsFallbackTarget,
+) {
+  if (!hasMatchingFiscalIdentity(record, target, { useDate: false })) {
+    return false;
+  }
+  const period = stringValue(record.fiscalPeriod ?? record.fiscal_period).toUpperCase();
+  return !period || period.includes(`${target.fiscalYear}Q${target.quarter.slice(1)}`);
 }
 
 export function parseFinnhubEarningsCandidate(
@@ -149,7 +219,7 @@ export function parseFinnhubEarningsCandidate(
   const row = rows.find(
     (entry) =>
       (!stringValue(entry.symbol) || stringValue(entry.symbol).toUpperCase() === ticker) &&
-      hasMatchingFiscalIdentity(entry, target, { useDate: false }),
+      matchesFinnhubFiscalPeriod(entry, target),
   );
   if (!row) return null;
   return candidateFromRecord(target, "finnhub", row, {
@@ -160,21 +230,40 @@ export function parseFinnhubEarningsCandidate(
   });
 }
 
+function flattenNestedRecords(value: unknown): JsonRecord[] {
+  if (Array.isArray(value)) return value.flatMap(flattenNestedRecords);
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) return [];
+  const nested = Object.values(record).filter(Array.isArray);
+  return nested.length > 0 ? nested.flatMap(flattenNestedRecords) : [record];
+}
+
 export function parseEodhdEarningsCandidate(
   payload: unknown,
   target: StocksEarningsFallbackTarget,
 ): StocksEarningsFallbackCandidate | null {
   const parsed = asRecord(payload);
-  const rows = asArray(parsed.trends ?? parsed.data ?? parsed.results).map(asRecord);
-  const row = rows.find((entry) => hasMatchingFiscalIdentity(entry, target));
+  const symbol = eodhdSymbol(target.ticker);
+  const rows = flattenNestedRecords(parsed.trends ?? parsed.data ?? parsed.results);
+  const row = rows.find(
+    (entry) =>
+      (!stringValue(entry.code) || stringValue(entry.code).toUpperCase() === symbol) &&
+      hasMatchingFiscalIdentity(entry, target),
+  );
   if (!row) return null;
   return candidateFromRecord(target, "eodhd", row, {
     revenueEstimate: recordNumber(row, [
       "revenueEstimate",
       "revenueAvg",
       "estimatedRevenueAvg",
+      "revenueEstimateAvg",
     ]),
-    epsEstimate: recordNumber(row, ["epsEstimate", "epsAvg", "estimatedEpsAvg"]),
+    epsEstimate: recordNumber(row, [
+      "epsEstimate",
+      "epsAvg",
+      "estimatedEpsAvg",
+      "earningsEstimateAvg",
+    ]),
   });
 }
 
@@ -205,22 +294,41 @@ export function parseAlphaVantageEarningsCandidate(
     epsEstimate: estimate
       ? recordNumber(estimate, ["estimatedEPS", "epsEstimate"])
       : null,
+    dilutedShares: income
+      ? recordNumber(income, ["dilutedShares", "weightedAverageShsOutDil"])
+      : null,
   });
 }
 
-function parseYahooEarningsCandidate(
+function yahooFiscalDate(row: JsonRecord) {
+  const endDate = asRecord(row.endDate);
+  const formatted = stringValue(endDate.fmt);
+  if (formatted) return formatted;
+  const raw = numberValue(endDate.raw);
+  if (raw === null || !Number.isSafeInteger(raw) || raw < 0) return "";
+  const date = new Date(raw * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : "";
+}
+
+export function parseYahooEarningsCandidate(
   payload: unknown,
   target: StocksEarningsFallbackTarget,
 ): StocksEarningsFallbackCandidate | null {
   const result = asArray(asRecord(asRecord(payload).quoteSummary).result)[0];
   const history = asRecord(asRecord(result).incomeStatementHistoryQuarterly);
   const rows = asArray(history.incomeStatementHistory).map(asRecord);
-  const row = rows.find((entry) => hasMatchingFiscalIdentity(entry, target));
+  const row = rows.find((entry) => yahooFiscalDate(entry) === target.fiscalDateEnding);
   if (!row) return null;
-  return candidateFromRecord(target, "yahoo", row, {
+  const candidate = candidateFromRecord(target, "yahoo", {
+    ...asRecord(result),
+    ...row,
+  }, {
     revenueActual: recordNumber(asRecord(row.totalRevenue), ["raw"]),
     netIncomeActual: recordNumber(asRecord(row.netIncome), ["raw"]),
+    revenueUnit: "raw",
+    netIncomeUnit: "raw",
   });
+  return candidate;
 }
 
 export function deriveNetIncome(
@@ -255,6 +363,113 @@ function provenance(
   return { provider, method, accountingBasis };
 }
 
+function addDiagnostic(errors: string[] | undefined, message: string) {
+  if (errors && !errors.includes(message)) errors.push(message);
+}
+
+function normalizeAmount(value: number, unit: StocksEarningsAmountUnit) {
+  const factor =
+    unit === "thousands"
+      ? 1_000
+      : unit === "millions"
+        ? 1_000_000
+        : unit === "billions"
+          ? 1_000_000_000
+          : 1;
+  return value * factor;
+}
+
+function normalizeMetricValues(
+  values: [number | null, number | null],
+  unit: StocksEarningsAmountUnit,
+  currency: string | null,
+  base: StocksEarningsFallbackBase,
+  baseUnit: StocksEarningsAmountUnit,
+  label: string,
+  errors?: string[],
+): [number | null, number | null] {
+  if (values[0] === null && values[1] === null) return values;
+  if (!currency || currency !== base.currency.toUpperCase()) {
+    addDiagnostic(errors, `${label} skipped: incompatible source currency`);
+    return [null, null];
+  }
+  if (!unit || baseUnit !== "raw") {
+    addDiagnostic(errors, `${label} skipped: incompatible or unknown source unit`);
+    return [null, null];
+  }
+  return [
+    values[0] === null ? null : normalizeAmount(values[0], unit),
+    values[1] === null ? null : normalizeAmount(values[1], unit),
+  ];
+}
+
+function canDeriveNetIncome(
+  candidate: StocksEarningsFallbackCandidate,
+  base: StocksEarningsFallbackBase,
+  errors?: string[],
+) {
+  if (candidate.epsEstimate === null) return false;
+  const shares = candidate.dilutedShares ?? base.dilutedShares;
+  const sharesUnit =
+    candidate.dilutedShares === null
+      ? base.dilutedSharesUnit
+      : candidate.dilutedSharesUnit;
+  const baseEpsCurrency = base.epsCurrency?.toUpperCase();
+  if (
+    shares === null ||
+    sharesUnit !== "shares" ||
+    candidate.epsUnit !== "per-share" ||
+    !candidate.epsCurrency ||
+    candidate.epsCurrency !== base.currency.toUpperCase() ||
+    baseEpsCurrency !== base.currency.toUpperCase()
+  ) {
+    addDiagnostic(errors, "net income estimate skipped: incompatible EPS or diluted shares basis");
+    return false;
+  }
+  return true;
+}
+
+function sanitizeCandidateForBase(
+  base: StocksEarningsFallbackBase,
+  candidate: StocksEarningsFallbackCandidate,
+  errors?: string[],
+) {
+  const [revenueActual, revenueEstimate] = normalizeMetricValues(
+    [candidate.revenueActual, candidate.revenueEstimate],
+    candidate.revenueUnit,
+    candidate.currency,
+    base,
+    base.revenueUnit,
+    "revenue",
+    errors,
+  );
+  const [netIncomeActual, netIncomeEstimate] = normalizeMetricValues(
+    [candidate.netIncomeActual, candidate.netIncomeEstimate],
+    candidate.netIncomeUnit,
+    candidate.currency,
+    base,
+    base.netIncomeUnit,
+    "net income",
+    errors,
+  );
+  const epsEstimate = canDeriveNetIncome(candidate, base, errors)
+    ? candidate.epsEstimate
+    : null;
+  return {
+    ...candidate,
+    revenueActual,
+    revenueEstimate,
+    revenueUnit: revenueActual === null && revenueEstimate === null ? candidate.revenueUnit : "raw",
+    netIncomeActual,
+    netIncomeEstimate,
+    netIncomeUnit:
+      netIncomeActual === null && netIncomeEstimate === null
+        ? candidate.netIncomeUnit
+        : "raw",
+    epsEstimate,
+  };
+}
+
 function canUseDirectValue(
   current: number | null,
   source: StocksEarningsValueProvenance | undefined,
@@ -267,6 +482,13 @@ function canUseDirectValue(
 }
 
 export function mergeStocksEarningsFallbackCandidate(
+  base: StocksEarningsFallbackBase,
+  candidate: StocksEarningsFallbackCandidate,
+): StocksEarningsFallbackBase {
+  return mergeCompatibleCandidate(base, sanitizeCandidateForBase(base, candidate));
+}
+
+function mergeCompatibleCandidate(
   base: StocksEarningsFallbackBase,
   candidate: StocksEarningsFallbackCandidate,
 ): StocksEarningsFallbackBase {
@@ -349,11 +571,26 @@ function comparisonHasGaps(comparison: StocksEarningsComparison) {
   ].some((value) => value === null);
 }
 
+function addUtcDays(dateValue: string, days: number) {
+  const parsed = Date.parse(`${dateValue}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function finnhubAnnouncementWindow(target: StocksEarningsFallbackTarget) {
+  if (target.reportDate) return { from: target.reportDate, to: target.reportDate };
+  return {
+    from: addUtcDays(target.fiscalDateEnding, 14),
+    to: addUtcDays(target.fiscalDateEnding, 120),
+  };
+}
+
 function finnhubUrl(ticker: string, target: StocksEarningsFallbackTarget, apiKey: string) {
   const url = new URL("https://finnhub.io/api/v1/calendar/earnings");
+  const window = finnhubAnnouncementWindow(target);
   url.searchParams.set("symbol", ticker.trim().toUpperCase());
-  url.searchParams.set("from", target.fiscalDateEnding);
-  url.searchParams.set("to", target.fiscalDateEnding);
+  url.searchParams.set("from", window.from);
+  url.searchParams.set("to", window.to);
   url.searchParams.set("token", apiKey);
   return url.toString();
 }
@@ -458,7 +695,12 @@ export async function completeStocksEarningsComparison({
       errors,
     );
     const candidate = payload && parseFinnhubEarningsCandidate(payload, target);
-    if (candidate) completed = mergeStocksEarningsFallbackCandidate(completed, candidate);
+    if (candidate) {
+      completed = mergeCompatibleCandidate(
+        completed,
+        sanitizeCandidateForBase(completed, candidate, errors),
+      );
+    }
   }
 
   if (comparisonHasGaps(completed.comparison) && eodhdKeys[0]) {
@@ -469,7 +711,12 @@ export async function completeStocksEarningsComparison({
       errors,
     );
     const candidate = payload && parseEodhdEarningsCandidate(payload, target);
-    if (candidate) completed = mergeStocksEarningsFallbackCandidate(completed, candidate);
+    if (candidate) {
+      completed = mergeCompatibleCandidate(
+        completed,
+        sanitizeCandidateForBase(completed, candidate, errors),
+      );
+    }
   }
 
   if (comparisonHasGaps(completed.comparison) && alphaVantageKeys[0]) {
@@ -498,7 +745,12 @@ export async function completeStocksEarningsComparison({
       { incomeStatement: incomePayload, earningsEstimates: estimatesPayload },
       target,
     );
-    if (candidate) completed = mergeStocksEarningsFallbackCandidate(completed, candidate);
+    if (candidate) {
+      completed = mergeCompatibleCandidate(
+        completed,
+        sanitizeCandidateForBase(completed, candidate, errors),
+      );
+    }
   }
 
   if (
@@ -513,7 +765,12 @@ export async function completeStocksEarningsComparison({
       errors,
     );
     const candidate = payload && parseYahooEarningsCandidate(payload, target);
-    if (candidate) completed = mergeStocksEarningsFallbackCandidate(completed, candidate);
+    if (candidate) {
+      completed = mergeCompatibleCandidate(
+        completed,
+        sanitizeCandidateForBase(completed, candidate, errors),
+      );
+    }
   }
 
   return { comparison: completed.comparison, errors };
