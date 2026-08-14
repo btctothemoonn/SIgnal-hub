@@ -15,6 +15,20 @@ assert.match(layout, /mobileScrollerRef/);
 assert.match(layout, /snap-x snap-mandatory/);
 assert.match(layout, /onScroll=\{handleMobileScroll\}/);
 assert.match(layout, /aria-pressed=\{activeMobilePanel === panel\.id\}/);
+assert.match(layout, /const handleSelectTicker = useCallback/);
+assert.match(
+  layout,
+  /onSelectTicker\(ticker\);[\s\S]*?showMobilePanel\("detail"\)/,
+  "selecting a stock on mobile must reveal its detail and earnings panel",
+);
+assert.match(layout, /onSelectTicker=\{handleSelectTicker\}/);
+assert.match(layout, /window\.matchMedia\("\(max-width: 1023px\)"\)/);
+assert.match(layout, /mobileDetailRef/);
+assert.match(
+  layout,
+  /querySelector<HTMLElement>\([\s\S]*?"\[data-stocks-earnings-brief\]"/,
+);
+assert.match(layout, /earnings\?\.scrollIntoView\(\{/);
 assert.match(layout, /lg:grid-cols-\[minmax\(18rem,0\.34fr\)_minmax\(0,0\.66fr\)\]/);
 assert.doesNotMatch(layout, /xl:grid-cols-\[/);
 assert.doesNotMatch(layout, /2xl:grid-cols-\[/);

@@ -26,6 +26,10 @@ assert.match(source, /data-stock-primary-context/);
 assert.match(source, /研究结论/);
 assert.match(source, /跟踪要点/);
 assert.match(source, /StocksEarningsBrief/);
+assert.ok(
+  source.indexOf("<StocksEarningsBrief") < source.indexOf("{stock.summary}"),
+  "earnings must appear before the longer research conclusion on mobile",
+);
 assert.match(source, /stock\.summary/);
 assert.match(source, /stock\.thesis\.slice\(0, 2\)/);
 assert.match(source, /compactTrackingPoints\(stock\)/);

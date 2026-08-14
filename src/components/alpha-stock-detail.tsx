@@ -200,6 +200,13 @@ export function AlphaStockDetail({
 
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(22rem,0.88fr)]">
         <div className="space-y-5">
+          <StocksEarningsBrief
+            comparison={stock.financialSnapshot.latestEarnings ?? null}
+            insight={stock.financialSnapshot.earningsInsight ?? null}
+            updatedAt={stock.financialSnapshot.updatedAt}
+            source={stock.financialSnapshot.source}
+          />
+
           <Section title="研究结论">
             <p className="text-sm leading-6 text-foreground">
               {stock.summary}
@@ -208,13 +215,6 @@ export function AlphaStockDetail({
               <BulletList items={stock.thesis.slice(0, 2)} />
             </div>
           </Section>
-
-          <StocksEarningsBrief
-            comparison={stock.financialSnapshot.latestEarnings ?? null}
-            insight={stock.financialSnapshot.earningsInsight ?? null}
-            updatedAt={stock.financialSnapshot.updatedAt}
-            source={stock.financialSnapshot.source}
-          />
         </div>
 
         <Section title="跟踪要点">

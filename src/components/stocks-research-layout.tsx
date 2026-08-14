@@ -30,7 +30,7 @@ type StocksResearchLayoutProps = {
 const mobilePanels: Array<{ id: StocksMobilePanel; label: string }> = [
   { id: "pool", label: "股票池" },
   { id: "chart", label: "走势" },
-  { id: "detail", label: "详情" },
+  { id: "detail", label: "详情/财报" },
 ];
 
 function mobilePanelIndex(panel: StocksMobilePanel) {
@@ -56,6 +56,7 @@ export function StocksResearchLayout({
   performanceLoading,
 }: StocksResearchLayoutProps) {
   const mobileScrollerRef = useRef<HTMLDivElement | null>(null);
+  const mobileDetailRef = useRef<HTMLDivElement | null>(null);
   const [activeMobilePanel, setActiveMobilePanel] =
     useState<StocksMobilePanel>("pool");
 
@@ -69,6 +70,27 @@ export function StocksResearchLayout({
       behavior: "smooth",
     });
   }, []);
+
+  const handleSelectTicker = useCallback(
+    (ticker: string) => {
+      onSelectTicker(ticker);
+      if (!window.matchMedia("(max-width: 1023px)").matches) return;
+
+      showMobilePanel("detail");
+      window.requestAnimationFrame(() => {
+        const earnings =
+          mobileDetailRef.current?.querySelector<HTMLElement>(
+            "[data-stocks-earnings-brief]",
+          );
+        earnings?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+          inline: "nearest",
+        });
+      });
+    },
+    [onSelectTicker, showMobilePanel],
+  );
 
   const handleMobileScroll = useCallback(() => {
     const scroller = mobileScrollerRef.current;
@@ -100,7 +122,7 @@ export function StocksResearchLayout({
     <AlphaSectorList
       stocks={stocks}
       selectedTicker={selectedTicker}
-      onSelectTicker={onSelectTicker}
+      onSelectTicker={handleSelectTicker}
       marketDataLoading={marketDataLoading}
     />
   );
@@ -154,7 +176,12 @@ export function StocksResearchLayout({
         >
           <div className="min-w-0 basis-full shrink-0 snap-start">{pool}</div>
           <div className="min-w-0 basis-full shrink-0 snap-start pl-3">{chart}</div>
-          <div className="min-w-0 basis-full shrink-0 snap-start pl-3">{detail}</div>
+          <div
+            ref={mobileDetailRef}
+            className="min-w-0 basis-full shrink-0 snap-start pl-3"
+          >
+            {detail}
+          </div>
         </div>
       </section>
     </div>
