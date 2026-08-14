@@ -231,6 +231,72 @@ try {
     "Legacy/unknown accounting basis",
   );
 
+  const nextMissingFinancial = structuredClone(partialFinancial);
+  nextMissingFinancial.financials.NBIS.latestEarnings = null;
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env,
+    snapshot: legacyPreviousFinancial,
+  });
+  const migratedNextMissing = await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: true,
+    loader: async () => nextMissingFinancial,
+  });
+  assert.equal(
+    migratedNextMissing.financials.NBIS.latestEarnings.revenue.estimateSource
+      .accountingBasis,
+    "FMP standardized",
+  );
+  assert.equal(
+    JSON.parse(readFileSync(getStocksSnapshotCachePath("financial", env), "utf8"))
+      .financials.NBIS.latestEarnings.revenue.estimateSource.accountingBasis,
+    "FMP standardized",
+  );
+
+  const historyMissingFinancial = structuredClone(partialFinancial);
+  historyMissingFinancial.financials.NBIS.latestEarnings = structuredClone(
+    previousFinancial.financials.NBIS.latestEarnings,
+  );
+  historyMissingFinancial.financials.NBIS.earningsHistory = [];
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env,
+    snapshot: legacyPreviousFinancial,
+  });
+  const migratedHistoryMissing = await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: true,
+    loader: async () => historyMissingFinancial,
+  });
+  assert.equal(
+    migratedHistoryMissing.financials.NBIS.earningsHistory[0].revenue
+      .estimateSource.accountingBasis,
+    "FMP standardized",
+  );
+  assert.equal(
+    JSON.parse(readFileSync(getStocksSnapshotCachePath("financial", env), "utf8"))
+      .financials.NBIS.earningsHistory[0].revenue.estimateSource.accountingBasis,
+    "FMP standardized",
+  );
+
+  const mismatchedFinancial = structuredClone(partialFinancial);
+  mismatchedFinancial.financials.NBIS.latestEarnings = structuredClone(
+    legacyPreviousFinancial.financials.NBIS.latestEarnings,
+  );
+  mismatchedFinancial.financials.NBIS.latestEarnings.fiscalYear = 2027;
+  const migratedMismatched = preserveSuccessfulFinancialEntries(
+    legacyPreviousFinancial,
+    mismatchedFinancial,
+  );
+  assert.equal(
+    migratedMismatched.financials.NBIS.latestEarnings.revenue.estimateSource
+      .accountingBasis,
+    "FMP standardized",
+  );
+
   const cachedMarket = {
     generatedAt: "2026-05-14T01:00:00.000Z",
     source: "live",

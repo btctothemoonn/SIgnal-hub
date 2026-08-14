@@ -250,16 +250,27 @@ function normalizeEarningsMetric(
     : metric;
 }
 
+function normalizeEarningsComparison(
+  comparison: StocksEarningsComparison | null | undefined,
+) {
+  if (!comparison) return null;
+  return {
+    ...comparison,
+    revenue: normalizeEarningsMetric(comparison.revenue),
+    netIncome: normalizeEarningsMetric(comparison.netIncome),
+  };
+}
+
 function mergeEarningsComparison(
   previous: StocksEarningsComparison | null | undefined,
   next: StocksEarningsComparison | null | undefined,
 ) {
-  if (!next) return previous ?? null;
-  if (!previous || !sameEarningsPeriod(previous, next)) return next;
-  const normalizedPreviousRevenue = normalizeEarningsMetric(previous.revenue);
-  const normalizedNextRevenue = normalizeEarningsMetric(next.revenue);
-  const normalizedPreviousNetIncome = normalizeEarningsMetric(previous.netIncome);
-  const normalizedNextNetIncome = normalizeEarningsMetric(next.netIncome);
+  const normalizedPrevious = normalizeEarningsComparison(previous);
+  const normalizedNext = normalizeEarningsComparison(next);
+  if (!normalizedNext) return normalizedPrevious;
+  if (!normalizedPrevious || !sameEarningsPeriod(normalizedPrevious, normalizedNext)) {
+    return normalizedNext;
+  }
   const mergeMetric = (
     prior: StocksEarningsComparison["revenue"],
     current: StocksEarningsComparison["revenue"],
@@ -284,13 +295,13 @@ function mergeEarningsComparison(
     }
     return mergeEarningsMetricValues(current, patch);
   };
-  const revenue = mergeMetric(normalizedPreviousRevenue, normalizedNextRevenue);
+  const revenue = mergeMetric(normalizedPrevious.revenue, normalizedNext.revenue);
   const netIncome = mergeMetric(
-    normalizedPreviousNetIncome,
-    normalizedNextNetIncome,
+    normalizedPrevious.netIncome,
+    normalizedNext.netIncome,
   );
   return {
-    ...next,
+    ...normalizedNext,
     revenue,
     netIncome,
   };
@@ -339,7 +350,8 @@ function mergeFinancialStatement(
     if (!(next.earningsHistory ?? []).some(
       (candidate) => `${candidate.fiscalYear}-${candidate.quarter}` === key,
     )) {
-      history.push(item);
+      const normalizedItem = normalizeEarningsComparison(item);
+      if (normalizedItem) history.push(normalizedItem);
     }
   }
   return {
