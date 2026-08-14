@@ -1,8 +1,22 @@
 type JsonRecord = Record<string, unknown>;
 
+export type StocksEarningsProvider =
+  | "fmp"
+  | "finnhub"
+  | "eodhd"
+  | "alpha-vantage"
+  | "yahoo";
+
+export type StocksEarningsValueProvenance = {
+  provider: StocksEarningsProvider;
+  method: "direct" | "eps-times-diluted-shares";
+};
+
 export type StocksEarningsMetricComparison = {
   estimate: number | null;
+  estimateSource?: StocksEarningsValueProvenance;
   actual: number | null;
+  actualSource?: StocksEarningsValueProvenance;
   previousYearActual: number | null;
   estimateYoYPct: number | null;
   actualYoYPct: number | null;
@@ -89,10 +103,14 @@ export function calculateComparisonMetric(
   actual: number | null,
   estimate: number | null,
   previousYearActual: number | null,
+  sources: {
+    estimateSource?: StocksEarningsValueProvenance;
+    actualSource?: StocksEarningsValueProvenance;
+  } = {},
 ): StocksEarningsMetricComparison {
   const surprise =
     actual !== null && estimate !== null ? actual - estimate : null;
-  return {
+  const metric: StocksEarningsMetricComparison = {
     estimate,
     actual,
     previousYearActual,
@@ -104,6 +122,58 @@ export function calculateComparisonMetric(
         ? (surprise / Math.abs(estimate)) * 100
         : null,
   };
+  if (estimate !== null && sources.estimateSource) {
+    metric.estimateSource = sources.estimateSource;
+  }
+  if (actual !== null && sources.actualSource) {
+    metric.actualSource = sources.actualSource;
+  }
+  return metric;
+}
+
+type StocksEarningsMetricValuePatch = {
+  estimate?: number | null;
+  estimateSource?: StocksEarningsValueProvenance;
+  actual?: number | null;
+  actualSource?: StocksEarningsValueProvenance;
+  previousYearActual?: number | null;
+};
+
+export function mergeEarningsMetricValues(
+  metric: StocksEarningsMetricComparison,
+  patch: StocksEarningsMetricValuePatch,
+): StocksEarningsMetricComparison {
+  const actual = patch.actual !== undefined ? patch.actual : metric.actual;
+  const estimate =
+    patch.estimate !== undefined ? patch.estimate : metric.estimate;
+  const previousYearActual =
+    patch.previousYearActual !== undefined
+      ? patch.previousYearActual
+      : metric.previousYearActual;
+  const merged = calculateComparisonMetric(
+    actual,
+    estimate,
+    previousYearActual,
+  );
+  const estimateSource =
+    estimate === null
+      ? undefined
+      : patch.estimateSource !== undefined
+        ? patch.estimateSource
+        : patch.estimate !== undefined
+          ? undefined
+          : metric.estimateSource;
+  const actualSource =
+    actual === null
+      ? undefined
+      : patch.actualSource !== undefined
+        ? patch.actualSource
+        : patch.actual !== undefined
+          ? undefined
+          : metric.actualSource;
+  if (estimateSource) merged.estimateSource = estimateSource;
+  if (actualSource) merged.actualSource = actualSource;
+  return merged;
 }
 
 function matchingEstimate(
@@ -205,6 +275,10 @@ function parseIncomeQuarter(
       numberValue(income.revenue),
       numberValue(estimate?.estimatedRevenueAvg ?? estimate?.revenueAvg),
       numberValue(previous?.revenue),
+      {
+        actualSource: { provider: "fmp", method: "direct" },
+        estimateSource: { provider: "fmp", method: "direct" },
+      },
     ),
     netIncome: calculateComparisonMetric(
       numberValue(income.netIncome),
@@ -212,6 +286,10 @@ function parseIncomeQuarter(
         estimate?.estimatedNetIncomeAvg ?? estimate?.netIncomeAvg,
       ),
       numberValue(previous?.netIncome),
+      {
+        actualSource: { provider: "fmp", method: "direct" },
+        estimateSource: { provider: "fmp", method: "direct" },
+      },
     ),
   };
 }

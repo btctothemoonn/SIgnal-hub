@@ -13,7 +13,8 @@ import {
 } from "./stocks-financial-data.ts";
 import { enrichStocksFinancialSnapshotWithInsights } from "./stocks-earnings-insight.ts";
 import {
-  calculateComparisonMetric,
+  mergeEarningsMetricValues,
+  type StocksEarningsValueProvenance,
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
 import {
@@ -198,6 +199,35 @@ function sameEarningsPeriod(
   );
 }
 
+function earningsValuePriority(
+  source: StocksEarningsValueProvenance | undefined,
+) {
+  if (source?.method === "direct") return 2;
+  if (source) return 1;
+  return 0;
+}
+
+function mergeMetricValue<T extends "actual" | "estimate">(
+  previous: StocksEarningsComparison["revenue"],
+  next: StocksEarningsComparison["revenue"],
+  field: T,
+) {
+  const sourceField = `${field}Source` as const;
+  const previousValue = previous[field];
+  const nextValue = next[field];
+  if (nextValue === null) {
+    return { value: previousValue, source: previous[sourceField] };
+  }
+  if (
+    previousValue !== null &&
+    earningsValuePriority(previous[sourceField]) >
+      earningsValuePriority(next[sourceField])
+  ) {
+    return { value: previousValue, source: previous[sourceField] };
+  }
+  return { value: nextValue, source: next[sourceField] };
+}
+
 function mergeEarningsComparison(
   previous: StocksEarningsComparison | null | undefined,
   next: StocksEarningsComparison | null | undefined,
@@ -208,17 +238,32 @@ function mergeEarningsComparison(
     prior: StocksEarningsComparison["revenue"],
     current: StocksEarningsComparison["revenue"],
   ) => {
-    if (current.estimate !== null) return current;
-    return calculateComparisonMetric(
-      current.actual,
-      prior.estimate,
-      current.previousYearActual ?? prior.previousYearActual,
-    );
+    const actual = mergeMetricValue(prior, current, "actual");
+    const estimate = mergeMetricValue(prior, current, "estimate");
+    const patch: Parameters<typeof mergeEarningsMetricValues>[1] = {
+      previousYearActual:
+        current.previousYearActual ?? prior.previousYearActual,
+    };
+    if (actual.value !== current.actual) {
+      patch.actual = actual.value;
+      if (actual.source) patch.actualSource = actual.source;
+    } else if (actual.source && actual.source !== current.actualSource) {
+      patch.actualSource = actual.source;
+    }
+    if (estimate.value !== current.estimate) {
+      patch.estimate = estimate.value;
+      if (estimate.source) patch.estimateSource = estimate.source;
+    } else if (estimate.source && estimate.source !== current.estimateSource) {
+      patch.estimateSource = estimate.source;
+    }
+    return mergeEarningsMetricValues(current, patch);
   };
+  const revenue = mergeMetric(previous.revenue, next.revenue);
+  const netIncome = mergeMetric(previous.netIncome, next.netIncome);
   return {
     ...next,
-    revenue: mergeMetric(previous.revenue, next.revenue),
-    netIncome: mergeMetric(previous.netIncome, next.netIncome),
+    revenue,
+    netIncome,
   };
 }
 
@@ -237,8 +282,16 @@ function mergeFinancialStatement(
       sameEarningsPeriod(next.latestEarnings, previous.latestEarnings) &&
       ((next.latestEarnings.revenue.estimate === null &&
         previous.latestEarnings.revenue.estimate !== null) ||
+        (next.latestEarnings.revenue.estimate !== null &&
+          previous.latestEarnings.revenue.estimate !== null &&
+          earningsValuePriority(next.latestEarnings.revenue.estimateSource) <
+            earningsValuePriority(previous.latestEarnings.revenue.estimateSource)) ||
         (next.latestEarnings.netIncome.estimate === null &&
-          previous.latestEarnings.netIncome.estimate !== null)),
+          previous.latestEarnings.netIncome.estimate !== null) ||
+        (next.latestEarnings.netIncome.estimate !== null &&
+          previous.latestEarnings.netIncome.estimate !== null &&
+          earningsValuePriority(next.latestEarnings.netIncome.estimateSource) <
+            earningsValuePriority(previous.latestEarnings.netIncome.estimateSource))),
   );
   const priorHistory = new Map(
     (previous.earningsHistory ?? []).map((item) => [

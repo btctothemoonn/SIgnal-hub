@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   calculateComparisonMetric,
+  mergeEarningsMetricValues,
   parseFmpQuarterlyEarnings,
   parseFmpQuarterlyEarningsHistory,
 } from "./stocks-earnings-comparison.ts";
@@ -60,6 +61,14 @@ assert.equal(comparison.provider, "fmp");
 assert.equal(comparison.generatedAt, generatedAt);
 assert.equal(comparison.revenue.actual, 582_300_000);
 assert.equal(comparison.revenue.estimate, 573_937_500);
+assert.deepEqual(comparison.revenue.actualSource, {
+  provider: "fmp",
+  method: "direct",
+});
+assert.deepEqual(comparison.revenue.estimateSource, {
+  provider: "fmp",
+  method: "direct",
+});
 assert.equal(comparison.revenue.previousYearActual, 105_100_000);
 assert.equal(comparison.revenue.surprise, 8_362_500);
 assert.ok(Math.abs(comparison.revenue.surprisePct - 1.457_04) < 0.000_01);
@@ -83,6 +92,21 @@ const missingEstimate = calculateComparisonMetric(12, null, 10);
 assert.equal(missingEstimate.surprise, null);
 assert.equal(missingEstimate.surprisePct, null);
 assert.equal(missingEstimate.actualYoYPct, 20);
+
+const filled = mergeEarningsMetricValues(
+  calculateComparisonMetric(582_300_000, null, 105_100_000),
+  {
+    estimate: 573_937_500,
+    estimateSource: { provider: "finnhub", method: "direct" },
+  },
+);
+assert.equal(filled.actual, 582_300_000);
+assert.equal(filled.estimate, 573_937_500);
+assert.deepEqual(filled.estimateSource, {
+  provider: "finnhub",
+  method: "direct",
+});
+assert.ok(Math.abs(filled.surprisePct - 1.45704) < 0.00001);
 
 const withinSevenDays = parseFmpQuarterlyEarnings(
   "TEST",

@@ -35,7 +35,9 @@ const priorComparison = {
   generatedAt: "2026-08-14T00:00:00.000Z",
   revenue: {
     estimate: 573_937_500,
+    estimateSource: { provider: "fmp", method: "direct" },
     actual: 582_300_000,
+    actualSource: { provider: "fmp", method: "direct" },
     previousYearActual: 105_100_000,
     estimateYoYPct: 446.087,
     actualYoYPct: 454.044,
@@ -110,7 +112,11 @@ const partialFinancial = {
         generatedAt: "2026-08-14T01:00:00.000Z",
         revenue: {
           ...priorComparison.revenue,
-          estimate: null,
+          estimate: 560_000_000,
+          estimateSource: {
+            provider: "finnhub",
+            method: "eps-times-diluted-shares",
+          },
           estimateYoYPct: null,
           surprise: null,
           surprisePct: null,
@@ -135,6 +141,10 @@ assert.ok(preservedFinancial.financials.CBRS);
 assert.equal(
   preservedFinancial.financials.NBIS.latestEarnings.revenue.estimate,
   573_937_500,
+);
+assert.deepEqual(
+  preservedFinancial.financials.NBIS.latestEarnings.revenue.estimateSource,
+  { provider: "fmp", method: "direct" },
 );
 assert.equal(
   preservedFinancial.financials.NBIS.earningsInsight.conclusion,
