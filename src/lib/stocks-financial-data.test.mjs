@@ -286,8 +286,8 @@ assert.equal(fmpPartialEndpointSnapshot.provider, "fmp");
 assert.equal(fmpPartialEndpointSnapshot.financials.NVDA.revenue, "$26.04B");
 assert.equal(fmpPartialEndpointSnapshot.financials.NVDA.guidance, "No forward estimate");
 assert.ok(
-  !fmpPartialEndpointSnapshot.errors.some((error) =>
-    error.includes("analyst-estimates"),
+  fmpPartialEndpointSnapshot.errors.some((error) =>
+    error.includes("analyst-estimates HTTP 402"),
   ),
 );
 

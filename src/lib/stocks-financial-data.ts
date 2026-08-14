@@ -7,6 +7,10 @@ import {
   pickProviderApiKey,
 } from "./provider-api-keys.ts";
 import { resolveEarningsStatus } from "./stocks-earnings.ts";
+import {
+  parseFmpQuarterlyEarningsHistory,
+  type StocksEarningsComparison,
+} from "./stocks-earnings-comparison.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -19,6 +23,8 @@ export type StocksFinancialStatement = AlphaResearchFinancialSnapshot & {
   periodLabel: string;
   source: StocksFinancialDataSource;
   updatedAt: string;
+  latestEarnings?: StocksEarningsComparison | null;
+  earningsHistory?: StocksEarningsComparison[];
 };
 
 export type StocksFinancialSnapshot = {
@@ -199,10 +205,30 @@ function selectFmpFinancialStocks(stocks: AlphaResearchStock[], env: EnvLike) {
     if (excludedTickers?.has(ticker)) return false;
     return true;
   });
-  return candidates.slice(
-    0,
-    positiveInt(env.STOCKS_FMP_FINANCIAL_MAX_TICKERS, 8, candidates.length),
+  const configuredLimit = env.STOCKS_FMP_FINANCIAL_MAX_TICKERS?.trim();
+  if (!configuredLimit) return candidates;
+  return candidates.slice(0, positiveInt(configuredLimit, candidates.length, candidates.length));
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>,
+) {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  const runners = Array.from(
+    { length: Math.min(values.length, Math.max(1, concurrency)) },
+    async () => {
+      while (cursor < values.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(values[index], index);
+      }
+    },
   );
+  await Promise.all(runners);
+  return results;
 }
 
 function fmpUrl(
@@ -308,6 +334,62 @@ async function readFmpEndpointPayload(
     payload,
     summary: summarizeFmpPayload(endpoint, payload),
   };
+}
+
+function fmpEndpointError(payload: FmpEndpointPayload) {
+  return `FMP ${payload.endpoint} HTTP ${payload.status}: ${payload.summary}`;
+}
+
+function retryDelayMs(env: EnvLike, attempt: number) {
+  const configured = Number(env.STOCKS_FMP_RETRY_BASE_MS);
+  const base = Number.isFinite(configured) && configured >= 0 ? configured : 300;
+  return base * 3 ** attempt;
+}
+
+async function fetchFmpEndpointPayload({
+  endpoint,
+  ticker,
+  apiKeys,
+  tickerIndex,
+  params,
+  fetchImpl,
+  env,
+}: {
+  endpoint: string;
+  ticker: string;
+  apiKeys: string[];
+  tickerIndex: number;
+  params: Record<string, string>;
+  fetchImpl: FetchLike;
+  env: EnvLike;
+}): Promise<FmpEndpointPayload> {
+  for (let attempt = 0; attempt <= 2; attempt += 1) {
+    const apiKey = pickProviderApiKey(apiKeys, tickerIndex + attempt);
+    try {
+      const response = await fetchImpl(fmpUrl(endpoint, ticker, apiKey, params), {
+        cache: "no-store",
+      });
+      const payload = await readFmpEndpointPayload(endpoint, response);
+      if (payload.ok) return payload;
+      const retryable = payload.status === 429 || payload.status >= 500;
+      const terminalPlanError = [401, 402, 403].includes(payload.status);
+      if (terminalPlanError || !retryable || attempt === 2) return payload;
+    } catch (error) {
+      if (attempt === 2) {
+        return {
+          endpoint,
+          status: 0,
+          ok: false,
+          payload: null,
+          summary: `${endpoint} network error: ${truncateDiagnostic(
+            error instanceof Error ? error.message : String(error),
+          )}`,
+        };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs(env, attempt)));
+  }
+  throw new Error(`Unreachable FMP retry state for ${endpoint}`);
 }
 
 export function parseYahooFinancialStatement(
@@ -518,56 +600,84 @@ export async function fetchFmpStocksFinancialSnapshot({
   const generatedAt = new Date().toISOString();
   const providerStocks = selectFmpFinancialStocks(stocks, env);
   const errors: string[] = [];
+  const concurrency = positiveInt(
+    env.STOCKS_FMP_FINANCIAL_CONCURRENCY,
+    3,
+    8,
+  );
   const entries: Array<readonly [string, StocksFinancialStatement] | null> =
-    await Promise.all(
-      providerStocks.map(async (stock, index) => {
-        const apiKey = pickProviderApiKey(apiKeys, index);
+    await mapWithConcurrency(
+      providerStocks,
+      concurrency,
+      async (stock, index) => {
         try {
-          const [incomeResponse, cashFlowResponse, growthResponse, estimatesResponse] =
+          const endpointPayloads =
             await Promise.all([
-              fetchImpl(
-                fmpUrl("income-statement", stock.ticker, apiKey, {
+              fetchFmpEndpointPayload({
+                endpoint: "income-statement",
+                ticker: stock.ticker,
+                apiKeys,
+                tickerIndex: index,
+                params: { period: "quarter", limit: "9" },
+                fetchImpl,
+                env,
+              }),
+              fetchFmpEndpointPayload({
+                endpoint: "cash-flow-statement",
+                ticker: stock.ticker,
+                apiKeys,
+                tickerIndex: index,
+                params: {
                   period: "annual",
                   limit: "1",
-                }),
-                { cache: "no-store" },
-              ),
-              fetchImpl(
-                fmpUrl("cash-flow-statement", stock.ticker, apiKey, {
+                },
+                fetchImpl,
+                env,
+              }),
+              fetchFmpEndpointPayload({
+                endpoint: "financial-growth",
+                ticker: stock.ticker,
+                apiKeys,
+                tickerIndex: index,
+                params: {
                   period: "annual",
                   limit: "1",
-                }),
-                { cache: "no-store" },
-              ),
-              fetchImpl(
-                fmpUrl("financial-growth", stock.ticker, apiKey, {
-                  period: "annual",
-                  limit: "1",
-                }),
-                { cache: "no-store" },
-              ),
-              fetchImpl(
-                fmpUrl("analyst-estimates", stock.ticker, apiKey, {
-                  period: "quarter",
-                  limit: "1",
-                }),
-                { cache: "no-store" },
-              ),
+                },
+                fetchImpl,
+                env,
+              }),
+              fetchFmpEndpointPayload({
+                endpoint: "analyst-estimates",
+                ticker: stock.ticker,
+                apiKeys,
+                tickerIndex: index,
+                params: { period: "quarter", limit: "12" },
+                fetchImpl,
+                env,
+              }),
+              fetchFmpEndpointPayload({
+                endpoint: "earnings",
+                ticker: stock.ticker,
+                apiKeys,
+                tickerIndex: index,
+                params: { limit: "12" },
+                fetchImpl,
+                env,
+              }),
             ]);
-          const endpointPayloads = await Promise.all([
-            readFmpEndpointPayload("income-statement", incomeResponse),
-            readFmpEndpointPayload("cash-flow-statement", cashFlowResponse),
-            readFmpEndpointPayload("financial-growth", growthResponse),
-            readFmpEndpointPayload("analyst-estimates", estimatesResponse),
-          ]);
           const incomePayload = endpointPayloads[0];
           if (!incomePayload?.ok) {
             throw new Error(
               incomePayload
-                ? `FMP ${incomePayload.endpoint} HTTP ${incomePayload.status}: ${incomePayload.summary}`
+                ? fmpEndpointError(incomePayload)
                 : "FMP income-statement returned no payload",
             );
           }
+          endpointPayloads.slice(1).forEach((payload) => {
+            if (!payload.ok) {
+              errors.push(`${stock.ticker}: ${fmpEndpointError(payload)}`);
+            }
+          });
           const statement = parseFmpFinancialStatement(
             stock.ticker,
             {
@@ -585,14 +695,34 @@ export async function fetchFmpStocksFinancialSnapshot({
                 .join("; ")}`,
             );
           }
-          return [stock.ticker, statement] as const;
+          const earningsHistory = parseFmpQuarterlyEarningsHistory(
+            stock.ticker,
+            {
+              income: incomePayload.payload,
+              estimates: endpointPayloads[3]?.ok
+                ? endpointPayloads[3].payload
+                : [],
+              earnings: endpointPayloads[4]?.ok
+                ? endpointPayloads[4].payload
+                : [],
+            },
+            { generatedAt, limit: 8 },
+          );
+          return [
+            stock.ticker,
+            {
+              ...statement,
+              latestEarnings: earningsHistory[0] ?? null,
+              earningsHistory,
+            },
+          ] as const;
         } catch (error) {
           errors.push(
             `${stock.ticker}: ${error instanceof Error ? error.message : String(error)}`,
           );
           return null;
         }
-      }),
+      },
     );
 
   const financialEntries = entries.filter(
