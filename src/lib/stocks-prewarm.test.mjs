@@ -18,6 +18,8 @@ const {
   resolveStocksMarketProvider,
   writeStocksSnapshotCache,
 } = await import(moduleUrl);
+const prewarmSource = readFileSync(moduleUrl, "utf8");
+assert.match(prewarmSource, /enrichStocksFinancialSnapshotWithInsights/);
 
 const runtimeDir = mkdtempSync(join(tmpdir(), "signal-hub-stocks-prewarm-"));
 const env = {

@@ -11,6 +11,7 @@ import {
   parseFmpQuarterlyEarningsHistory,
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
+import type { StocksEarningsInsight } from "./stocks-earnings-insight.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -25,6 +26,7 @@ export type StocksFinancialStatement = AlphaResearchFinancialSnapshot & {
   updatedAt: string;
   latestEarnings?: StocksEarningsComparison | null;
   earningsHistory?: StocksEarningsComparison[];
+  earningsInsight?: StocksEarningsInsight | null;
 };
 
 export type StocksFinancialSnapshot = {

@@ -10,6 +10,7 @@ import {
   getStocksFinancialSnapshot,
   type StocksFinancialSnapshot,
 } from "./stocks-financial-data.ts";
+import { enrichStocksFinancialSnapshotWithInsights } from "./stocks-earnings-insight.ts";
 import {
   getStocksMarketSnapshot,
   type StocksMarketDataProvider,
@@ -388,13 +389,18 @@ export async function getCachedStocksFinancialSnapshot({
     kind: "financial",
     env,
     force,
-    loader: () =>
-      getStocksFinancialSnapshot({
+    loader: async () => {
+      const snapshot = await getStocksFinancialSnapshot({
         stocks,
         fetchImpl,
         env,
         ...(provider ? { provider } : {}),
-      }),
+      });
+      return enrichStocksFinancialSnapshotWithInsights(snapshot, {
+        fetchImpl,
+        env,
+      });
+    },
   });
 }
 
