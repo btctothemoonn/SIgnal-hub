@@ -95,10 +95,10 @@ const estimatesUrl = urls.find((url) =>
 const earningsUrl = urls.find((url) => url.pathname.endsWith("earnings"));
 assert.ok(incomeUrl);
 assert.equal(incomeUrl.searchParams.get("period"), "quarter");
-assert.equal(incomeUrl.searchParams.get("limit"), "9");
+assert.equal(incomeUrl.searchParams.get("limit"), "5");
 assert.equal(estimatesUrl?.searchParams.get("period"), "quarter");
-assert.equal(estimatesUrl?.searchParams.get("limit"), "12");
-assert.equal(earningsUrl?.searchParams.get("limit"), "12");
+assert.equal(estimatesUrl?.searchParams.get("limit"), "5");
+assert.equal(earningsUrl?.searchParams.get("limit"), "5");
 assert.equal(snapshot.financials.NBIS.latestEarnings.revenue.actual, 582_300_000);
 assert.equal(snapshot.financials.NBIS.latestEarnings.revenue.estimate, 573_937_500);
 assert.equal(snapshot.financials.NBIS.latestEarnings.netIncome.surprise, 83_400_000);

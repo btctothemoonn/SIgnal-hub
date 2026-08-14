@@ -620,7 +620,9 @@ export async function fetchFmpStocksFinancialSnapshot({
                 ticker: stock.ticker,
                 apiKeys,
                 tickerIndex: index,
-                params: { period: "quarter", limit: "9" },
+                // Five quarters are enough for the latest YoY comparison and
+                // stay within FMP's standard-plan parameter limit.
+                params: { period: "quarter", limit: "5" },
                 fetchImpl,
                 env,
               }),
@@ -653,7 +655,7 @@ export async function fetchFmpStocksFinancialSnapshot({
                 ticker: stock.ticker,
                 apiKeys,
                 tickerIndex: index,
-                params: { period: "quarter", limit: "12" },
+                params: { period: "quarter", limit: "5" },
                 fetchImpl,
                 env,
               }),
@@ -662,7 +664,7 @@ export async function fetchFmpStocksFinancialSnapshot({
                 ticker: stock.ticker,
                 apiKeys,
                 tickerIndex: index,
-                params: { limit: "12" },
+                params: { limit: "5" },
                 fetchImpl,
                 env,
               }),
