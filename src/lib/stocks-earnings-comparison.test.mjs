@@ -64,10 +64,12 @@ assert.equal(comparison.revenue.estimate, 573_937_500);
 assert.deepEqual(comparison.revenue.actualSource, {
   provider: "fmp",
   method: "direct",
+  accountingBasis: "FMP standardized",
 });
 assert.deepEqual(comparison.revenue.estimateSource, {
   provider: "fmp",
   method: "direct",
+  accountingBasis: "FMP standardized",
 });
 assert.equal(comparison.revenue.previousYearActual, 105_100_000);
 assert.equal(comparison.revenue.surprise, 8_362_500);
@@ -97,7 +99,11 @@ const filled = mergeEarningsMetricValues(
   calculateComparisonMetric(582_300_000, null, 105_100_000),
   {
     estimate: 573_937_500,
-    estimateSource: { provider: "finnhub", method: "direct" },
+    estimateSource: {
+      provider: "finnhub",
+      method: "direct",
+      accountingBasis: "Finnhub consensus",
+    },
   },
 );
 assert.equal(filled.actual, 582_300_000);
@@ -105,6 +111,7 @@ assert.equal(filled.estimate, 573_937_500);
 assert.deepEqual(filled.estimateSource, {
   provider: "finnhub",
   method: "direct",
+  accountingBasis: "Finnhub consensus",
 });
 assert.ok(Math.abs(filled.surprisePct - 1.45704) < 0.00001);
 

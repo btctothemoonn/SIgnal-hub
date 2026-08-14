@@ -10,6 +10,7 @@ export type StocksEarningsProvider =
 export type StocksEarningsValueProvenance = {
   provider: StocksEarningsProvider;
   method: "direct" | "eps-times-diluted-shares";
+  accountingBasis: string;
 };
 
 export type StocksEarningsMetricComparison = {
@@ -276,8 +277,16 @@ function parseIncomeQuarter(
       numberValue(estimate?.estimatedRevenueAvg ?? estimate?.revenueAvg),
       numberValue(previous?.revenue),
       {
-        actualSource: { provider: "fmp", method: "direct" },
-        estimateSource: { provider: "fmp", method: "direct" },
+        actualSource: {
+          provider: "fmp",
+          method: "direct",
+          accountingBasis: "FMP standardized",
+        },
+        estimateSource: {
+          provider: "fmp",
+          method: "direct",
+          accountingBasis: "FMP standardized",
+        },
       },
     ),
     netIncome: calculateComparisonMetric(
@@ -287,8 +296,16 @@ function parseIncomeQuarter(
       ),
       numberValue(previous?.netIncome),
       {
-        actualSource: { provider: "fmp", method: "direct" },
-        estimateSource: { provider: "fmp", method: "direct" },
+        actualSource: {
+          provider: "fmp",
+          method: "direct",
+          accountingBasis: "FMP standardized",
+        },
+        estimateSource: {
+          provider: "fmp",
+          method: "direct",
+          accountingBasis: "FMP standardized",
+        },
       },
     ),
   };
