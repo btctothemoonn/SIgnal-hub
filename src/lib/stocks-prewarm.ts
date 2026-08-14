@@ -14,6 +14,7 @@ import {
 import { enrichStocksFinancialSnapshotWithInsights } from "./stocks-earnings-insight.ts";
 import {
   mergeEarningsMetricValues,
+  normalizeStocksEarningsValueProvenance,
   type StocksEarningsValueProvenance,
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
@@ -228,12 +229,37 @@ function mergeMetricValue<T extends "actual" | "estimate">(
   return { value: nextValue, source: next[sourceField] };
 }
 
+function normalizeEarningsMetric(
+  metric: StocksEarningsComparison["revenue"],
+) {
+  const patch: Parameters<typeof mergeEarningsMetricValues>[1] = {};
+  if (metric.estimate !== null && metric.estimateSource) {
+    const estimateSource = normalizeStocksEarningsValueProvenance(
+      metric.estimateSource,
+    );
+    if (estimateSource) patch.estimateSource = estimateSource;
+  }
+  if (metric.actual !== null && metric.actualSource) {
+    const actualSource = normalizeStocksEarningsValueProvenance(
+      metric.actualSource,
+    );
+    if (actualSource) patch.actualSource = actualSource;
+  }
+  return Object.keys(patch).length > 0
+    ? mergeEarningsMetricValues(metric, patch)
+    : metric;
+}
+
 function mergeEarningsComparison(
   previous: StocksEarningsComparison | null | undefined,
   next: StocksEarningsComparison | null | undefined,
 ) {
   if (!next) return previous ?? null;
   if (!previous || !sameEarningsPeriod(previous, next)) return next;
+  const normalizedPreviousRevenue = normalizeEarningsMetric(previous.revenue);
+  const normalizedNextRevenue = normalizeEarningsMetric(next.revenue);
+  const normalizedPreviousNetIncome = normalizeEarningsMetric(previous.netIncome);
+  const normalizedNextNetIncome = normalizeEarningsMetric(next.netIncome);
   const mergeMetric = (
     prior: StocksEarningsComparison["revenue"],
     current: StocksEarningsComparison["revenue"],
@@ -258,8 +284,11 @@ function mergeEarningsComparison(
     }
     return mergeEarningsMetricValues(current, patch);
   };
-  const revenue = mergeMetric(previous.revenue, next.revenue);
-  const netIncome = mergeMetric(previous.netIncome, next.netIncome);
+  const revenue = mergeMetric(normalizedPreviousRevenue, normalizedNextRevenue);
+  const netIncome = mergeMetric(
+    normalizedPreviousNetIncome,
+    normalizedNextNetIncome,
+  );
   return {
     ...next,
     revenue,

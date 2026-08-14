@@ -13,6 +13,43 @@ export type StocksEarningsValueProvenance = {
   accountingBasis: string;
 };
 
+export const LEGACY_UNKNOWN_ACCOUNTING_BASIS =
+  "Legacy/unknown accounting basis";
+
+function isStocksEarningsProvider(
+  value: unknown,
+): value is StocksEarningsProvider {
+  return ["fmp", "finnhub", "eodhd", "alpha-vantage", "yahoo"].includes(
+    value as StocksEarningsProvider,
+  );
+}
+
+function isStocksEarningsValueMethod(
+  value: unknown,
+): value is StocksEarningsValueProvenance["method"] {
+  return value === "direct" || value === "eps-times-diluted-shares";
+}
+
+export function normalizeStocksEarningsValueProvenance(
+  source: Partial<StocksEarningsValueProvenance> | undefined,
+): StocksEarningsValueProvenance | undefined {
+  if (!source) return undefined;
+  if (!isStocksEarningsProvider(source.provider)) return undefined;
+  if (!isStocksEarningsValueMethod(source.method)) return undefined;
+  const accountingBasis =
+    typeof source.accountingBasis === "string" &&
+    source.accountingBasis.trim()
+      ? source.accountingBasis.trim()
+      : source.provider === "fmp"
+        ? "FMP standardized"
+        : LEGACY_UNKNOWN_ACCOUNTING_BASIS;
+  return {
+    provider: source.provider,
+    method: source.method,
+    accountingBasis,
+  };
+}
+
 export type StocksEarningsMetricComparison = {
   estimate: number | null;
   estimateSource?: StocksEarningsValueProvenance;

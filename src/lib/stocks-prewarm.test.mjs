@@ -142,6 +142,11 @@ const partialFinancial = {
     },
   },
 };
+const legacyPreviousFinancial = structuredClone(previousFinancial);
+delete legacyPreviousFinancial.financials.NBIS.latestEarnings.revenue
+  .estimateSource.accountingBasis;
+delete legacyPreviousFinancial.financials.NBIS.earningsHistory[0].revenue
+  .estimateSource.accountingBasis;
 const preservedFinancial = preserveSuccessfulFinancialEntries(
   previousFinancial,
   partialFinancial,
@@ -178,6 +183,52 @@ try {
   assert.equal(
     resolveStocksMarketProvider({ STOCKS_MARKET_DATA_PROVIDER: "eodhd" }),
     "eodhd",
+  );
+
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env,
+    snapshot: legacyPreviousFinancial,
+  });
+  const migratedFinancial = await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: true,
+    loader: async () => partialFinancial,
+  });
+  assert.equal(
+    migratedFinancial.financials.NBIS.latestEarnings.revenue.estimate,
+    573_937_500,
+  );
+  assert.equal(
+    migratedFinancial.financials.NBIS.latestEarnings.revenue.estimateSource
+      .accountingBasis,
+    "FMP standardized",
+  );
+  assert.equal(
+    JSON.parse(readFileSync(getStocksSnapshotCachePath("financial", env), "utf8"))
+      .financials.NBIS.latestEarnings.revenue.estimateSource.accountingBasis,
+    "FMP standardized",
+  );
+
+  const legacyUnknownFinancial = structuredClone(legacyPreviousFinancial);
+  legacyUnknownFinancial.financials.NBIS.latestEarnings.revenue.estimateSource.provider =
+    "finnhub";
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env,
+    snapshot: legacyUnknownFinancial,
+  });
+  const migratedUnknownFinancial = await getCachedStocksSnapshot({
+    kind: "financial",
+    env,
+    force: true,
+    loader: async () => partialFinancial,
+  });
+  assert.equal(
+    migratedUnknownFinancial.financials.NBIS.latestEarnings.revenue
+      .estimateSource.accountingBasis,
+    "Legacy/unknown accounting basis",
   );
 
   const cachedMarket = {
