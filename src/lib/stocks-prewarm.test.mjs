@@ -310,6 +310,11 @@ try {
     env,
     snapshot: freshLegacyFinancial,
   });
+  const freshRevenueBefore = structuredClone(
+    freshLegacyFinancial.financials.NBIS.latestEarnings.revenue,
+  );
+  delete freshRevenueBefore.estimateSource;
+  delete freshRevenueBefore.actualSource;
   let freshLoaderCalls = 0;
   const freshHit = await getCachedStocksSnapshot({
     kind: "financial",
@@ -334,6 +339,12 @@ try {
       .accountingBasis,
     "FMP standardized",
   );
+  const freshRevenueAfter = structuredClone(
+    freshHit.financials.NBIS.latestEarnings.revenue,
+  );
+  delete freshRevenueAfter.estimateSource;
+  delete freshRevenueAfter.actualSource;
+  assert.deepEqual(freshRevenueAfter, freshRevenueBefore);
   const freshCachePath = getStocksSnapshotCachePath("financial", env);
   assert.equal(
     JSON.parse(readFileSync(freshCachePath, "utf8"))

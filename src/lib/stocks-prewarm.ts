@@ -232,22 +232,20 @@ function mergeMetricValue<T extends "actual" | "estimate">(
 function normalizeEarningsMetric(
   metric: StocksEarningsComparison["revenue"],
 ) {
-  const patch: Parameters<typeof mergeEarningsMetricValues>[1] = {};
+  const normalized = { ...metric };
   if (metric.estimate !== null && metric.estimateSource) {
     const estimateSource = normalizeStocksEarningsValueProvenance(
       metric.estimateSource,
     );
-    if (estimateSource) patch.estimateSource = estimateSource;
+    if (estimateSource) normalized.estimateSource = estimateSource;
   }
   if (metric.actual !== null && metric.actualSource) {
     const actualSource = normalizeStocksEarningsValueProvenance(
       metric.actualSource,
     );
-    if (actualSource) patch.actualSource = actualSource;
+    if (actualSource) normalized.actualSource = actualSource;
   }
-  return Object.keys(patch).length > 0
-    ? mergeEarningsMetricValues(metric, patch)
-    : metric;
+  return normalized;
 }
 
 function normalizeEarningsComparison(
@@ -316,22 +314,41 @@ function mergeEarningsComparison(
     const actual = mergeMetricValue(prior, current, "actual");
     const estimate = mergeMetricValue(prior, current, "estimate");
     const patch: Parameters<typeof mergeEarningsMetricValues>[1] = {
-      previousYearActual:
-        current.previousYearActual ?? prior.previousYearActual,
     };
+    const sourcePatch: Pick<
+      Parameters<typeof mergeEarningsMetricValues>[1],
+      "actualSource" | "estimateSource"
+    > = {};
+    let rawValuesChanged = false;
+    const previousYearActual =
+      current.previousYearActual ?? prior.previousYearActual;
+    if (previousYearActual !== current.previousYearActual) {
+      patch.previousYearActual = previousYearActual;
+      rawValuesChanged = true;
+    }
     if (actual.value !== current.actual) {
       patch.actual = actual.value;
-      if (actual.source) patch.actualSource = actual.source;
+      rawValuesChanged = true;
+      if (actual.source) sourcePatch.actualSource = actual.source;
     } else if (actual.source && actual.source !== current.actualSource) {
-      patch.actualSource = actual.source;
+      sourcePatch.actualSource = actual.source;
     }
     if (estimate.value !== current.estimate) {
       patch.estimate = estimate.value;
-      if (estimate.source) patch.estimateSource = estimate.source;
+      rawValuesChanged = true;
+      if (estimate.source) sourcePatch.estimateSource = estimate.source;
     } else if (estimate.source && estimate.source !== current.estimateSource) {
-      patch.estimateSource = estimate.source;
+      sourcePatch.estimateSource = estimate.source;
     }
-    return mergeEarningsMetricValues(current, patch);
+    if (rawValuesChanged) {
+      return mergeEarningsMetricValues(current, {
+        ...patch,
+        ...sourcePatch,
+      });
+    }
+    return Object.keys(sourcePatch).length > 0
+      ? { ...current, ...sourcePatch }
+      : current;
   };
   const revenue = mergeMetric(normalizedPrevious.revenue, normalizedNext.revenue);
   const netIncome = mergeMetric(
