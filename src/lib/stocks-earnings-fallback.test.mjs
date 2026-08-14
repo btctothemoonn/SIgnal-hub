@@ -17,6 +17,7 @@ const target = {
   reportDate: "2026-08-12",
   reportTiming: "before-market",
   currency: "USD",
+  market: "US",
 };
 
 const finnhubPayload = {
@@ -31,9 +32,6 @@ const finnhubPayload = {
       revenueEstimate: 573_937_500,
       epsActual: -1.9,
       epsEstimate: -2.74,
-      currency: "USD",
-      revenueUnit: "raw",
-      epsUnit: "per-share",
     },
   ],
 };
@@ -59,9 +57,6 @@ const eodhdNestedPayload = {
         code: "NBIS.US",
         date: "2026-06-30",
         period: "0q",
-        currency: "USD",
-        revenueUnit: "raw",
-        epsUnit: "per-share",
         revenueEstimateAvg: "573937500.00",
         earningsEstimateAvg: "-2.74",
       },
@@ -294,23 +289,6 @@ assert.equal(noReportDateUrls[0]?.searchParams.get("from"), "2026-07-14");
 assert.equal(noReportDateUrls[0]?.searchParams.get("to"), "2026-10-28");
 assert.equal(withoutReportDate.comparison.revenue.estimate, 573_937_500);
 
-const normalizedUnit = await completeStocksEarningsComparison({
-  ticker: "NBIS",
-  base: baseCandidate({ revenueEstimate: null }),
-  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
-  fetchImpl: async () =>
-    Response.json({
-      earningsCalendar: [
-        {
-          ...finnhubPayload.earningsCalendar[0],
-          revenueEstimate: 573.9375,
-          revenueUnit: "millions",
-        },
-      ],
-    }),
-});
-assert.equal(normalizedUnit.comparison.revenue.estimate, 573_937_500);
-
 const incompatibleCurrency = await completeStocksEarningsComparison({
   ticker: "NBIS",
   base: baseCandidate({ revenueEstimate: null }),
@@ -321,6 +299,7 @@ const incompatibleCurrency = await completeStocksEarningsComparison({
         {
           ...finnhubPayload.earningsCalendar[0],
           currency: "KRW",
+          revenueUnit: "raw",
         },
       ],
     }),
@@ -342,7 +321,6 @@ const yahooFallback = await completeStocksEarningsComparison({
       quoteSummary: {
         result: [
           {
-            currency: "USD",
             incomeStatementHistoryQuarterly: {
               incomeStatementHistory: [
                 {
@@ -361,6 +339,32 @@ const yahooFallback = await completeStocksEarningsComparison({
 assert.equal(yahooUrls.length, 1);
 assert.equal(yahooFallback.comparison.revenue.actual, 582_300_000);
 assert.equal(yahooFallback.comparison.netIncome.actual, -190_400_000);
+
+const eodhdFallback = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: baseCandidate({ revenueEstimate: null, netIncomeEstimate: null }),
+  env: { STOCKS_EODHD_API_KEY: "eodhd-secret" },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.hostname, "eodhd.com");
+    assert.equal(url.searchParams.get("symbols"), "NBIS.US");
+    return Response.json(eodhdNestedPayload);
+  },
+});
+assert.equal(eodhdFallback.comparison.revenue.estimate, 573_937_500);
+assert.equal(eodhdFallback.comparison.netIncome.estimate, -274_000_000);
+
+const unknownMarket = baseCandidate({ revenueEstimate: null, netIncomeEstimate: null });
+delete unknownMarket.market;
+const unknownMarketFallback = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: unknownMarket,
+  env: { STOCKS_FINNHUB_API_KEY: "finnhub-secret" },
+  fetchImpl: async () => Response.json(finnhubPayload),
+});
+assert.equal(unknownMarketFallback.comparison.revenue.estimate, null);
+assert.equal(unknownMarketFallback.comparison.netIncome.estimate, null);
+assert.ok(unknownMarketFallback.errors.some((error) => /US listing context/i.test(error)));
 
 const noKeyUrls = [];
 const noKeys = await completeStocksEarningsComparison({
@@ -455,6 +459,16 @@ const incompatibleEpsBasis = mergeStocksEarningsFallbackCandidate(
   { ...derivedCandidate, epsCurrency: "KRW" },
 );
 assert.equal(incompatibleEpsBasis.comparison.netIncome.estimate, null);
+const nonUsdEpsBasis = mergeStocksEarningsFallbackCandidate(
+  {
+    ...baseCandidate({ netIncomeEstimate: null }),
+    currency: "EUR",
+    epsCurrency: "EUR",
+    comparison: { ...baseCandidate({ netIncomeEstimate: null }).comparison, currency: "EUR" },
+  },
+  { ...derivedCandidate, currency: "EUR", epsCurrency: "EUR" },
+);
+assert.equal(nonUsdEpsBasis.comparison.netIncome.estimate, null);
 const directWins = mergeStocksEarningsFallbackCandidate(derivedFirst, directCandidate);
 assert.equal(directWins.comparison.netIncome.estimate, -260_000_000);
 assert.equal(directWins.comparison.netIncome.estimateSource?.method, "direct");

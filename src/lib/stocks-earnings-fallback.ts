@@ -18,6 +18,8 @@ export type StocksEarningsFallbackTarget = {
   reportDate: string | null;
   reportTiming: "before-market" | "after-market" | "unknown";
   currency: string;
+  market?: string;
+  exchange?: string;
 };
 
 type StocksEarningsAmountUnit = "raw" | "thousands" | "millions" | "billions" | null;
@@ -181,9 +183,6 @@ function candidateFromRecord(
   values: Partial<StocksEarningsFallbackCandidate>,
 ) {
   const currency = currencyValue(record);
-  const epsActual = values.epsActual ?? null;
-  const epsEstimate = values.epsEstimate ?? null;
-  const dilutedShares = values.dilutedShares ?? null;
   return {
     ...emptyCandidate(target, provider),
     ...values,
@@ -191,9 +190,8 @@ function candidateFromRecord(
     revenueUnit: values.revenueUnit ?? sourceAmountUnit(record, "revenue"),
     netIncomeUnit: values.netIncomeUnit ?? sourceAmountUnit(record, "netIncome"),
     epsCurrency: values.epsCurrency ?? currency,
-    epsUnit: values.epsUnit ?? (epsActual !== null || epsEstimate !== null ? "per-share" : null),
-    dilutedSharesUnit:
-      values.dilutedSharesUnit ?? (dilutedShares !== null ? "shares" : null),
+    epsUnit: values.epsUnit ?? null,
+    dilutedSharesUnit: values.dilutedSharesUnit ?? null,
     reportDate: stringValue(record.date) || target.reportDate,
     reportTiming: reportTiming(record.hour ?? record.time) || target.reportTiming,
   };
@@ -243,7 +241,8 @@ export function parseEodhdEarningsCandidate(
   target: StocksEarningsFallbackTarget,
 ): StocksEarningsFallbackCandidate | null {
   const parsed = asRecord(payload);
-  const symbol = eodhdSymbol(target.ticker);
+  const symbol = eodhdSymbol(target.ticker, target);
+  if (!symbol) return null;
   const rows = flattenNestedRecords(parsed.trends ?? parsed.data ?? parsed.results);
   const row = rows.find(
     (entry) =>
@@ -367,6 +366,77 @@ function addDiagnostic(errors: string[] | undefined, message: string) {
   if (errors && !errors.includes(message)) errors.push(message);
 }
 
+function isConfirmedUsUsdListing(target: Pick<StocksEarningsFallbackTarget, "currency" | "market" | "exchange">) {
+  if (target.currency.trim().toUpperCase() !== "USD") return false;
+  const context = [target.market, target.exchange]
+    .map((value) => stringValue(value).toUpperCase())
+    .filter(Boolean);
+  return context.some((value) =>
+    ["US", "USA", "NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"].some(
+      (marker) => value === marker || value.startsWith(marker),
+    ),
+  );
+}
+
+const providerDefaultPolicy: Record<
+  StocksEarningsProvider,
+  "us-usd-contract" | "explicit-only"
+> = {
+  fmp: "explicit-only",
+  finnhub: "us-usd-contract",
+  eodhd: "us-usd-contract",
+  "alpha-vantage": "explicit-only",
+  yahoo: "us-usd-contract",
+};
+
+function candidateNeedsUsUsdDefaults(candidate: StocksEarningsFallbackCandidate) {
+  return (
+    (candidate.revenueActual !== null || candidate.revenueEstimate !== null) &&
+      (!candidate.currency || !candidate.revenueUnit) ||
+    (candidate.netIncomeActual !== null || candidate.netIncomeEstimate !== null) &&
+      (!candidate.currency || !candidate.netIncomeUnit) ||
+    candidate.epsEstimate !== null &&
+      (!candidate.epsCurrency || candidate.epsUnit !== "per-share") ||
+    candidate.dilutedShares !== null && candidate.dilutedSharesUnit !== "shares"
+  );
+}
+
+function applyProviderDefaults(
+  base: StocksEarningsFallbackBase,
+  candidate: StocksEarningsFallbackCandidate,
+  errors?: string[],
+) {
+  if (
+    providerDefaultPolicy[candidate.provider] !== "us-usd-contract" ||
+    !candidateNeedsUsUsdDefaults(candidate)
+  ) {
+    return candidate;
+  }
+  if (!isConfirmedUsUsdListing(base)) {
+    addDiagnostic(
+      errors,
+      `${candidate.provider} skipped: US listing context required for USD defaults`,
+    );
+    return candidate;
+  }
+  const currency = candidate.currency ?? "USD";
+  return {
+    ...candidate,
+    currency,
+    revenueUnit: candidate.revenueUnit ?? "raw",
+    netIncomeUnit: candidate.netIncomeUnit ?? "raw",
+    epsCurrency: candidate.epsCurrency ?? "USD",
+    epsUnit:
+      candidate.epsUnit ??
+      (candidate.epsActual !== null || candidate.epsEstimate !== null
+        ? "per-share"
+        : null),
+    dilutedSharesUnit:
+      candidate.dilutedSharesUnit ??
+      (candidate.dilutedShares !== null ? "shares" : null),
+  };
+}
+
 function normalizeAmount(value: number, unit: StocksEarningsAmountUnit) {
   const factor =
     unit === "thousands"
@@ -415,13 +485,15 @@ function canDeriveNetIncome(
       ? base.dilutedSharesUnit
       : candidate.dilutedSharesUnit;
   const baseEpsCurrency = base.epsCurrency?.toUpperCase();
+  const baseCurrency = base.currency.toUpperCase();
   if (
     shares === null ||
     sharesUnit !== "shares" ||
     candidate.epsUnit !== "per-share" ||
+    baseCurrency !== "USD" ||
     !candidate.epsCurrency ||
-    candidate.epsCurrency !== base.currency.toUpperCase() ||
-    baseEpsCurrency !== base.currency.toUpperCase()
+    candidate.epsCurrency !== "USD" ||
+    baseEpsCurrency !== "USD"
   ) {
     addDiagnostic(errors, "net income estimate skipped: incompatible EPS or diluted shares basis");
     return false;
@@ -434,37 +506,38 @@ function sanitizeCandidateForBase(
   candidate: StocksEarningsFallbackCandidate,
   errors?: string[],
 ) {
+  const defaulted = applyProviderDefaults(base, candidate, errors);
   const [revenueActual, revenueEstimate] = normalizeMetricValues(
-    [candidate.revenueActual, candidate.revenueEstimate],
-    candidate.revenueUnit,
-    candidate.currency,
+    [defaulted.revenueActual, defaulted.revenueEstimate],
+    defaulted.revenueUnit,
+    defaulted.currency,
     base,
     base.revenueUnit,
     "revenue",
     errors,
   );
   const [netIncomeActual, netIncomeEstimate] = normalizeMetricValues(
-    [candidate.netIncomeActual, candidate.netIncomeEstimate],
-    candidate.netIncomeUnit,
-    candidate.currency,
+    [defaulted.netIncomeActual, defaulted.netIncomeEstimate],
+    defaulted.netIncomeUnit,
+    defaulted.currency,
     base,
     base.netIncomeUnit,
     "net income",
     errors,
   );
-  const epsEstimate = canDeriveNetIncome(candidate, base, errors)
-    ? candidate.epsEstimate
+  const epsEstimate = canDeriveNetIncome(defaulted, base, errors)
+    ? defaulted.epsEstimate
     : null;
   return {
-    ...candidate,
+    ...defaulted,
     revenueActual,
     revenueEstimate,
-    revenueUnit: revenueActual === null && revenueEstimate === null ? candidate.revenueUnit : "raw",
+    revenueUnit: revenueActual === null && revenueEstimate === null ? defaulted.revenueUnit : "raw",
     netIncomeActual,
     netIncomeEstimate,
     netIncomeUnit:
       netIncomeActual === null && netIncomeEstimate === null
-        ? candidate.netIncomeUnit
+        ? defaulted.netIncomeUnit
         : "raw",
     epsEstimate,
   };
@@ -595,15 +668,24 @@ function finnhubUrl(ticker: string, target: StocksEarningsFallbackTarget, apiKey
   return url.toString();
 }
 
-function eodhdSymbol(ticker: string) {
+function eodhdSymbol(
+  ticker: string,
+  target: Pick<StocksEarningsFallbackTarget, "currency" | "market" | "exchange">,
+) {
   const normalized = ticker.trim().toUpperCase();
-  if (normalized.endsWith(".KS")) return `${normalized.slice(0, -3)}.KO`;
-  return normalized.endsWith(".US") ? normalized : `${normalized}.US`;
+  if (isConfirmedUsUsdListing(target)) {
+    return normalized.endsWith(".US") ? normalized : `${normalized}.US`;
+  }
+  const market = stringValue(target.market).toUpperCase();
+  if (market === "KR" && normalized.endsWith(".KS")) {
+    return `${normalized.slice(0, -3)}.KO`;
+  }
+  return null;
 }
 
-function eodhdUrl(ticker: string, apiKey: string) {
+function eodhdUrl(symbol: string, apiKey: string) {
   const url = new URL("https://eodhd.com/api/calendar/trends");
-  url.searchParams.set("symbols", eodhdSymbol(ticker));
+  url.searchParams.set("symbols", symbol);
   url.searchParams.set("api_token", apiKey);
   url.searchParams.set("fmt", "json");
   return url.toString();
@@ -667,6 +749,8 @@ export async function completeStocksEarningsComparison({
     reportDate: base.reportDate,
     reportTiming: base.reportTiming,
     currency: base.currency,
+    market: base.market,
+    exchange: base.exchange,
   };
   const finnhubKeys = getProviderApiKeys(env, [
     "STOCKS_FINNHUB_API_KEYS",
@@ -703,10 +787,11 @@ export async function completeStocksEarningsComparison({
     }
   }
 
-  if (comparisonHasGaps(completed.comparison) && eodhdKeys[0]) {
+  const eodhdTicker = eodhdSymbol(ticker, target);
+  if (comparisonHasGaps(completed.comparison) && eodhdKeys[0] && eodhdTicker) {
     const payload = await fetchJson(
       fetchImpl,
-      eodhdUrl(ticker, eodhdKeys[0]),
+      eodhdUrl(eodhdTicker, eodhdKeys[0]),
       "eodhd calendar/trends",
       errors,
     );
@@ -717,6 +802,8 @@ export async function completeStocksEarningsComparison({
         sanitizeCandidateForBase(completed, candidate, errors),
       );
     }
+  } else if (comparisonHasGaps(completed.comparison) && eodhdKeys[0] && !eodhdTicker) {
+    addDiagnostic(errors, "eodhd calendar/trends skipped: unsupported or unproven listing market");
   }
 
   if (comparisonHasGaps(completed.comparison) && alphaVantageKeys[0]) {
