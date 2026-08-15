@@ -386,6 +386,7 @@ assert.ok(
   !alphaDisabledFallbackUrls.some((url) => url.includes("alphavantage.co")),
 );
 
+let alphaQuarterlyIncomeRequests = 0;
 const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
   stocks: [{ ticker: "NBIS", marketCode: "US" }],
   env: {
@@ -410,12 +411,19 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
           },
         ]);
       }
+      if (endpoint === "analyst-estimates") {
+        return new Response("plan restricted", { status: 402 });
+      }
       return Response.json([]);
     }
     if (
       url.hostname === "www.alphavantage.co" &&
       url.searchParams.get("function") === "INCOME_STATEMENT"
     ) {
+      alphaQuarterlyIncomeRequests += 1;
+      if (alphaQuarterlyIncomeRequests > 1) {
+        return new Response("temporary Alpha Vantage outage", { status: 503 });
+      }
       return Response.json({
         quarterlyReports: [
           {
@@ -443,6 +451,12 @@ assert.equal(
   alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actualSource
     .provider,
   "alpha-vantage",
+);
+assert.equal(alphaQuarterlyIncomeRequests, 1);
+assert.ok(
+  alphaQuarterlyRecovery.errors.some((error) =>
+    error.includes("FMP analyst-estimates HTTP 402"),
+  ),
 );
 
 await assert.rejects(

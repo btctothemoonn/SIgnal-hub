@@ -57,6 +57,8 @@ type FallbackResult = {
   errors: string[];
 };
 
+export type StocksEarningsFallbackPayloadCache = Map<string, unknown[]>;
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -728,16 +730,41 @@ async function fetchJson(
   }
 }
 
+function providerCacheKey(ticker: string, provider: string) {
+  return `${ticker.trim().toUpperCase()}:${provider}`;
+}
+
+function cachedProviderPayloads(
+  cache: StocksEarningsFallbackPayloadCache | undefined,
+  ticker: string,
+  provider: string,
+) {
+  return cache?.get(providerCacheKey(ticker, provider)) ?? [];
+}
+
+function cacheProviderPayload(
+  cache: StocksEarningsFallbackPayloadCache | undefined,
+  ticker: string,
+  provider: string,
+  payload: unknown,
+) {
+  if (!cache) return;
+  const key = providerCacheKey(ticker, provider);
+  cache.set(key, [...(cache.get(key) ?? []), payload]);
+}
+
 export async function completeStocksEarningsComparison({
   ticker,
   base,
   fetchImpl = fetch,
   env = process.env,
+  payloadCache,
 }: {
   ticker: string;
   base: StocksEarningsFallbackBase;
   fetchImpl?: FetchLike;
   env?: EnvLike;
+  payloadCache?: StocksEarningsFallbackPayloadCache;
 }): Promise<FallbackResult> {
   let completed = base;
   const errors: string[] = [];
@@ -772,13 +799,21 @@ export async function completeStocksEarningsComparison({
   ]);
 
   if (comparisonHasGaps(completed.comparison) && finnhubKeys[0]) {
-    const payload = await fetchJson(
-      fetchImpl,
-      finnhubUrl(ticker, target, finnhubKeys[0]),
-      "finnhub calendar/earnings",
-      errors,
-    );
-    const candidate = payload && parseFinnhubEarningsCandidate(payload, target);
+    let candidate = cachedProviderPayloads(payloadCache, ticker, "finnhub")
+      .map((payload) => parseFinnhubEarningsCandidate(payload, target))
+      .find((value): value is StocksEarningsFallbackCandidate => value !== null);
+    if (!candidate) {
+      const payload = await fetchJson(
+        fetchImpl,
+        finnhubUrl(ticker, target, finnhubKeys[0]),
+        "finnhub calendar/earnings",
+        errors,
+      );
+      if (payload) {
+        cacheProviderPayload(payloadCache, ticker, "finnhub", payload);
+        candidate = parseFinnhubEarningsCandidate(payload, target) ?? undefined;
+      }
+    }
     if (candidate) {
       completed = mergeCompatibleCandidate(
         completed,
@@ -789,13 +824,21 @@ export async function completeStocksEarningsComparison({
 
   const eodhdTicker = eodhdSymbol(ticker, target);
   if (comparisonHasGaps(completed.comparison) && eodhdKeys[0] && eodhdTicker) {
-    const payload = await fetchJson(
-      fetchImpl,
-      eodhdUrl(eodhdTicker, eodhdKeys[0]),
-      "eodhd calendar/trends",
-      errors,
-    );
-    const candidate = payload && parseEodhdEarningsCandidate(payload, target);
+    let candidate = cachedProviderPayloads(payloadCache, ticker, "eodhd")
+      .map((payload) => parseEodhdEarningsCandidate(payload, target))
+      .find((value): value is StocksEarningsFallbackCandidate => value !== null);
+    if (!candidate) {
+      const payload = await fetchJson(
+        fetchImpl,
+        eodhdUrl(eodhdTicker, eodhdKeys[0]),
+        "eodhd calendar/trends",
+        errors,
+      );
+      if (payload) {
+        cacheProviderPayload(payloadCache, ticker, "eodhd", payload);
+        candidate = parseEodhdEarningsCandidate(payload, target) ?? undefined;
+      }
+    }
     if (candidate) {
       completed = mergeCompatibleCandidate(
         completed,
@@ -808,26 +851,44 @@ export async function completeStocksEarningsComparison({
 
   if (comparisonHasGaps(completed.comparison) && alphaVantageKeys[0]) {
     const key = alphaVantageKeys[0];
-    const incomePayload =
+    let incomePayload =
       completed.comparison.revenue.actual === null ||
       completed.comparison.netIncome.actual === null
-        ? await fetchJson(
-            fetchImpl,
-            alphaVantageUrl("INCOME_STATEMENT", ticker, key),
-            "alpha-vantage INCOME_STATEMENT",
-            errors,
-          )
+        ? cachedProviderPayloads(payloadCache, ticker, "alpha-vantage-income")[0] ?? null
         : null;
-    const estimatesPayload =
+    if (incomePayload === null && (
+      completed.comparison.revenue.actual === null ||
+      completed.comparison.netIncome.actual === null
+    )) {
+      incomePayload = await fetchJson(
+        fetchImpl,
+        alphaVantageUrl("INCOME_STATEMENT", ticker, key),
+        "alpha-vantage INCOME_STATEMENT",
+        errors,
+      );
+      if (incomePayload) {
+        cacheProviderPayload(payloadCache, ticker, "alpha-vantage-income", incomePayload);
+      }
+    }
+    let estimatesPayload =
       completed.comparison.revenue.estimate === null ||
       completed.comparison.netIncome.estimate === null
-        ? await fetchJson(
-            fetchImpl,
-            alphaVantageUrl("EARNINGS_ESTIMATES", ticker, key),
-            "alpha-vantage EARNINGS_ESTIMATES",
-            errors,
-          )
+        ? cachedProviderPayloads(payloadCache, ticker, "alpha-vantage-estimates")[0] ?? null
         : null;
+    if (estimatesPayload === null && (
+      completed.comparison.revenue.estimate === null ||
+      completed.comparison.netIncome.estimate === null
+    )) {
+      estimatesPayload = await fetchJson(
+        fetchImpl,
+        alphaVantageUrl("EARNINGS_ESTIMATES", ticker, key),
+        "alpha-vantage EARNINGS_ESTIMATES",
+        errors,
+      );
+      if (estimatesPayload) {
+        cacheProviderPayload(payloadCache, ticker, "alpha-vantage-estimates", estimatesPayload);
+      }
+    }
     const candidate = parseAlphaVantageEarningsCandidate(
       { incomeStatement: incomePayload, earningsEstimates: estimatesPayload },
       target,
@@ -845,13 +906,21 @@ export async function completeStocksEarningsComparison({
     (completed.comparison.revenue.actual === null ||
       completed.comparison.netIncome.actual === null)
   ) {
-    const payload = await fetchJson(
-      fetchImpl,
-      yahooUrl(ticker),
-      "yahoo incomeStatementHistoryQuarterly",
-      errors,
-    );
-    const candidate = payload && parseYahooEarningsCandidate(payload, target);
+    let candidate = cachedProviderPayloads(payloadCache, ticker, "yahoo")
+      .map((payload) => parseYahooEarningsCandidate(payload, target))
+      .find((value): value is StocksEarningsFallbackCandidate => value !== null);
+    if (!candidate) {
+      const payload = await fetchJson(
+        fetchImpl,
+        yahooUrl(ticker),
+        "yahoo incomeStatementHistoryQuarterly",
+        errors,
+      );
+      if (payload) {
+        cacheProviderPayload(payloadCache, ticker, "yahoo", payload);
+        candidate = parseYahooEarningsCandidate(payload, target) ?? undefined;
+      }
+    }
     if (candidate) {
       completed = mergeCompatibleCandidate(
         completed,

@@ -14,7 +14,10 @@ import {
 } from "./stocks-earnings-comparison.ts";
 import {
   completeStocksEarningsComparison,
+  mergeStocksEarningsFallbackCandidate,
+  parseAlphaVantageEarningsCandidate,
   type StocksEarningsFallbackBase,
+  type StocksEarningsFallbackPayloadCache,
 } from "./stocks-earnings-fallback.ts";
 import type { StocksEarningsInsight } from "./stocks-earnings-insight.ts";
 
@@ -621,12 +624,16 @@ async function completeFmpEarningsComparison({
   stock,
   comparison,
   income,
+  alphaIncomePayload,
+  payloadCache,
   fetchImpl,
   env,
 }: {
   stock: AlphaResearchStock;
   comparison: StocksEarningsComparison;
   income: JsonRecord;
+  alphaIncomePayload?: unknown;
+  payloadCache?: StocksEarningsFallbackPayloadCache;
   fetchImpl: FetchLike;
   env: EnvLike;
 }) {
@@ -640,12 +647,22 @@ async function completeFmpEarningsComparison({
       errors: ["earnings fallback skipped: FMP currency is unavailable"],
     };
   }
+  const alphaCandidate = alphaIncomePayload
+    ? parseAlphaVantageEarningsCandidate(
+        { incomeStatement: alphaIncomePayload, earningsEstimates: null },
+        base,
+      )
+    : null;
+  const completedBase = alphaCandidate
+    ? mergeStocksEarningsFallbackCandidate(base, alphaCandidate)
+    : base;
   try {
     return await completeStocksEarningsComparison({
       ticker: stock.ticker,
-      base,
+      base: completedBase,
       fetchImpl,
       env,
+      payloadCache,
     });
   } catch {
     return {
@@ -659,14 +676,26 @@ function matchingFmpIncome(
   comparison: StocksEarningsComparison,
   incomePayload: unknown,
 ) {
+  const comparisonDate = Date.parse(`${comparison.fiscalDateEnding}T00:00:00Z`);
   return (
     asArray(incomePayload)
       .map(asRecord)
       .find(
-        (income) =>
-          fiscalYearValue(income.fiscalYear) === comparison.fiscalYear &&
-          quarterValue(income.period) === comparison.quarter &&
-          stringValue(income.date) === comparison.fiscalDateEnding,
+        (income) => {
+          const sameFiscalPeriod =
+            fiscalYearValue(income.fiscalYear) === comparison.fiscalYear &&
+            quarterValue(income.period) === comparison.quarter;
+          const incomeDate =
+            stringValue(income.fiscalDateEnding) ||
+            stringValue(income.fiscalDate) ||
+            stringValue(income.date);
+          const incomeTime = Date.parse(`${incomeDate}T00:00:00Z`);
+          const samePeriodEnd =
+            Number.isFinite(comparisonDate) &&
+            Number.isFinite(incomeTime) &&
+            Math.abs(comparisonDate - incomeTime) <= 7 * 86_400_000;
+          return sameFiscalPeriod || samePeriodEnd;
+        },
       ) ?? null
   );
 }
@@ -737,12 +766,14 @@ async function recoverFmpEarningsFromAlphaVantage({
   fetchImpl,
   env,
   generatedAt,
+  payloadCache,
 }: {
   stock: AlphaResearchStock;
   earningsPayload: unknown;
   fetchImpl: FetchLike;
   env: EnvLike;
   generatedAt: string;
+  payloadCache?: StocksEarningsFallbackPayloadCache;
 }) {
   const apiKey = alphaVantageApiKey(env);
   if (!apiKey) return { statement: null, errors: [] as string[] };
@@ -774,6 +805,8 @@ async function recoverFmpEarningsFromAlphaVantage({
       stock,
       comparison: seed.comparison,
       income: seed.income,
+      alphaIncomePayload: payload,
+      payloadCache,
       fetchImpl,
       env,
     });
@@ -903,6 +936,7 @@ export async function fetchFmpStocksFinancialSnapshot({
   const generatedAt = new Date().toISOString();
   const providerStocks = selectFmpFinancialStocks(stocks, env);
   const errors: string[] = [];
+  const earningsFallbackPayloadCache: StocksEarningsFallbackPayloadCache = new Map();
   const concurrency = positiveInt(
     env.STOCKS_FMP_FINANCIAL_CONCURRENCY,
     3,
@@ -972,6 +1006,20 @@ export async function fetchFmpStocksFinancialSnapshot({
             ]);
           const incomePayload = endpointPayloads[0];
           if (!incomePayload?.ok) {
+            errors.push(
+              `${stock.ticker}: ${
+                incomePayload
+                  ? fmpEndpointError(incomePayload)
+                  : "FMP income-statement returned no payload"
+              }`,
+            );
+          }
+          endpointPayloads.slice(1).forEach((payload) => {
+            if (!payload.ok) {
+              errors.push(`${stock.ticker}: ${fmpEndpointError(payload)}`);
+            }
+          });
+          if (!incomePayload?.ok) {
             const recovered = await recoverFmpEarningsFromAlphaVantage({
               stock,
               earningsPayload: endpointPayloads[4]?.ok
@@ -980,10 +1028,10 @@ export async function fetchFmpStocksFinancialSnapshot({
               fetchImpl,
               env,
               generatedAt,
+              payloadCache: earningsFallbackPayloadCache,
             });
             if (recovered.statement) {
               errors.push(
-                `${stock.ticker}: ${fmpEndpointError(incomePayload)}`,
                 ...recovered.errors.map((error) => `${stock.ticker}: ${error}`),
               );
               return [stock.ticker, recovered.statement] as const;
@@ -994,11 +1042,6 @@ export async function fetchFmpStocksFinancialSnapshot({
                 : "FMP income-statement returned no payload",
             );
           }
-          endpointPayloads.slice(1).forEach((payload) => {
-            if (!payload.ok) {
-              errors.push(`${stock.ticker}: ${fmpEndpointError(payload)}`);
-            }
-          });
           const statement = parseFmpFinancialStatement(
             stock.ticker,
             {
@@ -1031,26 +1074,30 @@ export async function fetchFmpStocksFinancialSnapshot({
           );
           const latestEarnings = earningsHistory[0] ?? null;
           if (latestEarnings) {
-            const completed = await completeFmpEarningsComparison({
-              stock,
-              comparison: latestEarnings,
-              income: matchingFmpIncome(latestEarnings, incomePayload.payload) ?? {},
-              fetchImpl,
-              env,
-            });
-            errors.push(
-              ...completed.errors.map((error) => `${stock.ticker}: ${error}`),
-            );
-            const completedHistory = earningsHistory.map((comparison) =>
-              sameEarningsPeriod(comparison, latestEarnings)
-                ? completed.comparison
-                : comparison,
-            );
+            const completedHistory: StocksEarningsComparison[] = [];
+            for (const comparison of earningsHistory) {
+              const completed = await completeFmpEarningsComparison({
+                stock,
+                comparison,
+                income: matchingFmpIncome(comparison, incomePayload.payload) ?? {},
+                fetchImpl,
+                env,
+                payloadCache: earningsFallbackPayloadCache,
+              });
+              errors.push(
+                ...completed.errors.map((error) => `${stock.ticker}: ${error}`),
+              );
+              completedHistory.push(completed.comparison);
+            }
+            const completedLatest =
+              completedHistory.find((comparison) =>
+                sameEarningsPeriod(comparison, latestEarnings),
+              ) ?? latestEarnings;
             return [
               stock.ticker,
               {
                 ...statement,
-                latestEarnings: completed.comparison,
+                latestEarnings: completedLatest,
                 earningsHistory: completedHistory,
               },
             ] as const;

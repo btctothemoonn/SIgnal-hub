@@ -178,8 +178,10 @@ const completedAfterEstimateRestriction = await fetchFmpStocksFinancialSnapshot(
     }
     if (endpoint === "income-statement") {
       return Response.json(
-        incomeRows("NBIS").map((row) => ({
+        incomeRows("NBIS").map((row, index) => ({
           ...row,
+          date: index === 0 ? "2026-06-29" : row.date,
+          fiscalDateEnding: index === 0 ? "2026-06-30" : undefined,
           weightedAverageShsOutDil: 100_000_000,
         })),
       );
@@ -218,5 +220,98 @@ assert.equal(
     .estimateSource.provider,
   "finnhub",
 );
+
+let historyFinnhubRequests = 0;
+const completedHistory = await fetchFmpStocksFinancialSnapshot({
+  stocks: stocks.slice(0, 1),
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    const endpoint = url.pathname.split("/").at(-1);
+    if (url.hostname === "finnhub.io") {
+      historyFinnhubRequests += 1;
+      return Response.json({
+        earningsCalendar: [
+          {
+            symbol: "NBIS",
+            fiscalYear: 2026,
+            fiscalPeriod: "2026Q2",
+            fiscalDateEnding: "2026-06-30",
+            date: "2026-08-12",
+            revenueEstimate: 573_937_500,
+            epsEstimate: -2.74,
+          },
+          {
+            symbol: "NBIS",
+            fiscalYear: 2026,
+            fiscalPeriod: "2026Q1",
+            fiscalDateEnding: "2026-03-31",
+            date: "2026-05-12",
+            revenueEstimate: 410_000_000,
+            epsEstimate: -1.8,
+          },
+        ],
+      });
+    }
+    if (endpoint === "income-statement") {
+      return Response.json([
+        {
+          date: "2026-06-29",
+          fiscalDateEnding: "2026-06-30",
+          fiscalYear: "2026",
+          period: "Q2",
+          reportedCurrency: "USD",
+          revenue: 582_300_000,
+          netIncome: -190_400_000,
+          weightedAverageShsOutDil: 100_000_000,
+        },
+        {
+          date: "2026-03-31",
+          fiscalYear: "2026",
+          period: "Q1",
+          reportedCurrency: "USD",
+          revenue: 420_000_000,
+          netIncome: -180_000_000,
+          weightedAverageShsOutDil: 100_000_000,
+        },
+      ]);
+    }
+    if (endpoint === "analyst-estimates") {
+      return new Response("upgrade plan", { status: 402 });
+    }
+    if (endpoint === "earnings") {
+      return Response.json([
+        {
+          date: "2026-08-12",
+          fiscalDateEnding: "2026-06-30",
+          time: "bmo",
+        },
+        {
+          date: "2026-05-12",
+          fiscalDateEnding: "2026-03-31",
+          time: "bmo",
+        },
+      ]);
+    }
+    return Response.json([]);
+  },
+});
+assert.equal(completedHistory.financials.NBIS.earningsHistory.length, 2);
+assert.equal(
+  completedHistory.financials.NBIS.earningsHistory[0].revenue.estimate,
+  573_937_500,
+);
+assert.equal(
+  completedHistory.financials.NBIS.earningsHistory[1].revenue.estimate,
+  410_000_000,
+);
+assert.equal(
+  completedHistory.financials.NBIS.earningsHistory[1].netIncome.estimate,
+  -180_000_000,
+);
+assert.equal(historyFinnhubRequests, 1);
 
 console.log("ok - stocks FMP quarterly transport");
