@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlphaSummaryCard } from "@/components/alpha-summary-card";
 import { StocksResearchLayout } from "@/components/stocks-research-layout";
-import { StocksHynixPremiumCurve } from "@/components/stocks-hynix-premium-curve";
 import { StocksTodayChanges } from "@/components/stocks-today-changes";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
 import {
@@ -322,7 +321,6 @@ export function AlphaResearchPage() {
 
       {activeTab === "research" ? (
         <section data-stocks-chart-band className="grid min-w-0 gap-3">
-          <StocksHynixPremiumCurve />
           <StocksTodayChanges
             changes={todayChanges}
             selectedTicker={selectedTicker}

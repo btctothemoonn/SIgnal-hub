@@ -20,7 +20,7 @@ assert.match(source, /data-stocks-earnings-brief/);
 assert.match(source, /预计值/);
 assert.match(source, /公布值/);
 assert.match(source, /较预期/);
-assert.match(source, /FMP standardized/);
+assert.match(source, /comparison\.accountingBasis/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
 const output = ts.transpileModule(source, {
@@ -40,7 +40,7 @@ try {
   );
   assert.equal(formatEarningsMoney(582_300_000, "USD"), "$582.30M");
   assert.equal(formatEarningsMoney(-190_400_000, "USD"), "-$190.40M");
-  assert.equal(formatEarningsMoney(null, "USD"), "n/a");
+  assert.equal(formatEarningsMoney(null, "USD"), "数据源暂未覆盖");
 
   const comparison = {
     ticker: "NBIS",
@@ -55,7 +55,17 @@ try {
     generatedAt: "2026-08-14T00:00:00.000Z",
     revenue: {
       estimate: 573_937_500,
+      estimateSource: {
+        provider: "fmp",
+        method: "direct",
+        accountingBasis: "FMP standardized",
+      },
       actual: 582_300_000,
+      actualSource: {
+        provider: "finnhub",
+        method: "direct",
+        accountingBasis: "Finnhub GAAP",
+      },
       previousYearActual: 105_100_000,
       estimateYoYPct: 446.087,
       actualYoYPct: 454.044,
@@ -64,7 +74,17 @@ try {
     },
     netIncome: {
       estimate: -273_800_000,
+      estimateSource: {
+        provider: "alpha-vantage",
+        method: "direct",
+        accountingBasis: "US GAAP",
+      },
       actual: -190_400_000,
+      actualSource: {
+        provider: "eodhd",
+        method: "eps-times-diluted-shares",
+        accountingBasis: "EODHD diluted shares",
+      },
       previousYearActual: -143_600_000,
       estimateYoYPct: -90.669,
       actualYoYPct: -32.591,
@@ -97,6 +117,10 @@ try {
   assert.match(rendered, /-\$190\.40M/);
   assert.match(rendered, /\+1\.46%/);
   assert.match(rendered, /FMP/);
+  assert.match(rendered, /Finnhub/);
+  assert.match(rendered, /EPS 推算/);
+  assert.match(rendered, /推导/);
+  assert.match(rendered, /Finnhub GAAP/);
   assert.match(rendered, /核心结论/);
   assert.match(rendered, /主要驱动/);
   assert.match(rendered, /风险提示/);
@@ -121,7 +145,33 @@ try {
       }),
     );
   });
-  assert.match(JSON.stringify(renderer.toJSON()), /n\/a/);
+  const missingEstimateRendered = JSON.stringify(renderer.toJSON());
+  assert.match(missingEstimateRendered, /数据源暂未覆盖/);
+  assert.doesNotMatch(missingEstimateRendered, /n\/a/);
+
+  await act(async () => renderer.unmount());
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(StocksEarningsBrief, {
+        comparison: {
+          ...comparison,
+          fiscalDateEnding: "2099-06-30",
+          reportDate: null,
+          revenue: {
+            ...comparison.revenue,
+            estimate: null,
+            actual: null,
+            estimateYoYPct: null,
+            actualYoYPct: null,
+            surprise: null,
+            surprisePct: null,
+          },
+        },
+        insight: null,
+      }),
+    );
+  });
+  assert.match(JSON.stringify(renderer.toJSON()), /等待公布/);
 } finally {
   if (renderer) await act(async () => renderer.unmount());
   rmSync(runtimePath, { force: true });

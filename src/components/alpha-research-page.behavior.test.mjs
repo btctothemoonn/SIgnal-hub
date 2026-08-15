@@ -62,10 +62,6 @@ export function StocksTodayChanges() {
   return null;
 }
 
-export function StocksHynixPremiumCurve() {
-  return null;
-}
-
 export function useBrowserJsonCache() {
   return [null, noop];
 }
@@ -116,6 +112,8 @@ export function buildStocksSubscriptionReports() {
 }
 `;
   writeFileSync(temporaryStubsPath, stubsSource, "utf8");
+
+  assert.doesNotMatch(readFileSync(pagePath, "utf8"), /StocksHynixPremiumCurve/);
 
   const pageOutput = ts
     .transpileModule(readFileSync(pagePath, "utf8"), {
