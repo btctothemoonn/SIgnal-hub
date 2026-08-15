@@ -4,6 +4,7 @@ import {
   deriveNetIncome,
   mergeStocksEarningsFallbackCandidate,
   matchesStocksEarningsFiscalPeriod,
+  needsDirectStocksEarningsActual,
   parseAlphaVantageEarningsCandidate,
   parseEodhdEarningsCandidate,
   parseFinnhubEarningsCandidate,
@@ -99,6 +100,28 @@ const alphaVantagePayload = {
   },
 };
 
+function yahooPayload(fiscalDateEnding, period = {}) {
+  return {
+    quoteSummary: {
+      result: [
+        {
+          currency: "USD",
+          incomeStatementHistoryQuarterly: {
+            incomeStatementHistory: [
+              {
+                ...period,
+                endDate: { fmt: fiscalDateEnding },
+                totalRevenue: { raw: 582_300_000 },
+                netIncome: { raw: -190_400_000 },
+              },
+            ],
+          },
+        },
+      ],
+    },
+  };
+}
+
 assert.equal(
   parseFinnhubEarningsCandidate(finnhubPayload, target)?.revenueEstimate,
   573_937_500,
@@ -162,6 +185,18 @@ assert.equal(
     target,
   )?.revenueActual,
   582_300_000,
+);
+assert.equal(
+  parseYahooEarningsCandidate(yahooPayload("2026-07-07"), target)?.netIncomeActual,
+  -190_400_000,
+);
+assert.equal(parseYahooEarningsCandidate(yahooPayload("2026-07-08"), target), null);
+assert.equal(
+  parseYahooEarningsCandidate(
+    yahooPayload("2026-07-01", { fiscalYear: 2026, period: "Q3" }),
+    target,
+  ),
+  null,
 );
 assert.equal(deriveNetIncome(-2.74, 100_000_000), -274_000_000);
 assert.equal(
@@ -386,6 +421,67 @@ const yahooFallback = await completeStocksEarningsComparison({
 assert.equal(yahooUrls.length, 1);
 assert.equal(yahooFallback.comparison.revenue.actual, 582_300_000);
 assert.equal(yahooFallback.comparison.netIncome.actual, -190_400_000);
+
+const derivedActualBase = {
+  ...baseCandidate(),
+  comparison: {
+    ...baseCandidate().comparison,
+    netIncome: metric(
+      -190_000_000,
+      -274_000_000,
+      "net-income",
+      "eps-times-diluted-shares",
+    ),
+  },
+};
+assert.equal(needsDirectStocksEarningsActual(derivedActualBase.comparison), true);
+assert.equal(needsDirectStocksEarningsActual(baseCandidate().comparison), false);
+const alphaDirectUrls = [];
+const alphaDirectOverDerived = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: derivedActualBase,
+  env: { STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-secret" },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    alphaDirectUrls.push(url);
+    assert.equal(url.searchParams.get("function"), "INCOME_STATEMENT");
+    return Response.json(alphaVantagePayload.incomeStatement);
+  },
+});
+assert.equal(alphaDirectUrls.length, 1);
+assert.equal(alphaDirectOverDerived.comparison.netIncome.actual, -190_400_000);
+assert.equal(
+  alphaDirectOverDerived.comparison.netIncome.actualSource?.provider,
+  "alpha-vantage",
+);
+assert.equal(alphaDirectOverDerived.comparison.netIncome.actualSource?.method, "direct");
+
+const yahooDirectUrls = [];
+const yahooDirectOverDerived = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: derivedActualBase,
+  env: {},
+  fetchImpl: async (input) => {
+    yahooDirectUrls.push(new URL(String(input)));
+    return Response.json(yahooPayload("2026-07-07"));
+  },
+});
+assert.equal(yahooDirectUrls.length, 1);
+assert.equal(yahooDirectOverDerived.comparison.netIncome.actual, -190_400_000);
+assert.equal(yahooDirectOverDerived.comparison.netIncome.actualSource?.provider, "yahoo");
+assert.equal(yahooDirectOverDerived.comparison.netIncome.actualSource?.method, "direct");
+
+const derivedWithoutDirect = await completeStocksEarningsComparison({
+  ticker: "NBIS",
+  base: derivedActualBase,
+  env: {},
+  fetchImpl: async () => Response.json(yahooPayload("2026-07-08")),
+});
+assert.equal(derivedWithoutDirect.comparison.netIncome.actual, -190_000_000);
+assert.equal(
+  derivedWithoutDirect.comparison.netIncome.actualSource?.method,
+  "eps-times-diluted-shares",
+);
 
 const eodhdFallback = await completeStocksEarningsComparison({
   ticker: "NBIS",

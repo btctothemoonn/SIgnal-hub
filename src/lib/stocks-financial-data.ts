@@ -16,6 +16,7 @@ import {
 import {
   completeStocksEarningsComparison,
   mergeStocksEarningsFallbackCandidate,
+  needsDirectStocksEarningsActual,
   parseAlphaVantageEarningsCandidate,
   primeStocksEarningsFallbackPayload,
   type StocksEarningsFallbackBase,
@@ -540,12 +541,11 @@ function quarterValue(value: unknown): StocksEarningsComparison["quarter"] | nul
 }
 
 function comparisonHasEarningsGaps(comparison: StocksEarningsComparison) {
-  return [
-    comparison.revenue.estimate,
-    comparison.revenue.actual,
-    comparison.netIncome.estimate,
-    comparison.netIncome.actual,
-  ].some((value) => value === null);
+  return (
+    needsDirectStocksEarningsActual(comparison) ||
+    comparison.revenue.estimate === null ||
+    comparison.netIncome.estimate === null
+  );
 }
 
 function sameEarningsPeriod(
@@ -654,10 +654,11 @@ async function completeFmpEarningsComparison({
         base,
       )
     : null;
-  const baseWithDerivedEps = mergeStocksEarningsFallbackCandidate(base, base);
   const completedBase = alphaCandidate
-    ? mergeStocksEarningsFallbackCandidate(baseWithDerivedEps, alphaCandidate)
-    : baseWithDerivedEps;
+    ? mergeStocksEarningsFallbackCandidate(base, alphaCandidate, {
+        deriveActual: false,
+      })
+    : base;
   try {
     return await completeStocksEarningsComparison({
       ticker: stock.ticker,

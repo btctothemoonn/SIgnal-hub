@@ -322,7 +322,16 @@ export function parseYahooEarningsCandidate(
   const result = asArray(asRecord(asRecord(payload).quoteSummary).result)[0];
   const history = asRecord(asRecord(result).incomeStatementHistoryQuarterly);
   const rows = asArray(history.incomeStatementHistory).map(asRecord);
-  const row = rows.find((entry) => yahooFiscalDate(entry) === target.fiscalDateEnding);
+  const row = rows.find((entry) => {
+    const fiscalDateEnding = yahooFiscalDate(entry);
+    return (
+      Boolean(fiscalDateEnding) &&
+      matchesStocksEarningsFiscalPeriod(
+        { ...entry, fiscalDateEnding },
+        target,
+      )
+    );
+  });
   if (!row) return null;
   const candidate = candidateFromRecord(target, "yahoo", {
     ...asRecord(result),
@@ -570,22 +579,48 @@ function canUseDirectValue(
   source: StocksEarningsValueProvenance | undefined,
   candidate: number | null,
 ) {
+  return candidate !== null && needsDirectValue(current, source);
+}
+
+function isDerivedValueSource(source: StocksEarningsValueProvenance | undefined) {
+  return Boolean(source && String(source.method) !== "direct");
+}
+
+function needsDirectValue(
+  current: number | null,
+  source: StocksEarningsValueProvenance | undefined,
+) {
+  return current === null || isDerivedValueSource(source);
+}
+
+export function needsDirectStocksEarningsActual(
+  comparison: StocksEarningsComparison,
+) {
   return (
-    candidate !== null &&
-    (current === null || source?.method === "eps-times-diluted-shares")
+    comparison.revenue.actual === null ||
+    needsDirectValue(
+      comparison.netIncome.actual,
+      comparison.netIncome.actualSource,
+    )
   );
 }
 
 export function mergeStocksEarningsFallbackCandidate(
   base: StocksEarningsFallbackBase,
   candidate: StocksEarningsFallbackCandidate,
+  options: { deriveActual?: boolean } = {},
 ): StocksEarningsFallbackBase {
-  return mergeCompatibleCandidate(base, sanitizeCandidateForBase(base, candidate));
+  return mergeCompatibleCandidate(
+    base,
+    sanitizeCandidateForBase(base, candidate),
+    options,
+  );
 }
 
 function mergeCompatibleCandidate(
   base: StocksEarningsFallbackBase,
   candidate: StocksEarningsFallbackCandidate,
+  { deriveActual = true }: { deriveActual?: boolean } = {},
 ): StocksEarningsFallbackBase {
   if (!matchesStocksEarningsFiscalPeriod(candidate, base)) return base;
 
@@ -647,6 +682,7 @@ function mergeCompatibleCandidate(
     candidate.dilutedShares ?? base.dilutedShares,
   );
   if (
+    deriveActual &&
     candidate.netIncomeActual === null &&
     base.comparison.netIncome.actual === null &&
     derivedNetIncomeActual !== null
@@ -704,12 +740,11 @@ function mergeCompatibleCandidate(
 }
 
 function comparisonHasGaps(comparison: StocksEarningsComparison) {
-  return [
-    comparison.revenue.actual,
-    comparison.revenue.estimate,
-    comparison.netIncome.actual,
-    comparison.netIncome.estimate,
-  ].some((value) => value === null);
+  return (
+    needsDirectStocksEarningsActual(comparison) ||
+    comparison.revenue.estimate === null ||
+    comparison.netIncome.estimate === null
+  );
 }
 
 function addUtcDays(dateValue: string, days: number) {
@@ -930,6 +965,14 @@ export async function completeStocksEarningsComparison({
 }): Promise<FallbackResult> {
   let completed = base;
   const errors: string[] = [];
+  const deferredActualCandidates: StocksEarningsFallbackCandidate[] = [];
+  const mergeProviderCandidate = (candidate: StocksEarningsFallbackCandidate) => {
+    const sanitized = sanitizeCandidateForBase(completed, candidate, errors);
+    if (sanitized.epsActual !== null) deferredActualCandidates.push(sanitized);
+    completed = mergeCompatibleCandidate(completed, sanitized, { deriveActual: false });
+  };
+  const sanitizedBase = sanitizeCandidateForBase(base, base, errors);
+  if (sanitizedBase.epsActual !== null) deferredActualCandidates.push(sanitizedBase);
   const target: StocksEarningsFallbackTarget = {
     ticker: ticker.trim().toUpperCase(),
     fiscalYear: base.fiscalYear,
@@ -982,10 +1025,7 @@ export async function completeStocksEarningsComparison({
       }
     }
     if (candidate) {
-      completed = mergeCompatibleCandidate(
-        completed,
-        sanitizeCandidateForBase(completed, candidate, errors),
-      );
+      mergeProviderCandidate(candidate);
     }
   }
 
@@ -1011,10 +1051,7 @@ export async function completeStocksEarningsComparison({
       }
     }
     if (candidate) {
-      completed = mergeCompatibleCandidate(
-        completed,
-        sanitizeCandidateForBase(completed, candidate, errors),
-      );
+      mergeProviderCandidate(candidate);
     }
   } else if (comparisonHasGaps(completed.comparison) && eodhdKeys[0] && !eodhdTicker) {
     addDiagnostic(errors, "eodhd calendar/trends skipped: unsupported or unproven listing market");
@@ -1023,14 +1060,13 @@ export async function completeStocksEarningsComparison({
   if (comparisonHasGaps(completed.comparison) && alphaVantageKeys[0]) {
     const key = alphaVantageKeys[0];
     let incomePayload =
-      completed.comparison.revenue.actual === null ||
-      completed.comparison.netIncome.actual === null
+      needsDirectStocksEarningsActual(completed.comparison)
         ? cachedProviderPayloads(payloadCache, ticker, "alpha-vantage-income")[0] ?? null
         : null;
-    if (incomePayload === null && (
-      completed.comparison.revenue.actual === null ||
-      completed.comparison.netIncome.actual === null
-    )) {
+    if (
+      incomePayload === null &&
+      needsDirectStocksEarningsActual(completed.comparison)
+    ) {
       const url = alphaVantageUrl("INCOME_STATEMENT", ticker, key);
       incomePayload = await fetchCachedProviderPayload({
         cache: payloadCache,
@@ -1069,17 +1105,13 @@ export async function completeStocksEarningsComparison({
       target,
     );
     if (candidate) {
-      completed = mergeCompatibleCandidate(
-        completed,
-        sanitizeCandidateForBase(completed, candidate, errors),
-      );
+      mergeProviderCandidate(candidate);
     }
   }
 
   if (
     comparisonHasGaps(completed.comparison) &&
-    (completed.comparison.revenue.actual === null ||
-      completed.comparison.netIncome.actual === null)
+    needsDirectStocksEarningsActual(completed.comparison)
   ) {
     let candidate = cachedProviderPayloads(payloadCache, ticker, "yahoo")
       .map((payload) => parseYahooEarningsCandidate(payload, target))
@@ -1101,10 +1133,14 @@ export async function completeStocksEarningsComparison({
       }
     }
     if (candidate) {
-      completed = mergeCompatibleCandidate(
-        completed,
-        sanitizeCandidateForBase(completed, candidate, errors),
-      );
+      mergeProviderCandidate(candidate);
+    }
+  }
+
+  if (completed.comparison.netIncome.actual === null) {
+    for (const candidate of deferredActualCandidates) {
+      completed = mergeCompatibleCandidate(completed, candidate);
+      if (completed.comparison.netIncome.actual !== null) break;
     }
   }
 
