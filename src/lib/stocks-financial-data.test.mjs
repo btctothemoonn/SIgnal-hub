@@ -388,7 +388,7 @@ assert.ok(
 
 let alphaQuarterlyIncomeRequests = 0;
 const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
-  stocks: [{ ticker: "NBIS", marketCode: "US" }],
+  stocks: [getAlphaResearchStockByTicker("NBIS")].filter(Boolean),
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
@@ -404,9 +404,7 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
         return Response.json([
           {
             date: "2026-08-12",
-            fiscalDateEnding: "2026-06-30",
-            fiscalYear: 2026,
-            period: "Q2",
+            fiscalDateEnding: "2026-07-05",
             time: "bmo",
           },
         ]);
@@ -428,13 +426,26 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
         quarterlyReports: [
           {
             fiscalDateEnding: "2026-06-30",
-            fiscalYear: 2026,
-            quarter: "Q2",
             reportedCurrency: "USD",
-            revenueUnit: "raw",
-            netIncomeUnit: "raw",
             totalRevenue: "582300000",
             netIncome: "-190400000",
+            dilutedAverageShares: "100000000",
+          },
+        ],
+      });
+    }
+    if (
+      url.hostname === "www.alphavantage.co" &&
+      url.searchParams.get("function") === "EARNINGS_ESTIMATES"
+    ) {
+      return Response.json({
+        symbol: "NBIS",
+        quarterlyEstimates: [
+          {
+            date: "2026-06-30",
+            horizon: "historical fiscal quarter",
+            eps_estimate_average: "-2.74",
+            revenue_estimate_average: "573937500",
           },
         ],
       });
@@ -451,6 +462,14 @@ assert.equal(
   alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actualSource
     .provider,
   "alpha-vantage",
+);
+assert.equal(
+  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.estimate,
+  573_937_500,
+);
+assert.equal(
+  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.reportDate,
+  "2026-08-12",
 );
 assert.equal(alphaQuarterlyIncomeRequests, 1);
 assert.ok(

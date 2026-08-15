@@ -46,6 +46,42 @@ const expectedTickers = [
   "NBIS",
 ];
 
+const expectedListings = {
+  NVDA: ["US", "NASDAQ", "USD"],
+  TSM: ["US", "NYSE", "USD"],
+  ASML: ["US", "NASDAQ", "USD"],
+  AMD: ["US", "NASDAQ", "USD"],
+  ARM: ["US", "NASDAQ", "USD"],
+  INTC: ["US", "NASDAQ", "USD"],
+  AVGO: ["US", "NASDAQ", "USD"],
+  LRCX: ["US", "NASDAQ", "USD"],
+  DRAM: ["US", "CBOE", "USD"],
+  MU: ["US", "NASDAQ", "USD"],
+  WDC: ["US", "NASDAQ", "USD"],
+  SNDK: ["US", "NASDAQ", "USD"],
+  STX: ["US", "NASDAQ", "USD"],
+  "000660.KS": ["KR", "KOSPI", "KRW"],
+  "005930.KS": ["KR", "KOSPI", "KRW"],
+  COHR: ["US", "NYSE", "USD"],
+  LITE: ["US", "NASDAQ", "USD"],
+  IPGP: ["US", "NASDAQ", "USD"],
+  FN: ["US", "NYSE", "USD"],
+  CIEN: ["US", "NYSE", "USD"],
+  GLW: ["US", "NYSE", "USD"],
+  MSFT: ["US", "NASDAQ", "USD"],
+  AMZN: ["US", "NASDAQ", "USD"],
+  GOOG: ["US", "NASDAQ", "USD"],
+  ORCL: ["US", "NYSE", "USD"],
+  NOW: ["US", "NYSE", "USD"],
+  SNOW: ["US", "NYSE", "USD"],
+  PLTR: ["US", "NASDAQ", "USD"],
+  DELL: ["US", "NYSE", "USD"],
+  VRT: ["US", "NYSE", "USD"],
+  CLS: ["US", "NYSE", "USD"],
+  CRWV: ["US", "NASDAQ", "USD"],
+  NBIS: ["US", "NASDAQ", "USD"],
+};
+
 assert.equal(ALPHA_RESEARCH_SECTORS.length, 5);
 assert.deepEqual(ALPHA_RESEARCH_STOCK_UNIVERSE, expectedTickers);
 assert.equal(ALPHA_RESEARCH_STOCKS.length, expectedTickers.length);
@@ -106,6 +142,11 @@ for (const stock of ALPHA_RESEARCH_STOCKS) {
   assert.equal(typeof stock.market.sevenDayChangePct, "number");
   assert.ok(stock.financialSnapshot.revenue.length > 0);
   assert.ok(stock.financialSnapshot.nextEarningsDate.length > 0);
+  assert.deepEqual(
+    [stock.listing.market, stock.listing.exchange, stock.listing.currency],
+    expectedListings[stock.ticker],
+    `${stock.ticker} listing context is missing or unverified`,
+  );
 }
 
 assert.equal(getAlphaResearchSectorById("optical")?.name, "光通信");

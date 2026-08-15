@@ -231,21 +231,40 @@ function mergeMetricValue<T extends "actual" | "estimate">(
 
 function normalizeEarningsMetric(
   metric: StocksEarningsComparison["revenue"],
+  currency: string,
+  metricName: "revenue" | "net-income",
 ) {
-  const normalized = { ...metric };
+  let estimateSource: StocksEarningsValueProvenance | undefined;
+  let actualSource: StocksEarningsValueProvenance | undefined;
   if (metric.estimate !== null && metric.estimateSource) {
-    const estimateSource = normalizeStocksEarningsValueProvenance(
+    estimateSource = normalizeStocksEarningsValueProvenance(
       metric.estimateSource,
+      {
+        currency,
+        unit: "monetary",
+        scale: "raw",
+        metric: metricName,
+        semantics: "consensus-estimate",
+      },
     );
-    if (estimateSource) normalized.estimateSource = estimateSource;
   }
   if (metric.actual !== null && metric.actualSource) {
-    const actualSource = normalizeStocksEarningsValueProvenance(
+    actualSource = normalizeStocksEarningsValueProvenance(
       metric.actualSource,
+      {
+        currency,
+        unit: "monetary",
+        scale: "raw",
+        metric: metricName,
+        semantics: "statement-actual",
+      },
     );
-    if (actualSource) normalized.actualSource = actualSource;
   }
-  return normalized;
+  return {
+    ...metric,
+    ...(estimateSource ? { estimateSource } : {}),
+    ...(actualSource ? { actualSource } : {}),
+  };
 }
 
 function normalizeEarningsComparison(
@@ -254,8 +273,16 @@ function normalizeEarningsComparison(
   if (!comparison) return null;
   return {
     ...comparison,
-    revenue: normalizeEarningsMetric(comparison.revenue),
-    netIncome: normalizeEarningsMetric(comparison.netIncome),
+    revenue: normalizeEarningsMetric(
+      comparison.revenue,
+      comparison.currency,
+      "revenue",
+    ),
+    netIncome: normalizeEarningsMetric(
+      comparison.netIncome,
+      comparison.currency,
+      "net-income",
+    ),
   };
 }
 

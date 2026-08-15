@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  areStocksEarningsValuesComparable,
   calculateComparisonMetric,
   mergeEarningsMetricValues,
   parseFmpQuarterlyEarnings,
@@ -65,11 +66,21 @@ assert.deepEqual(comparison.revenue.actualSource, {
   provider: "fmp",
   method: "direct",
   accountingBasis: "FMP standardized",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "revenue",
+  semantics: "statement-actual",
 });
 assert.deepEqual(comparison.revenue.estimateSource, {
   provider: "fmp",
   method: "direct",
   accountingBasis: "FMP standardized",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "revenue",
+  semantics: "consensus-estimate",
 });
 assert.equal(comparison.revenue.previousYearActual, 105_100_000);
 assert.equal(comparison.revenue.surprise, 8_362_500);
@@ -96,13 +107,29 @@ assert.equal(missingEstimate.surprisePct, null);
 assert.equal(missingEstimate.actualYoYPct, 20);
 
 const filled = mergeEarningsMetricValues(
-  calculateComparisonMetric(582_300_000, null, 105_100_000),
+  calculateComparisonMetric(582_300_000, null, 105_100_000, {
+    actualSource: {
+      provider: "fmp",
+      method: "direct",
+      accountingBasis: "FMP standardized",
+      currency: "USD",
+      unit: "monetary",
+      scale: "raw",
+      metric: "revenue",
+      semantics: "statement-actual",
+    },
+  }),
   {
     estimate: 573_937_500,
     estimateSource: {
       provider: "finnhub",
       method: "direct",
-      accountingBasis: "Finnhub consensus",
+      accountingBasis: "Unspecified accounting basis",
+      currency: "USD",
+      unit: "monetary",
+      scale: "raw",
+      metric: "revenue",
+      semantics: "consensus-estimate",
     },
   },
 );
@@ -111,9 +138,27 @@ assert.equal(filled.estimate, 573_937_500);
 assert.deepEqual(filled.estimateSource, {
   provider: "finnhub",
   method: "direct",
-  accountingBasis: "Finnhub consensus",
+  accountingBasis: "Unspecified accounting basis",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "revenue",
+  semantics: "consensus-estimate",
 });
 assert.ok(Math.abs(filled.surprisePct - 1.45704) < 0.00001);
+assert.equal(
+  areStocksEarningsValuesComparable(
+    filled.actualSource,
+    filled.estimateSource,
+  ),
+  true,
+);
+
+const incompatibleMetric = mergeEarningsMetricValues(filled, {
+  estimateSource: { ...filled.estimateSource, scale: "millions" },
+});
+assert.equal(incompatibleMetric.surprise, null);
+assert.equal(incompatibleMetric.surprisePct, null);
 
 const withinSevenDays = parseFmpQuarterlyEarnings(
   "TEST",

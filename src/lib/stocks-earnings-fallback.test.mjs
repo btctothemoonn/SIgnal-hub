@@ -3,6 +3,7 @@ import {
   completeStocksEarningsComparison,
   deriveNetIncome,
   mergeStocksEarningsFallbackCandidate,
+  matchesStocksEarningsFiscalPeriod,
   parseAlphaVantageEarningsCandidate,
   parseEodhdEarningsCandidate,
   parseFinnhubEarningsCandidate,
@@ -78,18 +79,21 @@ const alphaVantagePayload = {
     quarterlyReports: [
       {
         fiscalDateEnding: "2026-06-30",
+        reportedCurrency: "USD",
         totalRevenue: "582300000",
         netIncome: "-190400000",
         reportedEPS: "-1.90",
+        weightedAverageShsOutDil: "100000000",
       },
     ],
   },
   earningsEstimates: {
     quarterlyEstimates: [
       {
-        fiscalDateEnding: "2026-06-30",
-        estimatedRevenue: "573937500",
-        estimatedEPS: "-2.74",
+        date: "2026-06-30",
+        horizon: "historical fiscal quarter",
+        revenue_estimate_average: "573937500",
+        eps_estimate_average: "-2.74",
       },
     ],
   },
@@ -119,6 +123,23 @@ assert.equal(
   -190_400_000,
 );
 assert.equal(
+  parseAlphaVantageEarningsCandidate(alphaVantagePayload, target)
+    ?.revenueEstimate,
+  573_937_500,
+);
+assert.equal(
+  parseAlphaVantageEarningsCandidate(alphaVantagePayload, target)?.epsEstimate,
+  -2.74,
+);
+assert.equal(
+  parseAlphaVantageEarningsCandidate(alphaVantagePayload, target)?.revenueUnit,
+  "raw",
+);
+assert.equal(
+  parseAlphaVantageEarningsCandidate(alphaVantagePayload, target)?.netIncomeUnit,
+  "raw",
+);
+assert.equal(
   parseYahooEarningsCandidate(
     {
       quoteSummary: {
@@ -144,6 +165,31 @@ assert.equal(
 );
 assert.equal(deriveNetIncome(-2.74, 100_000_000), -274_000_000);
 assert.equal(
+  matchesStocksEarningsFiscalPeriod(
+    { fiscalDateEnding: "2026-07-07" },
+    target,
+  ),
+  true,
+);
+assert.equal(
+  matchesStocksEarningsFiscalPeriod(
+    { fiscalDateEnding: "2026-07-08" },
+    target,
+  ),
+  false,
+);
+assert.equal(
+  matchesStocksEarningsFiscalPeriod(
+    {
+      fiscalDateEnding: "2026-07-01T23:30:00-07:00",
+      fiscalYear: 2025,
+      period: "Q2",
+    },
+    target,
+  ),
+  false,
+);
+assert.equal(
   parseFinnhubEarningsCandidate(
     { earningsCalendar: [{ ...finnhubPayload.earningsCalendar[0], quarter: 3 }] },
     target,
@@ -151,32 +197,23 @@ assert.equal(
   null,
 );
 
-function metric(actual, estimate, source = "direct") {
+function metric(actual, estimate, metricName, source = "direct") {
+  const provenance = (semantics) => ({
+    provider: "fmp",
+    method: source,
+    accountingBasis: "FMP standardized",
+    currency: "USD",
+    unit: "monetary",
+    scale: "raw",
+    metric: metricName,
+    semantics,
+  });
   return {
     actual,
-    actualSource:
-      actual === null
-        ? undefined
-        : {
-            provider: "fmp",
-            method: source,
-            accountingBasis:
-              source === "direct"
-                ? "FMP standardized"
-                : "Derived from EPS times diluted shares",
-          },
+    actualSource: actual === null ? undefined : provenance("statement-actual"),
     estimate,
     estimateSource:
-      estimate === null
-        ? undefined
-        : {
-            provider: "fmp",
-            method: source,
-            accountingBasis:
-              source === "direct"
-                ? "FMP standardized"
-                : "Derived from EPS times diluted shares",
-          },
+      estimate === null ? undefined : provenance("consensus-estimate"),
     previousYearActual: null,
     estimateYoYPct: null,
     actualYoYPct: null,
@@ -211,8 +248,8 @@ function baseCandidate({
       provider: "fmp",
       generatedAt: "2026-08-15T00:00:00.000Z",
       accountingBasis: "FMP standardized",
-      revenue: metric(revenueActual, revenueEstimate),
-      netIncome: metric(netIncomeActual, netIncomeEstimate),
+      revenue: metric(revenueActual, revenueEstimate, "revenue"),
+      netIncome: metric(netIncomeActual, netIncomeEstimate, "net-income"),
     },
   };
 }
@@ -261,12 +298,22 @@ assert.equal(fallback.comparison.netIncome.estimate, -274_000_000);
 assert.deepEqual(fallback.comparison.revenue.estimateSource, {
   provider: "finnhub",
   method: "direct",
-  accountingBasis: "Finnhub consensus",
+  accountingBasis: "Unspecified accounting basis",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "revenue",
+  semantics: "consensus-estimate",
 });
 assert.deepEqual(fallback.comparison.netIncome.estimateSource, {
   provider: "finnhub",
   method: "eps-times-diluted-shares",
-  accountingBasis: "Derived from EPS times diluted shares",
+  accountingBasis: "Unspecified accounting basis",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "net-income",
+  semantics: "consensus-estimate",
 });
 assert.deepEqual(fallback.errors, []);
 
@@ -475,5 +522,23 @@ assert.equal(directWins.comparison.netIncome.estimateSource?.method, "direct");
 const derivedAfterDirect = mergeStocksEarningsFallbackCandidate(directWins, derivedCandidate);
 assert.equal(derivedAfterDirect.comparison.netIncome.estimate, -260_000_000);
 assert.equal(derivedAfterDirect.comparison.netIncome.estimateSource?.method, "direct");
+
+const actualDerived = mergeStocksEarningsFallbackCandidate(
+  baseCandidate({ netIncomeActual: null }),
+  {
+    ...derivedCandidate,
+    epsActual: -1.9,
+    epsEstimate: null,
+  },
+);
+assert.equal(actualDerived.comparison.netIncome.actual, -190_000_000);
+assert.equal(
+  actualDerived.comparison.netIncome.actualSource?.method,
+  "eps-times-diluted-shares",
+);
+assert.equal(
+  actualDerived.comparison.netIncome.actualSource?.semantics,
+  "statement-actual",
+);
 
 console.log("ok - stocks earnings fallback");

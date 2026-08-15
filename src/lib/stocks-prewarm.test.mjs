@@ -28,6 +28,17 @@ const {
 const prewarmSource = readFileSync(moduleUrl, "utf8");
 assert.match(prewarmSource, /enrichStocksFinancialSnapshotWithInsights/);
 
+const normalizedRevenueEstimateSource = {
+  provider: "fmp",
+  method: "direct",
+  accountingBasis: "FMP standardized",
+  currency: "USD",
+  unit: "monetary",
+  scale: "raw",
+  metric: "revenue",
+  semantics: "consensus-estimate",
+};
+
 const priorComparison = {
   ticker: "NBIS",
   fiscalYear: 2026,
@@ -130,7 +141,7 @@ const partialFinancial = {
           estimateSource: {
             provider: "finnhub",
             method: "eps-times-diluted-shares",
-            accountingBasis: "Derived from EPS times diluted shares",
+            accountingBasis: "Unspecified accounting basis",
           },
           estimateYoYPct: null,
           surprise: null,
@@ -164,11 +175,7 @@ assert.equal(
 );
 assert.deepEqual(
   preservedFinancial.financials.NBIS.latestEarnings.revenue.estimateSource,
-  {
-    provider: "fmp",
-    method: "direct",
-    accountingBasis: "FMP standardized",
-  },
+  normalizedRevenueEstimateSource,
 );
 assert.equal(
   preservedFinancial.financials.NBIS.earningsInsight.conclusion,
@@ -192,11 +199,7 @@ assert.equal(
 );
 assert.deepEqual(
   acceptedDirectFinancial.financials.NBIS.latestEarnings.revenue.estimateSource,
-  {
-    provider: "fmp",
-    method: "direct",
-    accountingBasis: "FMP standardized",
-  },
+  normalizedRevenueEstimateSource,
 );
 
 const runtimeDir = mkdtempSync(join(tmpdir(), "signal-hub-stocks-prewarm-"));

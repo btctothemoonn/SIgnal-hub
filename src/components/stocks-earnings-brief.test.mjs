@@ -21,6 +21,7 @@ assert.match(source, /预计值/);
 assert.match(source, /公布值/);
 assert.match(source, /较预期/);
 assert.match(source, /accountingBasisLabel\(source/);
+assert.doesNotMatch(source, /Finnhub consensus|Finnhub GAAP/);
 assert.doesNotMatch(source, /truncate/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
@@ -57,15 +58,25 @@ try {
     revenue: {
       estimate: 573_937_500,
       estimateSource: {
-        provider: "fmp",
+        provider: "finnhub",
         method: "direct",
-        accountingBasis: "FMP standardized",
+        accountingBasis: "Unspecified accounting basis",
+        currency: "USD",
+        unit: "monetary",
+        scale: "raw",
+        metric: "revenue",
+        semantics: "consensus-estimate",
       },
       actual: 582_300_000,
       actualSource: {
-        provider: "finnhub",
+        provider: "fmp",
         method: "direct",
         accountingBasis: "FMP standardized",
+        currency: "USD",
+        unit: "monetary",
+        scale: "raw",
+        metric: "revenue",
+        semantics: "statement-actual",
       },
       previousYearActual: 105_100_000,
       estimateYoYPct: 446.087,
@@ -78,13 +89,23 @@ try {
       estimateSource: {
         provider: "alpha-vantage",
         method: "direct",
-        accountingBasis: "US GAAP",
+        accountingBasis: "Unspecified accounting basis",
+        currency: "USD",
+        unit: "monetary",
+        scale: "raw",
+        metric: "net-income",
+        semantics: "consensus-estimate",
       },
       actual: -190_400_000,
       actualSource: {
         provider: "eodhd",
         method: "eps-times-diluted-shares",
-        accountingBasis: "EODHD diluted shares",
+        accountingBasis: "Company-reported",
+        currency: "USD",
+        unit: "monetary",
+        scale: "raw",
+        metric: "net-income",
+        semantics: "statement-actual",
       },
       previousYearActual: -143_600_000,
       estimateYoYPct: -90.669,
@@ -130,7 +151,7 @@ try {
   assert.match(rendered, /推导/);
   assert.match(visible, /FMP standardized/);
   assert.match(visible, /Finnhub/);
-  assert.match(visible, /EODHD diluted shares/);
+  assert.match(visible, /Company-reported/);
   assert.match(visible, /直接/);
   assert.match(rendered, /核心结论/);
   assert.match(rendered, /主要驱动/);
@@ -192,9 +213,11 @@ try {
           ...comparison,
           revenue: {
             ...comparison.revenue,
+            surprise: null,
+            surprisePct: null,
             actualSource: {
               ...comparison.revenue.actualSource,
-              accountingBasis: "Finnhub GAAP",
+              currency: "KRW",
             },
           },
         },
@@ -204,7 +227,7 @@ try {
   });
   const incompatibleVisible = visibleText(renderer.toJSON());
   assert.match(incompatibleVisible, /口径不可比/);
-  assert.match(incompatibleVisible, /Finnhub GAAP/);
+  assert.match(incompatibleVisible, /FMP standardized/);
   assert.doesNotMatch(incompatibleVisible, /\+1\.46%/);
 
   await act(async () => renderer.unmount());

@@ -120,6 +120,7 @@ export type AlphaResearchStock = {
   companyName: string;
   companyNameZh: string;
   sectorId: AlphaResearchSectorId;
+  listing: AlphaResearchListing;
   businessTags: string[];
   priority: AlphaResearchPriority;
   summary: string;
@@ -131,6 +132,12 @@ export type AlphaResearchStock = {
   thesis: string[];
   watchPoints: string[];
   risks: string[];
+};
+
+export type AlphaResearchListing = {
+  market: "US" | "KR";
+  exchange: "NASDAQ" | "NYSE" | "CBOE" | "KOSPI";
+  currency: "USD" | "KRW";
 };
 
 export const ALPHA_RESEARCH_SECTORS: AlphaResearchSector[] = [
@@ -174,6 +181,42 @@ export const ALPHA_RESEARCH_SECTORS: AlphaResearchSector[] = [
 export const ALPHA_RESEARCH_STOCK_UNIVERSE = ALPHA_RESEARCH_SECTORS.flatMap(
   (sector) => sector.tickers,
 );
+
+const ALPHA_RESEARCH_LISTINGS: Record<string, AlphaResearchListing> = {
+  NVDA: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  TSM: { market: "US", exchange: "NYSE", currency: "USD" },
+  ASML: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  AMD: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  ARM: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  INTC: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  AVGO: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  LRCX: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  DRAM: { market: "US", exchange: "CBOE", currency: "USD" },
+  MU: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  WDC: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  SNDK: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  STX: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  "000660.KS": { market: "KR", exchange: "KOSPI", currency: "KRW" },
+  "005930.KS": { market: "KR", exchange: "KOSPI", currency: "KRW" },
+  COHR: { market: "US", exchange: "NYSE", currency: "USD" },
+  LITE: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  IPGP: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  FN: { market: "US", exchange: "NYSE", currency: "USD" },
+  CIEN: { market: "US", exchange: "NYSE", currency: "USD" },
+  GLW: { market: "US", exchange: "NYSE", currency: "USD" },
+  MSFT: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  AMZN: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  GOOG: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  ORCL: { market: "US", exchange: "NYSE", currency: "USD" },
+  NOW: { market: "US", exchange: "NYSE", currency: "USD" },
+  SNOW: { market: "US", exchange: "NYSE", currency: "USD" },
+  PLTR: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  DELL: { market: "US", exchange: "NYSE", currency: "USD" },
+  VRT: { market: "US", exchange: "NYSE", currency: "USD" },
+  CLS: { market: "US", exchange: "NYSE", currency: "USD" },
+  CRWV: { market: "US", exchange: "NASDAQ", currency: "USD" },
+  NBIS: { market: "US", exchange: "NASDAQ", currency: "USD" },
+};
 
 type StockProfile = {
   ticker: string;
@@ -1100,11 +1143,16 @@ const profiles: StockProfile[] = [
 ];
 
 function buildStock(profile: StockProfile): AlphaResearchStock {
+  const listing = ALPHA_RESEARCH_LISTINGS[profile.ticker];
+  if (!listing) {
+    throw new Error(`Missing verified listing context for ${profile.ticker}`);
+  }
   return {
     ticker: profile.ticker,
     companyName: profile.companyName,
     companyNameZh: profile.companyNameZh,
     sectorId: profile.sectorId,
+    listing,
     businessTags: profile.businessTags,
     priority: profile.priority,
     summary: profile.summary,

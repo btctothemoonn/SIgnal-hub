@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { getAlphaResearchStockByTicker } from "./alpha-research-pool.ts";
 import { fetchFmpStocksFinancialSnapshot } from "./stocks-financial-data.ts";
+
+const nbisStock = getAlphaResearchStockByTicker("NBIS");
+assert.ok(nbisStock);
 
 const stocks = ["NBIS", "CBRS", "NVDA", "AMD"].map((ticker) => ({
   ticker,
@@ -153,7 +157,7 @@ assert.ok(restricted.errors.some((error) => /analyst-estimates HTTP 402/.test(er
 assert.ok(restricted.errors.every((error) => !error.includes("secret-plan-key")));
 
 const completedAfterEstimateRestriction = await fetchFmpStocksFinancialSnapshot({
-  stocks: stocks.slice(0, 1),
+  stocks: [nbisStock],
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_FINNHUB_API_KEY: "finnhub-key",
@@ -210,6 +214,22 @@ assert.equal(
     .estimateSource.provider,
   "finnhub",
 );
+assert.ok(
+  Math.abs(
+    completedAfterEstimateRestriction.financials.NBIS.latestEarnings.revenue
+      .surprisePct - 1.45704,
+  ) < 0.00001,
+);
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.latestEarnings.revenue
+    .estimateSource.accountingBasis,
+  "Unspecified accounting basis",
+);
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.latestEarnings.revenue
+    .estimateSource.semantics,
+  "consensus-estimate",
+);
 assert.equal(
   completedAfterEstimateRestriction.financials.NBIS.latestEarnings.netIncome
     .estimateSource.method,
@@ -223,7 +243,7 @@ assert.equal(
 
 let historyFinnhubRequests = 0;
 const completedHistory = await fetchFmpStocksFinancialSnapshot({
-  stocks: stocks.slice(0, 1),
+  stocks: [nbisStock],
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_FINNHUB_API_KEY: "finnhub-key",
@@ -332,7 +352,7 @@ const fourQuarterRows = [
 
 let terminalFinnhubRequests = 0;
 const terminalFinnhubSnapshot = await fetchFmpStocksFinancialSnapshot({
-  stocks: stocks.slice(0, 1),
+  stocks: [nbisStock],
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_FINNHUB_API_KEY: "finnhub-key",
@@ -360,14 +380,22 @@ assert.equal(
   1,
 );
 
-const repeatedQuarterRows = [
-  fourQuarterRows[0],
-  fourQuarterRows[1],
-  { ...fourQuarterRows[1] },
+const fiveQuarterRows = [
+  ...fourQuarterRows,
+  {
+    date: "2025-12-31",
+    fiscalDateEnding: "2025-12-31",
+    fiscalYear: "2025",
+    period: "Q4",
+    reportedCurrency: "USD",
+    revenue: 390_000_000,
+    netIncome: -210_000_000,
+    weightedAverageShsOutDil: 100_000_000,
+  },
 ];
-let controlledFollowUpRequests = 0;
+const boundedFinnhubUrls = [];
 await fetchFmpStocksFinancialSnapshot({
-  stocks: stocks.slice(0, 1),
+  stocks: [nbisStock],
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_FINNHUB_API_KEY: "finnhub-key",
@@ -376,7 +404,7 @@ await fetchFmpStocksFinancialSnapshot({
     const url = new URL(String(input));
     const endpoint = url.pathname.split("/").at(-1);
     if (url.hostname === "finnhub.io") {
-      controlledFollowUpRequests += 1;
+      boundedFinnhubUrls.push(url);
       return Response.json({
         earningsCalendar: [
           {
@@ -388,13 +416,15 @@ await fetchFmpStocksFinancialSnapshot({
         ],
       });
     }
-    if (endpoint === "income-statement") return Response.json(repeatedQuarterRows);
+    if (endpoint === "income-statement") return Response.json(fiveQuarterRows);
     if (endpoint === "analyst-estimates") {
       return new Response("upgrade plan", { status: 402 });
     }
     return Response.json([]);
   },
 });
-assert.equal(controlledFollowUpRequests, 2);
+assert.equal(boundedFinnhubUrls.length, 1);
+assert.equal(boundedFinnhubUrls[0].searchParams.get("from"), "2026-01-14");
+assert.equal(boundedFinnhubUrls[0].searchParams.get("to"), "2027-04-30");
 
 console.log("ok - stocks FMP quarterly transport");

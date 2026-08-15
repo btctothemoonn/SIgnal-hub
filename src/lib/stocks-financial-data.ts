@@ -9,6 +9,7 @@ import {
 import { resolveEarningsStatus } from "./stocks-earnings.ts";
 import {
   calculateComparisonMetric,
+  matchesStocksEarningsFiscalPeriod,
   parseFmpQuarterlyEarningsHistory,
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
@@ -16,6 +17,7 @@ import {
   completeStocksEarningsComparison,
   mergeStocksEarningsFallbackCandidate,
   parseAlphaVantageEarningsCandidate,
+  primeStocksEarningsFallbackPayload,
   type StocksEarningsFallbackBase,
   type StocksEarningsFallbackPayloadCache,
 } from "./stocks-earnings-fallback.ts";
@@ -559,23 +561,10 @@ function sameEarningsPeriod(
 }
 
 function fallbackListingContext(stock: AlphaResearchStock) {
-  const record = asRecord(stock);
-  const listing = asRecord(record.listing);
-  const market = asRecord(record.market);
+  const listing = stock.listing;
   return {
-    market:
-      stringValue(record.marketCode) ||
-      stringValue(record.countryCode) ||
-      stringValue(listing.market) ||
-      stringValue(listing.country) ||
-      stringValue(market.marketCode) ||
-      stringValue(market.countryCode) ||
-      undefined,
-    exchange:
-      stringValue(record.exchange) ||
-      stringValue(listing.exchange) ||
-      stringValue(market.exchange) ||
-      undefined,
+    market: listing?.market,
+    exchange: listing?.exchange,
   };
 }
 
@@ -583,6 +572,7 @@ function fmpComparisonFallbackBase(
   stock: AlphaResearchStock,
   comparison: StocksEarningsComparison,
   income: JsonRecord,
+  announcementWindow?: { from: string; to: string },
 ): StocksEarningsFallbackBase | null {
   const currency =
     stringValue(income.reportedCurrency) ||
@@ -590,7 +580,10 @@ function fmpComparisonFallbackBase(
     stringValue(income.financialCurrency);
   if (!currency) return null;
   const dilutedShares = numberValue(
-    income.weightedAverageShsOutDil ?? income.dilutedShares,
+    income.weightedAverageShsOutDil ??
+      income.weightedAverageShsOutDiluted ??
+      income.dilutedAverageShares ??
+      income.dilutedShares,
   );
   const { market, exchange } = fallbackListingContext(stock);
   return {
@@ -603,6 +596,7 @@ function fmpComparisonFallbackBase(
     currency: currency.toUpperCase(),
     market,
     exchange,
+    announcementWindow,
     provider: "fmp",
     revenueActual: comparison.revenue.actual,
     revenueEstimate: comparison.revenue.estimate,
@@ -625,6 +619,7 @@ async function completeFmpEarningsComparison({
   comparison,
   income,
   alphaIncomePayload,
+  announcementWindow,
   payloadCache,
   fetchImpl,
   env,
@@ -633,6 +628,7 @@ async function completeFmpEarningsComparison({
   comparison: StocksEarningsComparison;
   income: JsonRecord;
   alphaIncomePayload?: unknown;
+  announcementWindow?: { from: string; to: string };
   payloadCache?: StocksEarningsFallbackPayloadCache;
   fetchImpl: FetchLike;
   env: EnvLike;
@@ -640,7 +636,12 @@ async function completeFmpEarningsComparison({
   if (!comparisonHasEarningsGaps(comparison)) {
     return { comparison, errors: [] as string[] };
   }
-  const base = fmpComparisonFallbackBase(stock, comparison, income);
+  const base = fmpComparisonFallbackBase(
+    stock,
+    comparison,
+    income,
+    announcementWindow,
+  );
   if (!base) {
     return {
       comparison,
@@ -653,9 +654,10 @@ async function completeFmpEarningsComparison({
         base,
       )
     : null;
+  const baseWithDerivedEps = mergeStocksEarningsFallbackCandidate(base, base);
   const completedBase = alphaCandidate
-    ? mergeStocksEarningsFallbackCandidate(base, alphaCandidate)
-    : base;
+    ? mergeStocksEarningsFallbackCandidate(baseWithDerivedEps, alphaCandidate)
+    : baseWithDerivedEps;
   try {
     return await completeStocksEarningsComparison({
       ticker: stock.ticker,
@@ -676,28 +678,39 @@ function matchingFmpIncome(
   comparison: StocksEarningsComparison,
   incomePayload: unknown,
 ) {
-  const comparisonDate = Date.parse(`${comparison.fiscalDateEnding}T00:00:00Z`);
   return (
     asArray(incomePayload)
       .map(asRecord)
-      .find(
-        (income) => {
-          const sameFiscalPeriod =
-            fiscalYearValue(income.fiscalYear) === comparison.fiscalYear &&
-            quarterValue(income.period) === comparison.quarter;
-          const incomeDate =
-            stringValue(income.fiscalDateEnding) ||
-            stringValue(income.fiscalDate) ||
-            stringValue(income.date);
-          const incomeTime = Date.parse(`${incomeDate}T00:00:00Z`);
-          const samePeriodEnd =
-            Number.isFinite(comparisonDate) &&
-            Number.isFinite(incomeTime) &&
-            Math.abs(comparisonDate - incomeTime) <= 7 * 86_400_000;
-          return sameFiscalPeriod || samePeriodEnd;
-        },
+      .find((income) =>
+        matchesStocksEarningsFiscalPeriod(income, comparison),
       ) ?? null
   );
+}
+
+function addUtcDays(dateValue: string, days: number) {
+  const parsed = Date.parse(`${dateValue}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) return "";
+  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function finnhubAnnouncementWindowForHistory(
+  history: StocksEarningsComparison[],
+) {
+  const windows = history
+    .map((comparison) =>
+      comparison.reportDate
+        ? { from: comparison.reportDate, to: comparison.reportDate }
+        : {
+            from: addUtcDays(comparison.fiscalDateEnding, 14),
+            to: addUtcDays(comparison.fiscalDateEnding, 120),
+          },
+    )
+    .filter((window) => window.from && window.to);
+  if (windows.length === 0) return undefined;
+  return {
+    from: windows.map((window) => window.from).sort()[0],
+    to: windows.map((window) => window.to).sort().at(-1) as string,
+  };
 }
 
 function alphaVantageRecoverySeed(
@@ -706,38 +719,84 @@ function alphaVantageRecoverySeed(
   earningsPayload: unknown,
   generatedAt: string,
 ) {
+  const earningsRows = asArray(earningsPayload).map(asRecord);
   const income = asArray(asRecord(payload).quarterlyReports)
     .map(asRecord)
-    .map((row) => ({
-      row,
-      fiscalYear: fiscalYearValue(row.fiscalYear),
-      quarter: quarterValue(row.quarter ?? row.period),
-      fiscalDateEnding: stringValue(row.fiscalDateEnding),
-      currency:
+    .map((row) => {
+      const fiscalDateEnding = stringValue(row.fiscalDateEnding);
+      const parsedDate = Date.parse(`${fiscalDateEnding}T00:00:00Z`);
+      if (!fiscalDateEnding || !Number.isFinite(parsedDate)) return null;
+      const derivedDate = new Date(parsedDate);
+      const derivedFiscalYear = derivedDate.getUTCFullYear();
+      const derivedQuarter = `Q${Math.floor(derivedDate.getUTCMonth() / 3) + 1}` as
+        StocksEarningsComparison["quarter"];
+      const nearestEarnings = earningsRows
+        .map((earnings) => {
+          const earningsDate =
+            stringValue(earnings.fiscalDateEnding) ||
+            stringValue(earnings.fiscalDate);
+          const earningsTime = Date.parse(`${earningsDate}T00:00:00Z`);
+          return {
+            earnings,
+            distance:
+              Number.isFinite(earningsTime)
+                ? Math.abs(parsedDate - earningsTime) / 86_400_000
+                : Infinity,
+          };
+        })
+        .filter((candidate) => candidate.distance <= 7)
+        .sort((left, right) => left.distance - right.distance)[0]?.earnings;
+      const rowFiscalYear = fiscalYearValue(row.fiscalYear);
+      const earningsFiscalYear = fiscalYearValue(nearestEarnings?.fiscalYear);
+      const rowQuarter = quarterValue(row.quarter ?? row.period);
+      const earningsQuarter = quarterValue(
+        nearestEarnings?.quarter ?? nearestEarnings?.period,
+      );
+      if (
+        (rowFiscalYear !== null &&
+          earningsFiscalYear !== null &&
+          rowFiscalYear !== earningsFiscalYear) ||
+        (rowQuarter !== null &&
+          earningsQuarter !== null &&
+          rowQuarter !== earningsQuarter)
+      ) {
+        return null;
+      }
+      const fiscalYear =
+        rowFiscalYear ?? earningsFiscalYear ?? derivedFiscalYear;
+      const quarter = rowQuarter ?? earningsQuarter ?? derivedQuarter;
+      const currency =
         stringValue(row.reportedCurrency) ||
         stringValue(row.currency) ||
-        stringValue(row.financialCurrency),
-    }))
-    .filter(
-      (candidate) =>
-        candidate.fiscalYear !== null &&
-        candidate.quarter !== null &&
-        Boolean(candidate.fiscalDateEnding) &&
-        Boolean(candidate.currency),
-    )
+        stringValue(row.financialCurrency);
+      const target = { fiscalYear, quarter, fiscalDateEnding };
+      if (
+        !currency ||
+        !matchesStocksEarningsFiscalPeriod(row, target) ||
+        (nearestEarnings &&
+          !matchesStocksEarningsFiscalPeriod(nearestEarnings, target, {
+            dateFields: "fiscal-only",
+          }))
+      ) {
+        return null;
+      }
+      return {
+        row,
+        earnings: nearestEarnings,
+        fiscalYear,
+        quarter,
+        fiscalDateEnding,
+        currency,
+      };
+    })
+    .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
     .sort(
       (left, right) =>
         Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
     )[0];
-  if (!income || income.fiscalYear === null || income.quarter === null) return null;
+  if (!income) return null;
 
-  const earnings = asArray(earningsPayload)
-    .map(asRecord)
-    .find(
-      (row) =>
-        stringValue(row.fiscalDateEnding) === income.fiscalDateEnding ||
-        stringValue(row.fiscalDate) === income.fiscalDateEnding,
-    );
+  const earnings = income.earnings;
   const comparison: StocksEarningsComparison = {
     ticker: ticker.trim().toUpperCase(),
     fiscalYear: income.fiscalYear,
@@ -789,6 +848,12 @@ async function recoverFmpEarningsFromAlphaVantage({
       };
     }
     const payload = await response.json();
+    primeStocksEarningsFallbackPayload(
+      payloadCache,
+      stock.ticker,
+      "alpha-vantage-income",
+      payload,
+    );
     const seed = alphaVantageRecoverySeed(
       stock.ticker,
       payload,
@@ -1074,11 +1139,14 @@ export async function fetchFmpStocksFinancialSnapshot({
           const latestEarnings = earningsHistory[0] ?? null;
           if (latestEarnings) {
             const completedHistory: StocksEarningsComparison[] = [];
+            const announcementWindow =
+              finnhubAnnouncementWindowForHistory(earningsHistory);
             for (const comparison of earningsHistory) {
               const completed = await completeFmpEarningsComparison({
                 stock,
                 comparison,
                 income: matchingFmpIncome(comparison, incomePayload.payload) ?? {},
+                announcementWindow,
                 fetchImpl,
                 env,
                 payloadCache: earningsFallbackPayloadCache,

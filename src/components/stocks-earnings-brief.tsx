@@ -1,7 +1,8 @@
-import type {
-  StocksEarningsComparison,
-  StocksEarningsValueProvenance,
-} from "@/lib/stocks-earnings-comparison";
+import {
+  areStocksEarningsValuesComparable,
+  type StocksEarningsComparison,
+  type StocksEarningsValueProvenance,
+} from "../lib/stocks-earnings-comparison.ts";
 import type { StocksEarningsInsight } from "@/lib/stocks-earnings-insight";
 
 const providerLabel: Record<
@@ -125,16 +126,21 @@ function sourceSummary(source?: StocksEarningsValueProvenance) {
 function surpriseStatus(metric: StocksEarningsComparison["revenue"]) {
   if (
     !metric.estimateSource ||
-    !metric.actualSource ||
-    metric.surprise === null ||
-    metric.surprisePct === null
+    !metric.actualSource
   ) {
     return "待数据";
   }
-  const estimateBasis = sourceAccountingBasis(metric.estimateSource);
-  const actualBasis = sourceAccountingBasis(metric.actualSource);
-  if (!estimateBasis || !actualBasis) return "待数据";
-  return estimateBasis === actualBasis ? null : "口径不可比";
+  if (
+    !areStocksEarningsValuesComparable(
+      metric.actualSource,
+      metric.estimateSource,
+    )
+  ) {
+    return "口径不可比";
+  }
+  return metric.surprise === null || metric.surprisePct === null
+    ? "待数据"
+    : null;
 }
 
 function MetricValue({

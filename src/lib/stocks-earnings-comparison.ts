@@ -11,6 +11,11 @@ export type StocksEarningsValueProvenance = {
   provider: StocksEarningsProvider;
   method: "direct" | "eps-times-diluted-shares";
   accountingBasis: string;
+  currency?: string;
+  unit?: "monetary";
+  scale?: "raw" | "thousands" | "millions" | "billions";
+  metric?: "revenue" | "net-income";
+  semantics?: "statement-actual" | "consensus-estimate";
 };
 
 export const LEGACY_UNKNOWN_ACCOUNTING_BASIS =
@@ -32,6 +37,7 @@ function isStocksEarningsValueMethod(
 
 export function normalizeStocksEarningsValueProvenance(
   source: Partial<StocksEarningsValueProvenance> | undefined,
+  defaults: Partial<StocksEarningsValueProvenance> = {},
 ): StocksEarningsValueProvenance | undefined {
   if (!source) return undefined;
   if (!isStocksEarningsProvider(source.provider)) return undefined;
@@ -43,11 +49,46 @@ export function normalizeStocksEarningsValueProvenance(
       : source.provider === "fmp"
         ? "FMP standardized"
         : LEGACY_UNKNOWN_ACCOUNTING_BASIS;
-  return {
+  const normalized: StocksEarningsValueProvenance = {
     provider: source.provider,
     method: source.method,
     accountingBasis,
   };
+  const currency = stringValue(source.currency ?? defaults.currency).toUpperCase();
+  if (currency) normalized.currency = currency;
+  const unit = source.unit ?? defaults.unit;
+  if (unit === "monetary") normalized.unit = unit;
+  const scale = source.scale ?? defaults.scale;
+  if (["raw", "thousands", "millions", "billions"].includes(String(scale))) {
+    normalized.scale = scale as NonNullable<StocksEarningsValueProvenance["scale"]>;
+  }
+  const metric = source.metric ?? defaults.metric;
+  if (metric === "revenue" || metric === "net-income") {
+    normalized.metric = metric;
+  }
+  const semantics = source.semantics ?? defaults.semantics;
+  if (semantics === "statement-actual" || semantics === "consensus-estimate") {
+    normalized.semantics = semantics;
+  }
+  return normalized;
+}
+
+export function areStocksEarningsValuesComparable(
+  actualSource: StocksEarningsValueProvenance | undefined,
+  estimateSource: StocksEarningsValueProvenance | undefined,
+) {
+  if (!actualSource || !estimateSource) return false;
+  return (
+    Boolean(actualSource.currency) &&
+    actualSource.currency === estimateSource.currency &&
+    actualSource.unit === "monetary" &&
+    estimateSource.unit === "monetary" &&
+    actualSource.scale === estimateSource.scale &&
+    actualSource.scale === "raw" &&
+    actualSource.metric === estimateSource.metric &&
+    actualSource.semantics === "statement-actual" &&
+    estimateSource.semantics === "consensus-estimate"
+  );
 }
 
 export type StocksEarningsMetricComparison = {
@@ -111,9 +152,10 @@ function fiscalYearValue(value: unknown) {
 }
 
 function quarterValue(value: unknown): StocksEarningsComparison["quarter"] | null {
-  const normalized = stringValue(value).toUpperCase();
-  return /^(Q1|Q2|Q3|Q4)$/.test(normalized)
-    ? (normalized as StocksEarningsComparison["quarter"])
+  const normalized = String(value ?? "").trim().toUpperCase();
+  const match = normalized.match(/^Q?([1-4])$/);
+  return match
+    ? (`Q${match[1]}` as StocksEarningsComparison["quarter"])
     : null;
 }
 
@@ -126,10 +168,54 @@ function dateValue(record: JsonRecord) {
 }
 
 function dateDistanceDays(left: string, right: string) {
-  const leftMs = Date.parse(`${left}T00:00:00Z`);
-  const rightMs = Date.parse(`${right}T00:00:00Z`);
+  const leftMs = Date.parse(left.length === 10 ? `${left}T00:00:00Z` : left);
+  const rightMs = Date.parse(right.length === 10 ? `${right}T00:00:00Z` : right);
   if (!Number.isFinite(leftMs) || !Number.isFinite(rightMs)) return Infinity;
-  return Math.abs(leftMs - rightMs) / 86_400_000;
+  const leftUtcDay = Date.UTC(
+    new Date(leftMs).getUTCFullYear(),
+    new Date(leftMs).getUTCMonth(),
+    new Date(leftMs).getUTCDate(),
+  );
+  const rightUtcDay = Date.UTC(
+    new Date(rightMs).getUTCFullYear(),
+    new Date(rightMs).getUTCMonth(),
+    new Date(rightMs).getUTCDate(),
+  );
+  return Math.abs(leftUtcDay - rightUtcDay) / 86_400_000;
+}
+
+export function matchesStocksEarningsFiscalPeriod(
+  recordValue: unknown,
+  target: Pick<
+    StocksEarningsComparison,
+    "fiscalYear" | "quarter" | "fiscalDateEnding"
+  >,
+  { dateFields = "any" }: { dateFields?: "any" | "fiscal-only" } = {},
+) {
+  const record = asRecord(recordValue);
+  const fiscalPeriod = stringValue(
+    record.fiscalPeriod ?? record.fiscal_period,
+  ).toUpperCase();
+  const fiscalPeriodMatch = fiscalPeriod.match(/(\d{4})Q([1-4])/);
+  const fiscalYear =
+    fiscalYearValue(record.fiscalYear ?? record.year) ??
+    (fiscalPeriodMatch ? Number(fiscalPeriodMatch[1]) : null);
+  const quarter =
+    quarterValue(record.quarter ?? record.period) ??
+    (fiscalPeriodMatch
+      ? (`Q${fiscalPeriodMatch[2]}` as StocksEarningsComparison["quarter"])
+      : null);
+  if (fiscalYear !== null && fiscalYear !== target.fiscalYear) return false;
+  if (quarter !== null && quarter !== target.quarter) return false;
+
+  const fiscalDateEnding =
+    stringValue(record.fiscalDateEnding) ||
+    stringValue(record.fiscalDate) ||
+    (dateFields === "any" ? stringValue(record.date) : "");
+  if (fiscalDateEnding) {
+    return dateDistanceDays(fiscalDateEnding, target.fiscalDateEnding) <= 7;
+  }
+  return fiscalYear === target.fiscalYear && quarter === target.quarter;
 }
 
 function percentageChange(value: number | null, base: number | null) {
@@ -146,8 +232,19 @@ export function calculateComparisonMetric(
     actualSource?: StocksEarningsValueProvenance;
   } = {},
 ): StocksEarningsMetricComparison {
+  const hasStructuredComparison = Boolean(
+    sources.actualSource || sources.estimateSource,
+  );
+  const comparable =
+    !hasStructuredComparison ||
+    areStocksEarningsValuesComparable(
+      sources.actualSource,
+      sources.estimateSource,
+    );
   const surprise =
-    actual !== null && estimate !== null ? actual - estimate : null;
+    comparable && actual !== null && estimate !== null
+      ? actual - estimate
+      : null;
   const metric: StocksEarningsMetricComparison = {
     estimate,
     actual,
@@ -188,11 +285,6 @@ export function mergeEarningsMetricValues(
     patch.previousYearActual !== undefined
       ? patch.previousYearActual
       : metric.previousYearActual;
-  const merged = calculateComparisonMetric(
-    actual,
-    estimate,
-    previousYearActual,
-  );
   const estimateSource =
     estimate === null
       ? undefined
@@ -209,9 +301,30 @@ export function mergeEarningsMetricValues(
         : patch.actual !== undefined
           ? undefined
           : metric.actualSource;
-  if (estimateSource) merged.estimateSource = estimateSource;
-  if (actualSource) merged.actualSource = actualSource;
+  const merged = calculateComparisonMetric(
+    actual,
+    estimate,
+    previousYearActual,
+    { estimateSource, actualSource },
+  );
   return merged;
+}
+
+function fmpProvenance(
+  currency: string,
+  metric: NonNullable<StocksEarningsValueProvenance["metric"]>,
+  semantics: NonNullable<StocksEarningsValueProvenance["semantics"]>,
+): StocksEarningsValueProvenance {
+  return {
+    provider: "fmp",
+    method: "direct",
+    accountingBasis: "FMP standardized",
+    currency,
+    unit: "monetary",
+    scale: "raw",
+    metric,
+    semantics,
+  };
 }
 
 function matchingEstimate(
@@ -220,26 +333,16 @@ function matchingEstimate(
 ) {
   const fiscalYear = fiscalYearValue(income.fiscalYear);
   const quarter = quarterValue(income.period);
-  const exact = estimates.find(
-    (estimate) =>
-      fiscalYearValue(estimate.fiscalYear) === fiscalYear &&
-      quarterValue(estimate.period) === quarter,
-  );
-  if (exact) return exact;
-
-  const incomeDate = dateValue(income);
-  if (!incomeDate) return null;
+  const fiscalDateEnding = dateValue(income);
+  if (fiscalYear === null || quarter === null || !fiscalDateEnding) return null;
   return (
-    estimates.find((estimate) => {
-      if (
-        fiscalYearValue(estimate.fiscalYear) !== null &&
-        quarterValue(estimate.period) !== null
-      ) {
-        return false;
-      }
-      const estimateDate = dateValue(estimate);
-      return estimateDate && dateDistanceDays(incomeDate, estimateDate) <= 7;
-    }) ?? null
+    estimates.find((estimate) =>
+      matchesStocksEarningsFiscalPeriod(estimate, {
+        fiscalYear,
+        quarter,
+        fiscalDateEnding,
+      }),
+    ) ?? null
   );
 }
 
@@ -260,14 +363,18 @@ function matchingPreviousYear(
 }
 
 function matchingEarningsRow(income: JsonRecord, earnings: JsonRecord[]) {
-  const incomeDate = dateValue(income);
-  if (!incomeDate) return null;
+  const fiscalYear = fiscalYearValue(income.fiscalYear);
+  const quarter = quarterValue(income.period);
+  const fiscalDateEnding = dateValue(income);
+  if (fiscalYear === null || quarter === null || !fiscalDateEnding) return null;
   return (
-    earnings.find((row) => {
-      const fiscalDate =
-        stringValue(row.fiscalDateEnding) || stringValue(row.fiscalDate);
-      return fiscalDate && dateDistanceDays(incomeDate, fiscalDate) <= 7;
-    }) ?? null
+    earnings.find((row) =>
+      matchesStocksEarningsFiscalPeriod(
+        row,
+        { fiscalYear, quarter, fiscalDateEnding },
+        { dateFields: "fiscal-only" },
+      ),
+    ) ?? null
   );
 }
 
@@ -298,6 +405,7 @@ function parseIncomeQuarter(
   const estimate = matchingEstimate(income, estimates);
   const previous = matchingPreviousYear(income, statements);
   const earningsRow = matchingEarningsRow(income, earnings);
+  const currency = stringValue(income.reportedCurrency) || "USD";
   return {
     ticker: ticker.trim().toUpperCase(),
     fiscalYear,
@@ -305,7 +413,7 @@ function parseIncomeQuarter(
     fiscalDateEnding,
     reportDate: earningsRow ? stringValue(earningsRow.date) || null : null,
     reportTiming: reportTiming(earningsRow?.time),
-    currency: stringValue(income.reportedCurrency) || "USD",
+    currency,
     accountingBasis: "FMP standardized",
     provider: "fmp",
     generatedAt,
@@ -314,16 +422,12 @@ function parseIncomeQuarter(
       numberValue(estimate?.estimatedRevenueAvg ?? estimate?.revenueAvg),
       numberValue(previous?.revenue),
       {
-        actualSource: {
-          provider: "fmp",
-          method: "direct",
-          accountingBasis: "FMP standardized",
-        },
-        estimateSource: {
-          provider: "fmp",
-          method: "direct",
-          accountingBasis: "FMP standardized",
-        },
+        actualSource: fmpProvenance(currency, "revenue", "statement-actual"),
+        estimateSource: fmpProvenance(
+          currency,
+          "revenue",
+          "consensus-estimate",
+        ),
       },
     ),
     netIncome: calculateComparisonMetric(
@@ -333,16 +437,16 @@ function parseIncomeQuarter(
       ),
       numberValue(previous?.netIncome),
       {
-        actualSource: {
-          provider: "fmp",
-          method: "direct",
-          accountingBasis: "FMP standardized",
-        },
-        estimateSource: {
-          provider: "fmp",
-          method: "direct",
-          accountingBasis: "FMP standardized",
-        },
+        actualSource: fmpProvenance(
+          currency,
+          "net-income",
+          "statement-actual",
+        ),
+        estimateSource: fmpProvenance(
+          currency,
+          "net-income",
+          "consensus-estimate",
+        ),
       },
     ),
   };
