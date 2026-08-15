@@ -20,7 +20,8 @@ assert.match(source, /data-stocks-earnings-brief/);
 assert.match(source, /预计值/);
 assert.match(source, /公布值/);
 assert.match(source, /较预期/);
-assert.match(source, /comparison\.accountingBasis/);
+assert.match(source, /accountingBasisLabel\(source/);
+assert.doesNotMatch(source, /truncate/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
 const output = ts.transpileModule(source, {
@@ -64,7 +65,7 @@ try {
       actualSource: {
         provider: "finnhub",
         method: "direct",
-        accountingBasis: "Finnhub GAAP",
+        accountingBasis: "FMP standardized",
       },
       previousYearActual: 105_100_000,
       estimateYoYPct: 446.087,
@@ -110,6 +111,13 @@ try {
     );
   });
   const rendered = JSON.stringify(renderer.toJSON());
+  function visibleText(node) {
+    if (node === null || node === undefined || typeof node === "boolean") return "";
+    if (typeof node === "string" || typeof node === "number") return String(node);
+    if (Array.isArray(node)) return node.map(visibleText).join("");
+    return visibleText(node.children);
+  }
+  const visible = visibleText(renderer.toJSON());
   assert.match(rendered, /"2026"," ","Q2"/);
   assert.match(rendered, /营收/);
   assert.match(rendered, /净利润/);
@@ -120,7 +128,10 @@ try {
   assert.match(rendered, /Finnhub/);
   assert.match(rendered, /EPS 推算/);
   assert.match(rendered, /推导/);
-  assert.match(rendered, /Finnhub GAAP/);
+  assert.match(visible, /FMP standardized/);
+  assert.match(visible, /Finnhub/);
+  assert.match(visible, /EODHD diluted shares/);
+  assert.match(visible, /直接/);
   assert.match(rendered, /核心结论/);
   assert.match(rendered, /主要驱动/);
   assert.match(rendered, /风险提示/);
@@ -172,6 +183,50 @@ try {
     );
   });
   assert.match(JSON.stringify(renderer.toJSON()), /等待公布/);
+
+  await act(async () => renderer.unmount());
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(StocksEarningsBrief, {
+        comparison: {
+          ...comparison,
+          revenue: {
+            ...comparison.revenue,
+            actualSource: {
+              ...comparison.revenue.actualSource,
+              accountingBasis: "Finnhub GAAP",
+            },
+          },
+        },
+        insight: null,
+      }),
+    );
+  });
+  const incompatibleVisible = visibleText(renderer.toJSON());
+  assert.match(incompatibleVisible, /口径不可比/);
+  assert.match(incompatibleVisible, /Finnhub GAAP/);
+  assert.doesNotMatch(incompatibleVisible, /\+1\.46%/);
+
+  await act(async () => renderer.unmount());
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(StocksEarningsBrief, {
+        comparison: {
+          ...comparison,
+          revenue: {
+            ...comparison.revenue,
+            actualSource: undefined,
+          },
+        },
+        insight: null,
+      }),
+    );
+  });
+  const missingProvenanceVisible = visibleText(renderer.toJSON());
+  assert.match(missingProvenanceVisible, /来源未返回/);
+  assert.match(missingProvenanceVisible, /口径未返回/);
+  assert.match(missingProvenanceVisible, /待数据/);
+  assert.doesNotMatch(missingProvenanceVisible, /\+1\.46%/);
 } finally {
   if (renderer) await act(async () => renderer.unmount());
   rmSync(runtimePath, { force: true });

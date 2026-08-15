@@ -98,35 +98,43 @@ function isFutureOrUnpublished(comparison: StocksEarningsComparison) {
 
 function provenanceMethodLabel(source?: StocksEarningsValueProvenance) {
   if (!source) return "来源未返回";
-  if (source?.method === "eps-times-diluted-shares") {
-    return "EPS 推算 · 推导";
+  if (source.method === "eps-times-diluted-shares") {
+    return "推导 · EPS 推算";
   }
-  return source?.method === "direct" ? "直接" : "推导";
+  return source.method === "direct" ? "直接" : "来源未返回";
 }
 
-function provenanceProviderLabel(
-  source: StocksEarningsValueProvenance | undefined,
-  comparison: StocksEarningsComparison,
-) {
-  return providerLabel[source?.provider ?? comparison.provider];
+function provenanceProviderLabel(source?: StocksEarningsValueProvenance) {
+  return source ? providerLabel[source.provider] ?? "来源未返回" : "来源未返回";
 }
 
-function accountingBasisLabel(
-  source: StocksEarningsValueProvenance | undefined,
-  comparison: StocksEarningsComparison,
-) {
-  return source?.accountingBasis || comparison.accountingBasis;
+function accountingBasisLabel(source?: StocksEarningsValueProvenance) {
+  return sourceAccountingBasis(source) || "口径未返回";
 }
 
-function derivedProviderLabel(
-  metric: StocksEarningsComparison["revenue"],
-  comparison: StocksEarningsComparison,
-) {
-  const providers = [
-    provenanceProviderLabel(metric.estimateSource, comparison),
-    provenanceProviderLabel(metric.actualSource, comparison),
-  ].filter((provider, index, values) => values.indexOf(provider) === index);
-  return `推导 · ${providers.join("/")}`;
+function sourceAccountingBasis(source?: StocksEarningsValueProvenance) {
+  return typeof source?.accountingBasis === "string"
+    ? source.accountingBasis.trim()
+    : "";
+}
+
+function sourceSummary(source?: StocksEarningsValueProvenance) {
+  return `${provenanceProviderLabel(source)} / ${accountingBasisLabel(source)}`;
+}
+
+function surpriseStatus(metric: StocksEarningsComparison["revenue"]) {
+  if (
+    !metric.estimateSource ||
+    !metric.actualSource ||
+    metric.surprise === null ||
+    metric.surprisePct === null
+  ) {
+    return "待数据";
+  }
+  const estimateBasis = sourceAccountingBasis(metric.estimateSource);
+  const actualBasis = sourceAccountingBasis(metric.actualSource);
+  if (!estimateBasis || !actualBasis) return "待数据";
+  return estimateBasis === actualBasis ? null : "口径不可比";
 }
 
 function MetricValue({
@@ -134,14 +142,12 @@ function MetricValue({
   yoy,
   currency,
   source,
-  comparison,
   missingState,
 }: {
   value: number | null;
   yoy: number | null;
   currency: string;
   source?: StocksEarningsValueProvenance;
-  comparison: StocksEarningsComparison;
   missingState: FinancialMissingState;
 }) {
   const missing = missingLabel(missingState);
@@ -152,12 +158,14 @@ function MetricValue({
         {formatEarningsMoney(value, currency, missing)}
       </p>
       <p
-        className="mt-1 truncate text-[9px] text-muted sm:text-[10px]"
-        title={accountingBasisLabel(source, comparison)}
+        className="mt-1 break-words text-[9px] text-muted sm:text-[10px]"
       >
-        {provenanceProviderLabel(source, comparison)} · {provenanceMethodLabel(source)}
+        {provenanceProviderLabel(source)} · {provenanceMethodLabel(source)}
       </p>
-      <p className={`mt-1 truncate font-mono text-[10px] sm:text-[11px] ${valueTone(yoy)}`}>
+      <p className="mt-1 break-words text-[9px] text-muted sm:text-[10px]">
+        {accountingBasisLabel(source)}
+      </p>
+      <p className={`mt-1 break-words font-mono text-[10px] sm:text-[11px] ${valueTone(yoy)}`}>
         同比 {formatSignedPercent(yoy, missing)} · 推导
       </p>
     </div>
@@ -168,13 +176,11 @@ function MetricRow({
   label,
   metric,
   currency,
-  comparison,
   missingState,
 }: {
   label: string;
   metric: StocksEarningsComparison["revenue"];
   currency: string;
-  comparison: StocksEarningsComparison;
   missingState: FinancialMissingState;
 }) {
   const missing = missingLabel(missingState);
@@ -186,7 +192,6 @@ function MetricRow({
         yoy={metric.estimateYoYPct}
         currency={currency}
         source={metric.estimateSource}
-        comparison={comparison}
         missingState={missingState}
       />
       <MetricValue
@@ -194,29 +199,35 @@ function MetricRow({
         yoy={metric.actualYoYPct}
         currency={currency}
         source={metric.actualSource}
-        comparison={comparison}
         missingState={missingState}
       />
       <div className="min-w-0 text-right">
-        <p
-          className={`break-words font-mono text-xs font-semibold sm:text-sm ${valueTone(
-            metric.surprisePct,
-          )}`}
-        >
-          {formatSignedMoney(metric.surprise, currency, missing)}
-        </p>
-        <p
-          className={`mt-1 font-mono text-[10px] sm:text-[11px] ${valueTone(
-            metric.surprisePct,
-          )}`}
-        >
-          {formatSignedPercent(metric.surprisePct, missing)} · 推导
-        </p>
-        <p
-          className="mt-1 truncate text-[9px] text-muted sm:text-[10px]"
-          title={comparison.accountingBasis}
-        >
-          {derivedProviderLabel(metric, comparison)}
+        {surpriseStatus(metric) === null ? (
+          <>
+            <p
+              className={`break-words font-mono text-xs font-semibold sm:text-sm ${valueTone(
+                metric.surprisePct,
+              )}`}
+            >
+              {formatSignedMoney(metric.surprise, currency, missing)}
+            </p>
+            <p
+              className={`mt-1 break-words font-mono text-[10px] sm:text-[11px] ${valueTone(
+                metric.surprisePct,
+              )}`}
+            >
+              {formatSignedPercent(metric.surprisePct, missing)} · 推导
+            </p>
+          </>
+        ) : (
+          <p className="break-words text-xs font-semibold text-muted sm:text-sm">
+            {surpriseStatus(metric)}
+          </p>
+        )}
+        <p className="mt-1 break-words text-[9px] text-muted sm:text-[10px]">
+          预计 {sourceSummary(metric.estimateSource)}
+          <br />
+          公布 {sourceSummary(metric.actualSource)}
         </p>
       </div>
     </div>
@@ -274,9 +285,6 @@ export function StocksEarningsBrief({
           </p>
         </div>
         <div className="text-right text-[11px] leading-5 text-muted">
-          <p>
-            {providerLabel[comparison.provider]} · {comparison.accountingBasis}
-          </p>
           <p>{source === "live" ? "缓存已更新" : "本地基线"} · {displayTime(updatedAt)}</p>
         </div>
       </div>
@@ -292,14 +300,12 @@ export function StocksEarningsBrief({
           label="营收"
           metric={comparison.revenue}
           currency={comparison.currency}
-          comparison={comparison}
           missingState={missingState}
         />
         <MetricRow
           label="净利润"
           metric={comparison.netIncome}
           currency={comparison.currency}
-          comparison={comparison}
           missingState={missingState}
         />
       </div>
