@@ -57,7 +57,16 @@ type FallbackResult = {
   errors: string[];
 };
 
-export type StocksEarningsFallbackPayloadCache = Map<string, unknown[]>;
+type StocksEarningsFallbackProviderCache = {
+  payloads: unknown[];
+  requestWindows: Set<string>;
+  unavailable: boolean;
+};
+
+export type StocksEarningsFallbackPayloadCache = Map<
+  string,
+  StocksEarningsFallbackProviderCache
+>;
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -711,27 +720,26 @@ function yahooUrl(ticker: string) {
   return url.toString();
 }
 
-async function fetchJson(
-  fetchImpl: FetchLike,
-  url: string,
-  label: string,
-  errors: string[],
-) {
-  try {
-    const response = await fetchImpl(url);
-    if (!response.ok) {
-      errors.push(`${label} HTTP ${response.status}`);
-      return null;
-    }
-    return await response.json();
-  } catch {
-    errors.push(`${label} request failed`);
-    return null;
-  }
-}
-
 function providerCacheKey(ticker: string, provider: string) {
   return `${ticker.trim().toUpperCase()}:${provider}`;
+}
+
+function providerCacheEntry(
+  cache: StocksEarningsFallbackPayloadCache | undefined,
+  ticker: string,
+  provider: string,
+) {
+  if (!cache) return null;
+  const key = providerCacheKey(ticker, provider);
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const created: StocksEarningsFallbackProviderCache = {
+    payloads: [],
+    requestWindows: new Set(),
+    unavailable: false,
+  };
+  cache.set(key, created);
+  return created;
 }
 
 function cachedProviderPayloads(
@@ -739,7 +747,7 @@ function cachedProviderPayloads(
   ticker: string,
   provider: string,
 ) {
-  return cache?.get(providerCacheKey(ticker, provider)) ?? [];
+  return cache?.get(providerCacheKey(ticker, provider))?.payloads ?? [];
 }
 
 function cacheProviderPayload(
@@ -748,9 +756,87 @@ function cacheProviderPayload(
   provider: string,
   payload: unknown,
 ) {
-  if (!cache) return;
-  const key = providerCacheKey(ticker, provider);
-  cache.set(key, [...(cache.get(key) ?? []), payload]);
+  const entry = providerCacheEntry(cache, ticker, provider);
+  if (entry) entry.payloads.push(payload);
+}
+
+function isProviderPayloadUnavailable(payload: unknown) {
+  if (Array.isArray(payload)) return payload.length === 0;
+  const record = asRecord(payload);
+  if (Object.keys(record).length === 0) return true;
+  const message = [
+    record["Error Message"],
+    record.message,
+    record.error,
+    record.detail,
+    record.Information,
+  ]
+    .map(stringValue)
+    .find(Boolean)
+    ?.toLowerCase();
+  if (
+    message &&
+    /(quota|limit|permission|forbidden|unauthori[sz]|subscription|plan|api[ -]?key)/.test(
+      message,
+    )
+  ) {
+    return "explicit-error";
+  }
+  const resultArrays = [
+    record.earningsCalendar,
+    record.trends,
+    record.data,
+    record.results,
+    record.quarterlyReports,
+  ].filter(Array.isArray);
+  return resultArrays.length > 0 && resultArrays.every((value) => value.length === 0);
+}
+
+async function fetchCachedProviderPayload({
+  cache,
+  ticker,
+  provider,
+  requestWindow,
+  fetchImpl,
+  url,
+  label,
+  errors,
+}: {
+  cache: StocksEarningsFallbackPayloadCache | undefined;
+  ticker: string;
+  provider: string;
+  requestWindow: string;
+  fetchImpl: FetchLike;
+  url: string;
+  label: string;
+  errors: string[];
+}) {
+  const entry = providerCacheEntry(cache, ticker, provider);
+  if (entry?.unavailable || entry?.requestWindows.has(requestWindow)) return null;
+  entry?.requestWindows.add(requestWindow);
+  try {
+    const response = await fetchImpl(url);
+    if (!response.ok) {
+      errors.push(`${label} HTTP ${response.status}`);
+      if (entry) entry.unavailable = true;
+      return null;
+    }
+    const payload = await response.json();
+    const unavailablePayload = isProviderPayloadUnavailable(payload);
+    if (unavailablePayload) {
+      if (unavailablePayload === "explicit-error") {
+        errors.push(`${label} returned unavailable payload`);
+      }
+      if (entry) entry.unavailable = true;
+      return null;
+    }
+    cacheProviderPayload(cache, ticker, provider, payload);
+    return payload;
+  } catch {
+    errors.push(`${label} request failed`);
+    if (entry) entry.unavailable = true;
+    return null;
+  }
 }
 
 export async function completeStocksEarningsComparison({
@@ -803,14 +889,18 @@ export async function completeStocksEarningsComparison({
       .map((payload) => parseFinnhubEarningsCandidate(payload, target))
       .find((value): value is StocksEarningsFallbackCandidate => value !== null);
     if (!candidate) {
-      const payload = await fetchJson(
+      const url = finnhubUrl(ticker, target, finnhubKeys[0]);
+      const payload = await fetchCachedProviderPayload({
+        cache: payloadCache,
+        ticker,
+        provider: "finnhub",
+        requestWindow: url,
         fetchImpl,
-        finnhubUrl(ticker, target, finnhubKeys[0]),
-        "finnhub calendar/earnings",
+        url,
+        label: "finnhub calendar/earnings",
         errors,
-      );
+      });
       if (payload) {
-        cacheProviderPayload(payloadCache, ticker, "finnhub", payload);
         candidate = parseFinnhubEarningsCandidate(payload, target) ?? undefined;
       }
     }
@@ -828,14 +918,18 @@ export async function completeStocksEarningsComparison({
       .map((payload) => parseEodhdEarningsCandidate(payload, target))
       .find((value): value is StocksEarningsFallbackCandidate => value !== null);
     if (!candidate) {
-      const payload = await fetchJson(
+      const url = eodhdUrl(eodhdTicker, eodhdKeys[0]);
+      const payload = await fetchCachedProviderPayload({
+        cache: payloadCache,
+        ticker,
+        provider: "eodhd",
+        requestWindow: url,
         fetchImpl,
-        eodhdUrl(eodhdTicker, eodhdKeys[0]),
-        "eodhd calendar/trends",
+        url,
+        label: "eodhd calendar/trends",
         errors,
-      );
+      });
       if (payload) {
-        cacheProviderPayload(payloadCache, ticker, "eodhd", payload);
         candidate = parseEodhdEarningsCandidate(payload, target) ?? undefined;
       }
     }
@@ -860,15 +954,17 @@ export async function completeStocksEarningsComparison({
       completed.comparison.revenue.actual === null ||
       completed.comparison.netIncome.actual === null
     )) {
-      incomePayload = await fetchJson(
+      const url = alphaVantageUrl("INCOME_STATEMENT", ticker, key);
+      incomePayload = await fetchCachedProviderPayload({
+        cache: payloadCache,
+        ticker,
+        provider: "alpha-vantage-income",
+        requestWindow: url,
         fetchImpl,
-        alphaVantageUrl("INCOME_STATEMENT", ticker, key),
-        "alpha-vantage INCOME_STATEMENT",
+        url,
+        label: "alpha-vantage INCOME_STATEMENT",
         errors,
-      );
-      if (incomePayload) {
-        cacheProviderPayload(payloadCache, ticker, "alpha-vantage-income", incomePayload);
-      }
+      });
     }
     let estimatesPayload =
       completed.comparison.revenue.estimate === null ||
@@ -879,15 +975,17 @@ export async function completeStocksEarningsComparison({
       completed.comparison.revenue.estimate === null ||
       completed.comparison.netIncome.estimate === null
     )) {
-      estimatesPayload = await fetchJson(
+      const url = alphaVantageUrl("EARNINGS_ESTIMATES", ticker, key);
+      estimatesPayload = await fetchCachedProviderPayload({
+        cache: payloadCache,
+        ticker,
+        provider: "alpha-vantage-estimates",
+        requestWindow: url,
         fetchImpl,
-        alphaVantageUrl("EARNINGS_ESTIMATES", ticker, key),
-        "alpha-vantage EARNINGS_ESTIMATES",
+        url,
+        label: "alpha-vantage EARNINGS_ESTIMATES",
         errors,
-      );
-      if (estimatesPayload) {
-        cacheProviderPayload(payloadCache, ticker, "alpha-vantage-estimates", estimatesPayload);
-      }
+      });
     }
     const candidate = parseAlphaVantageEarningsCandidate(
       { incomeStatement: incomePayload, earningsEstimates: estimatesPayload },
@@ -910,14 +1008,18 @@ export async function completeStocksEarningsComparison({
       .map((payload) => parseYahooEarningsCandidate(payload, target))
       .find((value): value is StocksEarningsFallbackCandidate => value !== null);
     if (!candidate) {
-      const payload = await fetchJson(
+      const url = yahooUrl(ticker);
+      const payload = await fetchCachedProviderPayload({
+        cache: payloadCache,
+        ticker,
+        provider: "yahoo",
+        requestWindow: url,
         fetchImpl,
-        yahooUrl(ticker),
-        "yahoo incomeStatementHistoryQuarterly",
+        url,
+        label: "yahoo incomeStatementHistoryQuarterly",
         errors,
-      );
+      });
       if (payload) {
-        cacheProviderPayload(payloadCache, ticker, "yahoo", payload);
         candidate = parseYahooEarningsCandidate(payload, target) ?? undefined;
       }
     }

@@ -459,6 +459,37 @@ assert.ok(
   ),
 );
 
+const failedAlphaRecovery = await getStocksFinancialSnapshot({
+  stocks: [getAlphaResearchStockByTicker("NBIS")].filter(Boolean),
+  provider: "fmp",
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.hostname === "financialmodelingprep.com") {
+      return new Response("income unavailable", { status: 503 });
+    }
+    if (url.hostname === "www.alphavantage.co") {
+      return new Response("quota unavailable", { status: 402 });
+    }
+    return Response.json(yahooPayload);
+  },
+});
+assert.equal(failedAlphaRecovery.provider, "yahoo");
+assert.equal(
+  failedAlphaRecovery.errors.filter((error) =>
+    error.includes("FMP income-statement HTTP 503"),
+  ).length,
+  1,
+);
+assert.ok(
+  failedAlphaRecovery.errors.some((error) =>
+    error.includes("alpha-vantage INCOME_STATEMENT HTTP 402"),
+  ),
+);
+
 await assert.rejects(
   () =>
     fetchFmpStocksFinancialSnapshot({

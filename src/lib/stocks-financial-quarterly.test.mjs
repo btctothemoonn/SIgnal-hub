@@ -314,4 +314,87 @@ assert.equal(
 );
 assert.equal(historyFinnhubRequests, 1);
 
+const fourQuarterRows = [
+  ["Q4", "2026-12-31", 640_000_000, -160_000_000],
+  ["Q3", "2026-09-30", 610_000_000, -170_000_000],
+  ["Q2", "2026-06-30", 582_300_000, -190_400_000],
+  ["Q1", "2026-03-31", 420_000_000, -180_000_000],
+].map(([period, fiscalDateEnding, revenue, netIncome]) => ({
+  date: fiscalDateEnding,
+  fiscalDateEnding,
+  fiscalYear: "2026",
+  period,
+  reportedCurrency: "USD",
+  revenue,
+  netIncome,
+  weightedAverageShsOutDil: 100_000_000,
+}));
+
+let terminalFinnhubRequests = 0;
+const terminalFinnhubSnapshot = await fetchFmpStocksFinancialSnapshot({
+  stocks: stocks.slice(0, 1),
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    const endpoint = url.pathname.split("/").at(-1);
+    if (url.hostname === "finnhub.io") {
+      terminalFinnhubRequests += 1;
+      return new Response("plan restricted", { status: 402 });
+    }
+    if (endpoint === "income-statement") return Response.json(fourQuarterRows);
+    if (endpoint === "analyst-estimates") {
+      return new Response("upgrade plan", { status: 402 });
+    }
+    return Response.json([]);
+  },
+});
+assert.equal(terminalFinnhubSnapshot.financials.NBIS.earningsHistory.length, 4);
+assert.equal(terminalFinnhubRequests, 1);
+assert.equal(
+  terminalFinnhubSnapshot.errors.filter((error) =>
+    error.includes("finnhub calendar/earnings HTTP 402"),
+  ).length,
+  1,
+);
+
+const repeatedQuarterRows = [
+  fourQuarterRows[0],
+  fourQuarterRows[1],
+  { ...fourQuarterRows[1] },
+];
+let controlledFollowUpRequests = 0;
+await fetchFmpStocksFinancialSnapshot({
+  stocks: stocks.slice(0, 1),
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    const endpoint = url.pathname.split("/").at(-1);
+    if (url.hostname === "finnhub.io") {
+      controlledFollowUpRequests += 1;
+      return Response.json({
+        earningsCalendar: [
+          {
+            symbol: "NBIS",
+            fiscalYear: 2026,
+            fiscalPeriod: "2026Q1",
+            fiscalDateEnding: "2026-03-31",
+          },
+        ],
+      });
+    }
+    if (endpoint === "income-statement") return Response.json(repeatedQuarterRows);
+    if (endpoint === "analyst-estimates") {
+      return new Response("upgrade plan", { status: 402 });
+    }
+    return Response.json([]);
+  },
+});
+assert.equal(controlledFollowUpRequests, 2);
+
 console.log("ok - stocks FMP quarterly transport");

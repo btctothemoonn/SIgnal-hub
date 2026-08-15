@@ -1036,11 +1036,10 @@ export async function fetchFmpStocksFinancialSnapshot({
               );
               return [stock.ticker, recovered.statement] as const;
             }
-            throw new Error(
-              incomePayload
-                ? fmpEndpointError(incomePayload)
-                : "FMP income-statement returned no payload",
+            errors.push(
+              ...recovered.errors.map((error) => `${stock.ticker}: ${error}`),
             );
+            throw new Error("FMP income-statement recovery failed");
           }
           const statement = parseFmpFinancialStatement(
             stock.ticker,
@@ -1125,7 +1124,7 @@ export async function fetchFmpStocksFinancialSnapshot({
   );
   const financials = Object.fromEntries(financialEntries);
   if (Object.keys(financials).length === 0) {
-    const details = errors.slice(0, 3).join(" | ");
+    const details = errors.join(" | ");
     throw new Error(
       details
         ? `FMP financials returned no usable statements: ${details}`
