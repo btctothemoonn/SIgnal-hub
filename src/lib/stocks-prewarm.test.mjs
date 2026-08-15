@@ -175,6 +175,30 @@ assert.equal(
   "cached conclusion",
 );
 
+const newerDirectFinancial = structuredClone(partialFinancial);
+newerDirectFinancial.financials.NBIS.latestEarnings.revenue.estimate = 580_000_000;
+newerDirectFinancial.financials.NBIS.latestEarnings.revenue.estimateSource = {
+  provider: "fmp",
+  method: "direct",
+  accountingBasis: "FMP standardized",
+};
+const acceptedDirectFinancial = preserveSuccessfulFinancialEntries(
+  previousFinancial,
+  newerDirectFinancial,
+);
+assert.equal(
+  acceptedDirectFinancial.financials.NBIS.latestEarnings.revenue.estimate,
+  580_000_000,
+);
+assert.deepEqual(
+  acceptedDirectFinancial.financials.NBIS.latestEarnings.revenue.estimateSource,
+  {
+    provider: "fmp",
+    method: "direct",
+    accountingBasis: "FMP standardized",
+  },
+);
+
 const runtimeDir = mkdtempSync(join(tmpdir(), "signal-hub-stocks-prewarm-"));
 const env = {
   SIGNAL_HUB_RUNTIME_DIR: runtimeDir,

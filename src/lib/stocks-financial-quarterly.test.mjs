@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { fetchFmpStocksFinancialSnapshot } from "./stocks-financial-data.ts";
 
-const stocks = ["NBIS", "CBRS", "NVDA", "AMD"].map((ticker) => ({ ticker }));
+const stocks = ["NBIS", "CBRS", "NVDA", "AMD"].map((ticker) => ({
+  ticker,
+  marketCode: "US",
+}));
 const urls = [];
 let activeIncomeRequests = 0;
 let maxActiveIncomeRequests = 0;
@@ -148,5 +151,72 @@ assert.equal(restricted.financials.NBIS.latestEarnings.revenue.actual, 582_300_0
 assert.equal(restricted.financials.NBIS.latestEarnings.revenue.estimate, null);
 assert.ok(restricted.errors.some((error) => /analyst-estimates HTTP 402/.test(error)));
 assert.ok(restricted.errors.every((error) => !error.includes("secret-plan-key")));
+
+const completedAfterEstimateRestriction = await fetchFmpStocksFinancialSnapshot({
+  stocks: stocks.slice(0, 1),
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    const endpoint = url.pathname.split("/").at(-1);
+    if (url.hostname === "finnhub.io") {
+      return Response.json({
+        earningsCalendar: [
+          {
+            symbol: "NBIS",
+            fiscalYear: 2026,
+            fiscalPeriod: "2026Q2",
+            fiscalDateEnding: "2026-06-30",
+            date: "2026-08-12",
+            revenueEstimate: 573_937_500,
+            epsEstimate: -2.74,
+          },
+        ],
+      });
+    }
+    if (endpoint === "income-statement") {
+      return Response.json(
+        incomeRows("NBIS").map((row) => ({
+          ...row,
+          weightedAverageShsOutDil: 100_000_000,
+        })),
+      );
+    }
+    if (endpoint === "analyst-estimates") {
+      return new Response("upgrade plan", { status: 402 });
+    }
+    if (endpoint === "earnings") {
+      return Response.json([
+        {
+          date: "2026-08-12",
+          fiscalDateEnding: "2026-06-30",
+          time: "bmo",
+        },
+      ]);
+    }
+    return Response.json([]);
+  },
+});
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.latestEarnings.revenue.estimate,
+  573_937_500,
+);
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.latestEarnings.revenue
+    .estimateSource.provider,
+  "finnhub",
+);
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.latestEarnings.netIncome
+    .estimateSource.method,
+  "eps-times-diluted-shares",
+);
+assert.equal(
+  completedAfterEstimateRestriction.financials.NBIS.earningsHistory[0].revenue
+    .estimateSource.provider,
+  "finnhub",
+);
 
 console.log("ok - stocks FMP quarterly transport");

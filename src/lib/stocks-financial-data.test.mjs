@@ -386,6 +386,65 @@ assert.ok(
   !alphaDisabledFallbackUrls.some((url) => url.includes("alphavantage.co")),
 );
 
+const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
+  stocks: [{ ticker: "NBIS", marketCode: "US" }],
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.hostname === "financialmodelingprep.com") {
+      const endpoint = url.pathname.split("/").at(-1);
+      if (endpoint === "income-statement") {
+        return new Response("upstream unavailable", { status: 503 });
+      }
+      if (endpoint === "earnings") {
+        return Response.json([
+          {
+            date: "2026-08-12",
+            fiscalDateEnding: "2026-06-30",
+            fiscalYear: 2026,
+            period: "Q2",
+            time: "bmo",
+          },
+        ]);
+      }
+      return Response.json([]);
+    }
+    if (
+      url.hostname === "www.alphavantage.co" &&
+      url.searchParams.get("function") === "INCOME_STATEMENT"
+    ) {
+      return Response.json({
+        quarterlyReports: [
+          {
+            fiscalDateEnding: "2026-06-30",
+            fiscalYear: 2026,
+            quarter: "Q2",
+            reportedCurrency: "USD",
+            revenueUnit: "raw",
+            netIncomeUnit: "raw",
+            totalRevenue: "582300000",
+            netIncome: "-190400000",
+          },
+        ],
+      });
+    }
+    throw new Error(`Unexpected URL ${url}`);
+  },
+});
+assert.ok(alphaQuarterlyRecovery.financials.NBIS);
+assert.equal(
+  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actual,
+  582_300_000,
+);
+assert.equal(
+  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actualSource
+    .provider,
+  "alpha-vantage",
+);
+
 await assert.rejects(
   () =>
     fetchFmpStocksFinancialSnapshot({

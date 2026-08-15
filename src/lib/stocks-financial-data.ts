@@ -8,9 +8,14 @@ import {
 } from "./provider-api-keys.ts";
 import { resolveEarningsStatus } from "./stocks-earnings.ts";
 import {
+  calculateComparisonMetric,
   parseFmpQuarterlyEarningsHistory,
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
+import {
+  completeStocksEarningsComparison,
+  type StocksEarningsFallbackBase,
+} from "./stocks-earnings-fallback.ts";
 import type { StocksEarningsInsight } from "./stocks-earnings-insight.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -250,6 +255,15 @@ function fmpUrl(
 function alphaVantageOverviewUrl(ticker: string, apiKey: string) {
   const search = new URLSearchParams({
     function: "OVERVIEW",
+    symbol: ticker,
+    apikey: apiKey,
+  });
+  return `https://www.alphavantage.co/query?${search.toString()}`;
+}
+
+function alphaVantageIncomeStatementUrl(ticker: string, apiKey: string) {
+  const search = new URLSearchParams({
+    function: "INCOME_STATEMENT",
     symbol: ticker,
     apikey: apiKey,
   });
@@ -506,6 +520,293 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function fiscalYearValue(value: unknown) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isInteger(parsed) && parsed >= 1900 && parsed <= 2200
+    ? parsed
+    : null;
+}
+
+function quarterValue(value: unknown): StocksEarningsComparison["quarter"] | null {
+  const normalized = stringValue(value).toUpperCase();
+  return /^(Q1|Q2|Q3|Q4)$/.test(normalized)
+    ? (normalized as StocksEarningsComparison["quarter"])
+    : null;
+}
+
+function comparisonHasEarningsGaps(comparison: StocksEarningsComparison) {
+  return [
+    comparison.revenue.estimate,
+    comparison.revenue.actual,
+    comparison.netIncome.estimate,
+    comparison.netIncome.actual,
+  ].some((value) => value === null);
+}
+
+function sameEarningsPeriod(
+  left: StocksEarningsComparison,
+  right: StocksEarningsComparison,
+) {
+  return (
+    left.ticker === right.ticker &&
+    left.fiscalYear === right.fiscalYear &&
+    left.quarter === right.quarter &&
+    left.fiscalDateEnding === right.fiscalDateEnding
+  );
+}
+
+function fallbackListingContext(stock: AlphaResearchStock) {
+  const record = asRecord(stock);
+  const listing = asRecord(record.listing);
+  const market = asRecord(record.market);
+  return {
+    market:
+      stringValue(record.marketCode) ||
+      stringValue(record.countryCode) ||
+      stringValue(listing.market) ||
+      stringValue(listing.country) ||
+      stringValue(market.marketCode) ||
+      stringValue(market.countryCode) ||
+      undefined,
+    exchange:
+      stringValue(record.exchange) ||
+      stringValue(listing.exchange) ||
+      stringValue(market.exchange) ||
+      undefined,
+  };
+}
+
+function fmpComparisonFallbackBase(
+  stock: AlphaResearchStock,
+  comparison: StocksEarningsComparison,
+  income: JsonRecord,
+): StocksEarningsFallbackBase | null {
+  const currency =
+    stringValue(income.reportedCurrency) ||
+    stringValue(income.currency) ||
+    stringValue(income.financialCurrency);
+  if (!currency) return null;
+  const dilutedShares = numberValue(
+    income.weightedAverageShsOutDil ?? income.dilutedShares,
+  );
+  const { market, exchange } = fallbackListingContext(stock);
+  return {
+    ticker: comparison.ticker,
+    fiscalYear: comparison.fiscalYear,
+    quarter: comparison.quarter,
+    fiscalDateEnding: comparison.fiscalDateEnding,
+    reportDate: comparison.reportDate,
+    reportTiming: comparison.reportTiming,
+    currency: currency.toUpperCase(),
+    market,
+    exchange,
+    provider: "fmp",
+    revenueActual: comparison.revenue.actual,
+    revenueEstimate: comparison.revenue.estimate,
+    revenueUnit: "raw",
+    netIncomeActual: comparison.netIncome.actual,
+    netIncomeEstimate: comparison.netIncome.estimate,
+    netIncomeUnit: "raw",
+    epsActual: numberValue(income.eps ?? income.epsdiluted),
+    epsEstimate: null,
+    epsCurrency: currency.toUpperCase(),
+    epsUnit: "per-share",
+    dilutedShares,
+    dilutedSharesUnit: dilutedShares === null ? null : "shares",
+    comparison,
+  };
+}
+
+async function completeFmpEarningsComparison({
+  stock,
+  comparison,
+  income,
+  fetchImpl,
+  env,
+}: {
+  stock: AlphaResearchStock;
+  comparison: StocksEarningsComparison;
+  income: JsonRecord;
+  fetchImpl: FetchLike;
+  env: EnvLike;
+}) {
+  if (!comparisonHasEarningsGaps(comparison)) {
+    return { comparison, errors: [] as string[] };
+  }
+  const base = fmpComparisonFallbackBase(stock, comparison, income);
+  if (!base) {
+    return {
+      comparison,
+      errors: ["earnings fallback skipped: FMP currency is unavailable"],
+    };
+  }
+  try {
+    return await completeStocksEarningsComparison({
+      ticker: stock.ticker,
+      base,
+      fetchImpl,
+      env,
+    });
+  } catch {
+    return {
+      comparison,
+      errors: ["earnings fallback request failed"],
+    };
+  }
+}
+
+function matchingFmpIncome(
+  comparison: StocksEarningsComparison,
+  incomePayload: unknown,
+) {
+  return (
+    asArray(incomePayload)
+      .map(asRecord)
+      .find(
+        (income) =>
+          fiscalYearValue(income.fiscalYear) === comparison.fiscalYear &&
+          quarterValue(income.period) === comparison.quarter &&
+          stringValue(income.date) === comparison.fiscalDateEnding,
+      ) ?? null
+  );
+}
+
+function alphaVantageRecoverySeed(
+  ticker: string,
+  payload: unknown,
+  earningsPayload: unknown,
+  generatedAt: string,
+) {
+  const income = asArray(asRecord(payload).quarterlyReports)
+    .map(asRecord)
+    .map((row) => ({
+      row,
+      fiscalYear: fiscalYearValue(row.fiscalYear),
+      quarter: quarterValue(row.quarter ?? row.period),
+      fiscalDateEnding: stringValue(row.fiscalDateEnding),
+      currency:
+        stringValue(row.reportedCurrency) ||
+        stringValue(row.currency) ||
+        stringValue(row.financialCurrency),
+    }))
+    .filter(
+      (candidate) =>
+        candidate.fiscalYear !== null &&
+        candidate.quarter !== null &&
+        Boolean(candidate.fiscalDateEnding) &&
+        Boolean(candidate.currency),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
+    )[0];
+  if (!income || income.fiscalYear === null || income.quarter === null) return null;
+
+  const earnings = asArray(earningsPayload)
+    .map(asRecord)
+    .find(
+      (row) =>
+        stringValue(row.fiscalDateEnding) === income.fiscalDateEnding ||
+        stringValue(row.fiscalDate) === income.fiscalDateEnding,
+    );
+  const comparison: StocksEarningsComparison = {
+    ticker: ticker.trim().toUpperCase(),
+    fiscalYear: income.fiscalYear,
+    quarter: income.quarter,
+    fiscalDateEnding: income.fiscalDateEnding,
+    reportDate: earnings ? stringValue(earnings.date) || null : null,
+    reportTiming:
+      stringValue(earnings?.time).toLowerCase() === "bmo"
+        ? "before-market"
+        : stringValue(earnings?.time).toLowerCase() === "amc"
+          ? "after-market"
+          : "unknown",
+    currency: income.currency.toUpperCase(),
+    accountingBasis: "FMP standardized",
+    provider: "fmp",
+    generatedAt,
+    revenue: calculateComparisonMetric(null, null, null),
+    netIncome: calculateComparisonMetric(null, null, null),
+  };
+  return { comparison, income: income.row };
+}
+
+async function recoverFmpEarningsFromAlphaVantage({
+  stock,
+  earningsPayload,
+  fetchImpl,
+  env,
+  generatedAt,
+}: {
+  stock: AlphaResearchStock;
+  earningsPayload: unknown;
+  fetchImpl: FetchLike;
+  env: EnvLike;
+  generatedAt: string;
+}) {
+  const apiKey = alphaVantageApiKey(env);
+  if (!apiKey) return { statement: null, errors: [] as string[] };
+  try {
+    const response = await fetchImpl(
+      alphaVantageIncomeStatementUrl(stock.ticker, apiKey),
+      { cache: "no-store" },
+    );
+    if (!response.ok) {
+      return {
+        statement: null,
+        errors: [`alpha-vantage INCOME_STATEMENT HTTP ${response.status}`],
+      };
+    }
+    const payload = await response.json();
+    const seed = alphaVantageRecoverySeed(
+      stock.ticker,
+      payload,
+      earningsPayload,
+      generatedAt,
+    );
+    if (!seed) {
+      return {
+        statement: null,
+        errors: ["alpha-vantage INCOME_STATEMENT returned no period-safe quarter"],
+      };
+    }
+    const completed = await completeFmpEarningsComparison({
+      stock,
+      comparison: seed.comparison,
+      income: seed.income,
+      fetchImpl,
+      env,
+    });
+    const comparison = completed.comparison;
+    if (comparison.revenue.actual === null && comparison.netIncome.actual === null) {
+      return { statement: null, errors: completed.errors };
+    }
+    return {
+      statement: {
+        ticker: stock.ticker.trim().toUpperCase(),
+        revenue: formatLargeUsd(comparison.revenue.actual),
+        revenueYoY: "n/a",
+        eps: "n/a",
+        grossMargin: "n/a",
+        freeCashFlow: "n/a",
+        nextEarningsDate: comparison.reportDate ?? "n/a",
+        guidance: "No forward estimate",
+        periodLabel: `${comparison.quarter} ${comparison.fiscalYear}`,
+        source: "live" as const,
+        updatedAt: generatedAt,
+        latestEarnings: comparison,
+        earningsHistory: [comparison],
+      },
+      errors: completed.errors,
+    };
+  } catch {
+    return {
+      statement: null,
+      errors: ["alpha-vantage INCOME_STATEMENT request failed"],
+    };
+  }
+}
+
 export function buildMockStocksFinancialSnapshot(
   stocks: AlphaResearchStock[],
 ): StocksFinancialSnapshot {
@@ -671,6 +972,22 @@ export async function fetchFmpStocksFinancialSnapshot({
             ]);
           const incomePayload = endpointPayloads[0];
           if (!incomePayload?.ok) {
+            const recovered = await recoverFmpEarningsFromAlphaVantage({
+              stock,
+              earningsPayload: endpointPayloads[4]?.ok
+                ? endpointPayloads[4].payload
+                : [],
+              fetchImpl,
+              env,
+              generatedAt,
+            });
+            if (recovered.statement) {
+              errors.push(
+                `${stock.ticker}: ${fmpEndpointError(incomePayload)}`,
+                ...recovered.errors.map((error) => `${stock.ticker}: ${error}`),
+              );
+              return [stock.ticker, recovered.statement] as const;
+            }
             throw new Error(
               incomePayload
                 ? fmpEndpointError(incomePayload)
@@ -712,11 +1029,37 @@ export async function fetchFmpStocksFinancialSnapshot({
             },
             { generatedAt, limit: 8 },
           );
+          const latestEarnings = earningsHistory[0] ?? null;
+          if (latestEarnings) {
+            const completed = await completeFmpEarningsComparison({
+              stock,
+              comparison: latestEarnings,
+              income: matchingFmpIncome(latestEarnings, incomePayload.payload) ?? {},
+              fetchImpl,
+              env,
+            });
+            errors.push(
+              ...completed.errors.map((error) => `${stock.ticker}: ${error}`),
+            );
+            const completedHistory = earningsHistory.map((comparison) =>
+              sameEarningsPeriod(comparison, latestEarnings)
+                ? completed.comparison
+                : comparison,
+            );
+            return [
+              stock.ticker,
+              {
+                ...statement,
+                latestEarnings: completed.comparison,
+                earningsHistory: completedHistory,
+              },
+            ] as const;
+          }
           return [
             stock.ticker,
             {
               ...statement,
-              latestEarnings: earningsHistory[0] ?? null,
+              latestEarnings,
               earningsHistory,
             },
           ] as const;
