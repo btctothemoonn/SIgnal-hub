@@ -713,6 +713,49 @@ function finnhubAnnouncementWindowForHistory(
   };
 }
 
+function fiscalIdentityFromAnnualReports(
+  fiscalDateEnding: string,
+  annualReports: JsonRecord[],
+) {
+  const periodEnd = Date.parse(`${fiscalDateEnding}T00:00:00Z`);
+  const anchor = annualReports
+    .map((report) => stringValue(report.fiscalDateEnding))
+    .filter(Boolean)
+    .map((date) => ({ date, time: Date.parse(`${date}T00:00:00Z`) }))
+    .filter((candidate) => Number.isFinite(candidate.time))
+    .sort((left, right) => right.time - left.time)[0];
+  if (!Number.isFinite(periodEnd) || !anchor) return null;
+
+  const anchorDate = new Date(anchor.time);
+  const periodDate = new Date(periodEnd);
+  let fiscalYear = periodDate.getUTCFullYear();
+  let fiscalYearEnd = Date.UTC(
+    fiscalYear,
+    anchorDate.getUTCMonth(),
+    anchorDate.getUTCDate(),
+  );
+  if (fiscalYearEnd < periodEnd - 7 * 86_400_000) {
+    fiscalYear += 1;
+    fiscalYearEnd = Date.UTC(
+      fiscalYear,
+      anchorDate.getUTCMonth(),
+      anchorDate.getUTCDate(),
+    );
+  }
+  const daysUntilFiscalYearEnd =
+    (fiscalYearEnd - periodEnd) / 86_400_000;
+  const quarter = [
+    { value: "Q4" as const, expectedDays: 0 },
+    { value: "Q3" as const, expectedDays: 91 },
+    { value: "Q2" as const, expectedDays: 182 },
+    { value: "Q1" as const, expectedDays: 273 },
+  ].find(
+    (candidate) =>
+      Math.abs(daysUntilFiscalYearEnd - candidate.expectedDays) <= 35,
+  )?.value;
+  return quarter ? { fiscalYear, quarter } : null;
+}
+
 function alphaVantageRecoverySeed(
   ticker: string,
   payload: unknown,
@@ -720,16 +763,17 @@ function alphaVantageRecoverySeed(
   generatedAt: string,
 ) {
   const earningsRows = asArray(earningsPayload).map(asRecord);
+  const annualReports = asArray(asRecord(payload).annualReports).map(asRecord);
   const income = asArray(asRecord(payload).quarterlyReports)
     .map(asRecord)
     .map((row) => {
       const fiscalDateEnding = stringValue(row.fiscalDateEnding);
       const parsedDate = Date.parse(`${fiscalDateEnding}T00:00:00Z`);
       if (!fiscalDateEnding || !Number.isFinite(parsedDate)) return null;
-      const derivedDate = new Date(parsedDate);
-      const derivedFiscalYear = derivedDate.getUTCFullYear();
-      const derivedQuarter = `Q${Math.floor(derivedDate.getUTCMonth() / 3) + 1}` as
-        StocksEarningsComparison["quarter"];
+      const derivedIdentity = fiscalIdentityFromAnnualReports(
+        fiscalDateEnding,
+        annualReports,
+      );
       const nearestEarnings = earningsRows
         .map((earnings) => {
           const earningsDate =
@@ -763,15 +807,21 @@ function alphaVantageRecoverySeed(
         return null;
       }
       const fiscalYear =
-        rowFiscalYear ?? earningsFiscalYear ?? derivedFiscalYear;
-      const quarter = rowQuarter ?? earningsQuarter ?? derivedQuarter;
+        rowFiscalYear ?? earningsFiscalYear ?? derivedIdentity?.fiscalYear;
+      const quarter = rowQuarter ?? earningsQuarter ?? derivedIdentity?.quarter;
       const currency =
         stringValue(row.reportedCurrency) ||
         stringValue(row.currency) ||
         stringValue(row.financialCurrency);
+      if (
+        fiscalYear === undefined ||
+        quarter === undefined ||
+        !currency
+      ) {
+        return null;
+      }
       const target = { fiscalYear, quarter, fiscalDateEnding };
       if (
-        !currency ||
         !matchesStocksEarningsFiscalPeriod(row, target) ||
         (nearestEarnings &&
           !matchesStocksEarningsFiscalPeriod(nearestEarnings, target, {

@@ -388,7 +388,7 @@ assert.ok(
 
 let alphaQuarterlyIncomeRequests = 0;
 const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
-  stocks: [getAlphaResearchStockByTicker("NBIS")].filter(Boolean),
+  stocks: [getAlphaResearchStockByTicker("NVDA")].filter(Boolean),
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",
     STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
@@ -403,8 +403,8 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
       if (endpoint === "earnings") {
         return Response.json([
           {
-            date: "2026-08-12",
-            fiscalDateEnding: "2026-07-05",
+            date: "2026-08-27",
+            fiscalDateEnding: "2026-07-31",
             time: "bmo",
           },
         ]);
@@ -423,9 +423,15 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
         return new Response("temporary Alpha Vantage outage", { status: 503 });
       }
       return Response.json({
+        annualReports: [
+          {
+            fiscalDateEnding: "2026-01-25",
+            reportedCurrency: "USD",
+          },
+        ],
         quarterlyReports: [
           {
-            fiscalDateEnding: "2026-06-30",
+            fiscalDateEnding: "2026-07-26",
             reportedCurrency: "USD",
             totalRevenue: "582300000",
             netIncome: "-190400000",
@@ -439,10 +445,10 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
       url.searchParams.get("function") === "EARNINGS_ESTIMATES"
     ) {
       return Response.json({
-        symbol: "NBIS",
+        symbol: "NVDA",
         quarterlyEstimates: [
           {
-            date: "2026-06-30",
+            date: "2026-07-26",
             horizon: "historical fiscal quarter",
             eps_estimate_average: "-2.74",
             revenue_estimate_average: "573937500",
@@ -453,24 +459,29 @@ const alphaQuarterlyRecovery = await fetchFmpStocksFinancialSnapshot({
     throw new Error(`Unexpected URL ${url}`);
   },
 });
-assert.ok(alphaQuarterlyRecovery.financials.NBIS);
+assert.ok(alphaQuarterlyRecovery.financials.NVDA);
 assert.equal(
-  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actual,
+  alphaQuarterlyRecovery.financials.NVDA.latestEarnings.revenue.actual,
   582_300_000,
 );
 assert.equal(
-  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.actualSource
+  alphaQuarterlyRecovery.financials.NVDA.latestEarnings.revenue.actualSource
     .provider,
   "alpha-vantage",
 );
 assert.equal(
-  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.revenue.estimate,
+  alphaQuarterlyRecovery.financials.NVDA.latestEarnings.revenue.estimate,
   573_937_500,
 );
 assert.equal(
-  alphaQuarterlyRecovery.financials.NBIS.latestEarnings.reportDate,
-  "2026-08-12",
+  alphaQuarterlyRecovery.financials.NVDA.latestEarnings.reportDate,
+  "2026-08-27",
 );
+assert.equal(
+  alphaQuarterlyRecovery.financials.NVDA.latestEarnings.fiscalYear,
+  2027,
+);
+assert.equal(alphaQuarterlyRecovery.financials.NVDA.latestEarnings.quarter, "Q2");
 assert.equal(alphaQuarterlyIncomeRequests, 1);
 assert.ok(
   alphaQuarterlyRecovery.errors.some((error) =>
