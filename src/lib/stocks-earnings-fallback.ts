@@ -414,6 +414,7 @@ const providerDefaultPolicy: Record<
   sec: "explicit-only",
   "earnings-labs": "explicit-only",
   chartmill: "explicit-only",
+  "minimax-web": "explicit-only",
 };
 
 function candidateNeedsUsUsdDefaults(candidate: StocksEarningsFallbackCandidate) {

@@ -21,6 +21,7 @@ const providerLabel: Record<StocksEarningsProvider, string> = {
   sec: "SEC",
   "earnings-labs": "Earnings Labs",
   chartmill: "ChartMill",
+  "minimax-web": "MiniMax Web",
 };
 
 const missingFieldLabel: Record<StocksEarningsMissingField, string> = {

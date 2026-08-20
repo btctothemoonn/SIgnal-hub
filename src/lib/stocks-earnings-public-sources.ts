@@ -18,6 +18,7 @@ type CandidateField =
   | "epsEstimate"
   | "epsActual"
   | "dilutedShares"
+  | "netIncomeEstimate"
   | "netIncomeActual"
   | "companyGuidance";
 
@@ -34,6 +35,7 @@ export type StocksPublicEarningsCandidate = {
   epsEstimate: number | null;
   epsActual: number | null;
   dilutedShares: number | null;
+  netIncomeEstimate: number | null;
   netIncomeActual: number | null;
   companyGuidance: StocksCompanyGuidance | null;
   fieldSources: Partial<Record<CandidateField, StocksEarningsSourceRef>>;
@@ -175,6 +177,7 @@ function emptyCandidate(input: {
     epsEstimate: null,
     epsActual: null,
     dilutedShares: null,
+    netIncomeEstimate: null,
     netIncomeActual: null,
     companyGuidance: null,
     fieldSources: {},

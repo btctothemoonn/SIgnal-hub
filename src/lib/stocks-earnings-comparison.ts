@@ -9,7 +9,8 @@ export type StocksEarningsProvider =
   | "official-ir"
   | "sec"
   | "earnings-labs"
-  | "chartmill";
+  | "chartmill"
+  | "minimax-web";
 
 const STOCKS_EARNINGS_PROVIDERS: readonly StocksEarningsProvider[] = [
   "fmp",
@@ -21,6 +22,7 @@ const STOCKS_EARNINGS_PROVIDERS: readonly StocksEarningsProvider[] = [
   "sec",
   "earnings-labs",
   "chartmill",
+  "minimax-web",
 ];
 
 export type StocksEarningsValueProvenance = {

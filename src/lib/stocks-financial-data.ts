@@ -101,6 +101,7 @@ function providerPriority(
       yahoo: 310,
       "earnings-labs": 220,
       chartmill: 210,
+      "minimax-web": 180,
     }[provider];
   }
   if (kind === "actual") {
@@ -114,6 +115,7 @@ function providerPriority(
       eodhd: 340,
       "earnings-labs": 220,
       chartmill: 100,
+      "minimax-web": 200,
     }[provider];
   }
   return {
@@ -124,6 +126,7 @@ function providerPriority(
     yahoo: 450,
     "earnings-labs": 300,
     chartmill: 250,
+    "minimax-web": 240,
     "official-ir": 0,
     sec: 0,
   }[provider];
@@ -184,6 +187,7 @@ function mergePublicCandidates(candidates: StocksPublicEarningsCandidate[]) {
         | "epsEstimate"
         | "epsActual"
         | "dilutedShares"
+        | "netIncomeEstimate"
         | "netIncomeActual";
       sourceField:
         | "revenueEstimate"
@@ -191,6 +195,7 @@ function mergePublicCandidates(candidates: StocksPublicEarningsCandidate[]) {
         | "epsEstimate"
         | "epsActual"
         | "dilutedShares"
+        | "netIncomeEstimate"
         | "netIncomeActual";
       kind: "actual" | "estimate";
     }> = [
@@ -199,6 +204,11 @@ function mergePublicCandidates(candidates: StocksPublicEarningsCandidate[]) {
       { field: "epsEstimate", sourceField: "epsEstimate", kind: "estimate" },
       { field: "epsActual", sourceField: "epsActual", kind: "actual" },
       { field: "dilutedShares", sourceField: "dilutedShares", kind: "actual" },
+      {
+        field: "netIncomeEstimate",
+        sourceField: "netIncomeEstimate",
+        kind: "estimate",
+      },
       { field: "netIncomeActual", sourceField: "netIncomeActual", kind: "actual" },
     ];
     for (const { field, sourceField, kind } of fields) {
@@ -276,6 +286,7 @@ function earningsProviderLabel(provider: StocksEarningsProvider | undefined) {
       "official-ir": "Official IR",
       "earnings-labs": "Earnings Labs",
       chartmill: "ChartMill",
+      "minimax-web": "MiniMax Web",
     } satisfies Record<StocksEarningsProvider, string>
   )[provider ?? "chartmill"];
 }
@@ -301,7 +312,9 @@ function publicCandidateComparison(
     ? `${earningsProviderLabel(candidate.fieldSources.revenueEstimate.provider)} consensus`
     : accountingBasis;
   const netIncomeEstimateBasis =
-    candidate.fieldSources.epsEstimate && candidate.fieldSources.dilutedShares
+    candidate.fieldSources.netIncomeEstimate
+      ? `${earningsProviderLabel(candidate.fieldSources.netIncomeEstimate.provider)} consensus`
+      : candidate.fieldSources.epsEstimate && candidate.fieldSources.dilutedShares
       ? `${earningsProviderLabel(candidate.fieldSources.epsEstimate.provider)} EPS consensus × ${earningsProviderLabel(candidate.fieldSources.dilutedShares.provider)} diluted shares (approximate)`
       : accountingBasis;
   const netIncomeActual =
@@ -310,9 +323,10 @@ function publicCandidateComparison(
       ? candidate.epsActual * candidate.dilutedShares
       : null);
   const netIncomeEstimate =
-    candidate.epsEstimate !== null && candidate.dilutedShares !== null
+    candidate.netIncomeEstimate ??
+    (candidate.epsEstimate !== null && candidate.dilutedShares !== null
       ? candidate.epsEstimate * candidate.dilutedShares
-      : null;
+      : null);
   return {
     ticker: candidate.ticker,
     fiscalYear: candidate.fiscalYear,
@@ -365,13 +379,21 @@ function publicCandidateComparison(
             semantics: "statement-actual",
           },
         ),
-        estimateSource: valueProvenance(candidate.fieldSources.epsEstimate, {
-          method: "eps-times-diluted-shares",
-          accountingBasis: netIncomeEstimateBasis,
-          currency: candidate.currency,
-          metric: "net-income",
-          semantics: "consensus-estimate",
-        }),
+        estimateSource: valueProvenance(
+          candidate.netIncomeEstimate !== null
+            ? candidate.fieldSources.netIncomeEstimate
+            : candidate.fieldSources.epsEstimate,
+          {
+            method:
+              candidate.netIncomeEstimate !== null
+                ? "direct"
+                : "eps-times-diluted-shares",
+            accountingBasis: netIncomeEstimateBasis,
+            currency: candidate.currency,
+            metric: "net-income",
+            semantics: "consensus-estimate",
+          },
+        ),
       },
     ),
   } satisfies StocksEarningsComparison;
@@ -454,9 +476,15 @@ function attemptedProvidersFromErrors(errors: string[]) {
     "sec",
     "earnings-labs",
     "chartmill",
+    "minimax-web",
   ];
   for (const error of errors) {
-    const provider = supported.find((value) => error.startsWith(value) || error.startsWith(value.toUpperCase()));
+    const provider = error.startsWith("MiniMax")
+      ? "minimax-web"
+      : supported.find(
+          (value) =>
+            error.startsWith(value) || error.startsWith(value.toUpperCase()),
+        );
     if (provider) providers.push(provider);
   }
   return providers;
@@ -532,7 +560,29 @@ export async function completeCalendarYearEarnings({
     );
   }
 
-  const failedProviders = attemptedProvidersFromErrors(publicResult.errors);
+  const { fetchMiniMaxEarningsCandidates } = await import(
+    "./stocks-earnings-minimax-search.ts"
+  );
+  const miniMaxResult = await fetchMiniMaxEarningsCandidates({
+    stock,
+    comparisons: [...byPeriod.values()],
+    now,
+    fetchImpl,
+    env,
+  });
+  const miniMaxCandidates = mergePublicCandidates(miniMaxResult.candidates);
+  for (const candidate of miniMaxCandidates) {
+    const key = candidatePeriodKey(candidate);
+    const existing = byPeriod.get(key);
+    if (!existing) continue;
+    byPeriod.set(
+      key,
+      mergeComparisonWithPublic(existing, candidate, now.toISOString()),
+    );
+  }
+
+  const allErrors = [...publicResult.errors, ...miniMaxResult.errors];
+  const failedProviders = attemptedProvidersFromErrors(allErrors);
   const items = [...byPeriod.values()].map((comparison) => {
     const candidate = publicCandidates.find(
       (value) => candidatePeriodKey(value) === `${comparison.ticker.trim().toUpperCase()}-${comparison.fiscalYear}-${comparison.quarter}`,
@@ -542,6 +592,13 @@ export async function completeCalendarYearEarnings({
     const attemptedProviders = [
       comparison.provider,
       ...Object.values(candidate?.fieldSources ?? {}).map((source) => source.provider),
+      ...Object.values(
+        miniMaxCandidates.find(
+          (value) =>
+            candidatePeriodKey(value) ===
+            `${comparison.ticker.trim().toUpperCase()}-${comparison.fiscalYear}-${comparison.quarter}`,
+        )?.fieldSources ?? {},
+      ).map((source) => source.provider),
       ...failedProviders,
     ];
     const status =
@@ -567,7 +624,7 @@ export async function completeCalendarYearEarnings({
   });
   return {
     items: buildCalendarYearEarnings({ now, comparisons: items }),
-    errors: publicResult.errors,
+    errors: allErrors,
   };
 }
 
