@@ -201,7 +201,7 @@ export function AlphaStockDetail({
       <div className="mt-5 grid gap-5 2xl:grid-cols-[minmax(0,1.12fr)_minmax(22rem,0.88fr)]">
         <div className="space-y-5">
           <StocksEarningsBrief
-            comparison={stock.financialSnapshot.latestEarnings ?? null}
+            items={stock.financialSnapshot.calendarYearEarnings ?? []}
             insight={stock.financialSnapshot.earningsInsight ?? null}
             updatedAt={stock.financialSnapshot.updatedAt}
             source={stock.financialSnapshot.source}

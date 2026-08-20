@@ -1,14 +1,17 @@
 import {
   areStocksEarningsValuesComparable,
   type StocksEarningsComparison,
+  type StocksEarningsProvider,
   type StocksEarningsValueProvenance,
 } from "../lib/stocks-earnings-comparison.ts";
+import type {
+  StocksCalendarEarningsItem,
+  StocksEarningsMissingField,
+  StocksEarningsSourceRef,
+} from "../lib/stocks-earnings-calendar.ts";
 import type { StocksEarningsInsight } from "@/lib/stocks-earnings-insight";
 
-const providerLabel: Record<
-  StocksEarningsValueProvenance["provider"],
-  string
-> = {
+const providerLabel: Record<StocksEarningsProvider, string> = {
   fmp: "FMP",
   finnhub: "Finnhub",
   eodhd: "EODHD",
@@ -20,19 +23,29 @@ const providerLabel: Record<
   chartmill: "ChartMill",
 };
 
-type FinancialMissingState = "waiting" | "uncovered";
+const missingFieldLabel: Record<StocksEarningsMissingField, string> = {
+  "revenue-estimate": "营收预计值",
+  "revenue-actual": "营收公布值",
+  "net-income-estimate": "净利润预计值",
+  "net-income-actual": "净利润公布值",
+};
 
 type StocksEarningsBriefProps = {
-  comparison: StocksEarningsComparison | null;
+  items: StocksCalendarEarningsItem[];
   insight: StocksEarningsInsight | null;
+  calendarYear?: number;
   updatedAt?: string;
   source?: "live" | "mock";
 };
 
 function compactNumber(value: number) {
   const absolute = Math.abs(value);
-  if (absolute >= 1_000_000_000) return `${(absolute / 1_000_000_000).toFixed(2)}B`;
-  if (absolute >= 1_000_000) return `${(absolute / 1_000_000).toFixed(2)}M`;
+  if (absolute >= 1_000_000_000) {
+    return `${(absolute / 1_000_000_000).toFixed(2)}B`;
+  }
+  if (absolute >= 1_000_000) {
+    return `${(absolute / 1_000_000).toFixed(2)}M`;
+  }
   if (absolute >= 1_000) return `${(absolute / 1_000).toFixed(2)}K`;
   return absolute.toFixed(2);
 }
@@ -45,15 +58,6 @@ export function formatEarningsMoney(
   if (value === null) return missingLabel;
   const prefix = currency === "USD" ? "$" : `${currency} `;
   return `${value < 0 ? "-" : ""}${prefix}${compactNumber(value)}`;
-}
-
-function formatSignedMoney(
-  value: number | null,
-  currency: string,
-  missingLabel: string,
-) {
-  if (value === null) return missingLabel;
-  return `${value > 0 ? "+" : ""}${formatEarningsMoney(value, currency, missingLabel)}`;
 }
 
 function formatSignedPercent(value: number | null, missingLabel: string) {
@@ -88,33 +92,16 @@ function displayTime(value?: string) {
   }).format(new Date(timestamp));
 }
 
-function missingLabel(state: FinancialMissingState) {
-  return state === "waiting" ? "等待公布" : "数据源暂未覆盖";
-}
-
-function isFutureOrUnpublished(comparison: StocksEarningsComparison) {
-  const reportDate = comparison.reportDate
-    ? Date.parse(`${comparison.reportDate}T23:59:59Z`)
-    : NaN;
-  if (Number.isFinite(reportDate)) return reportDate > Date.now();
-  const fiscalDate = Date.parse(`${comparison.fiscalDateEnding}T23:59:59Z`);
-  return Number.isFinite(fiscalDate) && fiscalDate > Date.now();
-}
-
 function provenanceMethodLabel(source?: StocksEarningsValueProvenance) {
   if (!source) return "来源未返回";
   if (source.method === "eps-times-diluted-shares") {
-    return "推导 · EPS 推算";
+    return "推导 · EPS × 稀释股数";
   }
-  return source.method === "direct" ? "直接" : "来源未返回";
+  return "直接";
 }
 
 function provenanceProviderLabel(source?: StocksEarningsValueProvenance) {
-  return source ? providerLabel[source.provider] ?? "来源未返回" : "来源未返回";
-}
-
-function accountingBasisLabel(source?: StocksEarningsValueProvenance) {
-  return sourceAccountingBasis(source) || "口径未返回";
+  return source ? providerLabel[source.provider] : "来源未返回";
 }
 
 function sourceAccountingBasis(source?: StocksEarningsValueProvenance) {
@@ -123,17 +110,38 @@ function sourceAccountingBasis(source?: StocksEarningsValueProvenance) {
     : "";
 }
 
-function sourceSummary(source?: StocksEarningsValueProvenance) {
-  return `${provenanceProviderLabel(source)} / ${accountingBasisLabel(source)}`;
+function MetricSource({
+  source,
+}: {
+  source?: StocksEarningsValueProvenance;
+}) {
+  const label = `${provenanceProviderLabel(source)} · ${provenanceMethodLabel(source)}`;
+  const basis = sourceAccountingBasis(source) || "口径未返回";
+  return (
+    <div className="mt-1 break-words text-[9px] leading-4 text-muted sm:text-[10px]">
+      {source?.url ? (
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-foreground"
+        >
+          {label}
+        </a>
+      ) : (
+        <span>{label}</span>
+      )}
+      <span className="block">{basis}</span>
+    </div>
+  );
 }
 
-function surpriseStatus(metric: StocksEarningsComparison["revenue"]) {
-  if (
-    !metric.estimateSource ||
-    !metric.actualSource
-  ) {
-    return "待数据";
-  }
+function surpriseLabel(
+  metric: StocksEarningsComparison["revenue"],
+  upcoming: boolean,
+) {
+  if (upcoming) return "等待公布";
+  if (!metric.estimateSource || !metric.actualSource) return "待数据";
   if (
     !areStocksEarningsValuesComparable(
       metric.actualSource,
@@ -142,42 +150,31 @@ function surpriseStatus(metric: StocksEarningsComparison["revenue"]) {
   ) {
     return "口径不可比";
   }
-  return metric.surprise === null || metric.surprisePct === null
-    ? "待数据"
-    : null;
+  return formatSignedPercent(metric.surprisePct, "待数据");
 }
 
-function MetricValue({
+function MetricCell({
+  label,
   value,
-  yoy,
   currency,
   source,
-  missingState,
+  missing,
 }: {
+  label: string;
   value: number | null;
-  yoy: number | null;
   currency: string;
   source?: StocksEarningsValueProvenance;
-  missingState: FinancialMissingState;
+  missing: string;
 }) {
-  const missing = missingLabel(missingState);
-
   return (
-    <div className="min-w-0 text-right">
-      <p className="break-words font-mono text-xs font-semibold text-foreground sm:text-sm">
+    <div className="min-w-0">
+      <p className="text-[9px] font-semibold text-muted sm:text-[10px]">
+        {label}
+      </p>
+      <p className="mt-1 break-words font-mono text-xs font-semibold text-foreground sm:text-sm">
         {formatEarningsMoney(value, currency, missing)}
       </p>
-      <p
-        className="mt-1 break-words text-[9px] text-muted sm:text-[10px]"
-      >
-        {provenanceProviderLabel(source)} · {provenanceMethodLabel(source)}
-      </p>
-      <p className="mt-1 break-words text-[9px] text-muted sm:text-[10px]">
-        {accountingBasisLabel(source)}
-      </p>
-      <p className={`mt-1 break-words font-mono text-[10px] sm:text-[11px] ${valueTone(yoy)}`}>
-        同比 {formatSignedPercent(yoy, missing)} · 推导
-      </p>
+      <MetricSource source={source} />
     </div>
   );
 }
@@ -186,61 +183,163 @@ function MetricRow({
   label,
   metric,
   currency,
-  missingState,
+  upcoming,
 }: {
   label: string;
   metric: StocksEarningsComparison["revenue"];
   currency: string;
-  missingState: FinancialMissingState;
+  upcoming: boolean;
 }) {
-  const missing = missingLabel(missingState);
+  const surprise = surpriseLabel(metric, upcoming);
   return (
-    <div className="grid grid-cols-[4.2rem_repeat(3,minmax(0,1fr))] items-center gap-2 border-t border-line/60 px-2 py-3 sm:grid-cols-[6rem_repeat(3,minmax(0,1fr))] sm:px-3">
-      <p className="text-xs font-semibold text-foreground sm:text-sm">{label}</p>
-      <MetricValue
-        value={metric.estimate}
-        yoy={metric.estimateYoYPct}
-        currency={currency}
-        source={metric.estimateSource}
-        missingState={missingState}
-      />
-      <MetricValue
-        value={metric.actual}
-        yoy={metric.actualYoYPct}
-        currency={currency}
-        source={metric.actualSource}
-        missingState={missingState}
-      />
-      <div className="min-w-0 text-right">
-        {surpriseStatus(metric) === null ? (
-          <>
-            <p
-              className={`break-words font-mono text-xs font-semibold sm:text-sm ${valueTone(
-                metric.surprisePct,
-              )}`}
-            >
-              {formatSignedMoney(metric.surprise, currency, missing)}
-            </p>
-            <p
-              className={`mt-1 break-words font-mono text-[10px] sm:text-[11px] ${valueTone(
-                metric.surprisePct,
-              )}`}
-            >
-              {formatSignedPercent(metric.surprisePct, missing)} · 推导
-            </p>
-          </>
-        ) : (
-          <p className="break-words text-xs font-semibold text-muted sm:text-sm">
-            {surpriseStatus(metric)}
+    <div className="border-t border-line/60 px-3 py-3 sm:grid sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-3 sm:px-4">
+      <p className="mb-2 text-xs font-semibold text-foreground sm:mb-0 sm:pt-5 sm:text-sm">
+        {label}
+      </p>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <MetricCell
+          label="预计值"
+          value={metric.estimate}
+          currency={currency}
+          source={metric.estimateSource}
+          missing="数据未覆盖"
+        />
+        <MetricCell
+          label="公布值"
+          value={metric.actual}
+          currency={currency}
+          source={metric.actualSource}
+          missing={upcoming ? "等待公布" : "数据未覆盖"}
+        />
+        <div className="min-w-0">
+          <p className="text-[9px] font-semibold text-muted sm:text-[10px]">
+            较预期
           </p>
-        )}
-        <p className="mt-1 break-words text-[9px] text-muted sm:text-[10px]">
-          预计 {sourceSummary(metric.estimateSource)}
-          <br />
-          公布 {sourceSummary(metric.actualSource)}
-        </p>
+          <p
+            className={`mt-1 break-words font-mono text-xs font-semibold sm:text-sm ${valueTone(
+              metric.surprisePct,
+            )}`}
+          >
+            {surprise}
+          </p>
+          <p className="mt-1 break-words text-[9px] leading-4 text-muted sm:text-[10px]">
+            {surprise === "口径不可比"
+              ? "预计与公布口径不同"
+              : surprise === "待数据" || surprise === "等待公布"
+                ? "暂不计算"
+                : "按一致预期推导"}
+          </p>
+        </div>
       </div>
     </div>
+  );
+}
+
+function statusPresentation(item: StocksCalendarEarningsItem) {
+  if (item.status === "upcoming") {
+    return { label: "即将发布", tone: "bg-warning-soft text-warning" };
+  }
+  if (item.status === "incomplete") {
+    return { label: "数据不完整", tone: "bg-danger-soft text-danger" };
+  }
+  return { label: "已发布", tone: "bg-success-soft text-success" };
+}
+
+function SourceLink({
+  source,
+  prefix,
+}: {
+  source: StocksEarningsSourceRef | null;
+  prefix: string;
+}) {
+  if (!source) return <span>{prefix}来源未返回</span>;
+  const label = `${prefix}${providerLabel[source.provider]}`;
+  return source.url ? (
+    <a href={source.url} target="_blank" rel="noreferrer" className="hover:text-foreground">
+      {label}
+    </a>
+  ) : (
+    <span>{label}</span>
+  );
+}
+
+function CompanyGuidance({ item }: { item: StocksCalendarEarningsItem }) {
+  const guidance = item.companyGuidance;
+  if (!guidance) return null;
+  const range =
+    guidance.revenueLow !== null && guidance.revenueHigh !== null
+      ? `${formatEarningsMoney(guidance.revenueLow, guidance.currency)} 至 ${formatEarningsMoney(
+          guidance.revenueHigh,
+          guidance.currency,
+        )}`
+      : formatEarningsMoney(guidance.revenueMid, guidance.currency);
+  return (
+    <div className="border-t border-line/60 bg-info-soft/35 px-3 py-3 sm:px-4">
+      <p className="text-[10px] font-semibold text-info">
+        公司指引（非一致预期）
+      </p>
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-mono text-sm font-semibold text-foreground">营收 {range}</p>
+        <SourceLink source={guidance.source} prefix="来源 " />
+      </div>
+    </div>
+  );
+}
+
+function CompletenessWarning({ item }: { item: StocksCalendarEarningsItem }) {
+  if (item.status !== "incomplete") return null;
+  const missing = item.completeness.missing
+    .map((field) => missingFieldLabel[field])
+    .join("、");
+  const attempted = item.completeness.attemptedProviders
+    .map((provider) => providerLabel[provider])
+    .join("、");
+  return (
+    <div className="border-t border-danger/25 bg-danger-soft/40 px-3 py-3 text-xs leading-5 text-danger sm:px-4">
+      <p className="font-semibold">数据不完整：缺少 {missing || "必要财报字段"}</p>
+      <p className="mt-1 text-muted">已尝试 {attempted || "现有公开数据源"}</p>
+    </div>
+  );
+}
+
+function QuarterPanel({ item }: { item: StocksCalendarEarningsItem }) {
+  const status = statusPresentation(item);
+  const upcoming = item.status === "upcoming";
+  return (
+    <article className="border-t border-line/70 first:border-t-0">
+      <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-3 sm:px-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="font-mono text-sm font-semibold text-foreground">
+              FY{item.fiscalYear} {item.quarter}
+            </h4>
+            <span className={`rounded-md px-2 py-1 text-[10px] font-semibold ${status.tone}`}>
+              {status.label}
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-muted sm:text-xs">
+            {item.reportDate ?? "报告日期未知"} · {reportTimingLabel(item.reportTiming)} · {item.currency}
+          </p>
+        </div>
+        <p className="text-[10px] leading-5 text-muted sm:text-[11px]">
+          <SourceLink source={item.reportDateSource} prefix="日期 " />
+        </p>
+      </div>
+      <MetricRow
+        label="营收"
+        metric={item.revenue}
+        currency={item.currency}
+        upcoming={upcoming}
+      />
+      <MetricRow
+        label="净利润"
+        metric={item.netIncome}
+        currency={item.currency}
+        upcoming={upcoming}
+      />
+      <CompanyGuidance item={item} />
+      <CompletenessWarning item={item} />
+    </article>
   );
 }
 
@@ -254,73 +353,46 @@ function InsightLine({ label, value }: { label: string; value: string }) {
 }
 
 export function StocksEarningsBrief({
-  comparison,
+  items,
   insight,
+  calendarYear = new Date().getFullYear(),
   updatedAt,
   source,
 }: StocksEarningsBriefProps) {
-  if (!comparison) {
-    return (
-      <section
-        data-stocks-earnings-brief
-        className="rounded-md border border-line/60 bg-panel-strong/80 p-4"
-      >
-        <h3 className="text-[13px] font-semibold text-muted">财报速览</h3>
-        <p className="mt-3 text-sm text-muted">
-          财报数据源暂未返回，当前无法生成一致预期比较。
-        </p>
-      </section>
-    );
-  }
-
-  const missingState: FinancialMissingState = isFutureOrUnpublished(comparison)
-    ? "waiting"
-    : "uncovered";
-
+  const visibleItems = items.slice(0, 4);
   return (
     <section
       data-stocks-earnings-brief
       className="rounded-md border border-line/60 bg-panel-strong/80"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line/60 px-3 py-3 sm:px-4">
         <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">财报速览</h3>
-            <span className="rounded-md bg-info-soft px-2 py-1 font-mono text-xs font-semibold text-info">
-              {comparison.fiscalYear} {comparison.quarter}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted">
-            {comparison.reportDate ?? "报告日期未知"} · {reportTimingLabel(comparison.reportTiming)} · {comparison.currency}
+          <h3 className="text-sm font-semibold text-foreground">{calendarYear} 财报</h3>
+          <p className="mt-1 text-[11px] text-muted sm:text-xs">
+            按发布日期排序 · 最多四个季度
           </p>
         </div>
-        <div className="text-right text-[11px] leading-5 text-muted">
-          <p>{source === "live" ? "缓存已更新" : "本地基线"} · {displayTime(updatedAt)}</p>
-        </div>
+        <p className="text-right text-[10px] leading-5 text-muted sm:text-[11px]">
+          {source === "live" ? "缓存已更新" : "本地基线"} · {displayTime(updatedAt)}
+        </p>
       </div>
 
-      <div className="px-2 pt-2 sm:px-3">
-        <div className="grid grid-cols-[4.2rem_repeat(3,minmax(0,1fr))] gap-2 px-2 py-2 text-right text-[10px] font-semibold text-muted sm:grid-cols-[6rem_repeat(3,minmax(0,1fr))] sm:px-3 sm:text-xs">
-          <span className="text-left">指标</span>
-          <span>预计值</span>
-          <span>公布值</span>
-          <span>较预期</span>
+      {visibleItems.length > 0 ? (
+        <div>
+          {visibleItems.map((item) => (
+            <QuarterPanel
+              key={`${item.ticker}-${item.fiscalYear}-${item.quarter}`}
+              item={item}
+            />
+          ))}
         </div>
-        <MetricRow
-          label="营收"
-          metric={comparison.revenue}
-          currency={comparison.currency}
-          missingState={missingState}
-        />
-        <MetricRow
-          label="净利润"
-          metric={comparison.netIncome}
-          currency={comparison.currency}
-          missingState={missingState}
-        />
-      </div>
+      ) : (
+        <p className="px-3 py-5 text-sm text-muted sm:px-4">
+          {calendarYear} 年暂无可核验的财报数据。
+        </p>
+      )}
 
-      <div className="mt-2 space-y-3 border-t border-line/60 px-4 py-4">
+      <div className="space-y-3 border-t border-line/60 px-3 py-4 sm:px-4">
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-semibold text-muted">AI 业绩洞察</p>
           <span className="text-[10px] text-muted">

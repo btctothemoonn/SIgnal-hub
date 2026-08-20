@@ -20,8 +20,9 @@ assert.match(source, /data-stocks-earnings-brief/);
 assert.match(source, /预计值/);
 assert.match(source, /公布值/);
 assert.match(source, /较预期/);
-assert.match(source, /accountingBasisLabel\(source/);
-assert.doesNotMatch(source, /Finnhub consensus|Finnhub GAAP/);
+assert.match(source, /公司指引/);
+assert.match(source, /calendarYear/);
+assert.doesNotMatch(source, /overflow-x-auto|min-w-\[/);
 assert.doesNotMatch(source, /truncate/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 
@@ -34,225 +35,221 @@ const output = ts.transpileModule(source, {
   fileName: componentPath,
 }).outputText;
 
+function provenance(provider, metric, semantics, method = "direct") {
+  return {
+    provider,
+    method,
+    accountingBasis: provider === "sec" ? "US GAAP" : "Consensus",
+    url: `https://example.com/${provider}`,
+    fetchedAt: "2026-08-20T00:00:00.000Z",
+    confidence: provider === "sec" ? "official" : "structured",
+    currency: "USD",
+    unit: "monetary",
+    scale: "raw",
+    metric,
+    semantics,
+  };
+}
+
+function metric({ estimate, actual, metricName, derived = false }) {
+  const surprise = actual === null ? null : actual - estimate;
+  return {
+    estimate,
+    estimateSource: provenance(
+      "finnhub",
+      metricName,
+      "consensus-estimate",
+      derived ? "eps-times-diluted-shares" : "direct",
+    ),
+    actual,
+    actualSource:
+      actual === null
+        ? undefined
+        : provenance("sec", metricName, "statement-actual"),
+    previousYearActual: null,
+    estimateYoYPct: null,
+    actualYoYPct: null,
+    surprise,
+    surprisePct:
+      surprise === null || estimate === 0 ? null : (surprise / Math.abs(estimate)) * 100,
+  };
+}
+
+function earningsItem({
+  fiscalYear,
+  quarter,
+  reportDate,
+  status,
+  revenueEstimate,
+  revenueActual,
+  netIncomeEstimate,
+  netIncomeActual,
+  companyGuidance = null,
+  missing = [],
+}) {
+  return {
+    ticker: "NVDA",
+    fiscalYear,
+    quarter,
+    fiscalDateEnding: reportDate,
+    reportDate,
+    reportTiming: "after-market",
+    currency: "USD",
+    accountingBasis: "US GAAP",
+    provider: "fmp",
+    generatedAt: "2026-08-20T00:00:00.000Z",
+    revenue: metric({
+      estimate: revenueEstimate,
+      actual: revenueActual,
+      metricName: "revenue",
+    }),
+    netIncome: metric({
+      estimate: netIncomeEstimate,
+      actual: netIncomeActual,
+      metricName: "net-income",
+      derived: true,
+    }),
+    status,
+    reportDateSource: {
+      provider: "official-ir",
+      url: "https://investor.nvidia.com/",
+      fetchedAt: "2026-08-20T00:00:00.000Z",
+      confidence: "official",
+    },
+    companyGuidance,
+    completeness: {
+      complete: missing.length === 0,
+      missing,
+      attemptedProviders: ["fmp", "finnhub", "sec", "chartmill"],
+    },
+  };
+}
+
+function visibleText(node) {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(visibleText).join("");
+  return visibleText(node.children);
+}
+
 let renderer;
 try {
   writeFileSync(runtimePath, output, "utf8");
   const { StocksEarningsBrief, formatEarningsMoney } = await import(
     `${pathToFileURL(runtimePath).href}?run=${Date.now()}`
   );
-  assert.equal(formatEarningsMoney(582_300_000, "USD"), "$582.30M");
+  assert.equal(formatEarningsMoney(45_850_000_000, "USD"), "$45.85B");
   assert.equal(formatEarningsMoney(-190_400_000, "USD"), "-$190.40M");
-  assert.equal(formatEarningsMoney(null, "USD"), "数据源暂未覆盖");
 
-  const comparison = {
-    ticker: "NBIS",
-    fiscalYear: 2026,
-    quarter: "Q2",
-    fiscalDateEnding: "2026-06-30",
-    reportDate: "2026-08-12",
-    reportTiming: "before-market",
-    currency: "USD",
-    accountingBasis: "FMP standardized",
-    provider: "fmp",
-    generatedAt: "2026-08-14T00:00:00.000Z",
-    revenue: {
-      estimate: 573_937_500,
-      estimateSource: {
-        provider: "finnhub",
-        method: "direct",
-        accountingBasis: "Unspecified accounting basis",
+  const items = [
+    earningsItem({
+      fiscalYear: 2027,
+      quarter: "Q2",
+      reportDate: "2026-08-26",
+      status: "upcoming",
+      revenueEstimate: 45_850_000_000,
+      revenueActual: null,
+      netIncomeEstimate: 25_048_000_000,
+      netIncomeActual: null,
+      companyGuidance: {
+        revenueLow: 45_000_000_000,
+        revenueHigh: 47_000_000_000,
+        revenueMid: 46_000_000_000,
         currency: "USD",
-        unit: "monetary",
-        scale: "raw",
-        metric: "revenue",
-        semantics: "consensus-estimate",
+        source: {
+          provider: "official-ir",
+          url: "https://investor.nvidia.com/guidance",
+          fetchedAt: "2026-08-20T00:00:00.000Z",
+          confidence: "official",
+        },
       },
-      actual: 582_300_000,
-      actualSource: {
-        provider: "fmp",
-        method: "direct",
-        accountingBasis: "FMP standardized",
-        currency: "USD",
-        unit: "monetary",
-        scale: "raw",
-        metric: "revenue",
-        semantics: "statement-actual",
-      },
-      previousYearActual: 105_100_000,
-      estimateYoYPct: 446.087,
-      actualYoYPct: 454.044,
-      surprise: 8_362_500,
-      surprisePct: 1.457,
-    },
-    netIncome: {
-      estimate: -273_800_000,
-      estimateSource: {
-        provider: "alpha-vantage",
-        method: "direct",
-        accountingBasis: "Unspecified accounting basis",
-        currency: "USD",
-        unit: "monetary",
-        scale: "raw",
-        metric: "net-income",
-        semantics: "consensus-estimate",
-      },
-      actual: -190_400_000,
-      actualSource: {
-        provider: "eodhd",
-        method: "eps-times-diluted-shares",
-        accountingBasis: "Company-reported",
-        currency: "USD",
-        unit: "monetary",
-        scale: "raw",
-        metric: "net-income",
-        semantics: "statement-actual",
-      },
-      previousYearActual: -143_600_000,
-      estimateYoYPct: -90.669,
-      actualYoYPct: -32.591,
-      surprise: 83_400_000,
-      surprisePct: 30.46,
-    },
-  };
+    }),
+    earningsItem({
+      fiscalYear: 2027,
+      quarter: "Q1",
+      reportDate: "2026-05-20",
+      status: "reported",
+      revenueEstimate: 43_280_000_000,
+      revenueActual: 44_060_000_000,
+      netIncomeEstimate: 23_300_000_000,
+      netIncomeActual: 24_100_000_000,
+    }),
+    earningsItem({
+      fiscalYear: 2026,
+      quarter: "Q4",
+      reportDate: "2026-02-25",
+      status: "incomplete",
+      revenueEstimate: 38_000_000_000,
+      revenueActual: 39_300_000_000,
+      netIncomeEstimate: 0,
+      netIncomeActual: 22_000_000_000,
+      missing: ["net-income-estimate"],
+    }),
+    earningsItem({
+      fiscalYear: 2026,
+      quarter: "Q3",
+      reportDate: "2026-01-12",
+      status: "reported",
+      revenueEstimate: 34_000_000_000,
+      revenueActual: 35_100_000_000,
+      netIncomeEstimate: 18_000_000_000,
+      netIncomeActual: 19_300_000_000,
+    }),
+  ];
+  items[2].netIncome.estimate = null;
+  items[2].netIncome.estimateSource = undefined;
+
   await act(async () => {
     renderer = TestRenderer.create(
       React.createElement(StocksEarningsBrief, {
-        comparison,
+        items,
+        calendarYear: 2026,
         insight: {
-          conclusion: "营收与净利润均好于 FMP 一致预期。",
-          driver: "净亏损较预期收窄。",
-          risk: "公司仍处于亏损阶段。",
+          conclusion: "最新季度营收与净利润均高于一致预期。",
+          driver: "数据中心需求保持强劲。",
+          risk: "出口限制仍可能影响增速。",
           source: "ai",
           model: "MiniMax-M2.7",
-          generatedAt: "2026-08-14T00:05:00.000Z",
+          generatedAt: "2026-08-20T00:05:00.000Z",
         },
-        updatedAt: "2026-08-14T00:05:00.000Z",
+        updatedAt: "2026-08-20T00:05:00.000Z",
         source: "live",
       }),
     );
   });
-  const rendered = JSON.stringify(renderer.toJSON());
-  function visibleText(node) {
-    if (node === null || node === undefined || typeof node === "boolean") return "";
-    if (typeof node === "string" || typeof node === "number") return String(node);
-    if (Array.isArray(node)) return node.map(visibleText).join("");
-    return visibleText(node.children);
-  }
+
   const visible = visibleText(renderer.toJSON());
-  assert.match(rendered, /"2026"," ","Q2"/);
-  assert.match(rendered, /营收/);
-  assert.match(rendered, /净利润/);
-  assert.match(rendered, /\$582\.30M/);
-  assert.match(rendered, /-\$190\.40M/);
-  assert.match(rendered, /\+1\.46%/);
-  assert.match(rendered, /FMP/);
-  assert.match(rendered, /Finnhub/);
-  assert.match(rendered, /EPS 推算/);
-  assert.match(rendered, /推导/);
-  assert.match(visible, /FMP standardized/);
-  assert.match(visible, /Finnhub/);
-  assert.match(visible, /Company-reported/);
-  assert.match(visible, /直接/);
-  assert.match(rendered, /核心结论/);
-  assert.match(rendered, /主要驱动/);
-  assert.match(rendered, /风险提示/);
+  assert.match(visible, /2026 财报/);
+  assert.ok(visible.indexOf("FY2027 Q2") < visible.indexOf("FY2027 Q1"));
+  assert.match(visible, /即将发布/);
+  assert.equal((visible.match(/等待公布/g) ?? []).length >= 2, true);
+  assert.match(visible, /\$45\.85B/);
+  assert.match(visible, /\$44\.06B/);
+  assert.match(visible, /\+1\.80%/);
+  assert.match(visible, /推导/);
+  assert.match(visible, /公司指引（非一致预期）/);
+  assert.match(visible, /\$45\.00B 至 \$47\.00B/);
+  assert.match(visible, /数据不完整/);
+  assert.match(visible, /净利润预计值/);
+  assert.match(visible, /已尝试 FMP、Finnhub、SEC、ChartMill/);
+  assert.match(visible, /核心结论/);
+  assert.match(visible, /主要驱动/);
+  assert.match(visible, /风险提示/);
 
   await act(async () => renderer.unmount());
   await act(async () => {
     renderer = TestRenderer.create(
       React.createElement(StocksEarningsBrief, {
-        comparison: {
-          ...comparison,
-          revenue: {
-            ...comparison.revenue,
-            estimate: null,
-            estimateYoYPct: null,
-            surprise: null,
-            surprisePct: null,
-          },
-        },
-        insight: null,
-        updatedAt: comparison.generatedAt,
-        source: "live",
-      }),
-    );
-  });
-  const missingEstimateRendered = JSON.stringify(renderer.toJSON());
-  assert.match(missingEstimateRendered, /数据源暂未覆盖/);
-  assert.doesNotMatch(missingEstimateRendered, /n\/a/);
-
-  await act(async () => renderer.unmount());
-  await act(async () => {
-    renderer = TestRenderer.create(
-      React.createElement(StocksEarningsBrief, {
-        comparison: {
-          ...comparison,
-          fiscalDateEnding: "2099-06-30",
-          reportDate: null,
-          revenue: {
-            ...comparison.revenue,
-            estimate: null,
-            actual: null,
-            estimateYoYPct: null,
-            actualYoYPct: null,
-            surprise: null,
-            surprisePct: null,
-          },
-        },
+        items: [],
+        calendarYear: 2026,
         insight: null,
       }),
     );
   });
-  assert.match(JSON.stringify(renderer.toJSON()), /等待公布/);
-
-  await act(async () => renderer.unmount());
-  await act(async () => {
-    renderer = TestRenderer.create(
-      React.createElement(StocksEarningsBrief, {
-        comparison: {
-          ...comparison,
-          revenue: {
-            ...comparison.revenue,
-            surprise: null,
-            surprisePct: null,
-            actualSource: {
-              ...comparison.revenue.actualSource,
-              currency: "KRW",
-            },
-          },
-        },
-        insight: null,
-      }),
-    );
-  });
-  const incompatibleVisible = visibleText(renderer.toJSON());
-  assert.match(incompatibleVisible, /口径不可比/);
-  assert.match(incompatibleVisible, /FMP standardized/);
-  assert.doesNotMatch(incompatibleVisible, /\+1\.46%/);
-
-  await act(async () => renderer.unmount());
-  await act(async () => {
-    renderer = TestRenderer.create(
-      React.createElement(StocksEarningsBrief, {
-        comparison: {
-          ...comparison,
-          revenue: {
-            ...comparison.revenue,
-            actualSource: undefined,
-          },
-        },
-        insight: null,
-      }),
-    );
-  });
-  const missingProvenanceVisible = visibleText(renderer.toJSON());
-  assert.match(missingProvenanceVisible, /来源未返回/);
-  assert.match(missingProvenanceVisible, /口径未返回/);
-  assert.match(missingProvenanceVisible, /待数据/);
-  assert.doesNotMatch(missingProvenanceVisible, /\+1\.46%/);
+  assert.match(visibleText(renderer.toJSON()), /2026 年暂无可核验的财报数据/);
 } finally {
   if (renderer) await act(async () => renderer.unmount());
   rmSync(runtimePath, { force: true });
 }
 
-console.log("ok - stocks earnings brief UI");
+console.log("ok - stocks calendar-year earnings UI");
