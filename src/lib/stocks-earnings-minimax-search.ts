@@ -57,7 +57,7 @@ function parseScaledNumber(value: string) {
     .replace(/,/g, "")
     .replace(/[−–—]/g, "-");
   const match = normalized.match(
-    /\(?\s*[-+]?\$?\s*(\d+(?:\.\d+)?)\s*(K|M|B|T|thousand|million|billion|trillion)?\s*\)?/i,
+    /\(?\s*[-+]?(?:US\$|\$)?\s*(\d+(?:\.\d+)?)\s*(K|M|B|T|thousand|million|billion|trillion|万|亿)?\s*\)?/i,
   );
   if (!match) return null;
   const magnitude = Number(match[1]);
@@ -72,6 +72,8 @@ function parseScaledNumber(value: string) {
       BILLION: 1e9,
       T: 1e12,
       TRILLION: 1e12,
+      万: 1e4,
+      亿: 1e8,
     }[(match[2] ?? "").toUpperCase()] ?? 1;
   const negative = /^\s*\(/.test(normalized) || /-/.test(normalized);
   return magnitude * scale * (negative ? -1 : 1);
@@ -211,12 +213,22 @@ async function writeCache(
   await rename(temporaryPath, filePath);
 }
 
-function searchQuery(stock: AlphaResearchStock, target: StocksEarningsComparison) {
+function searchQuery(
+  stock: AlphaResearchStock,
+  target: StocksEarningsComparison,
+  now: Date,
+) {
+  const reportTime = target.reportDate
+    ? Date.parse(`${target.reportDate}T23:59:59Z`)
+    : Number.NaN;
+  const reported = Number.isFinite(reportTime) && reportTime <= now.getTime();
   return [
     stock.companyName,
     stock.ticker,
     `fiscal ${target.fiscalYear} ${target.quarter}`,
-    "earnings revenue net income consensus estimate actual",
+    reported
+      ? "revenue actual consensus estimate net income actual consensus estimate"
+      : "net income consensus estimate revenue consensus",
   ].join(" ");
 }
 
@@ -297,6 +309,168 @@ function selectSearchHits(
       ...hit,
       snippet: hit.snippet.slice(0, MAX_SNIPPET_CHARS),
     }));
+}
+
+type SourcedNumber = {
+  value: number;
+  source: StocksEarningsSourceRef;
+};
+
+const ALL_QUARTERS_RE =
+  /\bq[1-4]\b|first quarter|second quarter|third quarter|fourth quarter|第?[一二三四]季度|[一二三四]季/gi;
+const SCALED_NUMBER_RE =
+  /\(?\s*[-+]?(?:US\$|\$)?\s*\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion|trillion|[KMBT]|万|亿)\s*(?:美元)?\s*\)?/gi;
+
+function quarterTerms(quarter: string) {
+  return (
+    {
+      Q1: ["q1", "first quarter", "第一季度", "一季度", "一季"],
+      Q2: ["q2", "second quarter", "第二季度", "二季度", "二季"],
+      Q3: ["q3", "third quarter", "第三季度", "三季度", "三季"],
+      Q4: ["q4", "fourth quarter", "第四季度", "四季度", "四季"],
+    }[quarter] ?? [quarter.toLowerCase()]
+  );
+}
+
+function targetText(hit: SearchHit, target: StocksEarningsComparison) {
+  const text = `${hit.title}. ${hit.snippet}`;
+  const matches = [...text.matchAll(ALL_QUARTERS_RE)];
+  const targetTerms = quarterTerms(target.quarter);
+  const windows = matches.flatMap((match, index) => {
+    if (!targetTerms.includes(match[0].toLowerCase())) return [];
+    const start = match.index ?? 0;
+    const next = matches[index + 1]?.index ?? text.length;
+    return [text.slice(start, Math.min(next, start + MAX_SNIPPET_CHARS))];
+  });
+  if (windows.length === 0) return matches.length > 0 ? "" : text;
+  return windows.join(" ");
+}
+
+function metricSection(
+  text: string,
+  metric: RegExp,
+  stopAt?: RegExp,
+) {
+  const match = text.match(metric);
+  if (!match || match.index === undefined) return "";
+  const section = text.slice(match.index, match.index + 600);
+  if (!stopAt) return section;
+  const remainder = section.slice(match[0].length);
+  const stop = remainder.search(stopAt);
+  return stop >= 0
+    ? section.slice(0, match[0].length + stop)
+    : section;
+}
+
+function metricValues(
+  section: string,
+  reported: boolean,
+  hit: SearchHit,
+  fetchedAt: string,
+) {
+  const matches = [...section.matchAll(SCALED_NUMBER_RE)].flatMap((match) => {
+    const value = parseScaledNumber(match[0]);
+    return value === null
+      ? []
+      : [{ value, raw: match[0], index: match.index ?? 0 }];
+  });
+  if (matches.length === 0) return { estimate: null, actual: null };
+  const estimateMarker = /consensus|estimate|expected|forecast|预期|共识|预测/i;
+  const actualMarker = /actual|reported|公布|实际/i;
+  const classified = matches.map((match, index) => {
+    const previousEnd =
+      index === 0
+        ? 0
+        : matches[index - 1].index + matches[index - 1].raw.length;
+    const context = section.slice(previousEnd, match.index + match.raw.length);
+    return {
+      ...match,
+      estimate: estimateMarker.test(context),
+      actual: actualMarker.test(context),
+    };
+  });
+  const source: StocksEarningsSourceRef = {
+    provider: "minimax-web",
+    url: hit.link,
+    fetchedAt,
+    confidence: "public-page",
+  };
+  const sourced = (item: (typeof classified)[number] | undefined): SourcedNumber | null =>
+    item ? { value: item.value, source } : null;
+  const explicitEstimate = classified.find((item) => item.estimate);
+  if (!reported) {
+    return { estimate: sourced(explicitEstimate ?? classified[0]), actual: null };
+  }
+  const explicitActual = classified.find((item) => item.actual);
+  const estimate = explicitEstimate ?? (classified.length > 1 ? classified[0] : undefined);
+  const actual =
+    explicitActual ?? classified.find((item) => item !== estimate && !item.estimate);
+  return { estimate: sourced(estimate), actual: sourced(actual) };
+}
+
+function deterministicCandidate(input: {
+  stock: AlphaResearchStock;
+  target: StocksEarningsComparison;
+  hits: SearchHit[];
+  now: Date;
+}) {
+  const reportTime = input.target.reportDate
+    ? Date.parse(`${input.target.reportDate}T23:59:59Z`)
+    : Number.NaN;
+  const reported = Number.isFinite(reportTime) && reportTime <= input.now.getTime();
+  const fetchedAt = input.now.toISOString();
+  let revenueEstimate: SourcedNumber | null = null;
+  let revenueActual: SourcedNumber | null = null;
+  let netIncomeEstimate: SourcedNumber | null = null;
+  let netIncomeActual: SourcedNumber | null = null;
+  for (const hit of input.hits) {
+    const text = targetText(hit, input.target);
+    const revenue = metricValues(
+      metricSection(text, /revenue|sales|营收|营业收入|收入/i, /net income|net profit|净利润|净利/i),
+      reported,
+      hit,
+      fetchedAt,
+    );
+    const netIncome = metricValues(
+      metricSection(text, /net income|net profit|净利润|净利/i),
+      reported,
+      hit,
+      fetchedAt,
+    );
+    revenueEstimate ??= revenue.estimate;
+    revenueActual ??= revenue.actual;
+    netIncomeEstimate ??= netIncome.estimate;
+    netIncomeActual ??= netIncome.actual;
+  }
+  if (!revenueEstimate && !revenueActual && !netIncomeEstimate && !netIncomeActual) {
+    return null;
+  }
+  const candidate: StocksPublicEarningsCandidate = {
+    ticker: input.stock.ticker.trim().toUpperCase(),
+    fiscalYear: input.target.fiscalYear,
+    quarter: input.target.quarter,
+    fiscalDateEnding: input.target.fiscalDateEnding,
+    reportDate: input.target.reportDate ?? "",
+    reportTiming: input.target.reportTiming,
+    currency: input.target.currency,
+    revenueEstimate: revenueEstimate?.value ?? null,
+    revenueActual: revenueActual?.value ?? null,
+    epsEstimate: null,
+    epsActual: null,
+    dilutedShares: null,
+    netIncomeEstimate: netIncomeEstimate?.value ?? null,
+    netIncomeActual: netIncomeActual?.value ?? null,
+    companyGuidance: null,
+    fieldSources: {
+      ...(revenueEstimate ? { revenueEstimate: revenueEstimate.source } : {}),
+      ...(revenueActual ? { revenueActual: revenueActual.source } : {}),
+      ...(netIncomeEstimate
+        ? { netIncomeEstimate: netIncomeEstimate.source }
+        : {}),
+      ...(netIncomeActual ? { netIncomeActual: netIncomeActual.source } : {}),
+    },
+  };
+  return candidate;
 }
 
 function parseCompletionContent(payload: JsonRecord) {
@@ -500,20 +674,27 @@ export async function fetchMiniMaxEarningsCandidates({
   const searchHost = getSearchHost(env);
   const errors: string[] = [];
   const hits: SearchHit[] = [];
+  const deterministicCandidates: StocksPublicEarningsCandidate[] = [];
   for (const target of targets) {
     try {
-      hits.push(
-        ...selectSearchHits(
-          await requestSearch({
-            query: searchQuery(stock, target),
-            apiKey,
-            searchHost,
-            fetchImpl,
-            timeoutMs,
-          }),
-          target,
-        ),
+      const selectedHits = selectSearchHits(
+        await requestSearch({
+          query: searchQuery(stock, target, now),
+          apiKey,
+          searchHost,
+          fetchImpl,
+          timeoutMs,
+        }),
+        target,
       );
+      hits.push(...selectedHits);
+      const candidate = deterministicCandidate({
+        stock,
+        target,
+        hits: selectedHits,
+        now,
+      });
+      if (candidate) deterministicCandidates.push(candidate);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "MiniMax search failed");
     }
@@ -522,8 +703,8 @@ export async function fetchMiniMaxEarningsCandidates({
   const uniqueHits = [
     ...new Map(hits.map((hit) => [hit.link, hit] as const)).values(),
   ];
-  let candidates: StocksPublicEarningsCandidate[] = [];
-  if (uniqueHits.length > 0) {
+  let candidates = deterministicCandidates;
+  if (candidates.length === 0 && uniqueHits.length > 0) {
     try {
       const extraction = await requestExtraction({
         stock,

@@ -137,7 +137,7 @@ try {
   });
 
   assert.equal(calls.filter((call) => call.url.includes("coding_plan/search")).length, 2);
-  assert.equal(calls.filter((call) => call.url.includes("chat/completions")).length, 1);
+  assert.equal(calls.filter((call) => call.url.includes("chat/completions")).length, 0);
   assert.equal(result.candidates.length, 1);
   assert.equal(result.candidates[0].quarter, "Q2");
   assert.equal(result.candidates[0].revenueEstimate, 93_630_000_000);
@@ -175,7 +175,18 @@ try {
       },
       fetchImpl: async (url) =>
         String(url).endsWith("/v1/coding_plan/search")
-          ? Response.json(searchPayload)
+          ? Response.json({
+              organic: [
+                {
+                  title: "NVIDIA fiscal Q2 2027 figures",
+                  link: "https://finance.example.com/nvda-q2",
+                  snippet:
+                    "The Q2 2027 discussion included $93.63 billion and $51.20 billion.",
+                  date: "2026-08-20",
+                },
+              ],
+              base_resp: { status_code: 0, status_msg: "success" },
+            })
           : Response.json({
               choices: [
                 {
@@ -209,6 +220,65 @@ try {
   }
 
   clearMiniMaxEarningsSearchMemoryCacheForTests();
+  const deterministicDir = await mkdtemp(
+    join(tmpdir(), "signal-hub-minimax-deterministic-"),
+  );
+  try {
+    let extractionCalls = 0;
+    const deterministic = await fetchMiniMaxEarningsCandidates({
+      stock,
+      comparisons,
+      now: new Date("2026-08-20T00:00:00.000Z"),
+      cacheDir: deterministicDir,
+      env: {
+        MINIMAX_API_KEY: "sk-cp-test",
+        AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+      },
+      fetchImpl: async (url, init) => {
+        if (String(url).endsWith("/v1/coding_plan/search")) {
+          const query = JSON.parse(String(init?.body)).q;
+          const q2 = query.includes("Q2");
+          return Response.json({
+            organic: [
+              q2
+                ? {
+                    title: "Nvidia Q2 2027 Earnings Preview",
+                    link: "https://research.example.com/nvda-q2-preview",
+                    snippet:
+                      "Forward Consensus Revenue: $91,846M; Gross Margin: 75.0%; Net Income: $50,619M; EPS: $2.06.",
+                    date: "2026-08-19",
+                  }
+                : {
+                    title: "英伟达2027财年Q1财报",
+                    link: "https://news.example.com/nvda-q1-results",
+                    snippet:
+                      "英伟达2027财年Q1营收816亿美元，市场预期为786.72亿美元。Q1净利润583亿美元，市场预期为422.44亿美元。",
+                    date: "2026-05-21",
+                  },
+            ],
+            base_resp: { status_code: 0, status_msg: "success" },
+          });
+        }
+        extractionCalls += 1;
+        throw new Error("AI extraction should not be needed for explicit values");
+      },
+    });
+    assert.equal(extractionCalls, 0);
+    assert.equal(deterministic.candidates.length, 2);
+    const q1 = deterministic.candidates.find((item) => item.quarter === "Q1");
+    const q2 = deterministic.candidates.find((item) => item.quarter === "Q2");
+    assert.equal(q1.revenueActual, 81_600_000_000);
+    assert.equal(q1.revenueEstimate, 78_672_000_000);
+    assert.equal(q1.netIncomeActual, 58_300_000_000);
+    assert.equal(q1.netIncomeEstimate, 42_244_000_000);
+    assert.equal(q2.revenueEstimate, 91_846_000_000);
+    assert.equal(q2.netIncomeEstimate, 50_619_000_000);
+    assert.equal(q2.fieldSources.netIncomeEstimate.provider, "minimax-web");
+  } finally {
+    await rm(deterministicDir, { recursive: true, force: true });
+  }
+
+  clearMiniMaxEarningsSearchMemoryCacheForTests();
   const boundedInputDir = await mkdtemp(
     join(tmpdir(), "signal-hub-minimax-bounded-input-"),
   );
@@ -236,7 +306,7 @@ try {
               link: `https://finance.example.com/${quarter.toLowerCase()}-${index}`,
               snippet:
                 index === 6
-                  ? `${quarter} fiscal 2027 revenue consensus is $93.63 billion and net income consensus is $51.20 billion.`
+                  ? `${quarter} fiscal 2027 revenue and net income consensus discussion.`
                   : `${quarter} background ${index} ${"x".repeat(3_000)}`,
               date: "2026-08-20",
             })),
