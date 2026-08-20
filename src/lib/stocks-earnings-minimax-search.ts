@@ -351,15 +351,21 @@ function metricSection(
   metric: RegExp,
   stopAt?: RegExp,
 ) {
-  const match = text.match(metric);
-  if (!match || match.index === undefined) return "";
-  const section = text.slice(match.index, match.index + 600);
-  if (!stopAt) return section;
-  const remainder = section.slice(match[0].length);
-  const stop = remainder.search(stopAt);
-  return stop >= 0
-    ? section.slice(0, match[0].length + stop)
-    : section;
+  const flags = `${metric.flags.replace(/g/g, "")}g`;
+  const amount = new RegExp(SCALED_NUMBER_RE.source, "i");
+  return [...text.matchAll(new RegExp(metric.source, flags))]
+    .flatMap((match) => {
+      const start = match.index ?? 0;
+      let section = text.slice(start, start + 600);
+      if (stopAt) {
+        const remainder = section.slice(match[0].length);
+        const stop = remainder.search(stopAt);
+        if (stop >= 0) section = section.slice(0, match[0].length + stop);
+      }
+      const amountIndex = section.search(amount);
+      return amountIndex >= 0 ? [{ section, amountIndex }] : [];
+    })
+    .sort((left, right) => left.amountIndex - right.amountIndex)[0]?.section ?? "";
 }
 
 function metricValues(
@@ -432,7 +438,11 @@ function deterministicCandidate(input: {
       fetchedAt,
     );
     const netIncome = metricValues(
-      metricSection(text, /net income|net profit|净利润|净利/i),
+      metricSection(
+        text,
+        /net income|net profit|净利润|净利/i,
+        /revenue|sales|营收|营业收入|收入/i,
+      ),
       reported,
       hit,
       fetchedAt,
@@ -731,7 +741,7 @@ export async function fetchMiniMaxEarningsCandidates({
         error instanceof Error ? error.message : "MiniMax earnings extraction failed",
       );
     }
-  } else if (errors.length === 0) {
+  } else if (uniqueHits.length === 0 && errors.length === 0) {
     errors.push("MiniMax search returned no results");
   }
 

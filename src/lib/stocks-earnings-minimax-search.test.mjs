@@ -245,14 +245,14 @@ try {
                     title: "Nvidia Q2 2027 Earnings Preview",
                     link: "https://research.example.com/nvda-q2-preview",
                     snippet:
-                      "Forward Consensus Revenue: $91,846M; Gross Margin: 75.0%; Net Income: $50,619M; EPS: $2.06.",
+                      "NVDA 2027 Q2 Estimated Earnings Dates & Summary. Estimate YoY Revenue 92.02B +96.87% Net Income 50.55B +91.32%.",
                     date: "2026-08-19",
                   }
                 : {
                     title: "英伟达2027财年Q1财报",
                     link: "https://news.example.com/nvda-q1-results",
                     snippet:
-                      "英伟达2027财年Q1营收816亿美元，市场预期为786.72亿美元。Q1净利润583亿美元，市场预期为422.44亿美元。",
+                      "营收、净利润双创新高。该财季营收816亿美元，市场预期为786.72亿美元。GAAP净利润583亿美元，市场预期为422.44亿美元。",
                     date: "2026-05-21",
                   },
             ],
@@ -264,6 +264,7 @@ try {
       },
     });
     assert.equal(extractionCalls, 0);
+    assert.deepEqual(deterministic.errors, []);
     assert.equal(deterministic.candidates.length, 2);
     const q1 = deterministic.candidates.find((item) => item.quarter === "Q1");
     const q2 = deterministic.candidates.find((item) => item.quarter === "Q2");
@@ -271,8 +272,8 @@ try {
     assert.equal(q1.revenueEstimate, 78_672_000_000);
     assert.equal(q1.netIncomeActual, 58_300_000_000);
     assert.equal(q1.netIncomeEstimate, 42_244_000_000);
-    assert.equal(q2.revenueEstimate, 91_846_000_000);
-    assert.equal(q2.netIncomeEstimate, 50_619_000_000);
+    assert.equal(q2.revenueEstimate, 92_020_000_000);
+    assert.equal(q2.netIncomeEstimate, 50_550_000_000);
     assert.equal(q2.fieldSources.netIncomeEstimate.provider, "minimax-web");
   } finally {
     await rm(deterministicDir, { recursive: true, force: true });
