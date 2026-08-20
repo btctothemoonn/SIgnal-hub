@@ -7,6 +7,7 @@ import type {
   StocksCompanyGuidance,
   StocksEarningsSourceRef,
 } from "./stocks-earnings-calendar.ts";
+import { getProviderApiKeys } from "./provider-api-keys.ts";
 import { getStocksEarningsSourceConfig } from "./stocks-earnings-source-config.ts";
 
 type JsonRecord = Record<string, unknown>;
@@ -68,6 +69,12 @@ function asArray(value: unknown) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseTimeout(value: string | undefined) {
@@ -381,6 +388,7 @@ function parseSecCompanyFacts(input: {
   currency: string;
   url: string;
   fetchedAt: string;
+  calendarYear: number;
 }) {
   const facts = asRecord(asRecord(input.payload).facts);
   const taxonomy = asRecord(facts["us-gaap"] ?? facts.ifrs);
@@ -394,46 +402,259 @@ function parseSecCompanyFacts(input: {
   const ref = sourceRef("sec", input.url, input.fetchedAt, "official");
 
   for (const [field, concepts] of Object.entries(conceptNames)) {
-    const concept = concepts.map((name) => asRecord(taxonomy[name])).find((value) => Object.keys(value).length);
-    if (!concept) continue;
-    for (const fact of secFactUnits(concept)) {
-      if (!SEC_FORMS.has(stringValue(fact.form))) continue;
-      const fiscalYear = Number(fact.fy);
-      const fp = stringValue(fact.fp).toUpperCase();
-      if (!Number.isInteger(fiscalYear) || !/^Q[1-4]$/.test(fp)) continue;
-      const fiscalDateEnding = parseIsoDate(stringValue(fact.end));
-      const reportDate = parseIsoDate(stringValue(fact.filed));
-      const value = Number(fact.val);
-      if (!fiscalDateEnding || !reportDate || !Number.isFinite(value)) continue;
-      const key = `${fiscalYear}-${fp}-${fiscalDateEnding}`;
-      const candidate =
-        rows.get(key) ??
-        emptyCandidate({
-          ticker: input.ticker,
-          fiscalYear,
-          quarter: fp as StocksEarningsComparison["quarter"],
-          fiscalDateEnding,
-          reportDate,
-          currency: input.currency,
-        });
-      candidate.fieldSources.reportDate = ref;
-      if (field === "revenue") {
-        candidate.revenueActual = value;
-        candidate.fieldSources.revenueActual = ref;
-      } else if (field === "netIncome") {
-        candidate.netIncomeActual = value;
-        candidate.fieldSources.netIncomeActual = ref;
-      } else if (field === "eps") {
-        candidate.epsActual = value;
-        candidate.fieldSources.epsActual = ref;
-      } else if (field === "shares") {
-        candidate.dilutedShares = value;
-        candidate.fieldSources.dilutedShares = ref;
+    for (const conceptName of concepts) {
+      const concept = asRecord(taxonomy[conceptName]);
+      if (Object.keys(concept).length === 0) continue;
+      for (const fact of secFactUnits(concept)) {
+        if (!SEC_FORMS.has(stringValue(fact.form))) continue;
+        const fiscalYear = Number(fact.fy);
+        const fp = stringValue(fact.fp).toUpperCase();
+        if (!Number.isInteger(fiscalYear) || !/^Q[1-4]$/.test(fp)) continue;
+        const fiscalDateEnding = parseIsoDate(stringValue(fact.end));
+        const reportDate = parseIsoDate(stringValue(fact.filed));
+        const value = Number(fact.val);
+        if (!fiscalDateEnding || !reportDate || !Number.isFinite(value)) continue;
+        if (new Date(`${reportDate}T00:00:00Z`).getUTCFullYear() !== input.calendarYear) {
+          continue;
+        }
+        if (earningsDateDistanceDays(fiscalDateEnding, reportDate) > 180) {
+          continue;
+        }
+        const frame = stringValue(fact.frame).toUpperCase();
+        if (fp !== "Q1" && (!frame || !frame.endsWith(fp))) continue;
+        const key = `${fiscalYear}-${fp}-${fiscalDateEnding}`;
+        const candidate =
+          rows.get(key) ??
+          emptyCandidate({
+            ticker: input.ticker,
+            fiscalYear,
+            quarter: fp as StocksEarningsComparison["quarter"],
+            fiscalDateEnding,
+            reportDate,
+            currency: input.currency,
+          });
+        candidate.fieldSources.reportDate = ref;
+        if (field === "revenue") {
+          candidate.revenueActual = value;
+          candidate.fieldSources.revenueActual = ref;
+        } else if (field === "netIncome") {
+          candidate.netIncomeActual = value;
+          candidate.fieldSources.netIncomeActual = ref;
+        } else if (field === "eps") {
+          candidate.epsActual = value;
+          candidate.fieldSources.epsActual = ref;
+        } else if (field === "shares") {
+          candidate.dilutedShares = value;
+          candidate.fieldSources.dilutedShares = ref;
+        }
+        rows.set(key, candidate);
       }
-      rows.set(key, candidate);
     }
   }
   return [...rows.values()];
+}
+
+function earningsDateDistanceDays(left: string, right: string) {
+  const leftTime = Date.parse(`${left}T00:00:00Z`);
+  const rightTime = Date.parse(`${right}T00:00:00Z`);
+  if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return Infinity;
+  return Math.abs(leftTime - rightTime) / 86_400_000;
+}
+
+function advanceFiscalPeriod(
+  anchor: Pick<StocksPublicEarningsCandidate, "fiscalYear" | "quarter">,
+  steps: number,
+) {
+  const quarter = Number(anchor.quarter.slice(1));
+  const index = anchor.fiscalYear * 4 + quarter - 1 + steps;
+  return {
+    fiscalYear: Math.floor(index / 4),
+    quarter: `Q${(index % 4) + 1}` as StocksEarningsComparison["quarter"],
+  };
+}
+
+function parseFinnhubCalendar(input: {
+  payload: unknown;
+  ticker: string;
+  currency: string;
+  url: string;
+  fetchedAt: string;
+  now: Date;
+  anchors: StocksPublicEarningsCandidate[];
+}) {
+  const rows = asArray(asRecord(input.payload).earningsCalendar)
+    .map(asRecord)
+    .filter(
+      (row) =>
+        (!stringValue(row.symbol) ||
+          stringValue(row.symbol).toUpperCase() === input.ticker) &&
+        Boolean(parseIsoDate(stringValue(row.date))),
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(stringValue(left.date)) - Date.parse(stringValue(right.date)),
+    );
+  const nowMs = input.now.getTime();
+  const anchor = input.anchors
+    .filter((candidate) => {
+      const reportMs = Date.parse(`${candidate.reportDate}T00:00:00Z`);
+      return Number.isFinite(reportMs) && reportMs <= nowMs;
+    })
+    .sort(
+      (left, right) =>
+        Date.parse(right.reportDate) - Date.parse(left.reportDate),
+    )[0];
+  if (!anchor) return [];
+
+  const futureRows = rows.filter(
+    (row) =>
+      Date.parse(`${parseIsoDate(stringValue(row.date))}T00:00:00Z`) >
+      Date.parse(`${anchor.reportDate}T00:00:00Z`),
+  );
+  const ref = sourceRef("finnhub", input.url, input.fetchedAt, "structured");
+  return futureRows.map((row, index) => {
+    const period = advanceFiscalPeriod(anchor, index + 1);
+    const reportDate = parseIsoDate(stringValue(row.date));
+    const candidate = emptyCandidate({
+      ticker: input.ticker,
+      ...period,
+      fiscalDateEnding: parseIsoDate(stringValue(row.fiscalDateEnding)),
+      reportDate,
+      reportTiming: reportTiming(stringValue(row.hour ?? row.time)),
+      currency: input.currency,
+    });
+    candidate.revenueEstimate = numberValue(row.revenueEstimate);
+    candidate.revenueActual = numberValue(row.revenueActual);
+    candidate.epsEstimate = numberValue(row.epsEstimate);
+    candidate.epsActual = numberValue(row.epsActual);
+    candidate.dilutedShares = anchor.dilutedShares;
+    candidate.fieldSources.reportDate = ref;
+    if (candidate.revenueEstimate !== null) candidate.fieldSources.revenueEstimate = ref;
+    if (candidate.revenueActual !== null) candidate.fieldSources.revenueActual = ref;
+    if (candidate.epsEstimate !== null) candidate.fieldSources.epsEstimate = ref;
+    if (candidate.epsActual !== null) candidate.fieldSources.epsActual = ref;
+    if (candidate.dilutedShares !== null && anchor.fieldSources.dilutedShares) {
+      candidate.fieldSources.dilutedShares = anchor.fieldSources.dilutedShares;
+    }
+    return candidate;
+  });
+}
+
+function parseAlphaVantageEstimates(input: {
+  payload: unknown;
+  ticker: string;
+  currency: string;
+  url: string;
+  fetchedAt: string;
+  anchors: StocksPublicEarningsCandidate[];
+}) {
+  const payload = asRecord(input.payload);
+  const rows = asArray(
+    payload.estimates ?? payload.quarterlyEstimates ?? payload.data,
+  )
+    .map(asRecord)
+    .filter((row) => {
+      const horizon = stringValue(row.horizon).toLowerCase();
+      return (
+        (!horizon || horizon.includes("quarter")) &&
+        Boolean(parseIsoDate(stringValue(row.date ?? row.fiscalDateEnding)))
+      );
+    })
+    .sort(
+      (left, right) =>
+        Date.parse(parseIsoDate(stringValue(left.date ?? left.fiscalDateEnding))) -
+        Date.parse(parseIsoDate(stringValue(right.date ?? right.fiscalDateEnding))),
+    );
+  const datedAnchors = input.anchors.filter(
+    (candidate) => candidate.fiscalDateEnding,
+  );
+  const latestReportedAnchor = [...datedAnchors].sort(
+    (left, right) =>
+      Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
+  )[0];
+  if (!latestReportedAnchor) return [];
+
+  const ref = sourceRef("alpha-vantage", input.url, input.fetchedAt, "structured");
+  return rows.flatMap((row) => {
+    const fiscalDateEnding = parseIsoDate(
+      stringValue(row.date ?? row.fiscalDateEnding),
+    );
+    const directAnchor = datedAnchors
+      .filter(
+        (candidate) =>
+          earningsDateDistanceDays(candidate.fiscalDateEnding, fiscalDateEnding) <= 35,
+      )
+      .sort(
+        (left, right) =>
+          earningsDateDistanceDays(left.fiscalDateEnding, fiscalDateEnding) -
+          earningsDateDistanceDays(right.fiscalDateEnding, fiscalDateEnding),
+      )[0];
+    const inferredSteps = Math.round(
+      (Date.parse(`${fiscalDateEnding}T00:00:00Z`) -
+        Date.parse(`${latestReportedAnchor.fiscalDateEnding}T00:00:00Z`)) /
+        (91 * 86_400_000),
+    );
+    const period = directAnchor
+      ? { fiscalYear: directAnchor.fiscalYear, quarter: directAnchor.quarter }
+      : Math.abs(inferredSteps) <= 4
+        ? advanceFiscalPeriod(latestReportedAnchor, inferredSteps)
+        : null;
+    if (!period) return [];
+
+    const periodAnchor = input.anchors.find(
+      (candidate) =>
+        candidate.fiscalYear === period.fiscalYear &&
+        candidate.quarter === period.quarter &&
+        Boolean(candidate.reportDate),
+    );
+    if (!periodAnchor?.reportDate) return [];
+    const sharesAnchor =
+      input.anchors.find(
+        (candidate) =>
+          candidate.fiscalYear === period.fiscalYear &&
+          candidate.quarter === period.quarter &&
+          candidate.dilutedShares !== null,
+      ) ??
+      input.anchors
+        .filter(
+          (candidate) =>
+            candidate.dilutedShares !== null &&
+            (!candidate.fiscalDateEnding ||
+              Date.parse(`${candidate.fiscalDateEnding}T00:00:00Z`) <=
+                Date.parse(`${fiscalDateEnding}T00:00:00Z`)),
+        )
+        .sort(
+          (left, right) =>
+            Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
+        )[0];
+    const candidate = emptyCandidate({
+      ticker: input.ticker,
+      ...period,
+      fiscalDateEnding,
+      reportDate: periodAnchor.reportDate,
+      reportTiming: periodAnchor.reportTiming,
+      currency: input.currency,
+    });
+    candidate.revenueEstimate = numberValue(row.revenue_estimate_average);
+    candidate.epsEstimate = numberValue(row.eps_estimate_average);
+    candidate.dilutedShares = sharesAnchor?.dilutedShares ?? null;
+    if (periodAnchor.fieldSources.reportDate) {
+      candidate.fieldSources.reportDate = periodAnchor.fieldSources.reportDate;
+    }
+    if (candidate.revenueEstimate !== null) {
+      candidate.fieldSources.revenueEstimate = ref;
+    }
+    if (candidate.epsEstimate !== null) candidate.fieldSources.epsEstimate = ref;
+    if (
+      candidate.dilutedShares !== null &&
+      sharesAnchor?.fieldSources.dilutedShares
+    ) {
+      candidate.fieldSources.dilutedShares = sharesAnchor.fieldSources.dilutedShares;
+    }
+    return candidate.revenueEstimate !== null || candidate.epsEstimate !== null
+      ? [candidate]
+      : [];
+  });
 }
 
 async function fetchResponse(input: {
@@ -487,11 +708,21 @@ export async function fetchPublicEarningsCandidates({
   now,
   fetchImpl = fetch,
   env = process.env,
+  includeFinnhub = true,
+  finnhubPayloads = [],
+  finnhubUnavailable = false,
+  alphaVantageEstimatePayloads = [],
+  alphaVantageUnavailable = false,
 }: {
   stock: AlphaResearchStock;
   now: Date;
   fetchImpl?: typeof fetch;
   env?: Record<string, string | undefined>;
+  includeFinnhub?: boolean;
+  finnhubPayloads?: unknown[];
+  finnhubUnavailable?: boolean;
+  alphaVantageEstimatePayloads?: unknown[];
+  alphaVantageUnavailable?: boolean;
 }) {
   const ticker = stock.ticker.trim().toUpperCase();
   const config = getStocksEarningsSourceConfig(ticker);
@@ -540,10 +771,98 @@ export async function fetchPublicEarningsCandidates({
           currency: stock.listing.currency,
           url: secUrl,
           fetchedAt,
+          calendarYear,
         }),
     });
   } else if (config.secCik) {
     errors.push("SEC skipped: STOCKS_SEC_USER_AGENT is missing");
+  }
+
+  const finnhubKey = getProviderApiKeys(env, [
+    "STOCKS_FINNHUB_API_KEYS",
+    "STOCKS_FINNHUB_API_KEY",
+    "FINNHUB_API_KEYS",
+    "FINNHUB_API_KEY",
+  ])[0];
+  if (includeFinnhub && finnhubKey && !finnhubUnavailable) {
+    const finnhubUrl = new URL("https://finnhub.io/api/v1/calendar/earnings");
+    finnhubUrl.searchParams.set("symbol", ticker);
+    finnhubUrl.searchParams.set("from", `${calendarYear}-01-01`);
+    finnhubUrl.searchParams.set("to", `${calendarYear}-12-31`);
+    finnhubUrl.searchParams.set("token", finnhubKey);
+    const provenanceUrl = "https://finnhub.io/api/v1/calendar/earnings";
+    providers.push({
+      provider: "finnhub",
+      read: async () =>
+        (
+          finnhubPayloads.length > 0
+            ? finnhubPayloads
+            : [
+                await fetchResponse({
+                  url: finnhubUrl.toString(),
+                  fetchImpl,
+                  timeoutMs,
+                  userAgent,
+                  asJson: true,
+                }),
+              ]
+        ).flatMap((payload) =>
+          parseFinnhubCalendar({
+            payload,
+            ticker,
+            currency: stock.listing.currency,
+            url: provenanceUrl,
+            fetchedAt,
+            now,
+            anchors: candidates,
+          }),
+        ),
+    });
+  } else if (includeFinnhub && finnhubUnavailable) {
+    errors.push("finnhub skipped: prior request unavailable");
+  }
+
+  const alphaVantageKey = getProviderApiKeys(env, [
+    "STOCKS_ALPHA_VANTAGE_API_KEYS",
+    "STOCKS_ALPHA_VANTAGE_API_KEY",
+    "ALPHA_VANTAGE_API_KEYS",
+    "ALPHA_VANTAGE_API_KEY",
+  ])[0];
+  if (alphaVantageKey) {
+    const alphaVantageUrl = new URL("https://www.alphavantage.co/query");
+    alphaVantageUrl.searchParams.set("function", "EARNINGS_ESTIMATES");
+    alphaVantageUrl.searchParams.set("symbol", ticker);
+    alphaVantageUrl.searchParams.set("apikey", alphaVantageKey);
+    const provenanceUrl =
+      "https://www.alphavantage.co/query?function=EARNINGS_ESTIMATES";
+    providers.push({
+      provider: "alpha-vantage",
+      read: async () =>
+        (
+          alphaVantageEstimatePayloads.length > 0
+            ? alphaVantageEstimatePayloads
+            : [
+                await fetchResponse({
+                  url: alphaVantageUrl.toString(),
+                  fetchImpl,
+                  timeoutMs,
+                  userAgent,
+                  asJson: true,
+                }),
+              ]
+        ).flatMap((payload) =>
+          parseAlphaVantageEstimates({
+            payload,
+            ticker,
+            currency: stock.listing.currency,
+            url: provenanceUrl,
+            fetchedAt,
+            anchors: candidates,
+          }),
+        ),
+    });
+  } else if (alphaVantageUnavailable) {
+    errors.push("alpha-vantage skipped: prior request unavailable");
   }
 
   const earningsLabsUrl = `https://www.earningslabs.com/stock/${encodeURIComponent(config.earningsLabsTicker)}/earnings`;

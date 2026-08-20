@@ -58,6 +58,122 @@ const officialIrHtml = `
     <p>Revenue is expected to be $45.0 billion, plus or minus 2%.</p>
   </body></html>`;
 
+const secCompanyFacts = {
+  facts: {
+    "us-gaap": {
+      RevenueFromContractWithCustomerExcludingAssessedTax: {
+        units: {
+          USD: [
+            {
+              end: "2022-01-30",
+              filed: "2022-03-18",
+              fy: 2022,
+              fp: "FY",
+              form: "10-K",
+              val: 26_914_000_000,
+            },
+          ],
+        },
+      },
+      Revenues: {
+        units: {
+          USD: [
+            {
+              end: "2025-04-27",
+              filed: "2026-05-20",
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              val: 44_062_000_000,
+              frame: "CY2025Q1",
+            },
+            {
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              val: 81_615_000_000,
+              frame: "CY2026Q1",
+            },
+          ],
+        },
+      },
+      NetIncomeLoss: {
+        units: {
+          USD: [
+            {
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              val: 58_321_000_000,
+              frame: "CY2026Q1",
+            },
+          ],
+        },
+      },
+      WeightedAverageNumberOfDilutedSharesOutstanding: {
+        units: {
+          shares: [
+            {
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              val: 24_391_000_000,
+              frame: "CY2026Q1",
+            },
+          ],
+        },
+      },
+    },
+  },
+};
+
+const finnhubCalendar = {
+  earningsCalendar: [
+    {
+      date: "2026-08-26",
+      revenueEstimate: 93_634_391_959,
+      revenueActual: null,
+      epsEstimate: 2.1283,
+      epsActual: null,
+      hour: "amc",
+      symbol: "NVDA",
+    },
+    {
+      date: "2026-11-17",
+      revenueEstimate: 105_666_899_459,
+      revenueActual: null,
+      epsEstimate: 2.4084,
+      epsActual: null,
+      hour: "amc",
+      symbol: "NVDA",
+    },
+  ],
+};
+
+const alphaVantageEstimates = {
+  symbol: "NVDA",
+  estimates: [
+    {
+      date: "2026-04-30",
+      horizon: "fiscal quarter",
+      revenue_estimate_average: "79115709670.00",
+      eps_estimate_average: "1.7738",
+    },
+    {
+      date: "2026-07-31",
+      horizon: "fiscal quarter",
+      revenue_estimate_average: "91936931570.00",
+      eps_estimate_average: "2.0838",
+    },
+  ],
+};
+
 function fixtureFetch(url) {
   const value = String(url);
   if (value.includes("investor.nvidia.com")) {
@@ -118,6 +234,96 @@ const official = q2Candidates.find(
 assert.ok(official?.companyGuidance);
 assert.equal(official.companyGuidance.revenueMid, 45_000_000_000);
 assert.equal(official.companyGuidance.source.provider, "official-ir");
+
+clearStocksPublicEarningsCacheForTests();
+const structuredResult = await fetchPublicEarningsCandidates({
+  stock: nvda,
+  now: new Date("2026-08-15T00:00:00.000Z"),
+  fetchImpl: async (url) => {
+    const value = String(url);
+    if (value.includes("data.sec.gov")) return Response.json(secCompanyFacts);
+    if (value.includes("finnhub.io")) return Response.json(finnhubCalendar);
+    if (value.includes("alphavantage.co")) return Response.json(alphaVantageEstimates);
+    return fixtureFetch(url);
+  },
+  env: {
+    STOCKS_SEC_USER_AGENT: "SignalHub/1.0 test",
+    STOCKS_FINNHUB_API_KEY: "test-key",
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+  },
+});
+const secQ1 = structuredResult.candidates.find(
+  (candidate) =>
+    candidate.fiscalYear === 2027 &&
+    candidate.quarter === "Q1" &&
+    candidate.fieldSources.revenueActual?.provider === "sec",
+);
+assert.ok(secQ1, JSON.stringify(structuredResult));
+assert.equal(secQ1.revenueActual, 81_615_000_000);
+assert.equal(secQ1.netIncomeActual, 58_321_000_000);
+assert.equal(secQ1.dilutedShares, 24_391_000_000);
+const alphaQ1 = structuredResult.candidates.find(
+  (candidate) =>
+    candidate.fiscalYear === 2027 &&
+    candidate.quarter === "Q1" &&
+    candidate.fieldSources.revenueEstimate?.provider === "alpha-vantage",
+);
+assert.ok(alphaQ1, JSON.stringify(structuredResult));
+assert.equal(alphaQ1.fiscalDateEnding, "2026-04-30");
+assert.equal(alphaQ1.reportDate, "2026-05-20");
+assert.equal(alphaQ1.revenueEstimate, 79_115_709_670);
+assert.equal(alphaQ1.epsEstimate, 1.7738);
+assert.equal(alphaQ1.dilutedShares, 24_391_000_000);
+assert.equal(alphaQ1.fieldSources.dilutedShares.provider, "sec");
+assert.equal(
+  structuredResult.candidates.some((candidate) => candidate.reportDate.startsWith("2022-")),
+  false,
+);
+const finnhubQ2 = structuredResult.candidates.find(
+  (candidate) =>
+    candidate.fiscalYear === 2027 &&
+    candidate.quarter === "Q2" &&
+    candidate.fieldSources.revenueEstimate?.provider === "finnhub",
+);
+assert.ok(finnhubQ2, JSON.stringify(structuredResult));
+assert.equal(finnhubQ2.reportDate, "2026-08-26");
+assert.equal(finnhubQ2.revenueEstimate, 93_634_391_959);
+assert.equal(finnhubQ2.epsEstimate, 2.1283);
+assert.equal(finnhubQ2.dilutedShares, 24_391_000_000);
+assert.equal(finnhubQ2.fieldSources.dilutedShares.provider, "sec");
+
+clearStocksPublicEarningsCacheForTests();
+let alphaRetryCalls = 0;
+const transientAlphaResult = await fetchPublicEarningsCandidates({
+  stock: nvda,
+  now: new Date("2026-08-15T00:00:00.000Z"),
+  fetchImpl: async (url) => {
+    const value = String(url);
+    if (value.includes("investor.nvidia.com")) return new Response(officialIrHtml);
+    if (value.includes("data.sec.gov")) return Response.json(secCompanyFacts);
+    if (value.includes("alphavantage.co")) {
+      alphaRetryCalls += 1;
+      return Response.json(alphaVantageEstimates);
+    }
+    if (value.includes("earningslabs.com")) return new Response(earningsLabsHtml);
+    if (value.includes("chartmill.com")) return new Response(chartmillHtml);
+    throw new Error(`unexpected transient fixture URL: ${value}`);
+  },
+  env: {
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+    STOCKS_SEC_USER_AGENT: "SignalHub/1.0 test",
+  },
+  alphaVantageUnavailable: true,
+});
+assert.equal(alphaRetryCalls, 1);
+assert.equal(
+  transientAlphaResult.candidates.some(
+    (candidate) =>
+      candidate.quarter === "Q1" &&
+      candidate.fieldSources.revenueEstimate?.provider === "alpha-vantage",
+  ),
+  true,
+);
 
 clearStocksPublicEarningsCacheForTests();
 const failureResult = await fetchPublicEarningsCandidates({

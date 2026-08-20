@@ -89,10 +89,10 @@ const alphaVantagePayload = {
     ],
   },
   earningsEstimates: {
-    quarterlyEstimates: [
+    estimates: [
       {
         date: "2026-06-30",
-        horizon: "historical fiscal quarter",
+        horizon: "fiscal quarter",
         revenue_estimate_average: "573937500",
         eps_estimate_average: "-2.74",
       },

@@ -24,6 +24,8 @@ import {
 } from "./stocks-earnings-calendar.ts";
 import {
   completeStocksEarningsComparison,
+  getStocksEarningsFallbackProviderState,
+  markStocksEarningsFallbackProviderUnavailable,
   mergeStocksEarningsFallbackCandidate,
   needsDirectStocksEarningsActual,
   parseAlphaVantageEarningsCandidate,
@@ -40,6 +42,22 @@ import {
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 type EnvLike = Record<string, string | undefined>;
+
+const LIVE_EARNINGS_PAYLOAD_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+let liveEarningsPayloadCache: {
+  expiresAt: number;
+  payloads: StocksEarningsFallbackPayloadCache;
+} | null = null;
+
+function getLiveEarningsPayloadCache(nowMs: number) {
+  if (!liveEarningsPayloadCache || liveEarningsPayloadCache.expiresAt <= nowMs) {
+    liveEarningsPayloadCache = {
+      expiresAt: nowMs + LIVE_EARNINGS_PAYLOAD_CACHE_TTL_MS,
+      payloads: new Map(),
+    };
+  }
+  return liveEarningsPayloadCache.payloads;
+}
 
 export type StocksFinancialDataSource = "live" | "mock";
 
@@ -246,6 +264,22 @@ function comparisonSourceRef(
   };
 }
 
+function earningsProviderLabel(provider: StocksEarningsProvider | undefined) {
+  return (
+    {
+      "alpha-vantage": "Alpha Vantage",
+      finnhub: "Finnhub",
+      sec: "SEC",
+      fmp: "FMP",
+      eodhd: "EODHD",
+      yahoo: "Yahoo",
+      "official-ir": "Official IR",
+      "earnings-labs": "Earnings Labs",
+      chartmill: "ChartMill",
+    } satisfies Record<StocksEarningsProvider, string>
+  )[provider ?? "chartmill"];
+}
+
 function publicCandidateComparison(
   candidate: StocksPublicEarningsCandidate,
   generatedAt: string,
@@ -259,7 +293,17 @@ function publicCandidateComparison(
   const accountingBasis =
     baseProvider === "sec" || baseProvider === "official-ir"
       ? "Official filing / US GAAP"
+      : candidate.fieldSources.epsEstimate?.provider === "finnhub" &&
+          candidate.fieldSources.dilutedShares?.provider === "sec"
+        ? "Finnhub EPS consensus × latest SEC diluted shares (approximate)"
       : "Public consensus page";
+  const revenueEstimateBasis = candidate.fieldSources.revenueEstimate
+    ? `${earningsProviderLabel(candidate.fieldSources.revenueEstimate.provider)} consensus`
+    : accountingBasis;
+  const netIncomeEstimateBasis =
+    candidate.fieldSources.epsEstimate && candidate.fieldSources.dilutedShares
+      ? `${earningsProviderLabel(candidate.fieldSources.epsEstimate.provider)} EPS consensus × ${earningsProviderLabel(candidate.fieldSources.dilutedShares.provider)} diluted shares (approximate)`
+      : accountingBasis;
   const netIncomeActual =
     candidate.netIncomeActual ??
     (candidate.epsActual !== null && candidate.dilutedShares !== null
@@ -294,7 +338,7 @@ function publicCandidateComparison(
         }),
         estimateSource: valueProvenance(candidate.fieldSources.revenueEstimate, {
           method: "direct",
-          accountingBasis,
+          accountingBasis: revenueEstimateBasis,
           currency: candidate.currency,
           metric: "revenue",
           semantics: "consensus-estimate",
@@ -323,7 +367,7 @@ function publicCandidateComparison(
         ),
         estimateSource: valueProvenance(candidate.fieldSources.epsEstimate, {
           method: "eps-times-diluted-shares",
-          accountingBasis,
+          accountingBasis: netIncomeEstimateBasis,
           currency: candidate.currency,
           metric: "net-income",
           semantics: "consensus-estimate",
@@ -404,6 +448,8 @@ function mergeComparisonWithPublic(
 function attemptedProvidersFromErrors(errors: string[]) {
   const providers: StocksEarningsProvider[] = [];
   const supported: StocksEarningsProvider[] = [
+    "finnhub",
+    "alpha-vantage",
     "official-ir",
     "sec",
     "earnings-labs",
@@ -422,18 +468,42 @@ export async function completeCalendarYearEarnings({
   now,
   fetchImpl = fetch,
   env = process.env,
+  payloadCache,
 }: {
   stock: AlphaResearchStock;
   apiHistory: StocksEarningsComparison[];
   now: Date;
   fetchImpl?: typeof fetch;
   env?: EnvLike;
+  payloadCache?: StocksEarningsFallbackPayloadCache;
 }) {
+  const finnhubState = getStocksEarningsFallbackProviderState(
+    payloadCache,
+    stock.ticker,
+    "finnhub",
+  );
+  const alphaVantageState = getStocksEarningsFallbackProviderState(
+    payloadCache,
+    stock.ticker,
+    "alpha-vantage-estimates",
+  );
   const publicResult = await fetchPublicEarningsCandidates({
     stock,
     now,
     fetchImpl,
     env,
+    includeFinnhub:
+      apiHistory.length === 0 ||
+      apiHistory.some(
+        (comparison) =>
+          !comparison.reportDate ||
+          comparison.revenue.estimate === null ||
+          comparison.netIncome.estimate === null,
+      ),
+    finnhubPayloads: finnhubState.payloads,
+    finnhubUnavailable: finnhubState.unavailable,
+    alphaVantageEstimatePayloads: alphaVantageState.payloads,
+    alphaVantageUnavailable: alphaVantageState.unavailable,
   });
   const publicCandidates = mergePublicCandidates(publicResult.candidates);
   const byPeriod = new Map<string, StocksEarningsComparison>();
@@ -1348,24 +1418,55 @@ async function recoverFmpEarningsFromAlphaVantage({
 }) {
   const apiKey = alphaVantageApiKey(env);
   if (!apiKey) return { statement: null, errors: [] as string[] };
+  const cachedIncome = getStocksEarningsFallbackProviderState(
+    payloadCache,
+    stock.ticker,
+    "alpha-vantage-income",
+  );
+  if (cachedIncome.unavailable) {
+    return {
+      statement: null,
+      errors: ["alpha-vantage INCOME_STATEMENT skipped: prior request unavailable"],
+    };
+  }
   try {
-    const response = await fetchImpl(
-      alphaVantageIncomeStatementUrl(stock.ticker, apiKey),
-      { cache: "no-store" },
-    );
-    if (!response.ok) {
-      return {
-        statement: null,
-        errors: [`alpha-vantage INCOME_STATEMENT HTTP ${response.status}`],
-      };
+    let payload = cachedIncome.payloads[0];
+    if (!payload) {
+      const response = await fetchImpl(
+        alphaVantageIncomeStatementUrl(stock.ticker, apiKey),
+        { cache: "no-store" },
+      );
+      if (!response.ok) {
+        markStocksEarningsFallbackProviderUnavailable(
+          payloadCache,
+          stock.ticker,
+          "alpha-vantage-income",
+        );
+        return {
+          statement: null,
+          errors: [`alpha-vantage INCOME_STATEMENT HTTP ${response.status}`],
+        };
+      }
+      payload = await response.json();
+      const payloadMessage = fmpPayloadMessage(payload);
+      if (payloadMessage) {
+        markStocksEarningsFallbackProviderUnavailable(
+          payloadCache,
+          stock.ticker,
+          "alpha-vantage-income",
+        );
+        return {
+          statement: null,
+          errors: [`alpha-vantage INCOME_STATEMENT ${payloadMessage}`],
+        };
+      }
+      primeStocksEarningsFallbackPayload(
+        payloadCache,
+        stock.ticker,
+        "alpha-vantage-income",
+        payload,
+      );
     }
-    const payload = await response.json();
-    primeStocksEarningsFallbackPayload(
-      payloadCache,
-      stock.ticker,
-      "alpha-vantage-income",
-      payload,
-    );
     const seed = alphaVantageRecoverySeed(
       stock.ticker,
       payload,
@@ -1503,17 +1604,23 @@ export async function fetchFmpStocksFinancialSnapshot({
   stocks,
   fetchImpl = fetch,
   env = process.env,
+  payloadCache,
 }: {
   stocks: AlphaResearchStock[];
   fetchImpl?: FetchLike;
   env?: EnvLike;
+  payloadCache?: StocksEarningsFallbackPayloadCache;
 }): Promise<StocksFinancialSnapshot> {
   const apiKeys = fmpApiKeys(env);
   if (apiKeys.length === 0) throw new Error("FMP API key is not configured");
   const generatedAt = new Date().toISOString();
   const providerStocks = selectFmpFinancialStocks(stocks, env);
   const errors: string[] = [];
-  const earningsFallbackPayloadCache: StocksEarningsFallbackPayloadCache = new Map();
+  const earningsFallbackPayloadCache =
+    payloadCache ??
+    (fetchImpl === fetch
+      ? getLiveEarningsPayloadCache(Date.parse(generatedAt))
+      : new Map());
   const concurrency = positiveInt(
     env.STOCKS_FMP_FINANCIAL_CONCURRENCY,
     3,
@@ -1611,11 +1718,67 @@ export async function fetchFmpStocksFinancialSnapshot({
               errors.push(
                 ...recovered.errors.map((error) => `${stock.ticker}: ${error}`),
               );
-              return [stock.ticker, recovered.statement] as const;
+              const recoveredHistory =
+                recovered.statement.earningsHistory ??
+                (recovered.statement.latestEarnings
+                  ? [recovered.statement.latestEarnings]
+                  : []);
+              const calendar = await completeCalendarYearEarnings({
+                stock,
+                apiHistory: recoveredHistory,
+                now: new Date(generatedAt),
+                fetchImpl: fetchImpl as typeof fetch,
+                env,
+                payloadCache: earningsFallbackPayloadCache,
+              });
+              errors.push(
+                ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),
+              );
+              return [
+                stock.ticker,
+                {
+                  ...recovered.statement,
+                  calendarYearEarnings: calendar.items,
+                },
+              ] as const;
             }
             errors.push(
               ...recovered.errors.map((error) => `${stock.ticker}: ${error}`),
             );
+            const baselineHistory =
+              stock.financialSnapshot.earningsHistory ??
+              (stock.financialSnapshot.latestEarnings
+                ? [stock.financialSnapshot.latestEarnings]
+                : []);
+            const calendar = await completeCalendarYearEarnings({
+              stock,
+              apiHistory: baselineHistory,
+              now: new Date(generatedAt),
+              fetchImpl: fetchImpl as typeof fetch,
+              env,
+              payloadCache: earningsFallbackPayloadCache,
+            });
+            errors.push(
+              ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),
+            );
+            if (calendar.items.length > 0) {
+              return [
+                stock.ticker,
+                {
+                  ticker: stock.ticker.trim().toUpperCase(),
+                  ...stock.financialSnapshot,
+                  periodLabel:
+                    stock.financialSnapshot.periodLabel ??
+                    `${calendar.items[0].quarter} ${calendar.items[0].fiscalYear}`,
+                  source: "live" as const,
+                  updatedAt: generatedAt,
+                  latestEarnings:
+                    stock.financialSnapshot.latestEarnings ?? null,
+                  earningsHistory: baselineHistory,
+                  calendarYearEarnings: calendar.items,
+                },
+              ] as const;
+            }
             throw new Error("FMP income-statement recovery failed");
           }
           const statement = parseFmpFinancialStatement(
@@ -1678,6 +1841,7 @@ export async function fetchFmpStocksFinancialSnapshot({
               now: new Date(generatedAt),
               fetchImpl: fetchImpl as typeof fetch,
               env,
+              payloadCache: earningsFallbackPayloadCache,
             });
             errors.push(
               ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),
@@ -1698,6 +1862,7 @@ export async function fetchFmpStocksFinancialSnapshot({
             now: new Date(generatedAt),
             fetchImpl: fetchImpl as typeof fetch,
             env,
+            payloadCache: earningsFallbackPayloadCache,
           });
           errors.push(
             ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),

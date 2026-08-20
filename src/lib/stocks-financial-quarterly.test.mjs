@@ -560,4 +560,102 @@ assert.equal(nvdaCalendar.items[1].revenue.actualSource.provider, "sec");
 assert.equal(nvdaCalendar.items[1].netIncome.estimate, 22_089_800_000);
 assert.equal(nvdaCalendar.items[1].netIncome.actual, 23_805_000_000);
 
+const sharedEarningsPayloadCache = new Map();
+let publicOnlyAlphaRequests = 0;
+const publicOnlyInput = {
+  stocks: [nvdaStock],
+  payloadCache: sharedEarningsPayloadCache,
+  env: {
+    STOCKS_FMP_API_KEY: "fmp-key",
+    STOCKS_ALPHA_VANTAGE_API_KEY: "alpha-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-key",
+    STOCKS_SEC_USER_AGENT: "SignalHub/1.0 test",
+  },
+  fetchImpl: async (input) => {
+    const url = new URL(String(input));
+    if (url.hostname === "financialmodelingprep.com") {
+      return new Response("limit reached", { status: 429 });
+    }
+    if (url.hostname === "www.alphavantage.co") {
+      publicOnlyAlphaRequests += 1;
+      if (url.searchParams.get("function") === "EARNINGS_ESTIMATES") {
+        return Response.json({
+          symbol: "NVDA",
+          estimates: [
+            {
+              date: "2026-04-30",
+              horizon: "fiscal quarter",
+              revenue_estimate_average: "79115709670.00",
+              eps_estimate_average: "1.7738",
+            },
+            {
+              date: "2026-07-31",
+              horizon: "fiscal quarter",
+              revenue_estimate_average: "91936931570.00",
+              eps_estimate_average: "2.0838",
+            },
+          ],
+        });
+      }
+      return new Response("income unavailable", { status: 429 });
+    }
+    if (url.hostname === "data.sec.gov") return Response.json(nvdaSecFacts);
+    if (url.hostname === "finnhub.io") {
+      return Response.json({
+        earningsCalendar: [
+          {
+            date: "2026-08-26",
+            revenueEstimate: 93_634_391_959,
+            epsEstimate: 2.1283,
+            hour: "amc",
+            symbol: "NVDA",
+          },
+        ],
+      });
+    }
+    if (url.hostname === "investor.nvidia.com") {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (url.hostname === "www.earningslabs.com") {
+      return new Response("rate limited", { status: 429 });
+    }
+    throw new Error(`Unexpected public-only recovery URL ${url}`);
+  },
+};
+const publicOnlyRecovery = await fetchFmpStocksFinancialSnapshot(publicOnlyInput);
+await fetchFmpStocksFinancialSnapshot(publicOnlyInput);
+assert.equal(publicOnlyAlphaRequests, 2);
+const publicOnlyUpcoming =
+  publicOnlyRecovery.financials.NVDA.calendarYearEarnings[0];
+assert.equal(publicOnlyUpcoming.quarter, "Q2");
+assert.equal(publicOnlyUpcoming.status, "upcoming");
+assert.equal(publicOnlyUpcoming.revenue.estimate, 93_634_391_959);
+assert.equal(publicOnlyUpcoming.netIncome.estimate, 52_824_406_000);
+assert.equal(publicOnlyUpcoming.revenue.actual, null);
+assert.equal(publicOnlyUpcoming.netIncome.actual, null);
+assert.equal(publicOnlyUpcoming.revenue.estimateSource.provider, "finnhub");
+assert.equal(publicOnlyUpcoming.netIncome.estimateSource.method, "eps-times-diluted-shares");
+assert.match(publicOnlyUpcoming.netIncome.estimateSource.accountingBasis, /approximate/);
+const publicOnlyReported =
+  publicOnlyRecovery.financials.NVDA.calendarYearEarnings.find(
+    (item) => item.quarter === "Q1",
+  );
+assert.ok(publicOnlyReported);
+assert.equal(publicOnlyReported.status, "reported");
+assert.equal(publicOnlyReported.completeness.complete, true);
+assert.equal(publicOnlyReported.revenue.estimate, 79_115_709_670);
+assert.equal(publicOnlyReported.revenue.actual, 81_610_000_000);
+assert.equal(publicOnlyReported.netIncome.estimate, 44_025_716_000);
+assert.equal(publicOnlyReported.netIncome.actual, 23_805_000_000);
+assert.equal(publicOnlyReported.revenue.estimateSource.provider, "alpha-vantage");
+assert.equal(publicOnlyReported.netIncome.estimateSource.provider, "alpha-vantage");
+assert.equal(
+  publicOnlyReported.netIncome.estimateSource.method,
+  "eps-times-diluted-shares",
+);
+assert.match(
+  publicOnlyReported.netIncome.estimateSource.accountingBasis,
+  /Alpha Vantage.*SEC.*approximate/,
+);
+
 console.log("ok - stocks FMP quarterly transport");

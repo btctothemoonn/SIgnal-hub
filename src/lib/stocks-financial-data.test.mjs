@@ -484,6 +484,11 @@ assert.equal(
   2027,
 );
 assert.equal(alphaQuarterlyRecovery.financials.NVDA.latestEarnings.quarter, "Q2");
+assert.equal(
+  alphaQuarterlyRecovery.financials.NVDA.calendarYearEarnings?.[0]?.quarter,
+  "Q2",
+  "Alpha Vantage recovery must still run calendar-year earnings completion",
+);
 assert.equal(alphaQuarterlyIncomeRequests, 1);
 assert.ok(
   alphaQuarterlyRecovery.errors.some((error) =>

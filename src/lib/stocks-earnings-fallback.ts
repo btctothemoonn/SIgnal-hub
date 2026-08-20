@@ -255,7 +255,12 @@ function alphaQuarterlyReports(payload: unknown) {
 
 function alphaQuarterlyEstimates(payload: unknown) {
   const record = asRecord(payload);
-  return asArray(record.quarterlyEstimates ?? record.data).map(asRecord);
+  return asArray(record.estimates ?? record.quarterlyEstimates ?? record.data)
+    .map(asRecord)
+    .filter((row) => {
+      const horizon = stringValue(row.horizon).toLowerCase();
+      return !horizon || horizon.includes("quarter");
+    });
 }
 
 export function parseAlphaVantageEarningsCandidate(
@@ -867,6 +872,27 @@ export function primeStocksEarningsFallbackPayload(
   cacheProviderPayload(cache, ticker, provider, payload);
 }
 
+export function getStocksEarningsFallbackProviderState(
+  cache: StocksEarningsFallbackPayloadCache | undefined,
+  ticker: string,
+  provider: string,
+) {
+  const entry = cache?.get(providerCacheKey(ticker, provider));
+  return {
+    payloads: [...(entry?.payloads ?? [])],
+    unavailable: entry?.unavailable ?? false,
+  };
+}
+
+export function markStocksEarningsFallbackProviderUnavailable(
+  cache: StocksEarningsFallbackPayloadCache | undefined,
+  ticker: string,
+  provider: string,
+) {
+  const entry = providerCacheEntry(cache, ticker, provider);
+  if (entry) entry.unavailable = true;
+}
+
 function isProviderPayloadUnavailable(payload: unknown) {
   if (Array.isArray(payload)) return payload.length === 0;
   const record = asRecord(payload);
@@ -896,6 +922,7 @@ function isProviderPayloadUnavailable(payload: unknown) {
     record.results,
     record.quarterlyReports,
     record.quarterlyEstimates,
+    record.estimates,
   ].filter(Array.isArray);
   return resultArrays.length > 0 && resultArrays.every((value) => value.length === 0);
 }
