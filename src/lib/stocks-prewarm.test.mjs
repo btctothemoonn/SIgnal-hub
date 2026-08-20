@@ -79,6 +79,22 @@ const priorComparison = {
     surprisePct: 30.46,
   },
 };
+const priorCalendarItem = {
+  ...priorComparison,
+  status: "reported",
+  reportDateSource: {
+    provider: "fmp",
+    url: null,
+    fetchedAt: "2026-08-14T00:00:00.000Z",
+    confidence: "structured",
+  },
+  companyGuidance: null,
+  completeness: {
+    complete: true,
+    missing: [],
+    attemptedProviders: ["fmp"],
+  },
+};
 const previousFinancial = {
   generatedAt: "2026-08-14T00:00:00.000Z",
   source: "live",
@@ -99,6 +115,7 @@ const previousFinancial = {
       periodLabel: "Q2 2026",
       latestEarnings: priorComparison,
       earningsHistory: [priorComparison],
+      calendarYearEarnings: [priorCalendarItem],
       earningsInsight: {
         conclusion: "cached conclusion",
         driver: "cached driver",
@@ -148,6 +165,28 @@ const partialFinancial = {
           surprisePct: null,
         },
       },
+      calendarYearEarnings: [
+        {
+          ...priorCalendarItem,
+          generatedAt: "2026-08-14T01:00:00.000Z",
+          revenue: {
+            ...priorCalendarItem.revenue,
+            estimate: null,
+            estimateSource: undefined,
+          },
+          netIncome: {
+            ...priorCalendarItem.netIncome,
+            estimate: null,
+            estimateSource: undefined,
+          },
+          status: "incomplete",
+          completeness: {
+            complete: false,
+            missing: ["revenue-estimate", "net-income-estimate"],
+            attemptedProviders: ["fmp", "earnings-labs"],
+          },
+        },
+      ],
       earningsInsight: {
         conclusion: "temporary rules fallback",
         driver: "missing estimates",
@@ -180,6 +219,115 @@ assert.deepEqual(
 assert.equal(
   preservedFinancial.financials.NBIS.earningsInsight.conclusion,
   "cached conclusion",
+);
+assert.equal(
+  preservedFinancial.financials.NBIS.calendarYearEarnings[0].revenue.estimate,
+  573_937_500,
+);
+assert.equal(
+  preservedFinancial.financials.NBIS.calendarYearEarnings[0].completeness.complete,
+  true,
+);
+
+const upcomingCalendarItem = {
+  ...priorCalendarItem,
+  fiscalYear: 2026,
+  quarter: "Q3",
+  fiscalDateEnding: "2026-07-31",
+  reportDate: "2026-08-26",
+  status: "upcoming",
+  revenue: {
+    ...priorCalendarItem.revenue,
+    actual: null,
+    actualSource: undefined,
+  },
+  netIncome: {
+    ...priorCalendarItem.netIncome,
+    actual: null,
+    actualSource: undefined,
+  },
+};
+const withUpcoming = structuredClone(partialFinancial);
+withUpcoming.generatedAt = "2026-08-15T00:00:00.000Z";
+withUpcoming.financials.NBIS.calendarYearEarnings = [upcomingCalendarItem];
+const mergedUpcoming = preserveSuccessfulFinancialEntries(
+  previousFinancial,
+  withUpcoming,
+  new Date("2026-08-15T00:00:00.000Z"),
+);
+assert.deepEqual(
+  mergedUpcoming.financials.NBIS.calendarYearEarnings.map(
+    (item) => `${item.fiscalYear}-${item.quarter}`,
+  ),
+  ["2026-Q3", "2026-Q2"],
+);
+
+const fiveCalendarItems = [
+  [2027, "Q1", "2026-12-31"],
+  [2026, "Q4", "2026-11-01"],
+  [2026, "Q3", "2026-08-12"],
+  [2026, "Q2", "2026-05-12"],
+  [2026, "Q1", "2026-02-12"],
+].map(([fiscalYear, quarter, reportDate]) => ({
+  ...priorCalendarItem,
+  fiscalYear,
+  quarter,
+  fiscalDateEnding: reportDate,
+  reportDate,
+}));
+const overfull = structuredClone(partialFinancial);
+overfull.generatedAt = "2026-12-31T12:00:00.000Z";
+overfull.financials.NBIS.calendarYearEarnings = fiveCalendarItems;
+const boundedCalendar = preserveSuccessfulFinancialEntries(
+  null,
+  overfull,
+  new Date("2026-12-31T12:00:00.000Z"),
+);
+assert.equal(boundedCalendar.financials.NBIS.calendarYearEarnings.length, 4);
+
+const rollover = structuredClone(partialFinancial);
+rollover.generatedAt = "2027-01-01T00:00:00.000Z";
+rollover.financials.NBIS.calendarYearEarnings = [];
+const rolledCalendar = preserveSuccessfulFinancialEntries(
+  previousFinancial,
+  rollover,
+  new Date("2027-01-01T00:00:00.000Z"),
+);
+assert.deepEqual(rolledCalendar.financials.NBIS.calendarYearEarnings, []);
+
+assert.equal(
+  getStocksSnapshotHealth(
+    "financial",
+    previousFinancial,
+    {},
+    Date.parse("2026-08-14T01:00:00.000Z"),
+  ).maxAgeMs,
+  12 * 60 * 60 * 1000,
+);
+const upcomingHealthSnapshot = structuredClone(previousFinancial);
+upcomingHealthSnapshot.generatedAt = "2026-08-15T00:00:00.000Z";
+upcomingHealthSnapshot.financials.NBIS.calendarYearEarnings = [upcomingCalendarItem];
+assert.equal(
+  getStocksSnapshotHealth(
+    "financial",
+    upcomingHealthSnapshot,
+    {},
+    Date.parse("2026-08-15T01:00:00.000Z"),
+  ).maxAgeMs,
+  2 * 60 * 60 * 1000,
+);
+const reportDayIncomplete = structuredClone(partialFinancial);
+reportDayIncomplete.generatedAt = "2026-08-12T00:00:00.000Z";
+reportDayIncomplete.financials.NBIS.calendarYearEarnings[0].reportDate =
+  "2026-08-12";
+assert.equal(
+  getStocksSnapshotHealth(
+    "financial",
+    reportDayIncomplete,
+    {},
+    Date.parse("2026-08-12T00:20:00.000Z"),
+  ).maxAgeMs,
+  30 * 60 * 1000,
 );
 
 const newerDirectFinancial = structuredClone(partialFinancial);

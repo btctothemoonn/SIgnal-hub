@@ -19,6 +19,11 @@ import {
   type StocksEarningsComparison,
 } from "./stocks-earnings-comparison.ts";
 import {
+  assessCalendarEarningsCompleteness,
+  buildCalendarYearEarnings,
+  type StocksCalendarEarningsItem,
+} from "./stocks-earnings-calendar.ts";
+import {
   getStocksMarketSnapshot,
   type StocksMarketDataProvider,
   type StocksMarketSnapshot,
@@ -81,7 +86,7 @@ const CACHE_CONFIG: Record<
     pathEnv: "STOCKS_FINANCIAL_CACHE_PATH",
     defaultFile: "stocks-financial-snapshot.json",
     maxAgeEnv: "STOCKS_FINANCIAL_CACHE_MS",
-    defaultMaxAgeMs: 4 * 60 * 60 * 1000,
+    defaultMaxAgeMs: 12 * 60 * 60 * 1000,
   },
   catalysts: {
     pathEnv: "STOCKS_CATALYST_CACHE_PATH",
@@ -161,7 +166,15 @@ export function getStocksSnapshotHealth(
   env: EnvLike = process.env,
   now = Date.now(),
 ): StocksSnapshotHealth {
-  const maxAgeMs = cacheMaxAgeMs(kind, env);
+  const configuredMaxAgeMs = cacheMaxAgeMs(kind, env);
+  const maxAgeMs =
+    kind === "financial" && env.STOCKS_FINANCIAL_CACHE_MS === undefined
+      ? financialRefreshMaxAgeMs(
+          snapshot as unknown as StocksFinancialSnapshot,
+          now,
+          configuredMaxAgeMs,
+        )
+      : configuredMaxAgeMs;
   const generatedAt = snapshotTime(snapshot);
   const ageMs = generatedAt > 0 ? Math.max(0, now - generatedAt) : Number.POSITIVE_INFINITY;
   return {
@@ -169,6 +182,43 @@ export function getStocksSnapshotHealth(
     maxAgeMs,
     stale: generatedAt <= 0 || ageMs > maxAgeMs,
   };
+}
+
+function financialRefreshMaxAgeMs(
+  snapshot: StocksFinancialSnapshot,
+  now: number,
+  fallback: number,
+) {
+  const currentDay = Date.UTC(
+    new Date(now).getUTCFullYear(),
+    new Date(now).getUTCMonth(),
+    new Date(now).getUTCDate(),
+  );
+  let hasUpcomingWindow = false;
+  for (const statement of Object.values(snapshot.financials ?? {})) {
+    for (const item of statement.calendarYearEarnings ?? []) {
+      if (!item.reportDate) continue;
+      const reportTime = Date.parse(`${item.reportDate}T00:00:00Z`);
+      if (!Number.isFinite(reportTime)) continue;
+      const daysFromReport = (currentDay - reportTime) / 86_400_000;
+      if (
+        item.status === "incomplete" &&
+        daysFromReport >= 0 &&
+        daysFromReport <= 1
+      ) {
+        return 30 * 60 * 1000;
+      }
+      const daysUntilReport = -daysFromReport;
+      if (
+        item.status === "upcoming" &&
+        daysUntilReport >= 0 &&
+        daysUntilReport <= 15
+      ) {
+        hasUpcomingWindow = true;
+      }
+    }
+  }
+  return hasUpcomingWindow ? 2 * 60 * 60 * 1000 : fallback;
 }
 
 function withCacheRefreshError<T extends CacheableStocksSnapshot>(
@@ -286,8 +336,40 @@ function normalizeEarningsComparison(
   };
 }
 
+function normalizeCalendarEarningsItem(
+  item: StocksCalendarEarningsItem | null | undefined,
+) {
+  if (!item) return null;
+  const comparison = normalizeEarningsComparison(item);
+  if (!comparison) return null;
+  const status =
+    item.status === "upcoming" ||
+    item.status === "reported" ||
+    item.status === "incomplete"
+      ? item.status
+      : "incomplete";
+  const normalized: StocksCalendarEarningsItem = {
+    ...comparison,
+    status,
+    reportDateSource: item.reportDateSource ?? null,
+    companyGuidance: item.companyGuidance ?? null,
+    completeness: {
+      complete: false,
+      missing: [],
+      attemptedProviders: [
+        ...new Set(item.completeness?.attemptedProviders ?? [item.provider]),
+      ],
+    },
+  };
+  return {
+    ...normalized,
+    completeness: assessCalendarEarningsCompleteness(normalized),
+  };
+}
+
 function normalizeStocksFinancialStatement(
   statement: StocksFinancialStatement,
+  now = new Date(),
 ) {
   return {
     ...statement,
@@ -303,18 +385,31 @@ function normalizeStocksFinancialStatement(
               (item): item is StocksEarningsComparison => item !== null,
             ),
         }),
+    ...(statement.calendarYearEarnings === undefined
+      ? {}
+      : {
+          calendarYearEarnings: buildCalendarYearEarnings({
+            now,
+            comparisons: statement.calendarYearEarnings
+              .map((item) => normalizeCalendarEarningsItem(item))
+              .filter(
+                (item): item is StocksCalendarEarningsItem => item !== null,
+              ),
+          }),
+        }),
   };
 }
 
 function normalizeStocksFinancialSnapshot(
   snapshot: StocksFinancialSnapshot,
+  now = new Date(),
 ) {
   const normalized = {
     ...snapshot,
     financials: Object.fromEntries(
       Object.entries(snapshot.financials).map(([ticker, statement]) => [
         ticker,
-        normalizeStocksFinancialStatement(statement),
+        normalizeStocksFinancialStatement(statement, now),
       ]),
     ),
   };
@@ -322,6 +417,64 @@ function normalizeStocksFinancialSnapshot(
     snapshot: normalized,
     changed: JSON.stringify(snapshot) !== JSON.stringify(normalized),
   };
+}
+
+function mergeCalendarEarningsItems(
+  previous: StocksCalendarEarningsItem[] | undefined,
+  next: StocksCalendarEarningsItem[] | undefined,
+  now: Date,
+) {
+  const priorItems = (previous ?? [])
+    .map((item) => normalizeCalendarEarningsItem(item))
+    .filter((item): item is StocksCalendarEarningsItem => item !== null);
+  const nextItems = (next ?? [])
+    .map((item) => normalizeCalendarEarningsItem(item))
+    .filter((item): item is StocksCalendarEarningsItem => item !== null);
+  const priorByPeriod = new Map(
+    priorItems.map((item) => [`${item.ticker}-${item.fiscalYear}-${item.quarter}`, item]),
+  );
+  const merged: StocksCalendarEarningsItem[] = [];
+
+  for (const item of nextItems) {
+    const key = `${item.ticker}-${item.fiscalYear}-${item.quarter}`;
+    const prior = priorByPeriod.get(key);
+    if (!prior) {
+      merged.push(item);
+      continue;
+    }
+    const comparison = mergeEarningsComparison(prior, item) ?? item;
+    const status = item.status === "upcoming" ? "upcoming" : "reported";
+    const combined: StocksCalendarEarningsItem = {
+      ...comparison,
+      status,
+      reportDateSource: item.reportDateSource ?? prior.reportDateSource,
+      companyGuidance: item.companyGuidance ?? prior.companyGuidance,
+      completeness: {
+        complete: false,
+        missing: [],
+        attemptedProviders: [
+          ...new Set([
+            ...prior.completeness.attemptedProviders,
+            ...item.completeness.attemptedProviders,
+          ]),
+        ],
+      },
+    };
+    const completeness = assessCalendarEarningsCompleteness(combined);
+    merged.push({
+      ...combined,
+      status:
+        status === "upcoming"
+          ? "upcoming"
+          : completeness.complete
+            ? "reported"
+            : "incomplete",
+      completeness,
+    });
+    priorByPeriod.delete(key);
+  }
+  merged.push(...priorByPeriod.values());
+  return buildCalendarYearEarnings({ now, comparisons: merged });
 }
 
 function mergeEarningsComparison(
@@ -392,8 +545,9 @@ function mergeEarningsComparison(
 function mergeFinancialStatement(
   previous: StocksFinancialStatement | undefined,
   next: StocksFinancialStatement,
+  now: Date,
 ): StocksFinancialStatement {
-  if (!previous) return next;
+  if (!previous) return normalizeStocksFinancialStatement(next, now);
   const latestEarnings = mergeEarningsComparison(
     previous.latestEarnings,
     next.latestEarnings,
@@ -446,6 +600,11 @@ function mergeFinancialStatement(
           Date.parse(right.fiscalDateEnding) - Date.parse(left.fiscalDateEnding),
       )
       .slice(0, 8),
+    calendarYearEarnings: mergeCalendarEarningsItems(
+      previous.calendarYearEarnings,
+      next.calendarYearEarnings,
+      now,
+    ),
     earningsInsight:
       (consensusRegressed ? previous.earningsInsight : next.earningsInsight) ??
       (latestEarnings &&
@@ -459,13 +618,18 @@ function mergeFinancialStatement(
 export function preserveSuccessfulFinancialEntries(
   previous: StocksFinancialSnapshot | null,
   next: StocksFinancialSnapshot,
+  now = new Date(next.generatedAt),
 ): StocksFinancialSnapshot {
-  if (!previous) return next;
+  const effectiveNow = Number.isFinite(now.getTime()) ? now : new Date();
+  if (!previous) {
+    return normalizeStocksFinancialSnapshot(next, effectiveNow).snapshot;
+  }
   const financials = { ...previous.financials };
   for (const [ticker, statement] of Object.entries(next.financials)) {
     financials[ticker] = mergeFinancialStatement(
       previous.financials[ticker],
       statement,
+      effectiveNow,
     );
   }
   return { ...next, financials };
@@ -523,8 +687,6 @@ export async function readStocksSnapshotCache<
   env?: EnvLike;
   allowStale?: boolean;
 }): Promise<T | null> {
-  const maxAgeMs = cacheMaxAgeMs(kind, env);
-  if (maxAgeMs <= 0 && !allowStale) return null;
   try {
     const raw = await readFile(getStocksSnapshotCachePath(kind, env), "utf8");
     const snapshot = JSON.parse(raw) as T;
@@ -532,8 +694,8 @@ export async function readStocksSnapshotCache<
     if (!snapshot.generatedAt || !snapshot.source || !snapshot.provider) {
       return null;
     }
-    const ageMs = Date.now() - snapshotTime(snapshot);
-    if (!allowStale && ageMs > maxAgeMs) return null;
+    const health = getStocksSnapshotHealth(kind, snapshot, env, Date.now());
+    if (!allowStale && health.stale) return null;
     if (kind !== "financial") return snapshot;
     const migration = normalizeStocksFinancialSnapshot(
       snapshot as unknown as StocksFinancialSnapshot,
