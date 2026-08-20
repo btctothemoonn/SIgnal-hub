@@ -20,8 +20,9 @@ type CacheValue = {
   errors: string[];
 };
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_TIMEOUT_MS = 20_000;
+const SUCCESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const FAILURE_CACHE_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 55_000;
 const memoryCache = new Map<string, CacheValue>();
 
 export function clearMiniMaxEarningsSearchMemoryCacheForTests() {
@@ -106,6 +107,14 @@ function getTextBaseUrl(env: EnvLike, searchHost: string) {
 function positiveInt(value: string | undefined, fallback: number, max: number) {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+
+export function getMiniMaxEarningsSearchTimeoutMs(env: EnvLike = process.env) {
+  return positiveInt(
+    env.STOCKS_EARNINGS_MINIMAX_TIMEOUT_MS,
+    DEFAULT_TIMEOUT_MS,
+    60_000,
+  );
 }
 
 function incompleteComparison(comparison: StocksEarningsComparison, now: Date) {
@@ -435,11 +444,7 @@ export async function fetchMiniMaxEarningsCandidates({
   const cached = await readCache(filePath, key, now.getTime());
   if (cached) return { candidates: cached.candidates, errors: cached.errors };
 
-  const timeoutMs = positiveInt(
-    env.STOCKS_EARNINGS_MINIMAX_TIMEOUT_MS,
-    DEFAULT_TIMEOUT_MS,
-    60_000,
-  );
+  const timeoutMs = getMiniMaxEarningsSearchTimeoutMs(env);
   const searchHost = getSearchHost(env);
   const errors: string[] = [];
   const hits: SearchHit[] = [];
@@ -495,7 +500,9 @@ export async function fetchMiniMaxEarningsCandidates({
   }
 
   const value: CacheValue = {
-    expiresAt: now.getTime() + CACHE_TTL_MS,
+    expiresAt:
+      now.getTime() +
+      (candidates.length > 0 ? SUCCESS_CACHE_TTL_MS : FAILURE_CACHE_TTL_MS),
     candidates,
     errors,
   };

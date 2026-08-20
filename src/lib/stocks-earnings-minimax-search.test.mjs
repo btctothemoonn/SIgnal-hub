@@ -5,7 +5,16 @@ import { tmpdir } from "node:os";
 import {
   clearMiniMaxEarningsSearchMemoryCacheForTests,
   fetchMiniMaxEarningsCandidates,
+  getMiniMaxEarningsSearchTimeoutMs,
 } from "./stocks-earnings-minimax-search.ts";
+
+assert.equal(getMiniMaxEarningsSearchTimeoutMs({}), 55_000);
+assert.equal(
+  getMiniMaxEarningsSearchTimeoutMs({
+    STOCKS_EARNINGS_MINIMAX_TIMEOUT_MS: "90000",
+  }),
+  60_000,
+);
 
 const stock = {
   ticker: "NVDA",
