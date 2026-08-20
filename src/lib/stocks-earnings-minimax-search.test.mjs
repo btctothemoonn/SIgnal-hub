@@ -200,9 +200,105 @@ try {
             }),
     });
     assert.deepEqual(invalid.candidates, []);
-    assert.equal(invalid.errors.some((error) => error.includes("usable sourced values")), true);
+    assert.equal(
+      invalid.errors.some((error) => error.includes("usable sourced values")),
+      true,
+    );
   } finally {
     await rm(invalidSourceDir, { recursive: true, force: true });
+  }
+
+  clearMiniMaxEarningsSearchMemoryCacheForTests();
+  const boundedInputDir = await mkdtemp(
+    join(tmpdir(), "signal-hub-minimax-bounded-input-"),
+  );
+  try {
+    let extractionHits = [];
+    await fetchMiniMaxEarningsCandidates({
+      stock,
+      comparisons,
+      now: new Date("2026-08-20T00:00:00.000Z"),
+      cacheDir: boundedInputDir,
+      env: {
+        MINIMAX_API_KEY: "sk-cp-test",
+        AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+      },
+      fetchImpl: async (url, init) => {
+        if (String(url).endsWith("/v1/coding_plan/search")) {
+          const query = JSON.parse(String(init?.body)).q;
+          const quarter = query.includes("Q2") ? "Q2" : "Q1";
+          return Response.json({
+            organic: Array.from({ length: 7 }, (_, index) => ({
+              title:
+                index === 6
+                  ? `NVIDIA fiscal 2027 ${quarter} revenue and net income estimates`
+                  : `NVIDIA general article ${quarter} ${index}`,
+              link: `https://finance.example.com/${quarter.toLowerCase()}-${index}`,
+              snippet:
+                index === 6
+                  ? `${quarter} fiscal 2027 revenue consensus is $93.63 billion and net income consensus is $51.20 billion.`
+                  : `${quarter} background ${index} ${"x".repeat(3_000)}`,
+              date: "2026-08-20",
+            })),
+            base_resp: { status_code: 0, status_msg: "success" },
+          });
+        }
+        const body = JSON.parse(String(init?.body));
+        const marker = "\nSEARCH_RESULTS=";
+        const prompt = body.messages[1].content;
+        extractionHits = JSON.parse(
+          prompt.slice(prompt.lastIndexOf(marker) + marker.length),
+        );
+        return Response.json({
+          choices: [{ message: { content: '{"periods":[]}' } }],
+        });
+      },
+    });
+    assert.equal(extractionHits.length <= 6, true);
+    assert.equal(extractionHits.every((hit) => hit.snippet.length <= 1_800), true);
+    assert.equal(
+      extractionHits.some((hit) => hit.link.endsWith("/q2-6")),
+      true,
+    );
+    assert.equal(
+      extractionHits.some((hit) => hit.link.endsWith("/q1-6")),
+      true,
+    );
+  } finally {
+    await rm(boundedInputDir, { recursive: true, force: true });
+  }
+
+  clearMiniMaxEarningsSearchMemoryCacheForTests();
+  const reasoningDir = await mkdtemp(
+    join(tmpdir(), "signal-hub-minimax-reasoning-"),
+  );
+  try {
+    const reasoning = await fetchMiniMaxEarningsCandidates({
+      stock,
+      comparisons,
+      now: new Date("2026-08-20T00:00:00.000Z"),
+      cacheDir: reasoningDir,
+      env: {
+        MINIMAX_API_KEY: "sk-cp-test",
+        AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+      },
+      fetchImpl: async (url) =>
+        String(url).endsWith("/v1/coding_plan/search")
+          ? Response.json(searchPayload)
+          : Response.json({
+              choices: [
+                {
+                  message: {
+                    content: `<think>Check every cited field.</think>\n\`\`\`json\n${extractionPayload.choices[0].message.content}\n\`\`\``,
+                  },
+                },
+              ],
+            }),
+    });
+    assert.equal(reasoning.candidates.length, 1);
+    assert.equal(reasoning.candidates[0].revenueEstimate, 93_630_000_000);
+  } finally {
+    await rm(reasoningDir, { recursive: true, force: true });
   }
 
   clearMiniMaxEarningsSearchMemoryCacheForTests();

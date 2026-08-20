@@ -23,6 +23,8 @@ type CacheValue = {
 const SUCCESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 55_000;
+const MAX_HITS_PER_TARGET = 3;
+const MAX_SNIPPET_CHARS = 1_800;
 const memoryCache = new Map<string, CacheValue>();
 
 export function clearMiniMaxEarningsSearchMemoryCacheForTests() {
@@ -257,14 +259,64 @@ async function requestSearch(input: {
     .filter((item) => /^https:\/\//i.test(item.link) && Boolean(item.snippet));
 }
 
+function searchHitScore(
+  hit: SearchHit,
+  target: StocksEarningsComparison,
+  index: number,
+) {
+  const text = `${hit.title} ${hit.snippet}`.toLowerCase();
+  const quarterTerms =
+    {
+      Q1: ["q1", "first quarter", "第一季度", "一季度"],
+      Q2: ["q2", "second quarter", "第二季度", "二季度"],
+      Q3: ["q3", "third quarter", "第三季度", "三季度"],
+      Q4: ["q4", "fourth quarter", "第四季度", "四季度"],
+    }[target.quarter] ?? [target.quarter.toLowerCase()];
+  let score = -index * 0.01;
+  if (text.includes(String(target.fiscalYear))) score += 8;
+  if (quarterTerms.some((term) => text.includes(term))) score += 10;
+  if (/revenue|sales|营收|收入/.test(text)) score += 4;
+  if (/net income|net profit|净利润|净利/.test(text)) score += 4;
+  if (/consensus|estimate|expected|预期|共识/.test(text)) score += 5;
+  if (/actual|reported|公布|实际|财报/.test(text)) score += 2;
+  if (/\$?\d+(?:\.\d+)?\s*(?:million|billion|m|b|百万|亿)/i.test(text)) {
+    score += 3;
+  }
+  return score;
+}
+
+function selectSearchHits(
+  hits: SearchHit[],
+  target: StocksEarningsComparison,
+) {
+  return hits
+    .map((hit, index) => ({ hit, score: searchHitScore(hit, target, index) }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, MAX_HITS_PER_TARGET)
+    .map(({ hit }) => ({
+      ...hit,
+      snippet: hit.snippet.slice(0, MAX_SNIPPET_CHARS),
+    }));
+}
+
 function parseCompletionContent(payload: JsonRecord) {
   const choice = asRecord(asArray(payload.choices)[0]);
   const message = asRecord(choice.message);
   const content = stringValue(message.content)
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/&lt;think&gt;[\s\S]*?&lt;\/think&gt;/gi, "")
+    .trim()
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
+    .replace(/\s*```$/, "")
+    .trim();
   if (!content) throw new Error("MiniMax earnings extraction returned empty content");
-  return asRecord(JSON.parse(content));
+  const jsonStart = content.indexOf("{");
+  const jsonEnd = content.lastIndexOf("}");
+  const json =
+    jsonStart >= 0 && jsonEnd > jsonStart
+      ? content.slice(jsonStart, jsonEnd + 1)
+      : content;
+  return asRecord(JSON.parse(json));
 }
 
 async function requestExtraction(input: {
@@ -451,13 +503,16 @@ export async function fetchMiniMaxEarningsCandidates({
   for (const target of targets) {
     try {
       hits.push(
-        ...(await requestSearch({
-          query: searchQuery(stock, target),
-          apiKey,
-          searchHost,
-          fetchImpl,
-          timeoutMs,
-        })),
+        ...selectSearchHits(
+          await requestSearch({
+            query: searchQuery(stock, target),
+            apiKey,
+            searchHost,
+            fetchImpl,
+            timeoutMs,
+          }),
+          target,
+        ),
       );
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "MiniMax search failed");
