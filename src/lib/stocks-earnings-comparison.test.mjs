@@ -3,9 +3,33 @@ import {
   areStocksEarningsValuesComparable,
   calculateComparisonMetric,
   mergeEarningsMetricValues,
+  normalizeStocksEarningsValueProvenance,
   parseFmpQuarterlyEarnings,
   parseFmpQuarterlyEarningsHistory,
 } from "./stocks-earnings-comparison.ts";
+
+assert.deepEqual(
+  normalizeStocksEarningsValueProvenance({
+    provider: "official-ir",
+    method: "direct",
+    accountingBasis: "US GAAP",
+    currency: "usd",
+    unit: "monetary",
+    scale: "raw",
+    metric: "revenue",
+    semantics: "statement-actual",
+  }),
+  {
+    provider: "official-ir",
+    method: "direct",
+    accountingBasis: "US GAAP",
+    currency: "USD",
+    unit: "monetary",
+    scale: "raw",
+    metric: "revenue",
+    semantics: "statement-actual",
+  },
+);
 
 const generatedAt = "2026-08-14T00:00:00.000Z";
 const nbisPayload = {

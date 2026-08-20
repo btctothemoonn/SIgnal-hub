@@ -5,7 +5,23 @@ export type StocksEarningsProvider =
   | "finnhub"
   | "eodhd"
   | "alpha-vantage"
-  | "yahoo";
+  | "yahoo"
+  | "official-ir"
+  | "sec"
+  | "earnings-labs"
+  | "chartmill";
+
+const STOCKS_EARNINGS_PROVIDERS: readonly StocksEarningsProvider[] = [
+  "fmp",
+  "finnhub",
+  "eodhd",
+  "alpha-vantage",
+  "yahoo",
+  "official-ir",
+  "sec",
+  "earnings-labs",
+  "chartmill",
+];
 
 export type StocksEarningsValueProvenance = {
   provider: StocksEarningsProvider;
@@ -24,9 +40,7 @@ export const LEGACY_UNKNOWN_ACCOUNTING_BASIS =
 function isStocksEarningsProvider(
   value: unknown,
 ): value is StocksEarningsProvider {
-  return ["fmp", "finnhub", "eodhd", "alpha-vantage", "yahoo"].includes(
-    value as StocksEarningsProvider,
-  );
+  return STOCKS_EARNINGS_PROVIDERS.includes(value as StocksEarningsProvider);
 }
 
 function isStocksEarningsValueMethod(
@@ -111,8 +125,8 @@ export type StocksEarningsComparison = {
   reportDate: string | null;
   reportTiming: "before-market" | "after-market" | "unknown";
   currency: string;
-  accountingBasis: "FMP standardized";
-  provider: "fmp";
+  accountingBasis: string;
+  provider: StocksEarningsProvider;
   generatedAt: string;
   revenue: StocksEarningsMetricComparison;
   netIncome: StocksEarningsMetricComparison;
