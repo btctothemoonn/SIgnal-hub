@@ -355,9 +355,11 @@ function parseChartmillHtml(input: {
   });
   candidate.revenueEstimate = parseScaledNumber(labels.get("revenue consensus") ?? "");
   candidate.epsEstimate = parseScaledNumber(labels.get("eps consensus") ?? "");
+  candidate.dilutedShares = parseScaledNumber(labels.get("diluted shares") ?? "");
   candidate.fieldSources.reportDate = ref;
   if (candidate.revenueEstimate !== null) candidate.fieldSources.revenueEstimate = ref;
   if (candidate.epsEstimate !== null) candidate.fieldSources.epsEstimate = ref;
+  if (candidate.dilutedShares !== null) candidate.fieldSources.dilutedShares = ref;
   return candidate.revenueEstimate !== null || candidate.epsEstimate !== null
     ? [candidate]
     : [];

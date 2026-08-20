@@ -405,6 +405,10 @@ const providerDefaultPolicy: Record<
   eodhd: "us-usd-contract",
   "alpha-vantage": "us-usd-contract",
   yahoo: "us-usd-contract",
+  "official-ir": "explicit-only",
+  sec: "explicit-only",
+  "earnings-labs": "explicit-only",
+  chartmill: "explicit-only",
 };
 
 function candidateNeedsUsUsdDefaults(candidate: StocksEarningsFallbackCandidate) {

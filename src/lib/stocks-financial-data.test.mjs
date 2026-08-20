@@ -89,12 +89,14 @@ const dynamicEarningsMerged = mergeStocksFinancialSnapshot(
         ...parsed,
         nextEarningsDate: "2026-07-30",
         updatedAt: "2026-07-24T12:00:00.000Z",
+        calendarYearEarnings: [],
       },
     },
   },
   new Date("2026-07-24T12:00:00.000Z"),
 );
 assert.equal(dynamicEarningsMerged[0].market.earningsStatus, "upcoming");
+assert.deepEqual(dynamicEarningsMerged[0].financialSnapshot.calendarYearEarnings, []);
 
 const fmpParsed = parseFmpFinancialStatement(
   "NVDA",

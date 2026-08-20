@@ -10,9 +10,18 @@ import { resolveEarningsStatus } from "./stocks-earnings.ts";
 import {
   calculateComparisonMetric,
   matchesStocksEarningsFiscalPeriod,
+  mergeEarningsMetricValues,
   parseFmpQuarterlyEarningsHistory,
   type StocksEarningsComparison,
+  type StocksEarningsProvider,
+  type StocksEarningsValueProvenance,
 } from "./stocks-earnings-comparison.ts";
+import {
+  assessCalendarEarningsCompleteness,
+  buildCalendarYearEarnings,
+  type StocksCalendarEarningsItem,
+  type StocksEarningsSourceRef,
+} from "./stocks-earnings-calendar.ts";
 import {
   completeStocksEarningsComparison,
   mergeStocksEarningsFallbackCandidate,
@@ -23,6 +32,10 @@ import {
   type StocksEarningsFallbackPayloadCache,
 } from "./stocks-earnings-fallback.ts";
 import type { StocksEarningsInsight } from "./stocks-earnings-insight.ts";
+import {
+  fetchPublicEarningsCandidates,
+  type StocksPublicEarningsCandidate,
+} from "./stocks-earnings-public-sources.ts";
 
 type JsonRecord = Record<string, unknown>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -37,8 +50,456 @@ export type StocksFinancialStatement = AlphaResearchFinancialSnapshot & {
   updatedAt: string;
   latestEarnings?: StocksEarningsComparison | null;
   earningsHistory?: StocksEarningsComparison[];
+  calendarYearEarnings?: StocksCalendarEarningsItem[];
   earningsInsight?: StocksEarningsInsight | null;
 };
+
+function earningsDateDistanceDays(left: string, right: string) {
+  const leftTime = Date.parse(`${left}T00:00:00Z`);
+  const rightTime = Date.parse(`${right}T00:00:00Z`);
+  if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return Infinity;
+  return Math.abs(leftTime - rightTime) / 86_400_000;
+}
+
+function candidatePeriodKey(
+  value: Pick<StocksPublicEarningsCandidate, "ticker" | "fiscalYear" | "quarter">,
+) {
+  return `${value.ticker.trim().toUpperCase()}-${value.fiscalYear}-${value.quarter}`;
+}
+
+function providerPriority(
+  provider: StocksEarningsProvider | undefined,
+  kind: "date" | "actual" | "estimate",
+) {
+  if (!provider) return 0;
+  if (kind === "date") {
+    return {
+      "official-ir": 500,
+      sec: 450,
+      fmp: 350,
+      finnhub: 340,
+      eodhd: 330,
+      "alpha-vantage": 320,
+      yahoo: 310,
+      "earnings-labs": 220,
+      chartmill: 210,
+    }[provider];
+  }
+  if (kind === "actual") {
+    return {
+      "official-ir": 500,
+      sec: 490,
+      fmp: 380,
+      "alpha-vantage": 370,
+      yahoo: 360,
+      finnhub: 350,
+      eodhd: 340,
+      "earnings-labs": 220,
+      chartmill: 100,
+    }[provider];
+  }
+  return {
+    fmp: 500,
+    finnhub: 480,
+    eodhd: 470,
+    "alpha-vantage": 460,
+    yahoo: 450,
+    "earnings-labs": 300,
+    chartmill: 250,
+    "official-ir": 0,
+    sec: 0,
+  }[provider];
+}
+
+function publicFieldPriority(
+  source: StocksEarningsSourceRef | undefined,
+  kind: "date" | "actual" | "estimate",
+) {
+  return providerPriority(source?.provider, kind);
+}
+
+function mergePublicCandidates(candidates: StocksPublicEarningsCandidate[]) {
+  const merged = new Map<string, StocksPublicEarningsCandidate>();
+  for (const candidate of candidates) {
+    const key = candidatePeriodKey(candidate);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, {
+        ...candidate,
+        fieldSources: { ...candidate.fieldSources },
+      });
+      continue;
+    }
+    if (
+      candidate.fiscalDateEnding &&
+      current.fiscalDateEnding &&
+      earningsDateDistanceDays(candidate.fiscalDateEnding, current.fiscalDateEnding) > 7
+    ) {
+      continue;
+    }
+    if (!current.fiscalDateEnding && candidate.fiscalDateEnding) {
+      current.fiscalDateEnding = candidate.fiscalDateEnding;
+    }
+    const candidateDatePriority = publicFieldPriority(
+      candidate.fieldSources.reportDate,
+      "date",
+    );
+    const currentDatePriority = publicFieldPriority(
+      current.fieldSources.reportDate,
+      "date",
+    );
+    if (candidate.reportDate && candidateDatePriority > currentDatePriority) {
+      current.reportDate = candidate.reportDate;
+      current.reportTiming = candidate.reportTiming;
+      current.fieldSources.reportDate = candidate.fieldSources.reportDate;
+    } else if (
+      current.reportTiming === "unknown" &&
+      candidate.reportTiming !== "unknown"
+    ) {
+      current.reportTiming = candidate.reportTiming;
+    }
+
+    const fields: Array<{
+      field:
+        | "revenueEstimate"
+        | "revenueActual"
+        | "epsEstimate"
+        | "epsActual"
+        | "dilutedShares"
+        | "netIncomeActual";
+      sourceField:
+        | "revenueEstimate"
+        | "revenueActual"
+        | "epsEstimate"
+        | "epsActual"
+        | "dilutedShares"
+        | "netIncomeActual";
+      kind: "actual" | "estimate";
+    }> = [
+      { field: "revenueEstimate", sourceField: "revenueEstimate", kind: "estimate" },
+      { field: "revenueActual", sourceField: "revenueActual", kind: "actual" },
+      { field: "epsEstimate", sourceField: "epsEstimate", kind: "estimate" },
+      { field: "epsActual", sourceField: "epsActual", kind: "actual" },
+      { field: "dilutedShares", sourceField: "dilutedShares", kind: "actual" },
+      { field: "netIncomeActual", sourceField: "netIncomeActual", kind: "actual" },
+    ];
+    for (const { field, sourceField, kind } of fields) {
+      const nextValue = candidate[field];
+      const nextSource = candidate.fieldSources[sourceField];
+      if (
+        nextValue !== null &&
+        (current[field] === null ||
+          publicFieldPriority(nextSource, kind) >
+            publicFieldPriority(current.fieldSources[sourceField], kind))
+      ) {
+        current[field] = nextValue;
+        current.fieldSources[sourceField] = nextSource;
+      }
+    }
+    if (
+      candidate.companyGuidance &&
+      (!current.companyGuidance ||
+        publicFieldPriority(candidate.fieldSources.companyGuidance, "date") >
+          publicFieldPriority(current.fieldSources.companyGuidance, "date"))
+    ) {
+      current.companyGuidance = candidate.companyGuidance;
+      current.fieldSources.companyGuidance = candidate.fieldSources.companyGuidance;
+    }
+  }
+  return [...merged.values()];
+}
+
+function valueProvenance(
+  source: StocksEarningsSourceRef | undefined,
+  input: {
+    method: StocksEarningsValueProvenance["method"];
+    accountingBasis: string;
+    currency: string;
+    metric: NonNullable<StocksEarningsValueProvenance["metric"]>;
+    semantics: NonNullable<StocksEarningsValueProvenance["semantics"]>;
+  },
+): StocksEarningsValueProvenance | undefined {
+  if (!source) return undefined;
+  return {
+    provider: source.provider,
+    method: input.method,
+    accountingBasis: input.accountingBasis,
+    currency: input.currency,
+    unit: "monetary",
+    scale: "raw",
+    metric: input.metric,
+    semantics: input.semantics,
+    url: source.url ?? undefined,
+    fetchedAt: source.fetchedAt,
+    confidence: source.confidence,
+  };
+}
+
+function comparisonSourceRef(
+  comparison: StocksEarningsComparison,
+): StocksEarningsSourceRef {
+  return {
+    provider: comparison.provider,
+    url: null,
+    fetchedAt: comparison.generatedAt,
+    confidence: "structured",
+  };
+}
+
+function publicCandidateComparison(
+  candidate: StocksPublicEarningsCandidate,
+  generatedAt: string,
+) {
+  const reportSource = candidate.fieldSources.reportDate;
+  const baseProvider =
+    reportSource?.provider ??
+    candidate.fieldSources.revenueEstimate?.provider ??
+    candidate.fieldSources.revenueActual?.provider ??
+    "chartmill";
+  const accountingBasis =
+    baseProvider === "sec" || baseProvider === "official-ir"
+      ? "Official filing / US GAAP"
+      : "Public consensus page";
+  const netIncomeActual =
+    candidate.netIncomeActual ??
+    (candidate.epsActual !== null && candidate.dilutedShares !== null
+      ? candidate.epsActual * candidate.dilutedShares
+      : null);
+  const netIncomeEstimate =
+    candidate.epsEstimate !== null && candidate.dilutedShares !== null
+      ? candidate.epsEstimate * candidate.dilutedShares
+      : null;
+  return {
+    ticker: candidate.ticker,
+    fiscalYear: candidate.fiscalYear,
+    quarter: candidate.quarter,
+    fiscalDateEnding: candidate.fiscalDateEnding,
+    reportDate: candidate.reportDate || null,
+    reportTiming: candidate.reportTiming,
+    currency: candidate.currency,
+    accountingBasis,
+    provider: baseProvider,
+    generatedAt,
+    revenue: calculateComparisonMetric(
+      candidate.revenueActual,
+      candidate.revenueEstimate,
+      null,
+      {
+        actualSource: valueProvenance(candidate.fieldSources.revenueActual, {
+          method: "direct",
+          accountingBasis,
+          currency: candidate.currency,
+          metric: "revenue",
+          semantics: "statement-actual",
+        }),
+        estimateSource: valueProvenance(candidate.fieldSources.revenueEstimate, {
+          method: "direct",
+          accountingBasis,
+          currency: candidate.currency,
+          metric: "revenue",
+          semantics: "consensus-estimate",
+        }),
+      },
+    ),
+    netIncome: calculateComparisonMetric(
+      netIncomeActual,
+      netIncomeEstimate,
+      null,
+      {
+        actualSource: valueProvenance(
+          candidate.netIncomeActual !== null
+            ? candidate.fieldSources.netIncomeActual
+            : candidate.fieldSources.epsActual,
+          {
+            method:
+              candidate.netIncomeActual !== null
+                ? "direct"
+                : "eps-times-diluted-shares",
+            accountingBasis,
+            currency: candidate.currency,
+            metric: "net-income",
+            semantics: "statement-actual",
+          },
+        ),
+        estimateSource: valueProvenance(candidate.fieldSources.epsEstimate, {
+          method: "eps-times-diluted-shares",
+          accountingBasis,
+          currency: candidate.currency,
+          metric: "net-income",
+          semantics: "consensus-estimate",
+        }),
+      },
+    ),
+  } satisfies StocksEarningsComparison;
+}
+
+function metricValuePriority(
+  source: StocksEarningsValueProvenance | undefined,
+  kind: "actual" | "estimate",
+) {
+  return providerPriority(source?.provider, kind);
+}
+
+function mergeComparisonWithPublic(
+  comparison: StocksEarningsComparison,
+  candidate: StocksPublicEarningsCandidate,
+  generatedAt: string,
+) {
+  const patch = publicCandidateComparison(candidate, generatedAt);
+  const mergeMetric = (
+    current: StocksEarningsComparison["revenue"],
+    next: StocksEarningsComparison["revenue"],
+  ) =>
+    mergeEarningsMetricValues(current, {
+      estimate:
+        next.estimate !== null &&
+        (current.estimate === null ||
+          metricValuePriority(next.estimateSource, "estimate") >
+            metricValuePriority(current.estimateSource, "estimate"))
+          ? next.estimate
+          : undefined,
+      estimateSource:
+        next.estimate !== null &&
+        (current.estimate === null ||
+          metricValuePriority(next.estimateSource, "estimate") >
+            metricValuePriority(current.estimateSource, "estimate"))
+          ? next.estimateSource
+          : undefined,
+      actual:
+        next.actual !== null &&
+        (current.actual === null ||
+          metricValuePriority(next.actualSource, "actual") >
+            metricValuePriority(current.actualSource, "actual"))
+          ? next.actual
+          : undefined,
+      actualSource:
+        next.actual !== null &&
+        (current.actual === null ||
+          metricValuePriority(next.actualSource, "actual") >
+            metricValuePriority(current.actualSource, "actual"))
+          ? next.actualSource
+          : undefined,
+    });
+  const currentDateSource = comparisonSourceRef(comparison);
+  const nextDateSource = candidate.fieldSources.reportDate;
+  const usePublicDate =
+    Boolean(candidate.reportDate) &&
+    publicFieldPriority(nextDateSource, "date") >
+      publicFieldPriority(currentDateSource, "date");
+  return {
+    ...comparison,
+    fiscalDateEnding: comparison.fiscalDateEnding || candidate.fiscalDateEnding,
+    reportDate: usePublicDate ? candidate.reportDate : comparison.reportDate,
+    reportTiming: usePublicDate
+      ? candidate.reportTiming
+      : comparison.reportTiming === "unknown"
+        ? candidate.reportTiming
+        : comparison.reportTiming,
+    generatedAt,
+    revenue: mergeMetric(comparison.revenue, patch.revenue),
+    netIncome: mergeMetric(comparison.netIncome, patch.netIncome),
+  } satisfies StocksEarningsComparison;
+}
+
+function attemptedProvidersFromErrors(errors: string[]) {
+  const providers: StocksEarningsProvider[] = [];
+  const supported: StocksEarningsProvider[] = [
+    "official-ir",
+    "sec",
+    "earnings-labs",
+    "chartmill",
+  ];
+  for (const error of errors) {
+    const provider = supported.find((value) => error.startsWith(value) || error.startsWith(value.toUpperCase()));
+    if (provider) providers.push(provider);
+  }
+  return providers;
+}
+
+export async function completeCalendarYearEarnings({
+  stock,
+  apiHistory,
+  now,
+  fetchImpl = fetch,
+  env = process.env,
+}: {
+  stock: AlphaResearchStock;
+  apiHistory: StocksEarningsComparison[];
+  now: Date;
+  fetchImpl?: typeof fetch;
+  env?: EnvLike;
+}) {
+  const publicResult = await fetchPublicEarningsCandidates({
+    stock,
+    now,
+    fetchImpl,
+    env,
+  });
+  const publicCandidates = mergePublicCandidates(publicResult.candidates);
+  const byPeriod = new Map<string, StocksEarningsComparison>();
+  for (const comparison of apiHistory) {
+    byPeriod.set(
+      `${comparison.ticker.trim().toUpperCase()}-${comparison.fiscalYear}-${comparison.quarter}`,
+      comparison,
+    );
+  }
+  for (const candidate of publicCandidates) {
+    const key = candidatePeriodKey(candidate);
+    const existing = byPeriod.get(key);
+    if (
+      existing &&
+      existing.fiscalDateEnding &&
+      candidate.fiscalDateEnding &&
+      earningsDateDistanceDays(existing.fiscalDateEnding, candidate.fiscalDateEnding) > 7
+    ) {
+      continue;
+    }
+    byPeriod.set(
+      key,
+      existing
+        ? mergeComparisonWithPublic(existing, candidate, now.toISOString())
+        : publicCandidateComparison(candidate, now.toISOString()),
+    );
+  }
+
+  const failedProviders = attemptedProvidersFromErrors(publicResult.errors);
+  const items = [...byPeriod.values()].map((comparison) => {
+    const candidate = publicCandidates.find(
+      (value) => candidatePeriodKey(value) === `${comparison.ticker.trim().toUpperCase()}-${comparison.fiscalYear}-${comparison.quarter}`,
+    );
+    const reportDateSource =
+      candidate?.fieldSources.reportDate ?? comparisonSourceRef(comparison);
+    const attemptedProviders = [
+      comparison.provider,
+      ...Object.values(candidate?.fieldSources ?? {}).map((source) => source.provider),
+      ...failedProviders,
+    ];
+    const status =
+      comparison.reportDate &&
+      Date.parse(`${comparison.reportDate}T00:00:00Z`) > now.getTime()
+        ? "upcoming"
+        : "reported";
+    const item: StocksCalendarEarningsItem = {
+      ...comparison,
+      status,
+      reportDateSource,
+      companyGuidance: candidate?.companyGuidance ?? null,
+      completeness: {
+        complete: false,
+        missing: [],
+        attemptedProviders: [...new Set(attemptedProviders)],
+      },
+    };
+    return {
+      ...item,
+      completeness: assessCalendarEarningsCompleteness(item),
+    };
+  });
+  return {
+    items: buildCalendarYearEarnings({ now, comparisons: items }),
+    errors: publicResult.errors,
+  };
+}
 
 export type StocksFinancialSnapshot = {
   generatedAt: string;
@@ -1211,21 +1672,43 @@ export async function fetchFmpStocksFinancialSnapshot({
               completedHistory.find((comparison) =>
                 sameEarningsPeriod(comparison, latestEarnings),
               ) ?? latestEarnings;
+            const calendar = await completeCalendarYearEarnings({
+              stock,
+              apiHistory: completedHistory,
+              now: new Date(generatedAt),
+              fetchImpl: fetchImpl as typeof fetch,
+              env,
+            });
+            errors.push(
+              ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),
+            );
             return [
               stock.ticker,
               {
                 ...statement,
                 latestEarnings: completedLatest,
                 earningsHistory: completedHistory,
+                calendarYearEarnings: calendar.items,
               },
             ] as const;
           }
+          const calendar = await completeCalendarYearEarnings({
+            stock,
+            apiHistory: earningsHistory,
+            now: new Date(generatedAt),
+            fetchImpl: fetchImpl as typeof fetch,
+            env,
+          });
+          errors.push(
+            ...calendar.errors.map((error) => `${stock.ticker}: ${error}`),
+          );
           return [
             stock.ticker,
             {
               ...statement,
               latestEarnings,
               earningsHistory,
+              calendarYearEarnings: calendar.items,
             },
           ] as const;
         } catch (error) {
@@ -1441,6 +1924,7 @@ export function mergeStocksFinancialSnapshot(
         updatedAt: financial.updatedAt,
         latestEarnings: financial.latestEarnings ?? null,
         earningsHistory: financial.earningsHistory ?? [],
+        calendarYearEarnings: financial.calendarYearEarnings ?? [],
         earningsInsight: financial.earningsInsight ?? null,
       },
     };

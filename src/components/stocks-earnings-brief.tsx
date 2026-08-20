@@ -14,6 +14,10 @@ const providerLabel: Record<
   eodhd: "EODHD",
   "alpha-vantage": "AV",
   yahoo: "Yahoo",
+  "official-ir": "公司 IR",
+  sec: "SEC",
+  "earnings-labs": "Earnings Labs",
+  chartmill: "ChartMill",
 };
 
 type FinancialMissingState = "waiting" | "uncovered";

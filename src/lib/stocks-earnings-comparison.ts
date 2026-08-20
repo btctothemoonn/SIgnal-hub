@@ -27,6 +27,9 @@ export type StocksEarningsValueProvenance = {
   provider: StocksEarningsProvider;
   method: "direct" | "eps-times-diluted-shares";
   accountingBasis: string;
+  url?: string;
+  fetchedAt?: string;
+  confidence?: "official" | "structured" | "public-page";
   currency?: string;
   unit?: "monetary";
   scale?: "raw" | "thousands" | "millions" | "billions";
@@ -68,6 +71,18 @@ export function normalizeStocksEarningsValueProvenance(
     method: source.method,
     accountingBasis,
   };
+  const url = stringValue(source.url ?? defaults.url);
+  if (url) normalized.url = url;
+  const fetchedAt = stringValue(source.fetchedAt ?? defaults.fetchedAt);
+  if (fetchedAt) normalized.fetchedAt = fetchedAt;
+  const confidence = source.confidence ?? defaults.confidence;
+  if (
+    confidence === "official" ||
+    confidence === "structured" ||
+    confidence === "public-page"
+  ) {
+    normalized.confidence = confidence;
+  }
   const currency = stringValue(source.currency ?? defaults.currency).toUpperCase();
   if (currency) normalized.currency = currency;
   const unit = source.unit ?? defaults.unit;

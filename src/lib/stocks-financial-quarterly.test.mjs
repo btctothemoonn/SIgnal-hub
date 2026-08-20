@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { getAlphaResearchStockByTicker } from "./alpha-research-pool.ts";
-import { fetchFmpStocksFinancialSnapshot } from "./stocks-financial-data.ts";
+import { calculateComparisonMetric } from "./stocks-earnings-comparison.ts";
+import {
+  completeCalendarYearEarnings,
+  fetchFmpStocksFinancialSnapshot,
+} from "./stocks-financial-data.ts";
 
 const nbisStock = getAlphaResearchStockByTicker("NBIS");
 assert.ok(nbisStock);
@@ -110,6 +114,8 @@ assert.equal(snapshot.financials.NBIS.latestEarnings.revenue.actual, 582_300_000
 assert.equal(snapshot.financials.NBIS.latestEarnings.revenue.estimate, 573_937_500);
 assert.equal(snapshot.financials.NBIS.latestEarnings.netIncome.surprise, 83_400_000);
 assert.equal(snapshot.financials.NBIS.earningsHistory.length, 2);
+assert.ok(snapshot.financials.NBIS.calendarYearEarnings.length >= 1);
+assert.equal(snapshot.financials.NBIS.calendarYearEarnings[0].quarter, "Q2");
 
 let incomeAttempts = 0;
 const retried = await fetchFmpStocksFinancialSnapshot({
@@ -426,5 +432,132 @@ await fetchFmpStocksFinancialSnapshot({
 assert.equal(boundedFinnhubUrls.length, 1);
 assert.equal(boundedFinnhubUrls[0].searchParams.get("from"), "2026-01-14");
 assert.equal(boundedFinnhubUrls[0].searchParams.get("to"), "2027-04-30");
+
+const nvdaStock = getAlphaResearchStockByTicker("NVDA");
+assert.ok(nvdaStock);
+const q1ApiHistory = {
+  ticker: "NVDA",
+  fiscalYear: 2027,
+  quarter: "Q1",
+  fiscalDateEnding: "2026-04-26",
+  reportDate: "2026-05-20",
+  reportTiming: "after-market",
+  currency: "USD",
+  accountingBasis: "FMP standardized",
+  provider: "fmp",
+  generatedAt: "2026-08-15T00:00:00.000Z",
+  revenue: calculateComparisonMetric(81_610_000_000, null, null),
+  netIncome: calculateComparisonMetric(null, null, null),
+};
+
+const nvdaOfficialIr = `
+  <script type="application/ld+json">
+    {"@type":"Event","name":"NVIDIA FY2027 Q2 Financial Results","startDate":"2026-08-26T14:00:00-07:00"}
+  </script>
+  <body data-report-timing="after-market">
+    Revenue is expected to be $45.0 billion, plus or minus 2%.
+  </body>`;
+const nvdaHistoryPage = `
+  <table><thead><tr>
+    <th>Quarter</th><th>Fiscal Date</th><th>Report Date</th>
+    <th>Revenue Estimate</th><th>Revenue Actual</th>
+    <th>EPS Estimate</th><th>EPS Actual</th>
+  </tr></thead><tbody><tr>
+    <td>FY2027 Q1</td><td>2026-04-26</td><td>2026-05-20</td>
+    <td>$78.42B</td><td>$81.61B</td><td>$0.89</td><td>$0.96</td>
+  </tr></tbody></table>`;
+const nvdaUpcomingPage = `
+  <section data-upcoming-earnings><dl>
+    <dt>Fiscal Quarter</dt><dd>FY2027 Q2</dd>
+    <dt>Fiscal Date</dt><dd>2026-07-27</dd>
+    <dt>Report Date</dt><dd>2026-08-26</dd>
+    <dt>Revenue Consensus</dt><dd>$45.85B</dd>
+    <dt>EPS Consensus</dt><dd>$1.01</dd>
+    <dt>Diluted Shares</dt><dd>24.80B</dd>
+  </dl></section>`;
+const nvdaSecFacts = {
+  facts: {
+    "us-gaap": {
+      RevenueFromContractWithCustomerExcludingAssessedTax: {
+        units: {
+          USD: [
+            {
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              val: 81_610_000_000,
+            },
+          ],
+        },
+      },
+      NetIncomeLoss: {
+        units: {
+          USD: [
+            {
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              val: 23_805_000_000,
+            },
+          ],
+        },
+      },
+      WeightedAverageNumberOfDilutedSharesOutstanding: {
+        units: {
+          shares: [
+            {
+              fy: 2027,
+              fp: "Q1",
+              form: "10-Q",
+              end: "2026-04-26",
+              filed: "2026-05-20",
+              val: 24_820_000_000,
+            },
+          ],
+        },
+      },
+    },
+  },
+};
+
+const nvdaCalendar = await completeCalendarYearEarnings({
+  stock: nvdaStock,
+  apiHistory: [q1ApiHistory],
+  now: new Date("2026-08-15T00:00:00.000Z"),
+  env: { STOCKS_SEC_USER_AGENT: "SignalHub test@example.com" },
+  fetchImpl: async (input) => {
+    const url = String(input);
+    if (url.includes("investor.nvidia.com")) return new Response(nvdaOfficialIr);
+    if (url.includes("data.sec.gov")) return Response.json(nvdaSecFacts);
+    if (url.includes("earningslabs.com")) return new Response(nvdaHistoryPage);
+    if (url.includes("chartmill.com")) return new Response(nvdaUpcomingPage);
+    throw new Error(`Unexpected NVDA public source ${url}`);
+  },
+});
+
+assert.equal(nvdaCalendar.items[0].quarter, "Q2");
+assert.equal(nvdaCalendar.items[0].status, "upcoming");
+assert.equal(nvdaCalendar.items[0].revenue.estimate, 45_850_000_000);
+assert.equal(nvdaCalendar.items[0].revenue.estimateSource.provider, "chartmill");
+assert.match(nvdaCalendar.items[0].revenue.estimateSource.url, /chartmill\.com/);
+assert.equal(nvdaCalendar.items[0].netIncome.estimate, 25_048_000_000);
+assert.equal(nvdaCalendar.items[0].revenue.actual, null);
+assert.equal(nvdaCalendar.items[0].netIncome.actual, null);
+assert.equal(nvdaCalendar.items[0].companyGuidance.revenueMid, 45_000_000_000);
+assert.notEqual(
+  nvdaCalendar.items[0].revenue.estimate,
+  nvdaCalendar.items[0].companyGuidance.revenueMid,
+);
+assert.equal(nvdaCalendar.items[1].quarter, "Q1");
+assert.equal(nvdaCalendar.items[1].completeness.complete, true);
+assert.equal(nvdaCalendar.items[1].revenue.estimate, 78_420_000_000);
+assert.equal(nvdaCalendar.items[1].revenue.actual, 81_610_000_000);
+assert.equal(nvdaCalendar.items[1].revenue.actualSource.provider, "sec");
+assert.equal(nvdaCalendar.items[1].netIncome.estimate, 22_089_800_000);
+assert.equal(nvdaCalendar.items[1].netIncome.actual, 23_805_000_000);
 
 console.log("ok - stocks FMP quarterly transport");
