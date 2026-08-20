@@ -1,4 +1,3 @@
-import { load } from "cheerio";
 import type { AlphaResearchStock } from "./alpha-research-pool.ts";
 import type {
   StocksEarningsComparison,
@@ -47,6 +46,11 @@ type CacheEntry = {
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const publicEarningsCache = new Map<string, CacheEntry>();
+
+async function loadHtml(html: string) {
+  const { load } = await import("cheerio");
+  return load(html);
+}
 
 export function clearStocksPublicEarningsCacheForTests() {
   publicEarningsCache.clear();
@@ -208,14 +212,14 @@ function parseGuidance(
   } satisfies StocksCompanyGuidance;
 }
 
-function parseOfficialIrHtml(input: {
+async function parseOfficialIrHtml(input: {
   html: string;
   ticker: string;
   currency: string;
   url: string;
   fetchedAt: string;
 }) {
-  const $ = load(input.html);
+  const $ = await loadHtml(input.html);
   const candidates: StocksPublicEarningsCandidate[] = [];
   const pageTiming = reportTiming(
     $("body").attr("data-report-timing") ?? $("body").text(),
@@ -263,14 +267,14 @@ function normalizedHeader(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function parseEarningsLabsHtml(input: {
+async function parseEarningsLabsHtml(input: {
   html: string;
   ticker: string;
   currency: string;
   url: string;
   fetchedAt: string;
 }) {
-  const $ = load(input.html);
+  const $ = await loadHtml(input.html);
   const candidates: StocksPublicEarningsCandidate[] = [];
   $("table").each((_tableIndex, table) => {
     const headers = $(table)
@@ -322,14 +326,14 @@ function parseEarningsLabsHtml(input: {
   return candidates;
 }
 
-function parseChartmillHtml(input: {
+async function parseChartmillHtml(input: {
   html: string;
   ticker: string;
   currency: string;
   url: string;
   fetchedAt: string;
 }) {
-  const $ = load(input.html);
+  const $ = await loadHtml(input.html);
   const labels = new Map<string, string>();
   $("section[data-upcoming-earnings] dt").each((_index, term) => {
     const label = normalizedHeader($(term).text());
