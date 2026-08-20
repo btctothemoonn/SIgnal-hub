@@ -8,6 +8,7 @@ import { getStocksCatalystSnapshot } from "./stocks-catalyst-source.ts";
 import type { StocksCatalystSnapshot } from "./stocks-catalyst-data.ts";
 import {
   getStocksFinancialSnapshot,
+  mergeStocksFinancialSnapshot,
   type StocksFinancialStatement,
   type StocksFinancialSnapshot,
 } from "./stocks-financial-data.ts";
@@ -854,13 +855,31 @@ export async function getCachedStocksFinancialSnapshot({
   provider?: "fmp" | "yahoo" | "alpha-vantage" | "mock";
   force?: boolean;
 }) {
+  if (provider === "fmp" && !force) {
+    const cached = await readStocksSnapshotCache<StocksFinancialSnapshot>({
+      kind: "financial",
+      env,
+      allowStale: true,
+    });
+    if (cached) return cached;
+  }
+
   return getCachedStocksSnapshot({
     kind: "financial",
     env,
     force,
     loader: async () => {
-      const snapshot = await getStocksFinancialSnapshot({
+      const previous = await readStocksSnapshotCache<StocksFinancialSnapshot>({
+        kind: "financial",
+        env,
+        allowStale: true,
+      });
+      const refreshStocks = prepareStocksForFinancialRefresh(
         stocks,
+        previous,
+      );
+      const snapshot = await getStocksFinancialSnapshot({
+        stocks: refreshStocks,
         fetchImpl,
         env,
         ...(provider ? { provider } : {}),
@@ -871,6 +890,14 @@ export async function getCachedStocksFinancialSnapshot({
       });
     },
   });
+}
+
+export function prepareStocksForFinancialRefresh(
+  stocks: AlphaResearchStock[],
+  previous: StocksFinancialSnapshot | null,
+  now = new Date(),
+) {
+  return mergeStocksFinancialSnapshot(stocks, previous, now);
 }
 
 export async function getCachedStocksCatalystSnapshot({

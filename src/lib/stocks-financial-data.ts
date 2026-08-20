@@ -738,7 +738,32 @@ function configuredTickerSet(value: string | undefined) {
   return tickers.length > 0 ? new Set(tickers) : null;
 }
 
-function selectFmpFinancialStocks(stocks: AlphaResearchStock[], env: EnvLike) {
+function upcomingEarningsTime(stock: AlphaResearchStock) {
+  const value = stock.financialSnapshot.nextEarningsDate;
+  const parsed = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function rotatedStocks(
+  stocks: AlphaResearchStock[],
+  count: number,
+  slot: number,
+) {
+  if (count <= 0 || stocks.length === 0) return [];
+  if (stocks.length <= count) return stocks;
+  const batchCount = Math.ceil(stocks.length / count);
+  const start = (((slot % batchCount) + batchCount) % batchCount) * count;
+  return Array.from(
+    { length: count },
+    (_value, index) => stocks[(start + index) % stocks.length],
+  );
+}
+
+export function selectFmpFinancialStocksForRefresh(
+  stocks: AlphaResearchStock[],
+  env: EnvLike,
+  now = new Date(),
+) {
   const allowedTickers = configuredTickerSet(env.STOCKS_FMP_FINANCIAL_TICKERS);
   const excludedTickers = configuredTickerSet(
     env.STOCKS_FMP_FINANCIAL_EXCLUDE_TICKERS,
@@ -749,6 +774,79 @@ function selectFmpFinancialStocks(stocks: AlphaResearchStock[], env: EnvLike) {
     if (excludedTickers?.has(ticker)) return false;
     return true;
   });
+  if (candidates.length === 0) return candidates;
+
+  const configuredBatchSize = env.STOCKS_FMP_FINANCIAL_BATCH_SIZE?.trim();
+  if (configuredBatchSize) {
+    const batchSize = positiveInt(configuredBatchSize, 4, candidates.length);
+    const priorityDays = positiveInt(
+      env.STOCKS_FMP_FINANCIAL_PRIORITY_DAYS,
+      15,
+      90,
+    );
+    const rotationIntervalMs = positiveInt(
+      env.STOCKS_FMP_FINANCIAL_ROTATION_INTERVAL_MS,
+      12 * 60 * 60 * 1000,
+      7 * 24 * 60 * 60 * 1000,
+    );
+    const todayUtc = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+    );
+    const priorityCutoff = todayUtc + priorityDays * 86_400_000;
+    const priority = candidates
+      .map((stock, index) => ({ stock, index, earningsAt: upcomingEarningsTime(stock) }))
+      .filter(
+        (item) =>
+          item.earningsAt !== null &&
+          item.earningsAt >= todayUtc &&
+          item.earningsAt <= priorityCutoff,
+      )
+      .sort(
+        (left, right) =>
+          (left.earningsAt ?? 0) - (right.earningsAt ?? 0) ||
+          left.index - right.index,
+      )
+      .map((item) => item.stock);
+
+    const priorityTickers = new Set(priority.map((stock) => stock.ticker));
+    const rotationPool = candidates.filter(
+      (stock) => !priorityTickers.has(stock.ticker),
+    );
+    const slot = Math.floor(now.getTime() / rotationIntervalMs);
+    if (priority.length === 0) {
+      return rotatedStocks(rotationPool, batchSize, slot);
+    }
+    if (rotationPool.length === 0) {
+      return rotatedStocks(priority, batchSize, slot);
+    }
+    if (batchSize === 1) {
+      const cycleSlot = ((slot % 4) + 4) % 4;
+      if (cycleSlot < 3) {
+        const prioritySlot = Math.floor(slot / 4) * 3 + cycleSlot;
+        return rotatedStocks(priority, 1, prioritySlot);
+      }
+      return rotatedStocks(rotationPool, 1, Math.floor(slot / 4));
+    }
+
+    let priorityCount = Math.min(priority.length, Math.ceil(batchSize / 2));
+    let regularCount = Math.min(rotationPool.length, batchSize - priorityCount);
+    let unused = batchSize - priorityCount - regularCount;
+    if (unused > 0) {
+      const extraPriority = Math.min(unused, priority.length - priorityCount);
+      priorityCount += extraPriority;
+      unused -= extraPriority;
+    }
+    if (unused > 0) {
+      regularCount += Math.min(unused, rotationPool.length - regularCount);
+    }
+    return [
+      ...rotatedStocks(priority, priorityCount, slot),
+      ...rotatedStocks(rotationPool, regularCount, slot),
+    ];
+  }
+
   const configuredLimit = env.STOCKS_FMP_FINANCIAL_MAX_TICKERS?.trim();
   if (!configuredLimit) return candidates;
   return candidates.slice(0, positiveInt(configuredLimit, candidates.length, candidates.length));
@@ -1614,7 +1712,11 @@ export async function fetchFmpStocksFinancialSnapshot({
   const apiKeys = fmpApiKeys(env);
   if (apiKeys.length === 0) throw new Error("FMP API key is not configured");
   const generatedAt = new Date().toISOString();
-  const providerStocks = selectFmpFinancialStocks(stocks, env);
+  const providerStocks = selectFmpFinancialStocksForRefresh(
+    stocks,
+    env,
+    new Date(generatedAt),
+  );
   const errors: string[] = [];
   const earningsFallbackPayloadCache =
     payloadCache ??

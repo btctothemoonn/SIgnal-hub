@@ -13,6 +13,7 @@ import {
   parseAlphaVantageFinancialStatement,
   parseFmpFinancialStatement,
   parseYahooFinancialStatement,
+  selectFmpFinancialStocksForRefresh,
 } from "./stocks-financial-data.ts";
 
 const source = readFileSync(
@@ -148,6 +149,96 @@ assert.equal(alphaVantageParsed?.eps, "6.12");
 assert.equal(alphaVantageParsed?.grossMargin, "74.5%");
 assert.equal(alphaVantageParsed?.nextEarningsDate, "2026-01-31");
 assert.equal(alphaVantageParsed?.guidance, "Analyst target $1200.00");
+
+const rotatingStocks = ALPHA_RESEARCH_STOCKS.slice(0, 6).map((stock, index) => ({
+  ...stock,
+  financialSnapshot: {
+    ...stock.financialSnapshot,
+    nextEarningsDate: index === 0 ? "2026-08-26" : "2026-10-01",
+  },
+}));
+const rotationEnv = {
+  STOCKS_FMP_FINANCIAL_BATCH_SIZE: "3",
+  STOCKS_FMP_FINANCIAL_ROTATION_INTERVAL_MS: String(12 * 60 * 60 * 1000),
+};
+const rotationBatches = [0, 12, 24].map((hours) =>
+  selectFmpFinancialStocksForRefresh(
+    rotatingStocks,
+    rotationEnv,
+    new Date(Date.UTC(2026, 7, 20, hours)),
+  ).map((stock) => stock.ticker),
+);
+for (const batch of rotationBatches) {
+  assert.equal(batch.length, 3);
+  assert.equal(batch[0], rotatingStocks[0].ticker);
+}
+assert.notDeepEqual(rotationBatches[0], rotationBatches[1]);
+assert.deepEqual(
+  [...new Set(rotationBatches.flat())].sort(),
+  rotatingStocks.map((stock) => stock.ticker).sort(),
+);
+
+const crowdedUpcomingStocks = ALPHA_RESEARCH_STOCKS.slice(0, 8).map(
+  (stock, index) => ({
+    ...stock,
+    financialSnapshot: {
+      ...stock.financialSnapshot,
+      nextEarningsDate: index < 5 ? `2026-08-${24 + index}` : "2026-10-01",
+    },
+  }),
+);
+const crowdedBatches = [0, 12, 24].map((hours) =>
+  selectFmpFinancialStocksForRefresh(
+    crowdedUpcomingStocks,
+    { STOCKS_FMP_FINANCIAL_BATCH_SIZE: "4" },
+    new Date(Date.UTC(2026, 7, 20, hours)),
+  ).map((stock) => stock.ticker),
+);
+assert.deepEqual(
+  [...new Set(crowdedBatches.flat())].sort(),
+  crowdedUpcomingStocks.map((stock) => stock.ticker).sort(),
+);
+
+const singleTickerStocks = crowdedUpcomingStocks.slice(0, 4).map(
+  (stock, index) => ({
+    ...stock,
+    financialSnapshot: {
+      ...stock.financialSnapshot,
+      nextEarningsDate: index < 2 ? `2026-08-${24 + index}` : "2026-10-01",
+    },
+  }),
+);
+const singleTickerBatches = Array.from({ length: 8 }, (_value, slot) =>
+  selectFmpFinancialStocksForRefresh(
+    singleTickerStocks,
+    { STOCKS_FMP_FINANCIAL_BATCH_SIZE: "1" },
+    new Date(Date.UTC(2026, 7, 20, slot * 12)),
+  )[0].ticker,
+);
+assert.deepEqual(
+  [...new Set(singleTickerBatches)].sort(),
+  singleTickerStocks.map((stock) => stock.ticker).sort(),
+);
+const singleTickerPriority = new Set(
+  singleTickerStocks.slice(0, 2).map((stock) => stock.ticker),
+);
+for (let start = 0; start < singleTickerBatches.length; start += 4) {
+  assert.equal(
+    singleTickerBatches
+      .slice(start, start + 4)
+      .filter((ticker) => singleTickerPriority.has(ticker)).length,
+    3,
+  );
+}
+
+assert.deepEqual(
+  selectFmpFinancialStocksForRefresh(
+    rotatingStocks,
+    { STOCKS_FMP_FINANCIAL_MAX_TICKERS: "2" },
+    new Date("2026-08-20T00:00:00.000Z"),
+  ).map((stock) => stock.ticker),
+  rotatingStocks.slice(0, 2).map((stock) => stock.ticker),
+);
 
 const fmpFinancialUrls = [];
 const fmpFinancialSnapshot = await fetchFmpStocksFinancialSnapshot({

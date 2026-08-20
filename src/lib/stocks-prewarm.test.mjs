@@ -8,18 +8,22 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getAlphaResearchStockByTicker } from "./alpha-research-pool.ts";
 
 const moduleUrl = new URL("./stocks-prewarm.ts", import.meta.url);
 const workerUrl = new URL("../../scripts/stocks-cache-worker.mjs", import.meta.url);
 const startScriptUrl = new URL("../../scripts/start-signal-hub.ps1", import.meta.url);
 const packageJsonUrl = new URL("../../package.json", import.meta.url);
+const envExampleUrl = new URL("../../.env.example", import.meta.url);
 
 const {
   getCachedStocksSnapshot,
+  getCachedStocksFinancialSnapshot,
   getStocksPrewarmIntervalMs,
   getStocksSnapshotHealth,
   getStocksSnapshotCachePath,
   isStocksCachePrewarmEnabled,
+  prepareStocksForFinancialRefresh,
   preserveSuccessfulFinancialEntries,
   prewarmStocksCaches,
   resolveStocksMarketProvider,
@@ -27,6 +31,10 @@ const {
 } = await import(moduleUrl);
 const prewarmSource = readFileSync(moduleUrl, "utf8");
 assert.match(prewarmSource, /enrichStocksFinancialSnapshotWithInsights/);
+assert.match(
+  readFileSync(envExampleUrl, "utf8"),
+  /^STOCKS_CACHE_WORKER_FINANCIAL_INTERVAL_MS=43200000$/m,
+);
 
 const normalizedRevenueEstimateSource = {
   provider: "fmp",
@@ -140,6 +148,18 @@ const previousFinancial = {
     },
   },
 };
+const cachedUpcomingFinancial = structuredClone(previousFinancial);
+cachedUpcomingFinancial.financials.NBIS.nextEarningsDate = "2026-08-26";
+const nbisStock = getAlphaResearchStockByTicker("NBIS");
+assert.ok(nbisStock);
+assert.equal(
+  prepareStocksForFinancialRefresh(
+    [nbisStock],
+    cachedUpcomingFinancial,
+    new Date("2026-08-20T00:00:00.000Z"),
+  )[0].financialSnapshot.nextEarningsDate,
+  "2026-08-26",
+);
 const partialFinancial = {
   generatedAt: "2026-08-14T01:00:00.000Z",
   source: "live",
@@ -371,6 +391,23 @@ try {
     env,
     snapshot: legacyPreviousFinancial,
   });
+  let passiveFinancialRequests = 0;
+  const passiveFinancial = await getCachedStocksFinancialSnapshot({
+    stocks: [nbisStock],
+    env: {
+      ...env,
+      STOCKS_FINANCIAL_CACHE_MS: "1",
+      STOCKS_FINANCIAL_DATA_PROVIDER: "fmp",
+    },
+    provider: "fmp",
+    fetchImpl: async () => {
+      passiveFinancialRequests += 1;
+      return new Response("upstream unavailable", { status: 503 });
+    },
+  });
+  assert.equal(passiveFinancialRequests, 0);
+  assert.ok(passiveFinancial.financials.NBIS);
+
   const migratedFinancial = await getCachedStocksSnapshot({
     kind: "financial",
     env,
