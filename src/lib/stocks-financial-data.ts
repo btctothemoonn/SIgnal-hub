@@ -251,8 +251,12 @@ function sanitizeMiniMaxCandidate(
     sanitized[field] = null;
     delete sanitized.fieldSources[field];
   };
-  const essentiallyEqual = (left: number, right: number) =>
-    Math.abs(left - right) <= Math.max(1, Math.abs(right) * 0.001);
+  const essentiallyEqual = (
+    left: number,
+    right: number,
+    relativeTolerance = 0.001,
+  ) =>
+    Math.abs(left - right) <= Math.max(1, Math.abs(right) * relativeTolerance);
 
   if (sanitized.revenueActual !== null && sanitized.revenueActual <= 0) {
     discard("revenueActual");
@@ -274,7 +278,11 @@ function sanitizeMiniMaxCandidate(
   if (
     sanitized.netIncomeEstimate !== null &&
     sanitized.netIncomeActual !== null &&
-    essentiallyEqual(sanitized.netIncomeEstimate, sanitized.netIncomeActual)
+    essentiallyEqual(
+      sanitized.netIncomeEstimate,
+      sanitized.netIncomeActual,
+      0.005,
+    )
   ) {
     discard("netIncomeEstimate");
   }

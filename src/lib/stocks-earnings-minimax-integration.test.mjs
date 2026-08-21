@@ -221,7 +221,7 @@ try {
               title: "QUALITY Q2 2026 results",
               link: "https://finance.example.com/quality-q2-results",
               snippet:
-                "QUALITY Q2 2026 revenue actual reported was $10.253 billion and net income actual reported was $1.383 billion.",
+                "QUALITY Q2 2026 revenue actual reported was $10.253 billion and net income actual reported was $1.380 billion.",
             },
           ],
           base_resp: { status_code: 0, status_msg: "success" },
