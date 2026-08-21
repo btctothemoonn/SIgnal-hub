@@ -239,6 +239,39 @@ try {
     "net-income-estimate",
   ]);
 
+  const staleMiniMaxItem = structuredClone(history[0]);
+  staleMiniMaxItem.ticker = "STALE";
+  staleMiniMaxItem.revenue = metric(10_253_000_000, 5_800_000_000);
+  staleMiniMaxItem.revenue.estimateSource = { provider: "minimax-web" };
+  staleMiniMaxItem.netIncome = metric(1_383_000_000, 1_383_000_000);
+  staleMiniMaxItem.netIncome.estimateSource = { provider: "minimax-web" };
+  staleMiniMaxItem.status = "reported";
+  staleMiniMaxItem.completeness = {
+    complete: true,
+    missing: [],
+    attemptedProviders: ["sec", "minimax-web"],
+  };
+  const scrubbedSnapshot = await stocksFinancialData.backfillMiniMaxEarningsSnapshot({
+    stocks: [{ ticker: "STALE", companyName: "Stale Corporation" }],
+    snapshot: {
+      ...backfillSnapshot,
+      financials: {
+        STALE: {
+          ticker: "STALE",
+          nextEarningsDate: "2026-11-01",
+          calendarYearEarnings: [staleMiniMaxItem],
+        },
+      },
+    },
+    now: new Date("2026-08-20T00:00:00.000Z"),
+    env: {},
+  });
+  const scrubbedItem =
+    scrubbedSnapshot.financials.STALE.calendarYearEarnings[0];
+  assert.equal(scrubbedItem.revenue.estimate, null);
+  assert.equal(scrubbedItem.netIncome.estimate, null);
+  assert.equal(scrubbedItem.completeness.complete, false);
+
   const backfilledSnapshot =
     (await stocksFinancialData.backfillMiniMaxEarningsSnapshot?.({
       stocks: [{ ticker: "ORDINARY", companyName: "Ordinary Corporation" }],

@@ -1054,6 +1054,86 @@ export function selectMiniMaxEarningsBackfillStocks({
   ];
 }
 
+function shouldDiscardExistingMiniMaxEstimate(
+  metric: StocksEarningsComparison["revenue"],
+  kind: "revenue" | "net-income",
+) {
+  if (
+    metric.estimate === null ||
+    metric.estimateSource?.provider !== "minimax-web"
+  ) {
+    return false;
+  }
+  if (kind === "revenue" && metric.estimate <= 0) return true;
+  if (metric.actual === null) return false;
+
+  const actualMagnitude = Math.abs(metric.actual);
+  const relativeDifference =
+    actualMagnitude === 0
+      ? metric.estimate === metric.actual
+        ? 0
+        : Infinity
+      : Math.abs(metric.estimate - metric.actual) / actualMagnitude;
+  if (kind === "net-income") return relativeDifference <= 0.005;
+
+  const ratio = metric.estimate / metric.actual;
+  if (ratio < 0.65 || ratio > 1.5) return true;
+  const looksLikeRoundedLargeActual =
+    actualMagnitude >= 10_000_000_000 &&
+    relativeDifference <= 0.001 &&
+    Math.abs(metric.estimate % 100_000_000) < 1;
+  return looksLikeRoundedLargeActual;
+}
+
+function scrubExistingMiniMaxEarnings(snapshot: StocksFinancialSnapshot) {
+  let changed = false;
+  const financials: Record<string, StocksFinancialStatement> = Object.fromEntries(
+    Object.entries(snapshot.financials).map(([ticker, statement]) => {
+      const items = statement.calendarYearEarnings ?? [];
+      const nextItems = items.map((item) => {
+        const discardRevenue = shouldDiscardExistingMiniMaxEstimate(
+          item.revenue,
+          "revenue",
+        );
+        const discardNetIncome = shouldDiscardExistingMiniMaxEstimate(
+          item.netIncome,
+          "net-income",
+        );
+        if (!discardRevenue && !discardNetIncome) return item;
+        changed = true;
+        const next: StocksCalendarEarningsItem = {
+          ...item,
+          revenue: discardRevenue
+            ? mergeEarningsMetricValues(item.revenue, { estimate: null })
+            : item.revenue,
+          netIncome: discardNetIncome
+            ? mergeEarningsMetricValues(item.netIncome, { estimate: null })
+            : item.netIncome,
+        };
+        const completeness = assessCalendarEarningsCompleteness(next);
+        const finalized: StocksCalendarEarningsItem = {
+          ...next,
+          status:
+            next.status === "upcoming"
+              ? "upcoming"
+              : completeness.complete
+                ? "reported"
+                : "incomplete",
+          completeness,
+        };
+        return finalized;
+      });
+      return [
+        ticker,
+        nextItems.some((item, index) => item !== items[index])
+          ? { ...statement, calendarYearEarnings: nextItems }
+          : statement,
+      ];
+    }),
+  );
+  return changed ? { ...snapshot, financials } : snapshot;
+}
+
 export async function backfillMiniMaxEarningsSnapshot({
   stocks,
   snapshot,
@@ -1067,20 +1147,21 @@ export async function backfillMiniMaxEarningsSnapshot({
   now?: Date;
   fetchImpl?: FetchLike;
 }) {
+  const workingSnapshot = scrubExistingMiniMaxEarnings(snapshot);
   const selected = selectMiniMaxEarningsBackfillStocks({
     stocks,
-    snapshot,
+    snapshot: workingSnapshot,
     env,
     now,
   });
-  if (selected.length === 0) return snapshot;
+  if (selected.length === 0) return workingSnapshot;
 
   const { fetchMiniMaxEarningsCandidates } = await import(
     "./stocks-earnings-minimax-search.ts"
   );
   const generatedAt = now.toISOString();
-  const financials = { ...snapshot.financials };
-  const errors = [...snapshot.errors];
+  const financials = { ...workingSnapshot.financials };
+  const errors = [...workingSnapshot.errors];
 
   for (const stock of selected) {
     const statement = financials[stock.ticker];
@@ -1146,7 +1227,7 @@ export async function backfillMiniMaxEarningsSnapshot({
     );
   }
 
-  return { ...snapshot, financials, errors: [...new Set(errors)] };
+  return { ...workingSnapshot, financials, errors: [...new Set(errors)] };
 }
 
 async function mapWithConcurrency<T, R>(
