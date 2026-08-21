@@ -7,6 +7,7 @@ import * as stocksFinancialData from "./stocks-financial-data.ts";
 import { clearMiniMaxEarningsSearchMemoryCacheForTests } from "./stocks-earnings-minimax-search.ts";
 import {
   getCachedStocksFinancialSnapshot,
+  getCachedStocksSnapshot,
   writeStocksSnapshotCache,
 } from "./stocks-prewarm.ts";
 
@@ -271,6 +272,35 @@ try {
   assert.equal(scrubbedItem.revenue.estimate, null);
   assert.equal(scrubbedItem.netIncome.estimate, null);
   assert.equal(scrubbedItem.completeness.complete, false);
+  await writeStocksSnapshotCache({
+    kind: "financial",
+    env: { SIGNAL_HUB_RUNTIME_DIR: runtimeDir },
+    snapshot: {
+      ...backfillSnapshot,
+      financials: {
+        STALE: {
+          ticker: "STALE",
+          nextEarningsDate: "2026-11-01",
+          calendarYearEarnings: [staleMiniMaxItem],
+        },
+      },
+    },
+  });
+  const persistedScrub = await getCachedStocksSnapshot({
+    kind: "financial",
+    env: { SIGNAL_HUB_RUNTIME_DIR: runtimeDir },
+    force: true,
+    mergeCached: false,
+    loader: async () => scrubbedSnapshot,
+  });
+  assert.equal(
+    persistedScrub.financials.STALE.calendarYearEarnings[0].revenue.estimate,
+    null,
+  );
+  assert.equal(
+    persistedScrub.financials.STALE.calendarYearEarnings[0].netIncome.estimate,
+    null,
+  );
 
   const backfilledSnapshot =
     (await stocksFinancialData.backfillMiniMaxEarningsSnapshot?.({

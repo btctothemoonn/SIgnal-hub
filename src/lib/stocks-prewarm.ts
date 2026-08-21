@@ -738,12 +738,14 @@ export async function getCachedStocksSnapshot<
   kind,
   env = process.env,
   force = false,
+  mergeCached = true,
   now = Date.now(),
   loader,
 }: {
   kind: StocksSnapshotKind;
   env?: EnvLike;
   force?: boolean;
+  mergeCached?: boolean;
   now?: number;
   loader: () => Promise<T>;
 }): Promise<T> {
@@ -763,7 +765,7 @@ export async function getCachedStocksSnapshot<
   try {
     const snapshot = await loader();
     const candidate =
-      kind === "financial" && cached
+      kind === "financial" && cached && mergeCached
         ? (preserveSuccessfulFinancialEntries(
             cached as unknown as StocksFinancialSnapshot,
             snapshot as unknown as StocksFinancialSnapshot,
@@ -869,6 +871,7 @@ export async function getCachedStocksFinancialSnapshot({
     kind: "financial",
     env,
     force,
+    mergeCached: false,
     loader: async () => {
       const previous = await readStocksSnapshotCache<StocksFinancialSnapshot>({
         kind: "financial",
