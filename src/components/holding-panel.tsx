@@ -12,6 +12,7 @@ import {
   analyzeFuturesPositions,
 } from "@/lib/holding-analytics";
 import { getBinanceDisplayTotalEquity } from "@/lib/holding-display";
+import { buildFuturesExposureRows } from "@/lib/holding-layout";
 import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
 import type {
   BinanceFuturesEquityPoint,
@@ -140,10 +141,6 @@ function biasLabelText(label: string) {
     "Extremely Bearish": "极强看空",
   };
   return labels[label] ?? label;
-}
-
-function sideText(side: BinanceFuturesPosition["side"]) {
-  return side === "LONG" ? "多头" : "空头";
 }
 
 function marginTypeText(marginType: string) {
@@ -530,17 +527,6 @@ function FuturesEquityCurve({
   );
 }
 
-function baseAssetFromSymbol(symbol: string) {
-  return symbol.replace(/(USDT|USDC|BUSD|FDUSD|USD)$/i, "") || symbol;
-}
-
-function futuresPnlPercent(position: BinanceFuturesPosition) {
-  const costBasis = Math.abs(position.amount * position.entryPrice);
-  const fallbackBasis = Math.abs(position.notional);
-  const basis = costBasis > 0 ? costBasis : fallbackBasis;
-  return basis > 0 ? (position.unrealizedPnl / basis) * 100 : 0;
-}
-
 function spotSharePercent(balance: BinanceSpotBalance, totalUsdtValue: number) {
   const value = balance.usdtValue ?? 0;
   return totalUsdtValue > 0 ? (value / totalUsdtValue) * 100 : 0;
@@ -677,112 +663,242 @@ function FuturesPositionCards({
     return <EmptyState>暂无合约持仓</EmptyState>;
   }
 
+  const rows = buildFuturesExposureRows(positions);
+  const totalNotional = rows.reduce((total, row) => total + row.absNotional, 0);
+  const longNotional = rows.reduce(
+    (total, row) => total + (row.position.side === "LONG" ? row.absNotional : 0),
+    0,
+  );
+  const shortNotional = rows.reduce(
+    (total, row) => total + (row.position.side === "SHORT" ? row.absNotional : 0),
+    0,
+  );
+  const longPercent = totalNotional > 0 ? (longNotional / totalNotional) * 100 : 0;
+  const shortPercent =
+    totalNotional > 0 ? (shortNotional / totalNotional) * 100 : 0;
+
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-black text-foreground">合约持仓</h3>
-        <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
-          {positions.length} 条
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-base font-black text-foreground">合约持仓</h3>
+          <p className="mt-1 text-xs font-semibold text-muted">
+            持仓雷达 · 按名义金额排序 · {positions.length} 条
+          </p>
+        </div>
+        <span className="w-fit rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
+          总名义 {formatCompactUsd(totalNotional).replace("+", "")}
         </span>
       </div>
-      <div
-        data-holding-position-grid
-        className="grid min-w-0 gap-3 xl:grid-cols-2"
-      >
-        {positions.map((position) => {
-          const asset = baseAssetFromSymbol(position.symbol);
-          const absNotional = Math.abs(position.notional);
-          const pnlPercent = futuresPnlPercent(position);
-          const positive = position.unrealizedPnl >= 0;
 
-          return (
-            <article
-              key={`${position.symbol}-${position.side}`}
-              className="min-w-0 overflow-hidden rounded-[6px] border border-line/75 bg-panel-strong p-4 shadow-sm"
-            >
-              <div className="grid min-w-0 gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <AssetLogo asset={asset} />
+      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div
+          data-binance-futures-exposure-list
+          data-holding-position-grid
+          className="min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-panel-strong"
+        >
+          <div className="hidden border-b border-line/70 bg-background/60 px-3 py-2 text-[11px] font-bold uppercase tracking-normal text-muted md:grid md:grid-cols-[minmax(9rem,1.2fr)_minmax(9rem,1fr)_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(7rem,.8fr)] md:gap-3">
+            <span>币种</span>
+            <span>占比</span>
+            <span>名义金额</span>
+            <span>盈亏</span>
+            <span className="text-right">风险</span>
+          </div>
+
+          {rows.map((row) => {
+            const position = row.position;
+            const directionTone =
+              position.side === "LONG"
+                ? "border-success/30 bg-success-soft text-success"
+                : "border-danger/30 bg-danger-soft text-danger";
+
+            return (
+              <article
+                key={`${position.symbol}-${position.side}`}
+                data-binance-futures-exposure-row
+                className={[
+                  "grid min-w-0 gap-3 border-b border-line/60 px-3 py-3 last:border-b-0 md:grid-cols-[minmax(9rem,1.2fr)_minmax(9rem,1fr)_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(7rem,.8fr)] md:items-center",
+                  row.isTopExposure ? "bg-warning-soft/15" : "bg-panel-strong",
+                ].join(" ")}
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="w-5 shrink-0 text-right font-mono text-xs font-bold text-muted">
+                    {row.rank}
+                  </span>
+                  <AssetLogo asset={row.asset} />
                   <div className="min-w-0">
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
-                        {asset}
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <h4 className="font-mono text-lg font-black leading-tight text-foreground [overflow-wrap:anywhere]">
+                        {row.asset}
                       </h4>
                       <span
                         className={[
-                          "rounded-md border px-2 py-0.5 text-xs font-bold",
-                          position.side === "LONG"
-                            ? "border-success/30 bg-success-soft text-success"
-                            : "border-danger/30 bg-danger-soft text-danger",
+                          "rounded-md border px-1.5 py-0.5 text-[11px] font-black leading-none",
+                          directionTone,
                         ].join(" ")}
                       >
-                        {sideText(position.side)}
+                        {row.direction}
                       </span>
-                      <span className="rounded-md border border-line/70 bg-panel px-2 py-0.5 text-xs font-bold text-muted">
-                        {marginTypeText(position.marginType)}
-                      </span>
+                      {row.isTopExposure ? (
+                        <span className="rounded-md border border-warning/35 bg-warning-soft px-1.5 py-0.5 text-[11px] font-bold leading-none text-warning">
+                          Top {row.rank}
+                        </span>
+                      ) : null}
                     </div>
-                    <div className="mt-1 truncate font-mono text-xs font-semibold text-muted">
-                      {position.symbol}
+                    <div className="mt-1 font-mono text-[11px] font-semibold text-muted [overflow-wrap:anywhere]">
+                      {position.symbol} · {marginTypeText(position.marginType)}{" "}
+                      {formatNumber(position.leverage, { maximumFractionDigits: 0 })}x
                     </div>
                   </div>
                 </div>
 
-                <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
-                  <HoldingMetricCell
-                    label="数量"
-                    value={formatNumber(Math.abs(position.amount), {
-                      maximumFractionDigits: 6,
-                    })}
-                    detail={`${formatNumber(position.leverage, {
-                      maximumFractionDigits: 0,
-                    })}x 杠杆`}
-                  />
-                  <HoldingMetricCell
-                    label="开仓价"
-                    value={formatUsd(position.entryPrice)}
-                    detail="成本"
-                  />
-                  <HoldingMetricCell
-                    label="标记价"
-                    value={formatUsd(position.markPrice)}
-                    detail="当前"
-                  />
-                  <HoldingMetricCell
-                    label="强平价"
-                    value={
-                      position.liquidationPrice > 0
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-muted">
+                    <span>占比</span>
+                    <span className="font-mono text-foreground">
+                      {formatPercent(row.exposurePercent)}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
+                    <div
+                      className={[
+                        "h-full rounded-full",
+                        position.side === "LONG" ? "bg-success" : "bg-danger",
+                      ].join(" ")}
+                      style={{ width: `${Math.min(100, row.exposurePercent)}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid min-w-0 grid-cols-2 gap-3 md:block">
+                  <div>
+                    <div className="text-[11px] font-semibold text-muted">名义金额</div>
+                    <div className="mt-1 font-mono text-sm font-black text-foreground [overflow-wrap:anywhere]">
+                      {formatUsd(row.absNotional)}
+                    </div>
+                  </div>
+                  <div className="md:mt-2">
+                    <div className="text-[11px] font-semibold text-muted">数量</div>
+                    <div className="mt-1 font-mono text-xs font-bold text-muted [overflow-wrap:anywhere]">
+                      {formatNumber(Math.abs(position.amount), {
+                        maximumFractionDigits: 6,
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid min-w-0 grid-cols-2 gap-3 md:block">
+                  <div>
+                    <div className="text-[11px] font-semibold text-muted">盈亏</div>
+                    <div
+                      className={[
+                        "mt-1 font-mono text-sm font-black [overflow-wrap:anywhere]",
+                        pnlTone(position.unrealizedPnl),
+                      ].join(" ")}
+                    >
+                      {formatSignedUsd(position.unrealizedPnl)}
+                    </div>
+                  </div>
+                  <div className="md:mt-2">
+                    <div className="text-[11px] font-semibold text-muted">收益率</div>
+                    <div
+                      className={[
+                        "mt-1 font-mono text-xs font-bold [overflow-wrap:anywhere]",
+                        pnlTone(position.unrealizedPnl),
+                      ].join(" ")}
+                    >
+                      {formatSignedPercent(row.pnlPercent)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid min-w-0 grid-cols-3 gap-2 text-left md:text-right">
+                  <div>
+                    <div className="text-[11px] font-semibold text-muted">开仓价</div>
+                    <div className="mt-1 font-mono text-xs font-bold text-foreground [overflow-wrap:anywhere]">
+                      {formatUsd(position.entryPrice)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-muted">标记价</div>
+                    <div className="mt-1 font-mono text-xs font-bold text-foreground [overflow-wrap:anywhere]">
+                      {formatUsd(position.markPrice)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-muted">强平价</div>
+                    <div
+                      className={[
+                        "mt-1 font-mono text-xs font-black [overflow-wrap:anywhere]",
+                        position.liquidationPrice > 0 ? "text-warning" : "text-muted",
+                      ].join(" ")}
+                    >
+                      {position.liquidationPrice > 0
                         ? formatUsd(position.liquidationPrice)
-                        : "--"
-                    }
-                    detail="风险线"
-                  />
-                  <HoldingMetricCell
-                    label="盈亏"
-                    value={formatSignedUsd(position.unrealizedPnl)}
-                    detail={formatSignedPercent(pnlPercent)}
-                    tone={pnlTone(position.unrealizedPnl)}
-                  />
+                        : "--"}
+                    </div>
+                  </div>
                 </div>
+              </article>
+            );
+          })}
+        </div>
 
-                <div className="border-t border-line/70 pt-3 text-right">
-                  <div className="text-xs font-semibold text-muted">名义金额</div>
-                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
-                    {formatUsd(absNotional)}
-                  </div>
-                  <div
-                    className={[
-                      "mt-1 text-xs font-bold",
-                      positive ? "text-success" : "text-danger",
-                    ].join(" ")}
-                  >
-                    {positive ? "浮盈中" : "浮亏中"}
-                  </div>
-                </div>
+        <aside className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-3">
+          <div className="text-xs font-semibold uppercase tracking-normal text-muted">
+            多空敞口
+          </div>
+          <div className="mt-3 space-y-3">
+            <div>
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                <span className="text-success">多头</span>
+                <span className="font-mono text-foreground">
+                  {formatPercent(longPercent)}
+                </span>
               </div>
-            </article>
-          );
-        })}
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-background">
+                <div
+                  className="h-full rounded-full bg-success"
+                  style={{ width: `${Math.min(100, longPercent)}%` }}
+                />
+              </div>
+              <div className="mt-1 font-mono text-xs font-semibold text-muted">
+                {formatCompactUsd(longNotional).replace("+", "")}
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
+                <span className="text-danger">空头</span>
+                <span className="font-mono text-foreground">
+                  {formatPercent(shortPercent)}
+                </span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-background">
+                <div
+                  className="h-full rounded-full bg-danger"
+                  style={{ width: `${Math.min(100, shortPercent)}%` }}
+                />
+              </div>
+              <div className="mt-1 font-mono text-xs font-semibold text-muted">
+                {formatCompactUsd(shortNotional).replace("+", "")}
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 rounded-[6px] border border-line/60 bg-background/45 p-2">
+            <div className="text-[11px] font-semibold text-muted">观察重点</div>
+            <div
+              className={[
+                "mt-1 font-mono text-sm font-black",
+                longNotional >= shortNotional ? "text-success" : "text-danger",
+              ].join(" ")}
+            >
+              {longNotional >= shortNotional ? "净多头" : "净空头"}
+            </div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-muted">
+              前三大仓位已高亮，先看占比条和强平价。
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
   );
