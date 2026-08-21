@@ -19,10 +19,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#261f1b",
+  themeColor: "#111817",
 };
 
-const themeScript = `(function(){try{var t=localStorage.getItem("theme");var d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme:dark)").matches);if(d)document.documentElement.classList.add("dark")}catch(e){}})()`;
+const themeScript = `(function(){try{var t=localStorage.getItem("signal-hub:theme:cromojo-dark-dashboard:v1");var d=t===null||t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme:dark)").matches);if(d)document.documentElement.classList.add("dark")}catch(e){}})()`;
 
 export default function RootLayout({
   children,

@@ -318,7 +318,7 @@ function SummaryTile({
         {label}
       </div>
       <div
-        className={`mt-1 min-w-0 font-mono text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
+        className={`mt-1 min-w-0 font-mono text-base font-bold leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
       >
         {value}
       </div>
@@ -331,7 +331,7 @@ function SummaryTile({
 
 function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-[12rem] items-center justify-center rounded-[6px] border border-dashed border-line/80 bg-panel/50 px-4 py-8 text-sm text-muted">
+    <div className="flex min-h-[12rem] items-center justify-center rounded-lg border border-dashed border-line/80 bg-panel/50 px-4 py-8 text-sm text-muted">
       {children}
     </div>
   );
@@ -550,7 +550,7 @@ function AssetLogo({ asset }: { asset: string }) {
   return (
     <div
       className={[
-        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] border font-mono text-sm font-black uppercase shadow-sm",
+        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] border font-mono text-sm font-bold uppercase shadow-sm",
         assetLogoTone(asset),
       ].join(" ")}
     >
@@ -575,7 +575,7 @@ function HoldingMetricCell({
       <div className="text-xs font-semibold text-muted">{label}</div>
       <div
         className={[
-          "mt-1 min-w-0 font-mono text-sm font-black leading-tight tracking-normal [overflow-wrap:anywhere] sm:text-base",
+          "mt-1 min-w-0 font-mono text-sm font-bold leading-tight tracking-normal [overflow-wrap:anywhere] sm:text-base",
           tone,
         ].join(" ")}
       >
@@ -681,7 +681,7 @@ function FuturesPositionCards({
     <section className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="text-base font-black text-foreground">合约持仓</h3>
+          <h3 className="text-base font-semibold text-foreground">合约持仓</h3>
           <p className="mt-1 text-xs font-semibold text-muted">
             持仓雷达 · 按名义金额排序 · {positions.length} 条
           </p>
@@ -728,12 +728,12 @@ function FuturesPositionCards({
                   <AssetLogo asset={row.asset} />
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <h4 className="font-mono text-lg font-black leading-tight text-foreground [overflow-wrap:anywhere]">
+                      <h4 className="font-mono text-lg font-bold leading-tight text-foreground [overflow-wrap:anywhere]">
                         {row.asset}
                       </h4>
                       <span
                         className={[
-                          "rounded-md border px-1.5 py-0.5 text-[11px] font-black leading-none",
+                          "rounded-md border px-1.5 py-0.5 text-[11px] font-bold leading-none",
                           directionTone,
                         ].join(" ")}
                       >
@@ -773,7 +773,7 @@ function FuturesPositionCards({
                 <div className="grid min-w-0 grid-cols-2 gap-3 md:block">
                   <div>
                     <div className="text-[11px] font-semibold text-muted">名义金额</div>
-                    <div className="mt-1 font-mono text-sm font-black text-foreground [overflow-wrap:anywhere]">
+                    <div className="mt-1 font-mono text-sm font-bold text-foreground [overflow-wrap:anywhere]">
                       {formatUsd(row.absNotional)}
                     </div>
                   </div>
@@ -792,7 +792,7 @@ function FuturesPositionCards({
                     <div className="text-[11px] font-semibold text-muted">盈亏</div>
                     <div
                       className={[
-                        "mt-1 font-mono text-sm font-black [overflow-wrap:anywhere]",
+                        "mt-1 font-mono text-sm font-bold [overflow-wrap:anywhere]",
                         pnlTone(position.unrealizedPnl),
                       ].join(" ")}
                     >
@@ -829,7 +829,7 @@ function FuturesPositionCards({
                     <div className="text-[11px] font-semibold text-muted">强平价</div>
                     <div
                       className={[
-                        "mt-1 font-mono text-xs font-black [overflow-wrap:anywhere]",
+                        "mt-1 font-mono text-xs font-bold [overflow-wrap:anywhere]",
                         position.liquidationPrice > 0 ? "text-warning" : "text-muted",
                       ].join(" ")}
                     >
@@ -888,7 +888,7 @@ function FuturesPositionCards({
             <div className="text-[11px] font-semibold text-muted">观察重点</div>
             <div
               className={[
-                "mt-1 font-mono text-sm font-black",
+                "mt-1 font-mono text-sm font-bold",
                 longNotional >= shortNotional ? "text-success" : "text-danger",
               ].join(" ")}
             >
@@ -924,7 +924,7 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-black text-foreground">现货资产</h3>
+        <h3 className="text-base font-semibold text-foreground">现货资产</h3>
         <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
           {valuedBalances.length} 个币种
         </span>
@@ -946,7 +946,7 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
                 <div className="flex min-w-0 items-center gap-3">
                   <AssetLogo asset={balance.asset} />
                   <div className="min-w-0">
-                    <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
+                    <h4 className="truncate font-mono text-2xl font-bold leading-tight text-foreground">
                       {balance.asset}
                     </h4>
                     <div className="mt-1 text-xs font-semibold text-muted">
@@ -977,7 +977,7 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
 
                 <div className="border-t border-line/70 pt-3 text-right">
                   <div className="text-xs font-semibold text-muted">估值</div>
-                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
+                  <div className="mt-1 font-mono text-2xl font-bold text-foreground">
                     {formatUsd(value)}
                   </div>
                   <div className="mt-1 text-xs font-bold text-muted">
@@ -1022,7 +1022,7 @@ function TrackedPositionCards({
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-black text-foreground">公开合约持仓</h3>
+        <h3 className="text-base font-semibold text-foreground">公开合约持仓</h3>
         <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
           {positions.length} 条
         </span>
@@ -1044,7 +1044,7 @@ function TrackedPositionCards({
                   <AssetLogo asset={position.coin} />
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <h4 className="truncate font-mono text-2xl font-black leading-tight text-foreground">
+                      <h4 className="truncate font-mono text-2xl font-bold leading-tight text-foreground">
                         {position.coin}
                       </h4>
                       <span
@@ -1107,7 +1107,7 @@ function TrackedPositionCards({
 
                 <div className="border-t border-line/70 pt-3 text-right">
                   <div className="text-xs font-semibold text-muted">名义金额</div>
-                  <div className="mt-1 font-mono text-2xl font-black text-foreground">
+                  <div className="mt-1 font-mono text-2xl font-bold text-foreground">
                     {formatUsd(position.notional)}
                   </div>
                   <div
@@ -1430,7 +1430,7 @@ export function HoldingPanel() {
 
   return (
     <div data-holding-workspace className="min-w-0 space-y-4">
-      <div className="flex min-w-0 flex-col gap-3 rounded-[6px] border border-line/70 bg-panel-strong p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-line/70 bg-panel-strong p-3 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-xs font-semibold uppercase tracking-normal text-muted">
             Holding
@@ -1441,7 +1441,7 @@ export function HoldingPanel() {
         </div>
         <div
           data-holding-view-tabs
-          className="grid w-full min-w-0 grid-cols-3 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1 sm:max-w-[30rem]"
+          className="grid w-full min-w-0 grid-cols-3 gap-1 rounded-lg border border-line/70 bg-workspace-canvas p-1 sm:max-w-[30rem]"
           role="tablist"
           aria-label="持仓账户视图"
         >
@@ -1461,10 +1461,10 @@ export function HoldingPanel() {
                 aria-selected={selected}
                 aria-controls={`holding-panel-${item.id}`}
                 className={[
-                  "h-9 min-w-0 rounded-[6px] px-2 text-xs font-semibold transition-colors",
+                  "h-9 min-w-0 rounded-lg border px-2 text-xs font-semibold transition-colors",
                   selected
-                    ? "bg-foreground text-background shadow-sm"
-                    : "text-muted hover:bg-panel hover:text-foreground",
+                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                 ].join(" ")}
               >
                 {item.label}

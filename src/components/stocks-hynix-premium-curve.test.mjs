@@ -58,7 +58,7 @@ assert.match(source, /CandlestickSeries/);
 assert.match(source, /HistogramSeries/);
 assert.match(source, /fitContent\(\)/);
 assert.match(source, /ResizeObserver/);
-assert.match(source, /className="min-h-\[32rem\][^"]*rounded-\[6px\]/);
+assert.match(source, /className="min-h-\[32rem\][^"]*rounded-lg/);
 assert.doesNotMatch(source, /<svg/);
 assert.doesNotMatch(source, /polyline/);
 

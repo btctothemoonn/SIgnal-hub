@@ -243,7 +243,7 @@ export function SignalsResponsiveLayout({
       data-signal-workspace
       className="min-w-0 scroll-mt-[7rem]"
     >
-      <div className="mb-3 rounded-[6px] border border-workspace-line-strong bg-workspace-toolbar p-1">
+      <div className="mb-3 rounded-lg border border-workspace-line-strong bg-workspace-toolbar p-1 shadow-sm">
         <div
           role="tablist"
           aria-label="Signal Flow 移动视图"
@@ -261,10 +261,10 @@ export function SignalsResponsiveLayout({
               onClick={() => showMobilePanel(panel.id)}
               onKeyDown={(event) => handleMobileTabKeyDown(event, panel.id)}
               className={[
-                "h-9 rounded-md text-sm font-semibold transition-colors",
+                "h-9 rounded-md border text-sm font-semibold transition-colors",
                 activeMobilePanel === panel.id
-                  ? "bg-foreground text-background"
-                  : "text-muted hover:bg-workspace-surface hover:text-foreground",
+                  ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                  : "border-transparent text-muted hover:bg-workspace-surface hover:text-foreground",
               ].join(" ")}
             >
               {panel.label}

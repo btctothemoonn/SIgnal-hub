@@ -571,7 +571,7 @@ type FeedTab = SignalFeedTab;
 
 const SOURCE_ICON: Record<string, { letter: string; tone: string }> = {
   telegram: { letter: "T", tone: "bg-info text-background" },
-  x: { letter: "X", tone: "bg-foreground text-background" },
+  x: { letter: "X", tone: "bg-success text-background" },
   monitor985: { letter: "985", tone: "bg-accent text-white" },
   truth: { letter: "TS", tone: "bg-success text-background" },
   alert: { letter: "!", tone: "bg-danger text-background" },
@@ -1564,7 +1564,7 @@ export function UnifiedNewsPanel({
       data-mobile-command-feed
       data-signal-feed-pane
       className={[
-        "relative min-w-0 overflow-hidden rounded-[6px] border border-workspace-line-strong bg-workspace-surface",
+        "relative min-w-0 overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)]",
         rail
           ? "lg:sticky lg:top-[5.25rem] lg:flex lg:h-[calc(100vh-6rem)] lg:min-h-0 lg:flex-col"
           : "",
@@ -1586,13 +1586,13 @@ export function UnifiedNewsPanel({
               </p>
             </div>
 
-            <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-[6px] border border-workspace-line-strong bg-workspace-surface p-1 xl:w-[34rem] xl:overflow-visible">
+            <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border border-workspace-line-strong bg-workspace-canvas p-1 xl:w-[34rem] xl:overflow-visible">
               <button
                 onClick={() => selectActiveTab("all")}
-                className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
+                className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                   activeTab === "all"
-                    ? "bg-foreground text-background"
-                    : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
+                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                 }`}
               >
                 全部
@@ -1613,10 +1613,10 @@ export function UnifiedNewsPanel({
                   <button
                     key={tab.id}
                     onClick={() => selectActiveTab(tab.id)}
-                    className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-center text-xs font-medium transition-colors ${
+                    className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                       activeTab === tab.id
-                        ? "bg-foreground text-background"
-                        : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
+                        ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                        : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                     }`}
                   >
                     <span className="sm:hidden">{tab.shortLabel}</span>
@@ -1633,7 +1633,7 @@ export function UnifiedNewsPanel({
             </div>
           </div>
 
-          <div className="mt-2 grid grid-cols-5 gap-1 rounded-[6px] border border-workspace-line-strong bg-workspace-surface p-1">
+          <div className="mt-2 grid grid-cols-5 gap-1 rounded-lg border border-workspace-line-strong bg-workspace-canvas p-1">
             {SIGNAL_FEED_RANGE_OPTIONS.map((option) => {
               const selected = option.id === feedRange;
               return (
@@ -1642,10 +1642,10 @@ export function UnifiedNewsPanel({
                   type="button"
                   aria-pressed={selected}
                   onClick={() => setFeedRange(option.id)}
-                  className={`h-8 rounded-md px-2 text-[11px] font-semibold transition-colors ${
+                  className={`h-8 rounded-md border px-2 text-[11px] font-semibold transition-colors ${
                     selected
-                      ? "bg-foreground text-background"
-                      : "text-muted hover:bg-panel-strong/70 hover:text-foreground"
+                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                   }`}
                 >
                   {option.label}
@@ -1704,7 +1704,7 @@ export function UnifiedNewsPanel({
                     }}
                     className={`flex h-8 w-full items-center justify-between rounded-md px-2 text-left text-xs font-semibold transition-colors ${
                       effectiveAuthorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
-                        ? "bg-foreground text-background"
+                        ? "bg-success-soft text-foreground"
                         : "text-muted hover:bg-background/70 hover:text-foreground"
                     }`}
                   >
@@ -1972,7 +1972,7 @@ export function UnifiedNewsPanel({
                     });
                   }
                 }}
-                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-accent/45 bg-workspace-surface-raised px-2.5 py-2.5 transition-colors active:scale-[0.995] hover:border-accent/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-accent"
+                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-success/55 bg-workspace-surface-raised px-2.5 py-2.5 transition-all duration-75 active:scale-[0.995] hover:border-success/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-success"
               >
                 {/* Avatar */}
                 <div className="relative shrink-0 pt-0.5">
@@ -2028,7 +2028,7 @@ export function UnifiedNewsPanel({
                     ) : null}
                     <span className="text-muted">·</span>
                     <span className="shrink-0 text-muted">{formatDisplayTime(item.createdAt)}</span>
-                    {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-accent" />}
+                    {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-success" />}
                   </div>
 
                   {/* Body */}

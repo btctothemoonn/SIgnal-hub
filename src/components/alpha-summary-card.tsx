@@ -464,7 +464,7 @@ export function AlphaSummaryCard({
   }, [activeScope.pollMs, loadSummary, scope]);
 
   const scopeTabs = (
-    <div className="grid w-full grid-cols-4 gap-0.5 rounded-md border border-line/70 bg-background/40 p-0.5 sm:max-w-sm">
+    <div className="grid w-full grid-cols-4 gap-0.5 rounded-lg border border-line/70 bg-workspace-canvas p-0.5 sm:max-w-sm">
       {SUMMARY_SCOPES.map((item) => {
         const selected = item.id === scope;
         return (
@@ -473,10 +473,10 @@ export function AlphaSummaryCard({
             type="button"
             aria-pressed={selected}
             onClick={() => setScope(item.id)}
-            className={`h-7 rounded-md px-1.5 text-[11px] font-semibold transition-colors ${
+            className={`h-7 rounded-md border px-1.5 text-[11px] font-semibold transition-colors ${
               selected
-                ? "bg-foreground text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)]"
-                : "text-muted hover:bg-panel hover:text-foreground"
+                ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                : "border-transparent text-muted hover:bg-panel hover:text-foreground"
             }`}
           >
             {item.label}
@@ -489,7 +489,7 @@ export function AlphaSummaryCard({
   return (
     <section
       className={[
-        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_24px_60px_-50px_rgba(38,31,27,0.55)] pointer-events-auto",
+        "relative min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] pointer-events-auto",
         className,
       ]
         .filter(Boolean)
@@ -544,7 +544,7 @@ export function AlphaSummaryCard({
               type="button"
               disabled={busyScope === scope}
               onClick={() => void loadSummary(true, scope)}
-              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-line/70 bg-foreground px-3 text-xs font-semibold text-background shadow-[0_12px_28px_-24px_rgba(38,31,27,0.65)] transition-colors hover:bg-accent disabled:opacity-60"
+              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-success/45 bg-success px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-60"
             >
               {busyScope === scope ? "生成中..." : "重新生成"}
             </button>

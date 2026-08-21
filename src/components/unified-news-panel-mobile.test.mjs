@@ -30,11 +30,11 @@ assert.match(source, /rounded-\[6px\]/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 assert.match(
   source,
-  /rounded-\[6px\] border border-workspace-line-strong bg-workspace-surface/,
+  /rounded-lg border border-workspace-line-strong bg-workspace-surface/,
 );
 assert.match(source, /bg-workspace-canvas/);
 assert.match(source, /active:scale-\[0\.995\]/);
-assert.match(source, /border-l-2 border-l-accent\/45/);
+assert.match(source, /border-l-2 border-l-success\/55/);
 assert.match(source, /data-telegram-fault-alert/);
 assert.match(source, /requestTelegramSnapshot\(\{ range: feedRange \}\),\s*requestXSnapshot\(\{ range: feedRange \}\),/s);
 assert.doesNotMatch(source, /refreshSourceLabel\(telegramRefresh\?\.source\)/);

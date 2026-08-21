@@ -48,8 +48,13 @@ const STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY =
 const PREMIUM_CHART_HEIGHT = 360;
 const PREMIUM_KLINE_PAGE_LIMIT = 1500;
 const PREMIUM_MAX_POINTS = 20000;
-const PREMIUM_UP_COLOR = "#62d6aa";
-const PREMIUM_DOWN_COLOR = "#ff7b8a";
+const CHART_SURFACE = "#17211f";
+const CHART_TEXT = "#9eaaa7";
+const CHART_GRID = "rgba(185, 202, 196, 0.08)";
+const CHART_AXIS = "rgba(185, 202, 196, 0.16)";
+const CHART_ACCENT = "#2dd4bf";
+const PREMIUM_UP_COLOR = "#2dd4bf";
+const PREMIUM_DOWN_COLOR = "#f97066";
 const PREMIUM_INTERVAL_OPTIONS = [
   { value: "1m", label: "1分钟" },
   { value: "5m", label: "5分钟" },
@@ -111,8 +116,8 @@ function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
     value: Math.max(0, point.volume ?? 0),
     color:
       close >= open
-        ? "rgba(98, 214, 170, 0.32)"
-        : "rgba(255, 123, 138, 0.3)",
+        ? "rgba(45, 212, 191, 0.22)"
+        : "rgba(249, 112, 102, 0.2)",
   };
 }
 
@@ -194,8 +199,8 @@ export function StocksHynixPremiumCurve() {
       width: container.clientWidth,
       height: PREMIUM_CHART_HEIGHT,
       layout: {
-        background: { type: ColorType.Solid, color: "#0b1211" },
-        textColor: "#c8d6d0",
+        background: { type: ColorType.Solid, color: CHART_SURFACE },
+        textColor: CHART_TEXT,
       },
       localization: {
         locale: "zh-CN",
@@ -204,22 +209,22 @@ export function StocksHynixPremiumCurve() {
           `${formatShanghaiChartTime(time, selectedInterval)} UTC+8`,
       },
       grid: {
-        vertLines: { color: "rgba(148, 163, 184, 0.12)" },
-        horzLines: { color: "rgba(148, 163, 184, 0.12)" },
+        vertLines: { color: CHART_GRID },
+        horzLines: { color: CHART_GRID },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: "rgba(226, 232, 240, 0.35)",
-          labelBackgroundColor: "#2a342f",
+          color: "rgba(45, 212, 191, 0.45)",
+          labelBackgroundColor: CHART_ACCENT,
         },
         horzLine: {
-          color: "rgba(226, 232, 240, 0.35)",
-          labelBackgroundColor: "#2a342f",
+          color: "rgba(45, 212, 191, 0.45)",
+          labelBackgroundColor: CHART_ACCENT,
         },
       },
       rightPriceScale: {
-        borderColor: "rgba(148, 163, 184, 0.22)",
+        borderColor: CHART_AXIS,
         mode: PriceScaleMode.Normal,
         scaleMargins: {
           top: 0.12,
@@ -227,7 +232,7 @@ export function StocksHynixPremiumCurve() {
         },
       },
       timeScale: {
-        borderColor: "rgba(148, 163, 184, 0.22)",
+        borderColor: CHART_AXIS,
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: Time) =>
@@ -264,7 +269,7 @@ export function StocksHynixPremiumCurve() {
       },
     });
     const volumeSeries = chart.addSeries(HistogramSeries, {
-      color: "rgba(148, 163, 184, 0.25)",
+      color: "rgba(100, 115, 112, 0.18)",
       priceFormat: {
         type: "volume",
       },
@@ -516,7 +521,7 @@ export function StocksHynixPremiumCurve() {
   return (
     <section
       data-testid="stocks-hynix-premium-curve"
-      className="min-h-[32rem] min-w-0 rounded-[6px] border border-line/60 bg-panel-strong/80 px-3 py-3"
+      className="min-h-[32rem] min-w-0 rounded-lg border border-line/60 bg-panel-strong px-3 py-3 shadow-sm"
     >
       {premiumAlertVisible ? (
         <div
@@ -525,7 +530,7 @@ export function StocksHynixPremiumCurve() {
           aria-labelledby="hynix-premium-alert-title"
           className="fixed inset-0 z-50 flex items-start justify-center bg-background/55 px-4 pt-24 backdrop-blur-sm"
         >
-          <div className="w-full max-w-sm rounded-[6px] border border-danger/50 bg-panel-strong p-4">
+          <div className="w-full max-w-sm rounded-lg border border-danger/50 bg-panel-strong p-4">
             <p
               id="hynix-premium-alert-title"
               className="text-sm font-semibold text-danger"
@@ -554,7 +559,7 @@ export function StocksHynixPremiumCurve() {
                     dismissHynixPremiumAlertCycle(current),
                   )
                 }
-                className="rounded-[6px] bg-danger px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-danger/85"
+                className="rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-danger/85"
               >
                 知道了
               </button>
@@ -571,16 +576,16 @@ export function StocksHynixPremiumCurve() {
             SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
             {selectedInterval === "1m" ? "最近3天" : "2026-07-14 起"}
           </p>
-          <div className="mt-2 inline-flex rounded-[6px] border border-line/70 bg-background/45 p-1">
+          <div className="mt-2 inline-flex rounded-lg border border-line/70 bg-workspace-canvas p-1">
             {PREMIUM_INTERVAL_OPTIONS.map((option) => (
               <button
                 key={option.value}
                 type="button"
                 onClick={() => setSelectedInterval(option.value)}
-                className={`rounded-[6px] px-2.5 py-1 text-xs font-semibold transition ${
+                className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
                   selectedInterval === option.value
-                    ? "bg-foreground text-background"
-                    : "text-muted hover:text-foreground"
+                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    : "border-transparent text-muted hover:text-foreground"
                 }`}
               >
                 {option.label}
@@ -607,7 +612,7 @@ export function StocksHynixPremiumCurve() {
           </button>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:min-w-[30rem]">
-          <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-2">
+          <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-2">
             <p className="text-[10px] font-semibold text-muted">当前溢价</p>
             <p
               className={`mt-1 font-mono text-lg font-semibold ${premiumTone(
@@ -617,13 +622,13 @@ export function StocksHynixPremiumCurve() {
               {latest ? formatSignedPercent(latest.premiumPct) : "--"}
             </p>
           </div>
-          <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-2">
+          <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-2">
             <p className="text-[10px] font-semibold text-muted">SKHYUSDT</p>
             <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
               {latest ? formatPrice(latest.basePrice) : "--"}
             </p>
           </div>
-          <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-2">
+          <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-2">
             <p className="text-[10px] font-semibold text-muted">SKHYNIXUSDT</p>
             <p className="mt-1 truncate font-mono text-sm font-semibold text-foreground">
               {latest ? formatPrice(latest.benchmarkPrice) : "--"}
@@ -632,7 +637,7 @@ export function StocksHynixPremiumCurve() {
         </div>
       </div>
 
-      <div className="relative min-w-0 overflow-hidden rounded-[6px] border border-line/60 bg-background/35">
+      <div className="relative min-w-0 overflow-hidden rounded-lg border border-line/60 bg-workspace-canvas">
         <div
           ref={chartContainerRef}
           role="img"
@@ -647,7 +652,7 @@ export function StocksHynixPremiumCurve() {
       </div>
 
       <div className="mt-3 grid gap-2 lg:grid-cols-3">
-        <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-3">
+        <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-3">
           <p className="text-xs font-semibold text-foreground">
             溢价回归套利资金费
           </p>
@@ -655,7 +660,7 @@ export function StocksHynixPremiumCurve() {
             做空 SKHY + 做多 SKHYNIX，正数代表资金费收钱
           </p>
         </div>
-        <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-3">
+        <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-3">
           <p className="text-[10px] font-semibold text-muted">最近一期合计</p>
           <p
             className={`mt-1 font-mono text-base font-semibold ${premiumTone(
@@ -672,7 +677,7 @@ export function StocksHynixPremiumCurve() {
               : "等待资金费率"}
           </p>
         </div>
-        <div className="rounded-[6px] border border-line/60 bg-background/35 px-3 py-3">
+        <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-3">
           <p className="text-[10px] font-semibold text-muted">
             当日累计 / 1万USDT
           </p>

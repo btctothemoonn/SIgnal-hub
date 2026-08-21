@@ -274,17 +274,17 @@ export function AlphaResearchPage() {
       data-stocks-workspace
       className="grid min-h-0 min-w-0 gap-3 overflow-x-clip"
     >
-      <section className="rounded-[6px] border border-line/70 bg-panel-strong lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl">
+      <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl">
         <div className="grid gap-3 border-b border-line/60 px-3 py-3 sm:px-4 xl:grid-cols-[minmax(14rem,0.34fr)_minmax(0,0.66fr)] xl:items-center">
           <div className="min-w-0">
-            <h1 className="font-serif text-2xl font-medium text-foreground">
+            <h1 className="text-2xl font-semibold text-foreground">
               STOCKS 美股投研池
             </h1>
             <p className="mt-1 text-xs text-muted">
               行情尝试接入 Yahoo，财报采用 FMP 标准化数据；失败时保留最近缓存。
             </p>
           </div>
-          <div className="grid min-w-0 grid-cols-2 gap-1 rounded-[6px] border border-line/70 bg-background/45 p-1">
+          <div className="grid min-w-0 grid-cols-2 gap-1 rounded-lg border border-line/70 bg-workspace-canvas p-1">
             {tabs.map((tab) => {
               const selected = activeTab === tab.id;
               return (
@@ -294,10 +294,10 @@ export function AlphaResearchPage() {
                   aria-pressed={selected}
                   onClick={() => setActiveTab(tab.id)}
                   className={[
-                    "min-h-10 rounded-[6px] px-2 py-1.5 text-left transition-colors",
+                    "min-h-10 rounded-lg border px-2 py-1.5 text-left transition-colors",
                     selected
-                      ? "bg-foreground text-background"
-                      : "text-muted hover:bg-panel hover:text-foreground",
+                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >
                   <span className="block text-xs font-semibold">{tab.label}</span>

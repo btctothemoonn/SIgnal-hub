@@ -4,17 +4,20 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
 
 type Theme = "light" | "dark" | "system";
+const THEME_STORAGE_KEY = "signal-hub:theme:cromojo-dark-dashboard:v1";
 
 function getStoredTheme(): Theme {
-  if (typeof window === "undefined") return "system";
-  const stored = localStorage.getItem("theme");
-  if (stored === "light" || stored === "dark") return stored;
-  return "system";
+  if (typeof window === "undefined") return "dark";
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "light" || stored === "dark" || stored === "system") {
+    return stored;
+  }
+  return "dark";
 }
 
 function getResolvedTheme(theme: Theme): "light" | "dark" {
   if (theme !== "system") return theme;
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
@@ -36,7 +39,7 @@ function subscribeTheme(listener: () => void) {
 }
 
 function getServerThemeSnapshot(): Theme {
-  return "system";
+  return "dark";
 }
 
 export function ThemeToggle() {
@@ -60,8 +63,8 @@ export function ThemeToggle() {
 
   const cycle = useCallback(() => {
     const next: Theme =
-      theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
-    localStorage.setItem("theme", next);
+      theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+    localStorage.setItem(THEME_STORAGE_KEY, next);
     applyTheme(next);
     window.dispatchEvent(new Event("themechange"));
   }, [theme]);
@@ -74,7 +77,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={cycle}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-workspace-line-strong bg-workspace-surface-raised text-muted transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-success/40 hover:bg-success-soft hover:text-success"
       aria-label={`切换主题，当前：${label}`}
       title={label}
     >

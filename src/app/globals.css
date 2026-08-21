@@ -1,29 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f3f6f5;
-  --foreground: #1a211e;
-  --panel: rgba(255, 255, 255, 0.88);
-  --panel-strong: rgba(248, 251, 250, 0.97);
-  --muted: #5f6c66;
-  --line: rgba(36, 50, 44, 0.15);
-  --accent: #8a651f;
-  --accent-soft: rgba(138, 101, 31, 0.12);
-  --success: #28775a;
-  --success-soft: rgba(40, 119, 90, 0.12);
-  --warning: #8c650f;
-  --warning-soft: rgba(140, 101, 15, 0.12);
-  --danger: #b7483d;
-  --danger-soft: rgba(183, 72, 61, 0.12);
-  --info: #356f98;
-  --info-soft: rgba(53, 111, 152, 0.12);
-  --workspace-canvas: #f3f6f5;
-  --workspace-rail: #e6ece9;
+  --background: #f3f8f6;
+  --foreground: #10151b;
+  --panel: #ffffff;
+  --panel-strong: #ffffff;
+  --muted: #647370;
+  --line: rgba(17, 24, 28, 0.12);
+  --accent: #6c5ce7;
+  --accent-soft: rgba(108, 92, 231, 0.1);
+  --success: #14b8a6;
+  --success-soft: rgba(20, 184, 166, 0.12);
+  --warning: #b7791f;
+  --warning-soft: rgba(183, 121, 31, 0.12);
+  --danger: #c2415a;
+  --danger-soft: rgba(194, 65, 90, 0.1);
+  --info: #2563eb;
+  --info-soft: rgba(37, 99, 235, 0.09);
+  --workspace-canvas: #f3f8f6;
+  --workspace-rail: #f8fbfa;
   --workspace-surface: #ffffff;
-  --workspace-surface-raised: #f8fbfa;
-  --workspace-toolbar: #edf2f0;
-  --workspace-line-strong: #b8c4bf;
-  --workspace-radius: 6px;
+  --workspace-surface-raised: #ffffff;
+  --workspace-toolbar: #ffffff;
+  --workspace-line-strong: #dbe6e1;
+  --workspace-radius: 8px;
   --workspace-gutter: 20px;
   --app-font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "PingFang SC",
@@ -38,29 +38,29 @@
 }
 
 html.dark {
-  --background: #0c0f0e;
-  --foreground: #f5f2eb;
-  --panel: rgba(19, 23, 22, 0.88);
-  --panel-strong: rgba(25, 30, 29, 0.97);
-  --muted: #aeb8b3;
-  --line: rgba(226, 235, 230, 0.14);
-  --accent: #e0be76;
-  --accent-soft: rgba(224, 190, 118, 0.17);
-  --success: #7ed0aa;
-  --success-soft: rgba(126, 208, 170, 0.15);
-  --warning: #e7bf71;
-  --warning-soft: rgba(231, 191, 113, 0.15);
-  --danger: #f08779;
-  --danger-soft: rgba(240, 135, 121, 0.16);
-  --info: #95c0df;
-  --info-soft: rgba(149, 192, 223, 0.15);
-  --workspace-canvas: #0c0f0e;
-  --workspace-rail: #121816;
-  --workspace-surface: #171d1b;
-  --workspace-surface-raised: #1d2421;
-  --workspace-toolbar: #131a17;
-  --workspace-line-strong: #3b4641;
-  --workspace-radius: 6px;
+  --background: #111817;
+  --foreground: #edf1f4;
+  --panel: #17211f;
+  --panel-strong: #1b2725;
+  --muted: #9eaaa7;
+  --line: rgba(185, 202, 196, 0.16);
+  --accent: #8b83f6;
+  --accent-soft: rgba(109, 93, 246, 0.14);
+  --success: #2dd4bf;
+  --success-soft: rgba(45, 212, 191, 0.13);
+  --warning: #f2c94c;
+  --warning-soft: rgba(242, 201, 76, 0.12);
+  --danger: #f97066;
+  --danger-soft: rgba(249, 112, 102, 0.13);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.12);
+  --workspace-canvas: #111817;
+  --workspace-rail: #131c1a;
+  --workspace-surface: #17211f;
+  --workspace-surface-raised: #1b2725;
+  --workspace-toolbar: #17211f;
+  --workspace-line-strong: #2c3b38;
+  --workspace-radius: 8px;
   --workspace-gutter: 20px;
 }
 
@@ -109,7 +109,8 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background: var(--background);
-  background-image: none;
+  background-image: linear-gradient(180deg, #f8fcfa 0%, #f3f8f6 44%, #edf4f1 100%);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01", "ss03", "kern";
@@ -133,7 +134,7 @@ textarea,
 
 html.dark body {
   background: var(--background);
-  background-image: none;
+  background-image: linear-gradient(180deg, #111817 0%, #14201e 48%, #111817 100%);
 }
 
 a {

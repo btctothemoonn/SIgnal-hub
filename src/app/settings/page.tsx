@@ -13,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AppShell } from "@/components/app-shell";
 import { SystemHealthPanel } from "@/components/system-health-panel";
 
 type WatchItem = { ref: string; tags: string[] };
@@ -188,20 +189,24 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div data-settings-workspace className="min-h-screen overflow-x-hidden bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-4 px-4 py-5 sm:px-6 lg:py-7">
+    <AppShell
+      activeNav="settings"
+      subtitle="监控源 / AI 配置 / 系统健康"
+      mainClassName="mx-auto min-h-0 w-full max-w-[1180px] overflow-x-hidden px-4 py-5 sm:px-6 lg:py-7"
+    >
+      <div data-settings-workspace className="flex w-full flex-col gap-4 text-foreground">
         <header className="flex items-center justify-between gap-4 border-b border-line/70 pb-4">
           <div className="flex items-baseline gap-3">
             <button
               type="button"
               onClick={goHome}
               disabled={navigating}
-              className="inline-flex items-center gap-1.5 rounded-[6px] border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted shadow-sm transition-colors hover:border-success/35 hover:bg-success-soft hover:text-success disabled:opacity-60"
             >
               <ArrowLeft aria-hidden="true" size={14} />
               {navigating ? "返回中..." : "返回面板"}
             </button>
-            <h1 className="font-serif text-2xl font-medium text-foreground">
+            <h1 className="text-2xl font-semibold text-foreground">
               监控设置
             </h1>
           </div>
@@ -223,10 +228,10 @@ export default function SettingsPage() {
                   key={section.kind}
                   onClick={() => setActiveKind(section.kind)}
                   className={
-                    "flex shrink-0 items-center justify-between rounded-[6px] border px-3 py-2 text-sm transition-colors lg:w-full " +
+                    "flex shrink-0 items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors lg:w-full " +
                     (isActive
-                      ? "border-accent/45 bg-accent-soft text-accent"
-                      : "border-line/70 bg-panel-strong/90 text-muted hover:border-accent/30 hover:bg-panel hover:text-foreground")
+                      ? "border-success/45 bg-success-soft text-foreground shadow-sm"
+                      : "border-line/70 bg-panel-strong/90 text-muted hover:border-success/30 hover:bg-success-soft/70 hover:text-foreground")
                   }
                 >
                   <span className="font-medium">{section.title}</span>
@@ -235,7 +240,7 @@ export default function SettingsPage() {
                       className={
                         "ml-2 rounded-[6px] px-2 py-0.5 text-[11px] " +
                         (isActive
-                          ? "bg-foreground/10 text-foreground"
+                          ? "bg-success/15 text-success"
                           : "bg-line/60 text-muted")
                       }
                     >
@@ -249,7 +254,7 @@ export default function SettingsPage() {
 
           <section data-settings-editor className="min-w-0">
             {loading ? (
-              <div className="rounded-[6px] border border-line/70 bg-panel-strong p-6 text-sm text-muted">
+              <div className="rounded-lg border border-line/70 bg-panel-strong p-6 text-sm text-muted shadow-sm">
                 加载中...
               </div>
             ) : activeKind === "health" ? (
@@ -317,7 +322,7 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
 
@@ -333,7 +338,7 @@ function ConfigurationStatusPanel({
   items,
 }: ConfigurationStatusPanelProps) {
   return (
-    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
+    <div className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-sm sm:p-5">
       <div className="border-b border-line/70 pb-4">
         <h2 className="text-base font-semibold text-foreground">{title}</h2>
         <p className="mt-1 text-xs leading-5 text-muted">{description}</p>
@@ -479,7 +484,7 @@ function WatchListPanel({
       : splitInput(batchInput);
 
   return (
-    <div className="rounded-[6px] border border-line/70 bg-panel-strong p-4 sm:p-5">
+    <div className="rounded-lg border border-line/70 bg-panel-strong p-4 shadow-sm sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-foreground">
           {label}
@@ -518,7 +523,7 @@ function WatchListPanel({
         <button
           onClick={addSingle}
           disabled={busy || !singleInput.trim()}
-          className="inline-flex items-center justify-center gap-1.5 rounded-[6px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-success px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
         >
           <Plus aria-hidden="true" size={15} />
           添加
@@ -557,7 +562,7 @@ function WatchListPanel({
             <button
               onClick={addBatch}
               disabled={busy || previewBatch.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-[6px] bg-foreground px-4 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
             >
               <Plus aria-hidden="true" size={15} />
               添加 {previewBatch.length} 条
@@ -737,7 +742,7 @@ function WatchItemRow({
             <button
               onClick={save}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-[6px] bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
             >
               <Save aria-hidden="true" size={14} />
               保存

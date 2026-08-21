@@ -148,7 +148,7 @@ export function StocksResearchLayout({
       </section>
 
       <section data-mobile-stocks-pager className="min-w-0 lg:hidden">
-        <div className="mb-3 rounded-[6px] border border-line/70 bg-panel-strong/95 p-1">
+        <div className="mb-3 rounded-lg border border-line/70 bg-panel-strong/95 p-1 shadow-sm">
           <div className="grid grid-cols-3 gap-1">
             {mobilePanels.map((panel) => (
               <button
@@ -157,10 +157,10 @@ export function StocksResearchLayout({
                 aria-pressed={activeMobilePanel === panel.id}
                 onClick={() => showMobilePanel(panel.id)}
                 className={[
-                  "h-9 rounded-[6px] text-sm font-semibold transition-colors",
+                  "h-9 rounded-lg border text-sm font-semibold transition-colors",
                   activeMobilePanel === panel.id
-                    ? "bg-foreground text-background"
-                    : "text-muted hover:bg-panel hover:text-foreground",
+                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                 ].join(" ")}
               >
                 {panel.label}

@@ -353,7 +353,7 @@ export function DouyinMonitorPanel({
               type="button"
               onClick={refreshNow}
               disabled={isPending || creatorCount === 0 || !snapshot.enabled}
-              className="rounded-[6px] bg-foreground px-3 py-2 text-sm font-semibold text-background transition-colors hover:bg-accent disabled:opacity-40"
+              className="rounded-lg bg-success px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
             >
               {isPending ? "刷新中..." : "手动刷新"}
             </button>

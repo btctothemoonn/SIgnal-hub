@@ -46,13 +46,13 @@ type DragState = {
 type PerformancePoint = StocksPerformanceSnapshot["series"][number]["points"][number];
 
 const palette = [
-  "#d8e36f",
-  "#b7d8f3",
-  "#e4a8df",
-  "#8f85f0",
-  "#f5a5b8",
-  "#b7b8da",
-  "#8fd6c2",
+  "#6c5ce7",
+  "#14b8a6",
+  "#2563eb",
+  "#d946ef",
+  "#e11d48",
+  "#84cc16",
+  "#64748b",
 ];
 
 const FULL_ZOOM_RANGE: ZoomRange = { start: 0, end: 1 };
@@ -316,17 +316,17 @@ export function StocksPerformanceChart({
   return (
     <section
       data-stocks-performance-chart
-      className="min-h-[22rem] min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-[#10141f]"
+      className="min-h-[22rem] min-w-0 overflow-hidden rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)]"
     >
-      <div className="flex flex-col gap-3 border-b border-white/10 px-3 py-3 sm:px-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-3 border-b border-line/70 px-3 py-3 sm:px-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-start lg:gap-3">
           <div className="w-full min-w-0 lg:w-auto lg:min-w-[12rem]">
-            <h2 className="text-sm font-semibold text-white">研究池以来相对涨跌幅</h2>
-            <p className="mt-1 text-xs text-slate-300">
+            <h2 className="text-sm font-semibold text-foreground">研究池以来相对涨跌幅</h2>
+            <p className="mt-1 text-xs text-muted">
               {tickers.join(", ")} · 基准起点 {ALPHA_RESEARCH_POOL_TRACKING_START_DATE} 的首条本地缓存价
             </p>
           </div>
-          <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-[6px] border border-white/10 bg-white/5 p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
+          <div className="-mx-1 flex w-[calc(100%+0.5rem)] max-w-none gap-1 overflow-x-auto rounded-lg border border-line/70 bg-workspace-canvas p-1 sm:mx-0 sm:w-full lg:w-auto lg:flex-wrap lg:overflow-visible">
             {sectors.map((sector) => {
               const selected = sector.id === activeSectorId;
               return (
@@ -337,10 +337,10 @@ export function StocksPerformanceChart({
                   onClick={() => onSelectSector(sector.id)}
                   title={sector.tickers.join(", ")}
                   className={[
-                    "shrink-0 whitespace-nowrap rounded-[6px] px-2 py-1 text-[11px] font-semibold transition-colors",
+                    "shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors",
                     selected
-                      ? "bg-white text-[#10141f]"
-                      : "text-slate-300 hover:bg-white/10 hover:text-white",
+                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >
                   {sector.name}
@@ -350,14 +350,14 @@ export function StocksPerformanceChart({
           </div>
         </div>
         <div className="flex w-full flex-wrap gap-2 text-[11px] font-medium lg:w-auto lg:justify-end">
-          <div className="flex overflow-hidden rounded-[6px] border border-white/10 bg-white/5 text-slate-200">
+          <div className="flex overflow-hidden rounded-lg border border-line/70 bg-workspace-canvas text-muted">
             <button
               type="button"
               aria-label="Zoom out chart"
               title="Zoom out"
               disabled={!hasData}
               onClick={() => zoomFromCenter(1.25)}
-              className="min-h-8 min-w-8 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-8 min-w-8 px-2 transition-colors hover:bg-panel disabled:cursor-not-allowed disabled:opacity-40"
             >
               -
             </button>
@@ -367,7 +367,7 @@ export function StocksPerformanceChart({
               title="Zoom in"
               disabled={!hasData}
               onClick={() => zoomFromCenter(0.8)}
-              className="min-h-8 min-w-8 border-l border-white/10 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-8 min-w-8 border-l border-line/70 px-2 transition-colors hover:bg-panel disabled:cursor-not-allowed disabled:opacity-40"
             >
               +
             </button>
@@ -377,15 +377,15 @@ export function StocksPerformanceChart({
               title="Reset zoom"
               disabled={!hasData}
               onClick={resetZoom}
-              className="min-h-8 min-w-9 border-l border-white/10 px-2 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-8 min-w-9 border-l border-line/70 px-2 transition-colors hover:bg-panel disabled:cursor-not-allowed disabled:opacity-40"
             >
               1x
             </button>
           </div>
-          <span className="rounded-[6px] border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
+          <span className="rounded-lg border border-line/70 bg-workspace-canvas px-2 py-1 text-muted">
             {snapshot?.marketDate ?? "等待缓存"}
           </span>
-          <span className="rounded-[6px] border border-white/10 bg-white/5 px-2 py-1 text-slate-200">
+          <span className="rounded-lg border border-line/70 bg-workspace-canvas px-2 py-1 text-muted">
             {hasData ? `更新 ${formatTime(newestAt)}` : loading ? "加载中" : "暂无数据"}
           </span>
         </div>
@@ -395,7 +395,7 @@ export function StocksPerformanceChart({
         {!hasData ? (
           <div
             className={[
-              "flex items-center justify-center px-6 text-center text-sm text-slate-300",
+              "flex items-center justify-center px-6 text-center text-sm text-muted",
               compact ? "min-h-[14rem]" : "min-h-[17rem]",
             ].join(" ")}
           >
@@ -424,11 +424,11 @@ export function StocksPerformanceChart({
             className={[
               "h-auto w-full touch-none overscroll-contain select-none cursor-grab active:cursor-grabbing",
               usesRankedList
-                ? "rounded-[6px] border border-white/10 bg-[#10141f]"
+                ? "rounded-lg border border-line/70 bg-workspace-surface"
                 : "",
             ].join(" ")}
           >
-            <rect x="0" y="0" width="720" height={viewBoxHeight} fill="#10141f" />
+            <rect x="0" y="0" width="720" height={viewBoxHeight} fill="var(--workspace-surface)" />
             <defs>
               <clipPath id="stocks-performance-chart-plot">
                 <rect
@@ -449,12 +449,13 @@ export function StocksPerformanceChart({
                     x2={plot.right}
                     y1={y}
                     y2={y}
-                    stroke="rgba(255,255,255,0.08)"
+                    stroke="var(--line)"
+                    strokeOpacity="0.72"
                   />
                   <text
                     x={plot.right + 10}
                     y={y + 4}
-                    fill="#cbd5e1"
+                    fill="var(--muted)"
                     fontSize="10"
                   >
                     {formatSignedPercent(value)}
@@ -471,7 +472,8 @@ export function StocksPerformanceChart({
                   x2={x}
                   y1={plot.top}
                   y2={plot.bottom}
-                  stroke="rgba(255,255,255,0.08)"
+                  stroke="var(--line)"
+                  strokeOpacity="0.62"
                 />
               );
             })}
@@ -480,7 +482,7 @@ export function StocksPerformanceChart({
               x2={plot.right}
               y1={toY(0)}
               y2={toY(0)}
-              stroke="rgba(255,255,255,0.25)"
+              stroke="var(--workspace-line-strong)"
             />
             {series.map((item, index) => {
               const color = palette[index % palette.length];
@@ -539,7 +541,7 @@ export function StocksPerformanceChart({
                           <text
                             x={plot.right + 30}
                             y={labelY + 4}
-                            fill="#111827"
+                            fill="#ffffff"
                             fontSize="10"
                             fontWeight="700"
                           >
@@ -552,7 +554,7 @@ export function StocksPerformanceChart({
                 </g>
               );
             })}
-            <text x={plot.left} y={axisLabelY} fill="#cbd5e1" fontSize="10">
+            <text x={plot.left} y={axisLabelY} fill="var(--muted)" fontSize="10">
               {formatAxisTime(
                 new Date(
                   axisTimes[
@@ -565,7 +567,7 @@ export function StocksPerformanceChart({
                 hasMultipleMarketDates,
               )}
             </text>
-            <text x={plot.right - 70} y={axisLabelY} fill="#cbd5e1" fontSize="10">
+            <text x={plot.right - 70} y={axisLabelY} fill="var(--muted)" fontSize="10">
               {formatAxisTime(
                 new Date(
                   axisTimes[
@@ -583,12 +585,12 @@ export function StocksPerformanceChart({
             <aside
               data-chart-rank-list
               aria-label="股票涨跌榜"
-              className="grid grid-cols-2 gap-1.5 border-t border-white/10 pt-2 text-[11px] md:block md:border-l md:border-t-0 md:pl-3 md:pt-0"
+              className="grid grid-cols-2 gap-1.5 border-t border-line/70 pt-2 text-[11px] md:block md:border-l md:border-t-0 md:pl-3 md:pt-0"
             >
               {seriesLabelItems.map((item) => (
                 <div
                   key={item.ticker}
-                  className="mb-1.5 flex min-w-0 items-center justify-between gap-2 border-l-2 bg-white/[0.03] px-2 py-1.5 text-slate-100 last:mb-0"
+                  className="mb-1.5 flex min-w-0 items-center justify-between gap-2 rounded-md border-l-2 bg-workspace-canvas px-2 py-1.5 text-foreground last:mb-0"
                   style={{ borderColor: item.color }}
                   title={`${item.ticker} ${item.companyName} ${formatSignedPercent(item.changePct)}`}
                 >
@@ -602,7 +604,7 @@ export function StocksPerformanceChart({
                   <span
                     className={[
                       "shrink-0 font-bold tabular-nums",
-                      item.changePct >= 0 ? "text-emerald-200" : "text-rose-200",
+                      item.changePct >= 0 ? "text-success" : "text-danger",
                     ].join(" ")}
                   >
                     {formatSignedPercent(item.changePct)}
@@ -616,7 +618,7 @@ export function StocksPerformanceChart({
       </div>
 
       {hasData ? (
-        <div className="grid gap-1 border-t border-white/10 px-3 py-3 text-[11px] text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-1 border-t border-line/70 px-3 py-3 text-[11px] text-muted sm:grid-cols-2 lg:grid-cols-3">
           {series.map((item, index) => (
             <div key={item.ticker} className="flex min-w-0 items-center gap-2">
               <span

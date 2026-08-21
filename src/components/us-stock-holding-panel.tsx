@@ -230,7 +230,7 @@ function UsHoldingSummaryCell({
     <div className="min-w-0 bg-panel-strong px-3 py-3">
       <div className="text-[11px] font-semibold uppercase text-muted">{label}</div>
       <div
-        className={`mt-1 min-w-0 font-mono text-base font-black leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
+        className={`mt-1 min-w-0 font-mono text-base font-bold leading-tight [overflow-wrap:anywhere] sm:text-lg ${tone}`}
       >
         {value}
       </div>
@@ -267,7 +267,7 @@ function PositionLogo({ card }: { card: UsStockHoldingBriefCard }) {
       ].join(" ")}
       aria-hidden="true"
     >
-      <span className="text-sm font-black leading-none tracking-normal">
+      <span className="text-sm font-bold leading-none tracking-normal">
         {label.toLowerCase()}
       </span>
     </div>
@@ -332,7 +332,7 @@ function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
           <PositionLogo card={card} />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h4 className="truncate text-xl font-black leading-none text-foreground">
+              <h4 className="truncate text-xl font-bold leading-none text-foreground">
                 {card.symbol}
               </h4>
               <span
@@ -347,7 +347,7 @@ function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
           </div>
           <div className="shrink-0 text-right">
             <div className="text-xs font-medium text-muted">市值</div>
-            <div className="mt-1 font-mono text-lg font-black leading-none text-foreground">
+            <div className="mt-1 font-mono text-lg font-bold leading-none text-foreground">
               {formatUsd(card.marketValue)}
             </div>
           </div>
@@ -378,7 +378,7 @@ function PositionBriefCard({ card }: { card: UsStockHoldingBriefCard }) {
             label="盈亏"
             value={<PositionBriefPnl card={card} />}
             tone={pnlTone(card.unrealizedPnl)}
-            valueClassName="font-mono text-base font-black leading-tight"
+            valueClassName="font-mono text-base font-bold leading-tight"
           />
         </div>
       </div>
@@ -596,7 +596,7 @@ export function USStockHoldingPanel() {
     <section className="min-w-0 space-y-4">
       <div className="flex flex-col gap-4 border-b border-line/70 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-2xl font-black leading-tight text-foreground">
+          <h2 className="text-2xl font-semibold leading-tight text-foreground">
             持仓状况
           </h2>
           <p className="mt-2 text-sm font-medium text-muted">
