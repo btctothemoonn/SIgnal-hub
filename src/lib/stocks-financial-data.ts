@@ -801,8 +801,8 @@ function upcomingEarningsTime(stock: AlphaResearchStock) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function rotatedStocks(
-  stocks: AlphaResearchStock[],
+function rotatedStocks<T>(
+  stocks: T[],
   count: number,
   slot: number,
 ) {
@@ -907,6 +907,184 @@ export function selectFmpFinancialStocksForRefresh(
   const configuredLimit = env.STOCKS_FMP_FINANCIAL_MAX_TICKERS?.trim();
   if (!configuredLimit) return candidates;
   return candidates.slice(0, positiveInt(configuredLimit, candidates.length, candidates.length));
+}
+
+export function selectMiniMaxEarningsBackfillStocks({
+  stocks,
+  snapshot,
+  env,
+  now = new Date(),
+}: {
+  stocks: AlphaResearchStock[];
+  snapshot: StocksFinancialSnapshot;
+  env: EnvLike;
+  now?: Date;
+}) {
+  const todayUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const priorityCutoff = todayUtc + 15 * 86_400_000;
+  const candidates = stocks.flatMap((stock, index) => {
+    const statement = snapshot.financials[stock.ticker];
+    const items = statement?.calendarYearEarnings ?? [];
+    const incomplete = items.filter(
+      (item) =>
+        !item.completeness.complete && item.completeness.missing.length > 0,
+    );
+    if (incomplete.length === 0) return [];
+    const nextEarningsAt = Date.parse(
+      `${statement?.nextEarningsDate ?? ""}T00:00:00Z`,
+    );
+    const upcomingAt =
+      Number.isFinite(nextEarningsAt) &&
+      nextEarningsAt >= todayUtc &&
+      nextEarningsAt <= priorityCutoff
+        ? nextEarningsAt
+        : null;
+    return [{
+      stock,
+      index,
+      upcomingAt,
+      missingCount: incomplete.reduce(
+        (total, item) => total + item.completeness.missing.length,
+        0,
+      ),
+    }];
+  });
+  if (candidates.length === 0) return [];
+
+  const batchSize = positiveInt(
+    env.STOCKS_EARNINGS_MINIMAX_BACKFILL_BATCH_SIZE,
+    4,
+    candidates.length,
+  );
+  const priority = candidates
+    .filter((candidate) => candidate.upcomingAt !== null)
+    .sort(
+      (left, right) =>
+        (left.upcomingAt ?? 0) - (right.upcomingAt ?? 0) ||
+        right.missingCount - left.missingCount ||
+        left.index - right.index,
+    );
+  if (priority.length >= batchSize) {
+    return priority.slice(0, batchSize).map((candidate) => candidate.stock);
+  }
+
+  const priorityTickers = new Set(
+    priority.map((candidate) => candidate.stock.ticker),
+  );
+  const regular = candidates
+    .filter((candidate) => !priorityTickers.has(candidate.stock.ticker))
+    .sort(
+      (left, right) =>
+        right.missingCount - left.missingCount || left.index - right.index,
+    );
+  const intervalMs = positiveInt(
+    env.STOCKS_EARNINGS_MINIMAX_BACKFILL_ROTATION_INTERVAL_MS,
+    12 * 60 * 60 * 1000,
+    7 * 24 * 60 * 60 * 1000,
+  );
+  const selectedRegular = rotatedStocks(
+    regular,
+    batchSize - priority.length,
+    Math.floor(now.getTime() / intervalMs),
+  );
+  return [
+    ...priority.map((candidate) => candidate.stock),
+    ...selectedRegular.map((candidate) => candidate.stock),
+  ];
+}
+
+export async function backfillMiniMaxEarningsSnapshot({
+  stocks,
+  snapshot,
+  env = process.env,
+  now = new Date(),
+  fetchImpl = fetch,
+}: {
+  stocks: AlphaResearchStock[];
+  snapshot: StocksFinancialSnapshot;
+  env?: EnvLike;
+  now?: Date;
+  fetchImpl?: FetchLike;
+}) {
+  const selected = selectMiniMaxEarningsBackfillStocks({
+    stocks,
+    snapshot,
+    env,
+    now,
+  });
+  if (selected.length === 0) return snapshot;
+
+  const { fetchMiniMaxEarningsCandidates } = await import(
+    "./stocks-earnings-minimax-search.ts"
+  );
+  const generatedAt = now.toISOString();
+  const financials = { ...snapshot.financials };
+  const errors = [...snapshot.errors];
+
+  for (const stock of selected) {
+    const statement = financials[stock.ticker];
+    const items = statement?.calendarYearEarnings ?? [];
+    if (!statement || items.length === 0) continue;
+    const result = await fetchMiniMaxEarningsCandidates({
+      stock,
+      comparisons: items,
+      now,
+      fetchImpl,
+      env,
+    });
+    const candidates = mergePublicCandidates(result.candidates);
+    const candidatesByPeriod = new Map(
+      candidates.map((candidate) => [candidatePeriodKey(candidate), candidate]),
+    );
+    const nextItems = items.map<StocksCalendarEarningsItem>((item) => {
+      const candidate = candidatesByPeriod.get(candidatePeriodKey(item));
+      if (!candidate) return item;
+      const comparison = mergeComparisonWithPublic(
+        item,
+        candidate,
+        generatedAt,
+      );
+      const attemptedProviders = [
+        ...item.completeness.attemptedProviders,
+        ...Object.values(candidate.fieldSources).map(
+          (source) => source.provider,
+        ),
+      ];
+      const merged: StocksCalendarEarningsItem = {
+        ...item,
+        ...comparison,
+        completeness: {
+          complete: false,
+          missing: [],
+          attemptedProviders: [...new Set(attemptedProviders)],
+        },
+      };
+      const completeness = assessCalendarEarningsCompleteness(merged);
+      return {
+        ...merged,
+        status:
+          merged.status === "upcoming"
+            ? "upcoming"
+            : completeness.complete
+              ? "reported"
+              : "incomplete",
+        completeness,
+      };
+    });
+    financials[stock.ticker] = {
+      ...statement,
+      calendarYearEarnings: nextItems,
+    };
+    errors.push(
+      ...result.errors.map((error) => `${stock.ticker}: ${error}`),
+    );
+  }
+
+  return { ...snapshot, financials, errors: [...new Set(errors)] };
 }
 
 async function mapWithConcurrency<T, R>(

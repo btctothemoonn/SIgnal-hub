@@ -7,6 +7,7 @@ import {
 import { getStocksCatalystSnapshot } from "./stocks-catalyst-source.ts";
 import type { StocksCatalystSnapshot } from "./stocks-catalyst-data.ts";
 import {
+  backfillMiniMaxEarningsSnapshot,
   getStocksFinancialSnapshot,
   mergeStocksFinancialSnapshot,
   type StocksFinancialStatement,
@@ -884,9 +885,17 @@ export async function getCachedStocksFinancialSnapshot({
         env,
         ...(provider ? { provider } : {}),
       });
-      return enrichStocksFinancialSnapshotWithInsights(snapshot, {
+      const enriched = await enrichStocksFinancialSnapshotWithInsights(snapshot, {
         fetchImpl,
         env,
+      });
+      const merged = preserveSuccessfulFinancialEntries(previous, enriched);
+      return backfillMiniMaxEarningsSnapshot({
+        stocks,
+        snapshot: merged,
+        fetchImpl,
+        env,
+        now: new Date(enriched.generatedAt),
       });
     },
   });
