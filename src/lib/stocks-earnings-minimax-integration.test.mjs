@@ -178,6 +178,67 @@ try {
     ),
   );
 
+  const questionableItem = structuredClone(history[0]);
+  questionableItem.ticker = "QUALITY";
+  questionableItem.revenue = metric(10_253_000_000, null);
+  questionableItem.netIncome = metric(1_383_000_000, null);
+  questionableItem.status = "incomplete";
+  questionableItem.completeness = {
+    complete: false,
+    missing: ["revenue-estimate", "net-income-estimate"],
+    attemptedProviders: ["sec"],
+  };
+  const qualityChecked = await stocksFinancialData.backfillMiniMaxEarningsSnapshot({
+    stocks: [{ ticker: "QUALITY", companyName: "Quality Corporation" }],
+    snapshot: {
+      ...backfillSnapshot,
+      financials: {
+        QUALITY: {
+          ticker: "QUALITY",
+          nextEarningsDate: "2026-11-01",
+          calendarYearEarnings: [questionableItem],
+        },
+      },
+    },
+    now: new Date("2026-08-20T00:00:00.000Z"),
+    env: {
+      MINIMAX_API_KEY: "sk-cp-test",
+      AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+      SIGNAL_HUB_RUNTIME_DIR: runtimeDir,
+      STOCKS_EARNINGS_MINIMAX_BACKFILL_BATCH_SIZE: "1",
+    },
+    fetchImpl: async (input) => {
+      if (String(input).endsWith("/v1/coding_plan/search")) {
+        return Response.json({
+          organic: [
+            {
+              title: "QUALITY Q2 2026 earnings",
+              link: "https://finance.example.com/quality-q2-estimates",
+              snippet:
+                "QUALITY Q2 2026 revenue was expected at $5.80 billion and net income was expected at $1.383 billion.",
+            },
+            {
+              title: "QUALITY Q2 2026 results",
+              link: "https://finance.example.com/quality-q2-results",
+              snippet:
+                "QUALITY Q2 2026 revenue actual reported was $10.253 billion and net income actual reported was $1.383 billion.",
+            },
+          ],
+          base_resp: { status_code: 0, status_msg: "success" },
+        });
+      }
+      return new Response("unavailable", { status: 503 });
+    },
+  });
+  const qualityCheckedItem =
+    qualityChecked.financials.QUALITY.calendarYearEarnings[0];
+  assert.equal(qualityCheckedItem.revenue.estimate, null);
+  assert.equal(qualityCheckedItem.netIncome.estimate, null);
+  assert.deepEqual(qualityCheckedItem.completeness.missing, [
+    "revenue-estimate",
+    "net-income-estimate",
+  ]);
+
   const backfilledSnapshot =
     (await stocksFinancialData.backfillMiniMaxEarningsSnapshot?.({
       stocks: [{ ticker: "ORDINARY", companyName: "Ordinary Corporation" }],

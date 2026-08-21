@@ -237,6 +237,50 @@ function mergePublicCandidates(candidates: StocksPublicEarningsCandidate[]) {
   return [...merged.values()];
 }
 
+function sanitizeMiniMaxCandidate(
+  candidate: StocksPublicEarningsCandidate,
+  current: StocksEarningsComparison,
+) {
+  const sanitized: StocksPublicEarningsCandidate = {
+    ...candidate,
+    fieldSources: { ...candidate.fieldSources },
+  };
+  const discard = (
+    field: "revenueEstimate" | "revenueActual" | "netIncomeEstimate",
+  ) => {
+    sanitized[field] = null;
+    delete sanitized.fieldSources[field];
+  };
+  const essentiallyEqual = (left: number, right: number) =>
+    Math.abs(left - right) <= Math.max(1, Math.abs(right) * 0.001);
+
+  if (sanitized.revenueActual !== null && sanitized.revenueActual <= 0) {
+    discard("revenueActual");
+  }
+  const revenueActual = sanitized.revenueActual ?? current.revenue.actual;
+  if (sanitized.revenueEstimate !== null && revenueActual !== null) {
+    const ratio = sanitized.revenueEstimate / revenueActual;
+    if (
+      sanitized.revenueEstimate <= 0 ||
+      ratio < 0.65 ||
+      ratio > 1.5 ||
+      (sanitized.revenueActual !== null &&
+        essentiallyEqual(sanitized.revenueEstimate, sanitized.revenueActual))
+    ) {
+      discard("revenueEstimate");
+    }
+  }
+
+  if (
+    sanitized.netIncomeEstimate !== null &&
+    sanitized.netIncomeActual !== null &&
+    essentiallyEqual(sanitized.netIncomeEstimate, sanitized.netIncomeActual)
+  ) {
+    discard("netIncomeEstimate");
+  }
+  return sanitized;
+}
+
 function valueProvenance(
   source: StocksEarningsSourceRef | undefined,
   input: {
@@ -570,7 +614,12 @@ export async function completeCalendarYearEarnings({
     fetchImpl,
     env,
   });
-  const miniMaxCandidates = mergePublicCandidates(miniMaxResult.candidates);
+  const miniMaxCandidates = mergePublicCandidates(miniMaxResult.candidates).map(
+    (candidate) => {
+      const existing = byPeriod.get(candidatePeriodKey(candidate));
+      return existing ? sanitizeMiniMaxCandidate(candidate, existing) : candidate;
+    },
+  );
   for (const candidate of miniMaxCandidates) {
     const key = candidatePeriodKey(candidate);
     const existing = byPeriod.get(key);
@@ -1036,7 +1085,12 @@ export async function backfillMiniMaxEarningsSnapshot({
       fetchImpl,
       env,
     });
-    const candidates = mergePublicCandidates(result.candidates);
+    const candidates = mergePublicCandidates(result.candidates).map((candidate) => {
+      const existing = items.find(
+        (item) => candidatePeriodKey(item) === candidatePeriodKey(candidate),
+      );
+      return existing ? sanitizeMiniMaxCandidate(candidate, existing) : candidate;
+    });
     const candidatesByPeriod = new Map(
       candidates.map((candidate) => [candidatePeriodKey(candidate), candidate]),
     );
