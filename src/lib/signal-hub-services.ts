@@ -43,6 +43,12 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
     required: true,
   },
   {
+    name: "signal-hub-daily-brief",
+    label: "每日投资简报",
+    category: "ai",
+    required: true,
+  },
+  {
     name: "signal-hub-tiger-holdings",
     label: "Tiger 持仓缓存",
     category: "holding",

@@ -2,6 +2,9 @@
   "name": "dashboard-app",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -25,6 +28,8 @@
     "x:monitor985:once": "node --experimental-strip-types --experimental-transform-types scripts/monitor985-worker.mjs --once",
     "alpha-summary:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs",
     "alpha-summary:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/alpha-summary-worker.mjs --once",
+    "daily-brief:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/daily-brief-worker.mjs",
+    "daily-brief:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/daily-brief-worker.mjs --once",
     "stocks:prewarm": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs",
     "stocks:prewarm:once": "node --experimental-strip-types --experimental-transform-types scripts/stocks-cache-worker.mjs --once",
     "stocks:history:backfill": "node --experimental-strip-types --experimental-transform-types scripts/stocks-history-backfill.mjs",

@@ -6,8 +6,12 @@ const serviceRegistry = readFileSync(
   new URL("../src/lib/signal-hub-services.ts", import.meta.url),
   "utf8",
 );
+const packageJson = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 assert.match(source, /set -euo pipefail/);
+assert.match(source, /require\("node:sqlite"\)/);
 assert.match(source, /git pull --ff-only origin/);
 assert.match(source, /node_modules\/next\/dist\/bin\/next build/);
 const installCommand = '"$PNPM_BIN" install --frozen-lockfile --ignore-scripts';
@@ -24,9 +28,12 @@ assert.ok(lintIndex < buildIndex, "lint must run before build");
 assert.match(source, /systemctl restart/);
 assert.match(source, /signal-hub-web/);
 assert.match(source, /signal-hub-stocks-cache/);
+assert.match(source, /signal-hub-daily-brief/);
 assert.match(source, /signal-hub-tiger-holdings/);
 assert.match(source, /signal-hub-douyin/);
+assert.match(source, /daily-brief-worker\.mjs/);
 assert.match(source, /Environment=SIGNAL_HUB_RUNTIME_DIR=\$APP_DIR\/\.signal-hub/);
+assert.match(packageJson.engines.node, />=22\.5\.0/);
 assert.doesNotMatch(serviceRegistry, /signal-hub-opportunity|机会雷达/);
 assert.doesNotMatch(source, /signal-hub-opportunity|opportunity-worker/);
 

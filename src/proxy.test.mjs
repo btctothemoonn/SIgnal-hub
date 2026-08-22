@@ -51,6 +51,9 @@ assert.deepEqual(await apiResponse.json(), {
   success: false,
 });
 
+const dailyBriefApiResponse = proxy(request("/api/daily-brief"));
+assert.equal(dailyBriefApiResponse.status, 401);
+
 const dottedApiResponse = proxy(request("/api/telegram/media/channel-1/file.jpg"));
 assert.equal(dottedApiResponse.status, 401);
 
