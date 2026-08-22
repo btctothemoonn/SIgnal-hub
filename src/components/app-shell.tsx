@@ -9,12 +9,14 @@ import {
   Clapperboard,
   LogOut,
   Settings,
+  Sparkles,
   WalletCards,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 export type AppShellNavKey =
   | "signals"
+  | "intel"
   | "holding"
   | "stocks"
   | "douyin"
@@ -27,8 +29,23 @@ export type AppShellStatusPill = {
   tone?: string;
 };
 
-const shellNavItems = [
+type ShellNavItemConfig = {
+  key: AppShellNavKey;
+  label: string;
+  mobileLabel?: string;
+  href: string;
+  icon: typeof Activity;
+};
+
+const shellNavItems: readonly ShellNavItemConfig[] = [
   { key: "signals", label: "信号", href: "/", icon: Activity },
+  {
+    key: "intel",
+    label: "AI+币圈情报站",
+    mobileLabel: "AI情报",
+    href: "/intel",
+    icon: Sparkles,
+  },
   { key: "holding", label: "Holding", href: "/holding", icon: WalletCards },
   { key: "stocks", label: "STOCKS", href: "/stocks", icon: ChartNoAxesCombined },
   { key: "douyin", label: "抖音", href: "/douyin", icon: Clapperboard },
@@ -49,10 +66,10 @@ function ShellNavItem({
   onActivate,
   onWarm,
 }: {
-  item: (typeof shellNavItems)[number];
+  item: ShellNavItemConfig;
   active: boolean;
   onActivate: (key: AppShellNavKey) => void;
-  onWarm?: (item: (typeof shellNavItems)[number]) => void;
+  onWarm?: (item: ShellNavItemConfig) => void;
 }) {
   const Icon = item.icon;
 
@@ -142,7 +159,7 @@ export function AppShell({
     [],
   );
 
-  const warmRoute = (item: (typeof shellNavItems)[number]) => {
+  const warmRoute = (item: ShellNavItemConfig) => {
     router.prefetch(item.href);
     if (item.key === "holding") {
       void import("@/components/holding-panel");
@@ -256,9 +273,10 @@ export function AppShell({
         aria-label="Mobile primary navigation"
         className="fixed bottom-0 left-0 right-0 z-50 border-t border-workspace-line-strong bg-workspace-toolbar/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
+        <div className="mx-auto grid max-w-lg grid-cols-6 gap-1">
           {shellNavItems.map((item) => {
             const active = item.key === displayedActiveNav;
+            const mobileLabel = item.mobileLabel ?? item.label;
             return (
               <Link
                 key={item.key}
@@ -277,7 +295,7 @@ export function AppShell({
                 ].join(" ")}
               >
                 <item.icon aria-hidden className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span>{mobileLabel}</span>
               </Link>
             );
           })}
