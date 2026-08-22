@@ -153,12 +153,6 @@ function marginTypeText(marginType: string) {
   return marginType;
 }
 
-function peakTrackingSourceText(
-  source: NonNullable<BinanceFuturesPosition["peakTracking"]>["openedAtSource"],
-) {
-  return source === "trades" ? "成交回填" : "本地统计";
-}
-
 function isEquityPoint(value: unknown): value is BinanceFuturesEquityPoint {
   if (!value || typeof value !== "object") return false;
   const point = value as Partial<BinanceFuturesEquityPoint>;
@@ -660,7 +654,7 @@ function FuturesPositionCards({
         </span>
       </div>
 
-      <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
         <div
           data-binance-futures-exposure-list
           data-holding-position-grid
@@ -672,7 +666,7 @@ function FuturesPositionCards({
             <span>名义金额</span>
             <span>未实现盈亏</span>
             <span>开仓 / 标记</span>
-            <span className="text-right">峰值回撤 / 强平</span>
+            <span className="text-right">强平风险</span>
           </div>
 
           {rows.map((row) => {
@@ -689,15 +683,6 @@ function FuturesPositionCards({
                     row.liquidationDistancePercent < 35
                   ? "text-warning"
                   : "text-muted";
-            const peakTracking = position.peakTracking;
-            const peakDrawdownTone =
-              !peakTracking
-                ? "text-muted"
-                : peakTracking.drawdownPercent >= 20
-                  ? "text-danger"
-                  : peakTracking.drawdownPercent >= 10
-                    ? "text-warning"
-                    : "text-success";
 
             return (
               <article
@@ -815,51 +800,16 @@ function FuturesPositionCards({
                 </div>
 
                 <div className="min-w-0 text-left lg:text-right">
-                  <div
-                    data-position-peak-drawdown
-                    title={peakTracking?.error}
-                  >
-                    <div className="text-[10px] font-semibold text-muted">
-                      峰值回撤
-                    </div>
-                    <div
-                      className={`mt-1 font-mono text-xs font-bold ${peakDrawdownTone}`}
-                    >
-                      {peakTracking
-                        ? formatPercent(peakTracking.drawdownPercent)
-                        : "计算中"}
-                    </div>
-                    <div className="mt-1 font-mono text-[10px] font-semibold text-muted [overflow-wrap:anywhere]">
-                      {peakTracking
-                        ? `${position.side === "SHORT" ? "最低" : "最高"} ${formatUsd(
-                            peakTracking.favorablePrice,
-                          )}`
-                        : "等待历史回填"}
-                    </div>
-                    {peakTracking ? (
-                      <div className="mt-1 text-[9px] font-semibold text-muted">
-                        {peakTrackingSourceText(peakTracking.openedAtSource)}
-                        {peakTracking.status === "cached" ? " · 缓存" : ""}
-                        {` · ${formatTime(peakTracking.checkedAt)}`}
-                      </div>
-                    ) : null}
+                  <div className="text-[10px] font-semibold text-muted">强平距离</div>
+                  <div className={`mt-1 font-mono text-xs font-bold ${liquidationTone}`}>
+                    {row.liquidationDistancePercent === null
+                      ? "--"
+                      : formatPercent(row.liquidationDistancePercent)}
                   </div>
-                  <div className="mt-2 border-t border-line/60 pt-2">
-                    <div className="text-[10px] font-semibold text-muted">
-                      强平距离
-                    </div>
-                    <div
-                      className={`mt-1 font-mono text-xs font-bold ${liquidationTone}`}
-                    >
-                      {row.liquidationDistancePercent === null
-                        ? "--"
-                        : formatPercent(row.liquidationDistancePercent)}
-                    </div>
-                    <div className="mt-1 font-mono text-[10px] font-semibold text-muted [overflow-wrap:anywhere]">
-                      {position.liquidationPrice > 0
-                        ? formatUsd(position.liquidationPrice)
-                        : "无有效强平价"}
-                    </div>
+                  <div className="mt-1 font-mono text-[10px] font-semibold text-muted [overflow-wrap:anywhere]">
+                    {position.liquidationPrice > 0
+                      ? formatUsd(position.liquidationPrice)
+                      : "无有效强平价"}
                   </div>
                 </div>
               </article>

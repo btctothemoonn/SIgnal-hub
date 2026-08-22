@@ -11,11 +11,6 @@ import {
   invalidateCachedBinanceHoldingSnapshot,
   readPersistedBinanceFuturesEquityHistory,
 } from "@/lib/binance-holdings-cache";
-import {
-  attachBinancePositionPeakTrackings,
-  clearPersistedBinancePositionPeakTrackings,
-  getCachedBinancePositionPeakTrackings,
-} from "@/lib/binance-position-drawdown";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,17 +20,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const force = url.searchParams.get("refresh") === "1";
     const snapshot = await getCachedBinanceHoldingSnapshot({ force });
-    const [equityHistory, peakTrackings] = await Promise.all([
-      readPersistedBinanceFuturesEquityHistory(),
-      getCachedBinancePositionPeakTrackings(snapshot, { force }).catch(
-        () => [],
-      ),
-    ]);
-    return NextResponse.json({
-      success: true,
-      snapshot: attachBinancePositionPeakTrackings(snapshot, peakTrackings),
-      equityHistory,
-    });
+    const equityHistory = await readPersistedBinanceFuturesEquityHistory();
+    return NextResponse.json({ success: true, snapshot, equityHistory });
   } catch (error) {
     if (error instanceof BinanceConfigError) {
       return NextResponse.json(
@@ -101,7 +87,6 @@ export async function POST(request: Request) {
     await saveStoredBinanceCredentials({ apiKey, apiSecret });
     resetBinanceHoldingRuntimeHints();
     invalidateCachedBinanceHoldingSnapshot();
-    await clearPersistedBinancePositionPeakTrackings();
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof BinanceConfigError) {

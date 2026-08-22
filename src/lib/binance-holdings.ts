@@ -8,11 +8,6 @@ import type { Socket } from "node:net";
 import type { RequestOptions } from "node:https";
 import type { Duplex } from "node:stream";
 import type { TLSSocket } from "node:tls";
-import type {
-  BinanceFuturesUserTrade,
-  BinanceMarkPriceCandle,
-  BinancePositionPeakTracking,
-} from "./binance-position-drawdown";
 
 const BINANCE_API_CONFIG_PATH = resolve(
   process.cwd(),
@@ -40,8 +35,6 @@ export type BinanceFuturesPosition = {
   leverage: number;
   marginType: string;
   notional: number;
-  positionUpdatedAt?: string;
-  peakTracking?: BinancePositionPeakTracking;
 };
 
 export type BinanceHoldingSummary = {
@@ -109,7 +102,6 @@ type RawFuturesPosition = {
   marginType?: unknown;
   notional?: unknown;
   positionSide?: unknown;
-  updateTime?: unknown;
 };
 
 type RawFuturesAccount = {
@@ -125,13 +117,6 @@ type RawPortfolioMarginAccount = {
   actualEquity?: unknown;
   totalAvailableBalance?: unknown;
   totalMarginOpenLoss?: unknown;
-};
-
-type RawFuturesUserTrade = {
-  time?: unknown;
-  side?: unknown;
-  positionSide?: unknown;
-  qty?: unknown;
 };
 
 type SignedQueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -154,19 +139,8 @@ export type BinanceStoredCredentials = {
 type SignedRequestOptions = BinanceConfig & {
   path: string;
   market: "spot" | "futures" | "portfolio";
-  params?: SignedQueryParams;
   fetcher?: typeof fetch;
   now?: () => number;
-};
-
-export type BinanceFuturesHistoryClient = {
-  getUserTrades: (symbol: string) => Promise<BinanceFuturesUserTrade[]>;
-  getMarkPriceCandles: (options: {
-    symbol: string;
-    interval: "1m" | "1d";
-    startTime: number;
-    endTime: number;
-  }) => Promise<BinanceMarkPriceCandle[]>;
 };
 
 type PublicRequestOptions = Pick<
@@ -358,7 +332,6 @@ export function normalizeFuturesPositions(
       const markPrice = toNumber(position.markPrice);
       const rawNotional = toNumber(position.notional);
       const notional = rawNotional || amount * markPrice;
-      const updateTime = toNumber(position.updateTime);
       return {
         symbol: toText(position.symbol).toUpperCase(),
         side: amount >= 0 ? ("LONG" as const) : ("SHORT" as const),
@@ -372,9 +345,6 @@ export function normalizeFuturesPositions(
         leverage: toNumber(position.leverage),
         marginType: toText(position.marginType) || "cross",
         notional,
-        ...(updateTime > 0
-          ? { positionUpdatedAt: new Date(updateTime).toISOString() }
-          : {}),
       };
     })
     .filter((position) => position.symbol && position.amount !== 0)
@@ -753,14 +723,12 @@ async function createBinanceSyncedNow({
 async function requestSignedJson<T>({
   path,
   market,
-  params = {},
   fetcher = fetch,
   now = Date.now,
   ...config
 }: SignedRequestOptions): Promise<T> {
   const query = buildSignedBinanceQuery({
     params: {
-      ...params,
       recvWindow: config.recvWindow,
       timestamp: now(),
     },
@@ -802,97 +770,6 @@ async function requestSignedJson<T>({
   }
 
   return (await response.json()) as T;
-}
-
-function normalizeFuturesUserTrades(
-  trades: RawFuturesUserTrade[] | unknown,
-): BinanceFuturesUserTrade[] {
-  if (!Array.isArray(trades)) return [];
-  return trades
-    .map((trade) => {
-      const side = toText(trade.side).toUpperCase();
-      const positionSide = toText(trade.positionSide).toUpperCase() || "BOTH";
-      const normalizedPositionSide: BinanceFuturesUserTrade["positionSide"] =
-        positionSide === "LONG"
-          ? "LONG"
-          : positionSide === "SHORT"
-            ? "SHORT"
-            : "BOTH";
-      return {
-        time: toNumber(trade.time),
-        side: side === "SELL" ? ("SELL" as const) : ("BUY" as const),
-        positionSide: normalizedPositionSide,
-        qty: toNumber(trade.qty),
-      };
-    })
-    .filter((trade) => trade.time > 0 && trade.qty > 0);
-}
-
-function normalizeMarkPriceCandles(
-  candles: unknown,
-): BinanceMarkPriceCandle[] {
-  if (!Array.isArray(candles)) return [];
-  return candles
-    .map((candle) => {
-      if (!Array.isArray(candle)) return null;
-      const openTime = toNumber(candle[0]);
-      const high = toNumber(candle[2]);
-      const low = toNumber(candle[3]);
-      const closeTime = toNumber(candle[6]);
-      if (openTime <= 0 || closeTime <= 0 || high <= 0 || low <= 0) {
-        return null;
-      }
-      return { openTime, high, low, closeTime };
-    })
-    .filter((candle): candle is BinanceMarkPriceCandle => candle !== null);
-}
-
-export async function createBinanceFuturesHistoryClient({
-  accountMode,
-  env = process.env,
-  fetcher = fetch,
-  now = Date.now,
-}: {
-  accountMode: BinanceHoldingSnapshot["accountMode"];
-  env?: NodeJS.ProcessEnv;
-  fetcher?: typeof fetch;
-  now?: () => number;
-}): Promise<BinanceFuturesHistoryClient> {
-  const config = await getBinanceConfig(env);
-  const signedNow = await createBinanceSyncedNow({ config, fetcher, now });
-
-  return {
-    async getUserTrades(symbol) {
-      const portfolioMargin = accountMode === "portfolioMargin";
-      const trades = await requestSignedJson<RawFuturesUserTrade[]>({
-        ...config,
-        path: portfolioMargin
-          ? "/papi/v1/um/userTrades"
-          : "/fapi/v1/userTrades",
-        market: portfolioMargin ? "portfolio" : "futures",
-        params: { symbol, limit: 1000 },
-        fetcher,
-        now: signedNow,
-      });
-      return normalizeFuturesUserTrades(trades);
-    },
-    async getMarkPriceCandles({ symbol, interval, startTime, endTime }) {
-      const query = new URLSearchParams({
-        symbol,
-        interval,
-        startTime: String(startTime),
-        endTime: String(endTime),
-        limit: "1500",
-      });
-      const candles = await requestPublicJson<unknown>({
-        ...config,
-        path: `/fapi/v1/markPriceKlines?${query.toString()}`,
-        market: "futures",
-        fetcher,
-      });
-      return normalizeMarkPriceCandles(candles);
-    },
-  };
 }
 
 function isRejectedResult<T>(
