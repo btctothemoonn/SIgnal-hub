@@ -12,7 +12,10 @@ import {
   analyzeFuturesPositions,
 } from "@/lib/holding-analytics";
 import { getBinanceDisplayTotalEquity } from "@/lib/holding-display";
-import { buildFuturesExposureRows } from "@/lib/holding-layout";
+import {
+  buildFuturesExposureRows,
+  summarizeFuturesExposure,
+} from "@/lib/holding-layout";
 import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
 import type {
   BinanceFuturesEquityPoint,
@@ -345,10 +348,10 @@ function FuturesEquityCurve({
   history: BinanceFuturesEquityPoint[];
 }) {
   const points = equityHistoryWithCurrent({ history, snapshot });
-  const width = 720;
-  const height = 240;
-  const padX = 48;
-  const padY = 24;
+  const width = 320;
+  const height = 132;
+  const padX = 10;
+  const padY = 12;
   const chartWidth = width - padX * 2;
   const chartHeight = height - padY * 2;
   const values = points.flatMap((point) => [
@@ -383,146 +386,106 @@ function FuturesEquityCurve({
   const hasTrend = points.length >= 2;
 
   return (
-    <section className="min-w-0 py-2">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className="min-w-0 py-3">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
-                合约账户权益曲线
-              </div>
-              <div className="mt-1 text-xs text-muted">
-                本地快照 · {points.length} 个点 · 最近 {formatChartTime(lastPoint.at)}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-3 text-[11px] font-semibold text-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-success" />
-                账户权益
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-info" />
-                钱包余额
-              </span>
-            </div>
+    <section
+      data-binance-equity-compact
+      className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-3"
+    >
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
+            合约账户权益
           </div>
-
-          <svg
-            className="h-64 w-full overflow-hidden"
-            viewBox={`0 0 ${width} ${height}`}
-            role="img"
-            aria-label="合约账户权益历史曲线"
-            preserveAspectRatio="none"
-          >
-            <line
-              x1={padX}
-              y1={padY}
-              x2={padX}
-              y2={height - padY}
-              stroke="var(--line)"
-              strokeWidth="1"
-            />
-            {[0, 0.5, 1].map((ratio) => {
-              const y = padY + ratio * chartHeight;
-              const value = paddedMax - ratio * paddedRange;
-              return (
-                <g key={ratio}>
-                  <line
-                    x1={padX}
-                    y1={y}
-                    x2={width - padX}
-                    y2={y}
-                    stroke="var(--line)"
-                    strokeOpacity="0.7"
-                    strokeWidth="1"
-                    strokeDasharray={ratio === 0.5 ? "4 6" : undefined}
-                  />
-                  <text
-                    x={width - 4}
-                    y={y + 4}
-                    textAnchor="end"
-                    fill="currentColor"
-                    className="text-[10px] font-semibold text-muted"
-                  >
-                    {formatCompactUsd(value).replace("+", "")}
-                  </text>
-                </g>
-              );
-            })}
-            <polyline
-              points={walletPolyline}
-              fill="none"
-              stroke="var(--info)"
-              strokeOpacity="0.7"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-            <polyline
-              points={equityPolyline}
-              fill="none"
-              stroke="var(--success)"
-              strokeWidth="3.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              vectorEffect="non-scaling-stroke"
-            />
-            {points.map((point, index) => (
-              <circle
-                key={point.at}
-                cx={xForIndex(index)}
-                cy={yForValue(point.marginBalance)}
-                r={index === points.length - 1 ? 4 : 2.5}
-                fill="var(--success)"
-              />
-            ))}
-            <text
-              x={padX}
-              y={height - 4}
-              fill="currentColor"
-              className="text-[10px] font-semibold text-muted"
-            >
-              {formatChartTime(firstPoint.at)}
-            </text>
-            <text
-              x={width - padX}
-              y={height - 4}
-              textAnchor="end"
-              fill="currentColor"
-              className="text-[10px] font-semibold text-muted"
-            >
-              {formatChartTime(lastPoint.at)}
-            </text>
-          </svg>
-
-          {!hasTrend ? (
-            <div className="mt-2 rounded-md border border-line/60 bg-panel px-3 py-2 text-xs text-muted">
-              已保存当前权益点；继续刷新后会形成完整曲线。
-            </div>
-          ) : null}
+          <div className="mt-1 font-mono text-lg font-bold leading-none text-foreground [overflow-wrap:anywhere]">
+            {formatUsd(lastPoint.marginBalance)}
+          </div>
         </div>
-
-        <div className="grid gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 sm:grid-cols-3 xl:grid-cols-1">
-          <SummaryTile
-            label="当前权益"
-            value={formatUsd(lastPoint.marginBalance)}
-            detail={`钱包 ${formatUsd(lastPoint.walletBalance)}`}
-          />
-          <SummaryTile
-            label="区间变化"
-            value={formatSignedUsd(equityChange)}
-            detail={`${formatPercent(equityChangePercent)} · ${formatChartTime(firstPoint.at)} 起`}
-            tone={pnlTone(equityChange)}
-          />
-          <SummaryTile
-            label="未实现盈亏"
-            value={formatSignedUsd(lastPoint.unrealizedPnl)}
-            detail={`可用余额 ${formatUsd(lastPoint.availableBalance)}`}
-            tone={pnlTone(lastPoint.unrealizedPnl)}
-          />
+        <div className="shrink-0 text-right">
+          <div className={`font-mono text-xs font-bold ${pnlTone(equityChange)}`}>
+            {formatSignedUsd(equityChange)}
+          </div>
+          <div className={`mt-1 font-mono text-[11px] font-semibold ${pnlTone(equityChange)}`}>
+            {formatSignedPercent(equityChangePercent)}
+          </div>
         </div>
       </div>
+
+      <svg
+        className="mt-2 h-32 w-full overflow-hidden"
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label="合约账户权益历史曲线"
+        preserveAspectRatio="none"
+      >
+        {[0, 0.5, 1].map((ratio) => {
+          const y = padY + ratio * chartHeight;
+          return (
+            <line
+              key={ratio}
+              x1={padX}
+              y1={y}
+              x2={width - padX}
+              y2={y}
+              stroke="var(--line)"
+              strokeOpacity="0.7"
+              strokeWidth="1"
+              strokeDasharray={ratio === 0.5 ? "4 6" : undefined}
+            />
+          );
+        })}
+        <polyline
+          points={walletPolyline}
+          fill="none"
+          stroke="var(--info)"
+          strokeOpacity="0.55"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        <polyline
+          points={equityPolyline}
+          fill="none"
+          stroke="var(--success)"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {points.map((point, index) => (
+          <circle
+            key={point.at}
+            cx={xForIndex(index)}
+            cy={yForValue(point.marginBalance)}
+            r={index === points.length - 1 ? 3.5 : 2}
+            fill="var(--success)"
+          />
+        ))}
+      </svg>
+
+      <div className="flex items-center justify-between gap-3 text-[10px] font-semibold text-muted">
+        <span>{formatChartTime(firstPoint.at)}</span>
+        <span>{points.length} 个本地快照</span>
+        <span>{formatChartTime(lastPoint.at)}</span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[5px] bg-line/70">
+        <div className="bg-background/55 px-2.5 py-2">
+          <div className="text-[10px] font-semibold text-muted">钱包余额</div>
+          <div className="mt-1 font-mono text-xs font-bold text-foreground">
+            {formatUsd(lastPoint.walletBalance)}
+          </div>
+        </div>
+        <div className="bg-background/55 px-2.5 py-2">
+          <div className="text-[10px] font-semibold text-muted">可用余额</div>
+          <div className="mt-1 font-mono text-xs font-bold text-foreground">
+            {formatUsd(lastPoint.availableBalance)}
+          </div>
+        </div>
+      </div>
+      {!hasTrend ? (
+        <div className="mt-2 text-[10px] font-semibold text-muted">
+          已保存首个权益点，后续刷新将形成曲线。
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -546,11 +509,18 @@ function assetLogoTone(asset: string) {
   return "border-line bg-panel text-foreground";
 }
 
-function AssetLogo({ asset }: { asset: string }) {
+function AssetLogo({
+  asset,
+  compact = false,
+}: {
+  asset: string;
+  compact?: boolean;
+}) {
   return (
     <div
       className={[
-        "flex h-12 w-12 shrink-0 items-center justify-center rounded-[6px] border font-mono text-sm font-bold uppercase shadow-sm",
+        "flex shrink-0 items-center justify-center rounded-[6px] border font-mono font-bold uppercase shadow-sm",
+        compact ? "h-9 w-9 text-[10px]" : "h-12 w-12 text-sm",
         assetLogoTone(asset),
       ].join(" ")}
     >
@@ -656,26 +626,19 @@ function BinanceSummaryGrid({ snapshot }: { snapshot: BinanceHoldingSnapshot }) 
 
 function FuturesPositionCards({
   positions,
+  snapshot,
+  history,
 }: {
   positions: BinanceFuturesPosition[];
+  snapshot: BinanceHoldingSnapshot;
+  history: BinanceFuturesEquityPoint[];
 }) {
   if (positions.length === 0) {
     return <EmptyState>暂无合约持仓</EmptyState>;
   }
 
   const rows = buildFuturesExposureRows(positions);
-  const totalNotional = rows.reduce((total, row) => total + row.absNotional, 0);
-  const longNotional = rows.reduce(
-    (total, row) => total + (row.position.side === "LONG" ? row.absNotional : 0),
-    0,
-  );
-  const shortNotional = rows.reduce(
-    (total, row) => total + (row.position.side === "SHORT" ? row.absNotional : 0),
-    0,
-  );
-  const longPercent = totalNotional > 0 ? (longNotional / totalNotional) * 100 : 0;
-  const shortPercent =
-    totalNotional > 0 ? (shortNotional / totalNotional) * 100 : 0;
+  const exposure = summarizeFuturesExposure(rows);
 
   return (
     <section className="space-y-3">
@@ -683,11 +646,11 @@ function FuturesPositionCards({
         <div>
           <h3 className="text-base font-semibold text-foreground">合约持仓</h3>
           <p className="mt-1 text-xs font-semibold text-muted">
-            持仓雷达 · 按名义金额排序 · {positions.length} 条
+            按名义金额排序 · {positions.length} 条
           </p>
         </div>
         <span className="w-fit rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
-          总名义 {formatCompactUsd(totalNotional).replace("+", "")}
+          总名义 {formatCompactUsd(exposure.totalNotional).replace("+", "")}
         </span>
       </div>
 
@@ -697,12 +660,13 @@ function FuturesPositionCards({
           data-holding-position-grid
           className="min-w-0 overflow-hidden rounded-[6px] border border-line/70 bg-panel-strong"
         >
-          <div className="hidden border-b border-line/70 bg-background/60 px-3 py-2 text-[11px] font-bold uppercase tracking-normal text-muted md:grid md:grid-cols-[minmax(9rem,1.2fr)_minmax(9rem,1fr)_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(7rem,.8fr)] md:gap-3">
-            <span>币种</span>
+          <div className="hidden min-h-9 border-b border-line/70 bg-background/60 px-3 text-[10px] font-bold uppercase tracking-normal text-muted lg:grid lg:grid-cols-[minmax(9rem,1.15fr)_minmax(5rem,.55fr)_minmax(7rem,.75fr)_minmax(7rem,.8fr)_minmax(8rem,.9fr)_minmax(7rem,.7fr)] lg:items-center lg:gap-3">
+            <span>合约</span>
             <span>占比</span>
             <span>名义金额</span>
-            <span>盈亏</span>
-            <span className="text-right">风险</span>
+            <span>未实现盈亏</span>
+            <span>开仓 / 标记</span>
+            <span className="text-right">强平风险</span>
           </div>
 
           {rows.map((row) => {
@@ -711,41 +675,49 @@ function FuturesPositionCards({
               position.side === "LONG"
                 ? "border-success/30 bg-success-soft text-success"
                 : "border-danger/30 bg-danger-soft text-danger";
+            const liquidationTone =
+              row.liquidationDistancePercent !== null &&
+              row.liquidationDistancePercent < 20
+                ? "text-danger"
+                : row.liquidationDistancePercent !== null &&
+                    row.liquidationDistancePercent < 35
+                  ? "text-warning"
+                  : "text-muted";
 
             return (
               <article
                 key={`${position.symbol}-${position.side}`}
                 data-binance-futures-exposure-row
                 className={[
-                  "grid min-w-0 gap-3 border-b border-line/60 px-3 py-3 last:border-b-0 md:grid-cols-[minmax(9rem,1.2fr)_minmax(9rem,1fr)_minmax(8rem,1fr)_minmax(9rem,1fr)_minmax(7rem,.8fr)] md:items-center",
-                  row.isTopExposure ? "bg-warning-soft/15" : "bg-panel-strong",
+                  "grid min-w-0 grid-cols-3 gap-2.5 border-b border-line/60 px-3 py-2.5 last:border-b-0 lg:min-h-[4.25rem] lg:grid-cols-[minmax(9rem,1.15fr)_minmax(5rem,.55fr)_minmax(7rem,.75fr)_minmax(7rem,.8fr)_minmax(8rem,.9fr)_minmax(7rem,.7fr)] lg:items-center lg:gap-3",
+                  row.isTopExposure ? "bg-warning-soft/10" : "bg-panel-strong",
                 ].join(" ")}
               >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="w-5 shrink-0 text-right font-mono text-xs font-bold text-muted">
+                <div className="col-span-3 flex min-w-0 items-center gap-2 lg:col-span-1">
+                  <span className="w-4 shrink-0 text-right font-mono text-[10px] font-bold text-muted">
                     {row.rank}
                   </span>
-                  <AssetLogo asset={row.asset} />
+                  <AssetLogo asset={row.asset} compact />
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <h4 className="font-mono text-lg font-bold leading-tight text-foreground [overflow-wrap:anywhere]">
+                      <h4 className="font-mono text-sm font-bold leading-tight text-foreground [overflow-wrap:anywhere]">
                         {row.asset}
                       </h4>
                       <span
                         className={[
-                          "rounded-md border px-1.5 py-0.5 text-[11px] font-bold leading-none",
+                          "rounded-[4px] border px-1 py-0.5 text-[9px] font-bold leading-none",
                           directionTone,
                         ].join(" ")}
                       >
                         {row.direction}
                       </span>
                       {row.isTopExposure ? (
-                        <span className="rounded-md border border-warning/35 bg-warning-soft px-1.5 py-0.5 text-[11px] font-bold leading-none text-warning">
+                        <span className="rounded-[4px] border border-warning/35 bg-warning-soft px-1 py-0.5 text-[9px] font-bold leading-none text-warning">
                           Top {row.rank}
                         </span>
                       ) : null}
                     </div>
-                    <div className="mt-1 font-mono text-[11px] font-semibold text-muted [overflow-wrap:anywhere]">
+                    <div className="mt-1 font-mono text-[10px] font-semibold text-muted [overflow-wrap:anywhere]">
                       {position.symbol} · {marginTypeText(position.marginType)}{" "}
                       {formatNumber(position.leverage, { maximumFractionDigits: 0 })}x
                     </div>
@@ -759,7 +731,7 @@ function FuturesPositionCards({
                       {formatPercent(row.exposurePercent)}
                     </span>
                   </div>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-background">
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-background">
                     <div
                       className={[
                         "h-full rounded-full",
@@ -770,14 +742,14 @@ function FuturesPositionCards({
                   </div>
                 </div>
 
-                <div className="grid min-w-0 grid-cols-2 gap-3 md:block">
+                <div className="min-w-0">
                   <div>
                     <div className="text-[11px] font-semibold text-muted">名义金额</div>
                     <div className="mt-1 font-mono text-sm font-bold text-foreground [overflow-wrap:anywhere]">
                       {formatUsd(row.absNotional)}
                     </div>
                   </div>
-                  <div className="md:mt-2">
+                  <div className="mt-1">
                     <div className="text-[11px] font-semibold text-muted">数量</div>
                     <div className="mt-1 font-mono text-xs font-bold text-muted [overflow-wrap:anywhere]">
                       {formatNumber(Math.abs(position.amount), {
@@ -787,7 +759,7 @@ function FuturesPositionCards({
                   </div>
                 </div>
 
-                <div className="grid min-w-0 grid-cols-2 gap-3 md:block">
+                <div className="min-w-0">
                   <div>
                     <div className="text-[11px] font-semibold text-muted">盈亏</div>
                     <div
@@ -799,7 +771,7 @@ function FuturesPositionCards({
                       {formatSignedUsd(position.unrealizedPnl)}
                     </div>
                   </div>
-                  <div className="md:mt-2">
+                  <div className="mt-1">
                     <div className="text-[11px] font-semibold text-muted">收益率</div>
                     <div
                       className={[
@@ -812,31 +784,32 @@ function FuturesPositionCards({
                   </div>
                 </div>
 
-                <div className="grid min-w-0 grid-cols-3 gap-2 text-left md:text-right">
+                <div className="col-span-2 grid min-w-0 grid-cols-2 gap-2 lg:col-span-1 lg:block">
                   <div>
-                    <div className="text-[11px] font-semibold text-muted">开仓价</div>
+                    <div className="text-[10px] font-semibold text-muted">开仓价</div>
                     <div className="mt-1 font-mono text-xs font-bold text-foreground [overflow-wrap:anywhere]">
                       {formatUsd(position.entryPrice)}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[11px] font-semibold text-muted">标记价</div>
+                  <div className="lg:mt-1">
+                    <div className="text-[10px] font-semibold text-muted">标记价</div>
                     <div className="mt-1 font-mono text-xs font-bold text-foreground [overflow-wrap:anywhere]">
                       {formatUsd(position.markPrice)}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-[11px] font-semibold text-muted">强平价</div>
-                    <div
-                      className={[
-                        "mt-1 font-mono text-xs font-bold [overflow-wrap:anywhere]",
-                        position.liquidationPrice > 0 ? "text-warning" : "text-muted",
-                      ].join(" ")}
-                    >
-                      {position.liquidationPrice > 0
-                        ? formatUsd(position.liquidationPrice)
-                        : "--"}
-                    </div>
+                </div>
+
+                <div className="min-w-0 text-left lg:text-right">
+                  <div className="text-[10px] font-semibold text-muted">强平距离</div>
+                  <div className={`mt-1 font-mono text-xs font-bold ${liquidationTone}`}>
+                    {row.liquidationDistancePercent === null
+                      ? "--"
+                      : formatPercent(row.liquidationDistancePercent)}
+                  </div>
+                  <div className="mt-1 font-mono text-[10px] font-semibold text-muted [overflow-wrap:anywhere]">
+                    {position.liquidationPrice > 0
+                      ? formatUsd(position.liquidationPrice)
+                      : "无有效强平价"}
                   </div>
                 </div>
               </article>
@@ -844,61 +817,74 @@ function FuturesPositionCards({
           })}
         </div>
 
-        <aside className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-3">
-          <div className="text-xs font-semibold uppercase tracking-normal text-muted">
-            多空敞口
-          </div>
-          <div className="mt-3 space-y-3">
+        <div className="min-w-0 space-y-3">
+          <FuturesEquityCurve snapshot={snapshot} history={history} />
+          <aside
+          data-binance-exposure-compact
+          className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-3"
+          >
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-                <span className="text-success">多头</span>
-                <span className="font-mono text-foreground">
-                  {formatPercent(longPercent)}
+              <div className="text-[11px] font-semibold uppercase tracking-normal text-muted">
+                多空名义敞口
+              </div>
+              <div
+                className={[
+                  "mt-1 font-mono text-base font-bold",
+                  exposure.bias === "净多头"
+                    ? "text-success"
+                    : exposure.bias === "净空头"
+                      ? "text-danger"
+                      : "text-foreground",
+                ].join(" ")}
+              >
+                {exposure.bias}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold text-muted">总名义</div>
+              <div className="mt-1 font-mono text-xs font-bold text-foreground">
+                {formatCompactUsd(exposure.totalNotional).replace("+", "")}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-background">
+            <div className="h-full bg-success" style={{ width: `${exposure.longPercent}%` }} />
+            <div className="h-full bg-danger" style={{ width: `${exposure.shortPercent}%` }} />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 font-mono text-[11px] font-bold">
+            <span className="text-success">多 {formatPercent(exposure.longPercent)}</span>
+            <span className="text-danger">空 {formatPercent(exposure.shortPercent)}</span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[5px] bg-line/70">
+            <div className="bg-background/55 px-2.5 py-2">
+              <div className="text-[10px] font-semibold text-muted">多头名义</div>
+              <div className="mt-1 font-mono text-xs font-bold text-foreground">
+                {formatCompactUsd(exposure.longNotional).replace("+", "")}
+              </div>
+            </div>
+            <div className="bg-background/55 px-2.5 py-2 text-right">
+              <div className="text-[10px] font-semibold text-muted">空头名义</div>
+              <div className="mt-1 font-mono text-xs font-bold text-foreground">
+                {formatCompactUsd(exposure.shortNotional).replace("+", "")}
+              </div>
+            </div>
+          </div>
+          {rows[0] ? (
+            <div className="mt-3 border-t border-line/70 pt-2.5">
+              <div className="text-[10px] font-semibold text-muted">最大单仓</div>
+              <div className="mt-1 flex items-baseline justify-between gap-3">
+                <span className="font-mono text-sm font-bold text-foreground">
+                  {rows[0].asset} {rows[0].direction}
+                </span>
+                <span className="font-mono text-xs font-bold text-warning">
+                  {formatPercent(rows[0].exposurePercent)}
                 </span>
               </div>
-              <div className="mt-1 h-2 overflow-hidden rounded-full bg-background">
-                <div
-                  className="h-full rounded-full bg-success"
-                  style={{ width: `${Math.min(100, longPercent)}%` }}
-                />
-              </div>
-              <div className="mt-1 font-mono text-xs font-semibold text-muted">
-                {formatCompactUsd(longNotional).replace("+", "")}
-              </div>
             </div>
-            <div>
-              <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-                <span className="text-danger">空头</span>
-                <span className="font-mono text-foreground">
-                  {formatPercent(shortPercent)}
-                </span>
-              </div>
-              <div className="mt-1 h-2 overflow-hidden rounded-full bg-background">
-                <div
-                  className="h-full rounded-full bg-danger"
-                  style={{ width: `${Math.min(100, shortPercent)}%` }}
-                />
-              </div>
-              <div className="mt-1 font-mono text-xs font-semibold text-muted">
-                {formatCompactUsd(shortNotional).replace("+", "")}
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 rounded-[6px] border border-line/60 bg-background/45 p-2">
-            <div className="text-[11px] font-semibold text-muted">观察重点</div>
-            <div
-              className={[
-                "mt-1 font-mono text-sm font-bold",
-                longNotional >= shortNotional ? "text-success" : "text-danger",
-              ].join(" ")}
-            >
-              {longNotional >= shortNotional ? "净多头" : "净空头"}
-            </div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-muted">
-              前三大仓位已高亮，先看占比条和强平价。
-            </div>
-          </div>
-        </aside>
+          ) : null}
+          </aside>
+        </div>
       </div>
     </section>
   );
@@ -925,13 +911,14 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-base font-semibold text-foreground">现货资产</h3>
-        <span className="rounded-md border border-line/70 bg-background px-2 py-1 text-xs font-semibold text-muted">
-          {valuedBalances.length} 个币种
+        <span className="rounded-[5px] border border-line/70 bg-background px-2 py-1 text-[11px] font-semibold text-muted">
+          {valuedBalances.length} 个币种 · {formatUsd(totalUsdtValue)}
         </span>
       </div>
       <div
+        data-binance-spot-strip
         data-holding-position-grid
-        className="grid min-w-0 gap-3 xl:grid-cols-2"
+        className="grid min-w-0 gap-px overflow-hidden rounded-[6px] border border-line/70 bg-line/70 sm:grid-cols-2 xl:grid-cols-4"
       >
         {valuedBalances.map((balance) => {
           const value = balance.usdtValue ?? 0;
@@ -940,48 +927,31 @@ function SpotBalanceCards({ balances }: { balances: BinanceSpotBalance[] }) {
           return (
             <article
               key={balance.asset}
-              className="min-w-0 overflow-hidden rounded-[6px] border border-line/75 bg-panel-strong p-4 shadow-sm"
+              className="min-w-0 bg-panel-strong px-3 py-2.5"
             >
-              <div className="grid min-w-0 gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <AssetLogo asset={balance.asset} />
-                  <div className="min-w-0">
-                    <h4 className="truncate font-mono text-2xl font-bold leading-tight text-foreground">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <AssetLogo asset={balance.asset} compact />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-baseline justify-between gap-2">
+                    <h4 className="truncate font-mono text-sm font-bold leading-tight text-foreground">
                       {balance.asset}
                     </h4>
-                    <div className="mt-1 text-xs font-semibold text-muted">
-                      Binance Spot
-                    </div>
+                    <span className="shrink-0 font-mono text-xs font-bold text-foreground">
+                      {formatUsd(value)}
+                    </span>
                   </div>
-                </div>
-
-                <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
-                  <HoldingMetricCell
-                    label="总数量"
-                    value={formatNumber(balance.total, { maximumFractionDigits: 8 })}
-                  />
-                  <HoldingMetricCell
-                    label="可用"
-                    value={formatNumber(balance.free, { maximumFractionDigits: 8 })}
-                  />
-                  <HoldingMetricCell
-                    label="冻结"
-                    value={formatNumber(balance.locked, { maximumFractionDigits: 8 })}
-                  />
-                  <HoldingMetricCell
-                    label="价格"
-                    value={balance.usdtPrice ? formatUsd(balance.usdtPrice) : "--"}
-                  />
-                  <HoldingMetricCell label="占比" value={formatPercent(share)} />
-                </div>
-
-                <div className="border-t border-line/70 pt-3 text-right">
-                  <div className="text-xs font-semibold text-muted">估值</div>
-                  <div className="mt-1 font-mono text-2xl font-bold text-foreground">
-                    {formatUsd(value)}
+                  <div className="mt-1 flex min-w-0 items-center justify-between gap-2 text-[10px] font-semibold text-muted">
+                    <span className="truncate font-mono">
+                      {formatNumber(balance.total, { maximumFractionDigits: 6 })} ·{" "}
+                      {balance.usdtPrice ? formatUsd(balance.usdtPrice) : "--"}
+                    </span>
+                    <span className="shrink-0 font-mono">{formatPercent(share)}</span>
                   </div>
-                  <div className="mt-1 text-xs font-bold text-muted">
-                    现货资产占比
+                  <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-background">
+                    <div
+                      className="h-full rounded-full bg-info"
+                      style={{ width: `${Math.min(100, share)}%` }}
+                    />
                   </div>
                 </div>
               </div>
@@ -1594,8 +1564,11 @@ export function HoldingPanel() {
       {snapshot ? (
         <div className="space-y-4">
           <BinanceSummaryGrid snapshot={snapshot} />
-          <FuturesEquityCurve snapshot={snapshot} history={equityHistory} />
-          <FuturesPositionCards positions={snapshot.futuresPositions} />
+          <FuturesPositionCards
+            positions={snapshot.futuresPositions}
+            snapshot={snapshot}
+            history={equityHistory}
+          />
           <SpotBalanceCards balances={snapshot.spotBalances} />
           <div className="rounded-[6px] border border-line/70 bg-background/45 px-4 py-3 text-xs font-semibold leading-5 text-muted">
             注：以上数据仅用于持仓观察；币安接口可能存在延迟，交易和风控以交易所账户为准。
