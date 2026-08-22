@@ -1233,7 +1233,7 @@ function TrackedAccountsPanel({
 
 export function HoldingPanel() {
   const [activeHoldingView, setActiveHoldingView] =
-    useState<HoldingView>("us-stocks");
+    useState<HoldingView>("binance");
   const [snapshot, setSnapshot] = useState<BinanceHoldingSnapshot | null>(() =>
     readBrowserCachedSnapshot(),
   );
