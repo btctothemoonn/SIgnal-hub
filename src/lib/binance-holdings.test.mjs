@@ -144,6 +144,19 @@ assert.deepEqual(
   ],
 );
 
+assert.equal(
+  normalizeFuturesPositions([
+    {
+      symbol: "SOLUSDT",
+      positionAmt: "5",
+      entryPrice: "140",
+      markPrice: "145",
+      updateTime: 1_700_000_000_000,
+    },
+  ])[0]?.positionUpdatedAt,
+  "2023-11-14T22:13:20.000Z",
+);
+
 assert.deepEqual(
   buildHoldingSummary({
     spotBalances: normalizeSpotBalances([

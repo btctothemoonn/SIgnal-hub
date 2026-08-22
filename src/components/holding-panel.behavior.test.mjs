@@ -22,6 +22,17 @@ const temporaryStubsImport = `./holding-panel.runtime-stubs-${process.pid}.mjs`;
 
 const originalWindow = globalThis.window;
 let renderer;
+let cachedSnapshot = null;
+
+function renderedText(node) {
+  return node.children
+    .map((child) =>
+      typeof child === "string" || typeof child === "number"
+        ? String(child)
+        : renderedText(child),
+    )
+    .join("");
+}
 
 try {
   writeFileSync(
@@ -34,15 +45,25 @@ export function USStockHoldingPanel() {
 }
 
 export function analyzeFuturesPositions() {
-  return { totalPnl: 0, totalNotional: 0, weightedPnlPercent: 0 };
+  return { biasLabel: "Neutral", netExposureLeverage: 0 };
 }
 
 export function getBinanceDisplayTotalEquity() {
   return 0;
 }
 
-export function buildFuturesExposureRows() {
-  return [];
+export function buildFuturesExposureRows(positions) {
+  return positions.map((position, index) => ({
+    position,
+    asset: position.symbol.replace("USDT", ""),
+    rank: index + 1,
+    direction: position.side === "SHORT" ? "空" : "多",
+    absNotional: Math.abs(position.notional),
+    exposurePercent: 100,
+    pnlPercent: 10,
+    liquidationDistancePercent: 45,
+    isTopExposure: true,
+  }));
 }
 
 export function summarizeFuturesExposure() {
@@ -77,7 +98,7 @@ export function summarizeFuturesExposure() {
   globalThis.window = {
     localStorage: {
       getItem() {
-        return null;
+        return cachedSnapshot;
       },
       setItem() {},
       removeItem() {},
@@ -122,6 +143,71 @@ export function summarizeFuturesExposure() {
     renderer.root.findByProps({ id: "holding-panel-us-stocks" }).props.role,
     "tabpanel",
   );
+
+  await act(async () => {
+    renderer.unmount();
+  });
+  renderer = undefined;
+  cachedSnapshot = JSON.stringify({
+    exchange: "binance",
+    accountMode: "standard",
+    updatedAt: "2026-08-23T08:00:00.000Z",
+    spotBalances: [],
+    futuresPositions: [
+      {
+        symbol: "BTCUSDT",
+        side: "LONG",
+        amount: 1,
+        entryPrice: 100,
+        markPrice: 110,
+        unrealizedPnl: 10,
+        liquidationPrice: 60,
+        leverage: 5,
+        marginType: "cross",
+        notional: 110,
+        peakTracking: {
+          symbol: "BTCUSDT",
+          side: "LONG",
+          openedAt: "2026-08-22T06:00:00.000Z",
+          openedAtSource: "trades",
+          favorablePrice: 130,
+          drawdownPercent: 15.38,
+          checkedAt: "2026-08-23T08:00:00.000Z",
+          status: "live",
+        },
+      },
+    ],
+    summary: {
+      spotAssetCount: 0,
+      futuresPositionCount: 1,
+      futuresWalletBalance: 1_000,
+      futuresUnrealizedPnl: 10,
+      futuresMarginBalance: 1_010,
+      futuresAvailableBalance: 900,
+      futuresLongNotional: 110,
+      futuresShortNotional: 0,
+      futuresGrossNotional: 110,
+      futuresNetNotional: 110,
+    },
+    warnings: [],
+  });
+
+  await act(async () => {
+    renderer = TestRenderer.create(React.createElement(HoldingPanel));
+  });
+  const peakDrawdownNodes = renderer.root.findAllByProps({
+    "data-position-peak-drawdown": true,
+  });
+  assert.equal(
+    peakDrawdownNodes.length,
+    1,
+    "each futures row should display its peak drawdown",
+  );
+  const peakDrawdown = peakDrawdownNodes[0];
+  const peakDrawdownText = renderedText(peakDrawdown);
+  assert.match(peakDrawdownText, /峰值回撤/);
+  assert.match(peakDrawdownText, /15\.4%/);
+  assert.match(peakDrawdownText, /最高.*\$130\.00/);
 
   console.log("ok - holding panel defaults to Binance and keeps tabs interactive");
 } finally {
