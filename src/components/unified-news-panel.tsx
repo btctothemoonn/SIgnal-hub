@@ -571,9 +571,9 @@ type FeedTab = SignalFeedTab;
 
 const SOURCE_ICON: Record<string, { letter: string; tone: string }> = {
   telegram: { letter: "T", tone: "bg-info text-background" },
-  x: { letter: "X", tone: "bg-success text-background" },
-  monitor985: { letter: "985", tone: "bg-accent text-white" },
-  truth: { letter: "TS", tone: "bg-success text-background" },
+  x: { letter: "X", tone: "bg-foreground text-background" },
+  monitor985: { letter: "985", tone: "bg-accent text-accent-contrast" },
+  truth: { letter: "TS", tone: "bg-foreground text-background" },
   alert: { letter: "!", tone: "bg-danger text-background" },
 };
 
@@ -1591,7 +1591,7 @@ export function UnifiedNewsPanel({
                 onClick={() => selectActiveTab("all")}
                 className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                   activeTab === "all"
-                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                 }`}
               >
@@ -1615,7 +1615,7 @@ export function UnifiedNewsPanel({
                     onClick={() => selectActiveTab(tab.id)}
                     className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
                       activeTab === tab.id
-                        ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                        ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                         : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                     }`}
                   >
@@ -1644,7 +1644,7 @@ export function UnifiedNewsPanel({
                   onClick={() => setFeedRange(option.id)}
                   className={`h-8 rounded-md border px-2 text-[11px] font-semibold transition-colors ${
                     selected
-                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                       : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                   }`}
                 >
@@ -1704,7 +1704,7 @@ export function UnifiedNewsPanel({
                     }}
                     className={`flex h-8 w-full items-center justify-between rounded-md px-2 text-left text-xs font-semibold transition-colors ${
                       effectiveAuthorFilter === ALL_SIGNAL_FEED_AUTHOR_FILTER
-                        ? "bg-success-soft text-foreground"
+                        ? "bg-accent-soft text-foreground"
                         : "text-muted hover:bg-background/70 hover:text-foreground"
                     }`}
                   >
@@ -1972,7 +1972,7 @@ export function UnifiedNewsPanel({
                     });
                   }
                 }}
-                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-success/55 bg-workspace-surface-raised px-2.5 py-2.5 transition-all duration-75 active:scale-[0.995] hover:border-success/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-success"
+                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-accent/50 bg-workspace-surface-raised px-2.5 py-2.5 transition-all duration-75 active:scale-[0.995] hover:border-accent/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 {/* Avatar */}
                 <div className="relative shrink-0 pt-0.5">

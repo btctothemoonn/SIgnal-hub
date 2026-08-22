@@ -24,24 +24,33 @@ const stocksHynixPremiumCurve = await readFile(
   "src/components/stocks-hynix-premium-curve.tsx",
   "utf8",
 );
+const unifiedNewsPanel = await readFile(
+  "src/components/unified-news-panel.tsx",
+  "utf8",
+);
 
-await test("global theme keeps a light revenue-dashboard workspace palette", () => {
-  assert.match(globals, /:root\s*\{[\s\S]*--background:\s*#f3f8f6;/);
+await test("global theme keeps a neutral dark workspace palette", () => {
+  assert.match(globals, /:root\s*\{[\s\S]*--background:\s*#f5f6f8;/);
   assert.match(globals, /:root\s*\{[\s\S]*--foreground:\s*#10151b;/);
   assert.match(globals, /:root\s*\{[\s\S]*--panel:\s*#ffffff;/);
-  assert.match(globals, /:root\s*\{[\s\S]*--accent:\s*#6c5ce7;/);
-  assert.match(globals, /:root\s*\{[\s\S]*--success:\s*#14b8a6;/);
-  assert.match(globals, /:root\s*\{[\s\S]*--workspace-rail:\s*#f8fbfa;/);
+  assert.match(globals, /:root\s*\{[\s\S]*--accent:\s*#b6813c;/);
+  assert.match(globals, /:root\s*\{[\s\S]*--accent-contrast:\s*#11151a;/);
+  assert.match(globals, /:root\s*\{[\s\S]*--success:\s*#159a73;/);
+  assert.match(globals, /:root\s*\{[\s\S]*--workspace-rail:\s*#f9fafb;/);
   assert.match(globals, /:root\s*\{[\s\S]*--workspace-toolbar:\s*#ffffff;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--background:\s*#111817;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--foreground:\s*#edf1f4;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--success:\s*#2dd4bf;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--info:\s*#38bdf8;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--background:\s*#0f1115;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--foreground:\s*#eef0f4;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--accent:\s*#d6a85b;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--accent-contrast:\s*#101216;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--success:\s*#49c68d;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--workspace-rail:\s*#121419;/);
   assert.match(globals, /--app-font-serif:/);
   assert.match(globals, /--font-serif:\s*var\(--app-font-serif\);/);
-  assert.match(globals, /linear-gradient\(180deg,\s*#f8fcfa 0%,\s*#f3f8f6 44%,\s*#edf4f1 100%\)/);
+  assert.match(globals, /--color-accent-contrast:\s*var\(--accent-contrast\);/);
+  assert.match(globals, /linear-gradient\(180deg,\s*#fafbfc 0%,\s*#f5f6f8 44%,\s*#eef1f4 100%\)/);
+  assert.match(globals, /linear-gradient\(180deg,\s*#101216 0%,\s*#11141a 48%,\s*#0f1115 100%\)/);
   assert.doesNotMatch(globals, /radial-gradient/);
-  assert.doesNotMatch(globals, /#00e887|rgba\(0,\s*232,\s*135/);
+  assert.doesNotMatch(globals, /#111817|#131c1a|#17211f|#1b2725|#2c3b38|#00e887|rgba\(0,\s*232,\s*135/);
   assert.doesNotMatch(globals, /28px 28px/);
 });
 
@@ -56,7 +65,7 @@ await test("command workspace tokens define Cromojo-like product surfaces", () =
   assert.match(globals, /--workspace-gutter:/);
   assert.match(
     globals,
-    /html\.dark\s*\{[\s\S]*--workspace-canvas:\s*#111817;/,
+    /html\.dark\s*\{[\s\S]*--workspace-canvas:\s*#0f1115;/,
   );
   assert.match(globals, /--color-workspace-canvas:/);
   assert.doesNotMatch(globals, /letter-spacing:\s*-/);
@@ -67,8 +76,8 @@ await test("app shell exposes product sidebar and toolbar surfaces", () => {
   assert.match(appShell, /bg-workspace-toolbar/);
   assert.match(appShell, /w-\[13\.5rem\]/);
   assert.match(appShell, /justify-start/);
-  assert.match(appShell, /border-success\/45 bg-success-soft text-foreground shadow-sm/);
-  assert.match(appShell, /hover:border-success\/30 hover:bg-success-soft\/70 hover:text-foreground/);
+  assert.match(appShell, /border-accent\/45 bg-accent-soft text-foreground shadow-sm/);
+  assert.match(appShell, /hover:border-accent\/30 hover:bg-accent-soft\/70 hover:text-foreground/);
   assert.match(appShell, /Signal Hub/);
   assert.doesNotMatch(appShell, /font-black|rgba\(0,232,135/);
   assert.match(
@@ -77,6 +86,17 @@ await test("app shell exposes product sidebar and toolbar surfaces", () => {
   );
   assert.doesNotMatch(appShell, /font-serif/);
   assert.doesNotMatch(appShell, /bg-info text-sm font-bold text-white/);
+});
+
+await test("interactive selections use accent while status stays semantic", () => {
+  assert.match(appShell, /active:border-accent\/55 active:bg-accent-soft active:text-foreground/);
+  assert.match(themeToggle, /hover:border-accent\/40 hover:bg-accent-soft hover:text-accent/);
+  assert.match(settingsPage, /border-accent\/45 bg-accent-soft text-foreground shadow-sm/);
+  assert.match(settingsPage, /bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast/);
+  assert.match(unifiedNewsPanel, /border-l-accent\/50/);
+  assert.doesNotMatch(appShell, /active:border-success|hover:border-success|border-success\/45 bg-success-soft text-foreground/);
+  assert.doesNotMatch(themeToggle, /hover:border-success|hover:bg-success-soft|hover:text-success/);
+  assert.doesNotMatch(unifiedNewsPanel, /bg-success text-background|bg-success-soft text-foreground|border-l-success|focus:ring-success/);
 });
 
 await test("app shell gives sidebar navigation immediate optimistic feedback", () => {
@@ -150,11 +170,12 @@ await test("stocks performance chart uses the light product surface", () => {
 
 await test("hynix premium chart uses the dark product chart theme", () => {
   assert.match(stocksHynixPremiumCurve, /data-testid="stocks-hynix-premium-curve"/);
-  assert.match(stocksHynixPremiumCurve, /CHART_SURFACE = "#17211f"/);
-  assert.match(stocksHynixPremiumCurve, /CHART_TEXT = "#9eaaa7"/);
-  assert.match(stocksHynixPremiumCurve, /CHART_ACCENT = "#2dd4bf"/);
-  assert.match(stocksHynixPremiumCurve, /PREMIUM_DOWN_COLOR = "#f97066"/);
+  assert.match(stocksHynixPremiumCurve, /CHART_SURFACE = "#17191f"/);
+  assert.match(stocksHynixPremiumCurve, /CHART_TEXT = "#a1a7b3"/);
+  assert.match(stocksHynixPremiumCurve, /CHART_ACCENT = "#d6a85b"/);
+  assert.match(stocksHynixPremiumCurve, /PREMIUM_UP_COLOR = "#49c68d"/);
+  assert.match(stocksHynixPremiumCurve, /PREMIUM_DOWN_COLOR = "#ef6b73"/);
   assert.match(stocksHynixPremiumCurve, /labelBackgroundColor: CHART_ACCENT/);
   assert.match(stocksHynixPremiumCurve, /rounded-lg border border-line\/60 bg-panel-strong/);
-  assert.doesNotMatch(stocksHynixPremiumCurve, /CHART_SURFACE = "#ffffff"|CHART_TEXT = "#647370"|rgba\(17, 24, 28, 0\.08\)|rounded-\[6px\] border border-line\/60 bg-background\/35/);
+  assert.doesNotMatch(stocksHynixPremiumCurve, /CHART_SURFACE = "#ffffff"|CHART_SURFACE = "#17211f"|CHART_TEXT = "#647370"|CHART_ACCENT = "#2dd4bf"|rgba\(45, 212, 191|rounded-\[6px\] border border-line\/60 bg-background\/35/);
 });

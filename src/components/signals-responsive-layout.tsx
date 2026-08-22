@@ -263,7 +263,7 @@ export function SignalsResponsiveLayout({
               className={[
                 "h-9 rounded-md border text-sm font-semibold transition-colors",
                 activeMobilePanel === panel.id
-                  ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                  ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                   : "border-transparent text-muted hover:bg-workspace-surface hover:text-foreground",
               ].join(" ")}
             >

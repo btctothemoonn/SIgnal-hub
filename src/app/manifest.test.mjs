@@ -13,8 +13,8 @@ assert.equal(
 assert.equal(appManifest.start_url, "/");
 assert.equal(appManifest.scope, "/");
 assert.equal(appManifest.display, "standalone");
-assert.equal(appManifest.background_color, "#111817");
-assert.equal(appManifest.theme_color, "#111817");
+assert.equal(appManifest.background_color, "#0f1115");
+assert.equal(appManifest.theme_color, "#0f1115");
 assert.deepEqual(appManifest.icons, [
   {
     src: "/icon-192x192.png",

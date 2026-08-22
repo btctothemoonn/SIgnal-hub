@@ -475,7 +475,7 @@ export function AlphaSummaryCard({
             onClick={() => setScope(item.id)}
             className={`h-7 rounded-md border px-1.5 text-[11px] font-semibold transition-colors ${
               selected
-                ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                 : "border-transparent text-muted hover:bg-panel hover:text-foreground"
             }`}
           >
@@ -544,7 +544,7 @@ export function AlphaSummaryCard({
               type="button"
               disabled={busyScope === scope}
               onClick={() => void loadSummary(true, scope)}
-              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-success/45 bg-success px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-60"
+              className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-accent/45 bg-accent px-3 text-xs font-semibold text-accent-contrast shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-60"
             >
               {busyScope === scope ? "生成中..." : "重新生成"}
             </button>

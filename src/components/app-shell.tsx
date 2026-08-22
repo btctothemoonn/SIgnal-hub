@@ -72,10 +72,10 @@ function ShellNavItem({
       }}
       onPointerEnter={() => onWarm?.(item)}
       className={[
-        "flex h-10 w-full items-center justify-start gap-2 rounded-lg border px-3 text-sm font-semibold transition-all duration-75 active:scale-[0.99] active:border-success/55 active:bg-success-soft active:text-foreground",
+        "flex h-10 w-full items-center justify-start gap-2 rounded-lg border px-3 text-sm font-semibold transition-all duration-75 active:scale-[0.99] active:border-accent/55 active:bg-accent-soft active:text-foreground",
         active
-          ? "border-success/45 bg-success-soft text-foreground shadow-sm"
-          : "border-transparent text-muted hover:border-success/30 hover:bg-success-soft/70 hover:text-foreground",
+          ? "border-accent/45 bg-accent-soft text-foreground shadow-sm"
+          : "border-transparent text-muted hover:border-accent/30 hover:bg-accent-soft/70 hover:text-foreground",
       ].join(" ")}
     >
       <Icon aria-hidden className="h-4 w-4 shrink-0" />
@@ -162,7 +162,7 @@ export function AppShell({
       <div className="flex min-h-screen">
         <aside className="hidden w-[13.5rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-3 py-4 shadow-[8px_0_28px_-24px_rgba(15,23,42,0.28)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>
           <div className="mb-5 flex w-full items-center gap-2 rounded-lg border border-line/70 bg-workspace-surface px-2.5 py-2 shadow-sm">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-success/35 bg-success-soft font-mono text-xs font-bold text-success">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/35 bg-accent-soft font-mono text-xs font-bold text-accent">
               SH
             </div>
             <div className="min-w-0">
@@ -204,7 +204,7 @@ export function AppShell({
           >
             <div className="flex min-h-[4.25rem] flex-col gap-2 px-3 py-2.5 sm:px-5 lg:min-h-[4.75rem] lg:flex-row lg:items-center lg:justify-between lg:py-3">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-success/30 bg-success-soft font-mono text-xs font-bold text-success shadow-sm lg:hidden">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent-soft font-mono text-xs font-bold text-accent shadow-sm lg:hidden">
                   SH
                 </div>
                 <div className="min-w-0">
@@ -231,7 +231,7 @@ export function AppShell({
                   onFocus={warmSettingsRoute}
                   onPointerDown={warmSettingsRoute}
                   onPointerEnter={warmSettingsRoute}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-success/40 hover:bg-success-soft hover:text-success"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
                 >
                   <Settings aria-hidden className="h-4 w-4" />
                 </Link>
@@ -272,7 +272,7 @@ export function AppShell({
                 className={[
                   "flex h-12 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] font-semibold transition-all duration-75 active:scale-[0.98]",
                   active
-                    ? "border-success/45 bg-success-soft text-foreground"
+                    ? "border-accent/45 bg-accent-soft text-foreground"
                     : "border-transparent text-muted hover:bg-info-soft hover:text-foreground",
                 ].join(" ")}
               >

@@ -339,7 +339,7 @@ export function StocksPerformanceChart({
                   className={[
                     "shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors",
                     selected
-                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                       : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >

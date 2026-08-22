@@ -159,7 +159,7 @@ export function StocksResearchLayout({
                 className={[
                   "h-9 rounded-lg border text-sm font-semibold transition-colors",
                   activeMobilePanel === panel.id
-                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                 ].join(" ")}
               >

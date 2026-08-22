@@ -1463,7 +1463,7 @@ export function HoldingPanel() {
                 className={[
                   "h-9 min-w-0 rounded-lg border px-2 text-xs font-semibold transition-colors",
                   selected
-                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                 ].join(" ")}
               >

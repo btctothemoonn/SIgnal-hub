@@ -77,7 +77,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={cycle}
-      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-success/40 hover:bg-success-soft hover:text-success"
+      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
       aria-label={`切换主题，当前：${label}`}
       title={label}
     >

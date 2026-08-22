@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#111817",
+  themeColor: "#0f1115",
 };
 
 const themeScript = `(function(){try{var t=localStorage.getItem("signal-hub:theme:cromojo-dark-dashboard:v1");var d=t===null||t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme:dark)").matches);if(d)document.documentElement.classList.add("dark")}catch(e){}})()`;

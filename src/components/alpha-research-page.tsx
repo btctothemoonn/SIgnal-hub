@@ -296,7 +296,7 @@ export function AlphaResearchPage() {
                   className={[
                     "min-h-10 rounded-lg border px-2 py-1.5 text-left transition-colors",
                     selected
-                      ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                      ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                       : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >

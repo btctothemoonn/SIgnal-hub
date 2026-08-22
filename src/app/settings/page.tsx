@@ -201,7 +201,7 @@ export default function SettingsPage() {
               type="button"
               onClick={goHome}
               disabled={navigating}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted shadow-sm transition-colors hover:border-success/35 hover:bg-success-soft hover:text-success disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line/70 bg-panel-strong/90 px-3 py-1.5 text-xs font-semibold text-muted shadow-sm transition-colors hover:border-accent/35 hover:bg-accent-soft hover:text-accent disabled:opacity-60"
             >
               <ArrowLeft aria-hidden="true" size={14} />
               {navigating ? "返回中..." : "返回面板"}
@@ -230,8 +230,8 @@ export default function SettingsPage() {
                   className={
                     "flex shrink-0 items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors lg:w-full " +
                     (isActive
-                      ? "border-success/45 bg-success-soft text-foreground shadow-sm"
-                      : "border-line/70 bg-panel-strong/90 text-muted hover:border-success/30 hover:bg-success-soft/70 hover:text-foreground")
+                      ? "border-accent/45 bg-accent-soft text-foreground shadow-sm"
+                      : "border-line/70 bg-panel-strong/90 text-muted hover:border-accent/30 hover:bg-accent-soft/70 hover:text-foreground")
                   }
                 >
                   <span className="font-medium">{section.title}</span>
@@ -240,7 +240,7 @@ export default function SettingsPage() {
                       className={
                         "ml-2 rounded-[6px] px-2 py-0.5 text-[11px] " +
                         (isActive
-                          ? "bg-success/15 text-success"
+                          ? "bg-accent/15 text-accent"
                           : "bg-line/60 text-muted")
                       }
                     >
@@ -523,7 +523,7 @@ function WatchListPanel({
         <button
           onClick={addSingle}
           disabled={busy || !singleInput.trim()}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-success px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-40"
         >
           <Plus aria-hidden="true" size={15} />
           添加
@@ -562,7 +562,7 @@ function WatchListPanel({
             <button
               onClick={addBatch}
               disabled={busy || previewBatch.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-success px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-40"
             >
               <Plus aria-hidden="true" size={15} />
               添加 {previewBatch.length} 条
@@ -742,7 +742,7 @@ function WatchItemRow({
             <button
               onClick={save}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-success/90 disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-contrast shadow-sm transition-colors hover:bg-accent/90 disabled:opacity-40"
             >
               <Save aria-hidden="true" size={14} />
               保存

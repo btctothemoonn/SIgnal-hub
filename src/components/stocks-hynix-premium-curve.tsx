@@ -48,13 +48,13 @@ const STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY =
 const PREMIUM_CHART_HEIGHT = 360;
 const PREMIUM_KLINE_PAGE_LIMIT = 1500;
 const PREMIUM_MAX_POINTS = 20000;
-const CHART_SURFACE = "#17211f";
-const CHART_TEXT = "#9eaaa7";
-const CHART_GRID = "rgba(185, 202, 196, 0.08)";
-const CHART_AXIS = "rgba(185, 202, 196, 0.16)";
-const CHART_ACCENT = "#2dd4bf";
-const PREMIUM_UP_COLOR = "#2dd4bf";
-const PREMIUM_DOWN_COLOR = "#f97066";
+const CHART_SURFACE = "#17191f";
+const CHART_TEXT = "#a1a7b3";
+const CHART_GRID = "rgba(207, 213, 225, 0.08)";
+const CHART_AXIS = "rgba(207, 213, 225, 0.16)";
+const CHART_ACCENT = "#d6a85b";
+const PREMIUM_UP_COLOR = "#49c68d";
+const PREMIUM_DOWN_COLOR = "#ef6b73";
 const PREMIUM_INTERVAL_OPTIONS = [
   { value: "1m", label: "1分钟" },
   { value: "5m", label: "5分钟" },
@@ -116,8 +116,8 @@ function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
     value: Math.max(0, point.volume ?? 0),
     color:
       close >= open
-        ? "rgba(45, 212, 191, 0.22)"
-        : "rgba(249, 112, 102, 0.2)",
+        ? "rgba(73, 198, 141, 0.22)"
+        : "rgba(239, 107, 115, 0.2)",
   };
 }
 
@@ -215,11 +215,11 @@ export function StocksHynixPremiumCurve() {
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: "rgba(45, 212, 191, 0.45)",
+          color: "rgba(214, 168, 91, 0.45)",
           labelBackgroundColor: CHART_ACCENT,
         },
         horzLine: {
-          color: "rgba(45, 212, 191, 0.45)",
+          color: "rgba(214, 168, 91, 0.45)",
           labelBackgroundColor: CHART_ACCENT,
         },
       },
@@ -584,7 +584,7 @@ export function StocksHynixPremiumCurve() {
                 onClick={() => setSelectedInterval(option.value)}
                 className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
                   selectedInterval === option.value
-                    ? "border-success/35 bg-success-soft text-foreground shadow-sm"
+                    ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:text-foreground"
                 }`}
               >
