@@ -54,6 +54,7 @@ export type DailyBriefItem = {
   importance: "high" | "medium" | "low";
   title: string;
   topic: DailyBriefTopic | string;
+  candidateIndexes?: number[];
   sourceNames: string[];
   sourceUrls: string[];
   imageUrl: string | null;
@@ -485,6 +486,7 @@ export function buildDailyBriefPrompt({
 - 每天最多 ${maxItems} 条，宁缺毋滥；如果真正重要的少于 ${maxItems} 条，就少写。
 - 重点范围: ${DAILY_BRIEF_TOPICS.join("、")}。
 - 每条都要有: 标题、配图、发生了什么、投资影响、后续关注什么。
+- 每条必须用 candidateIndexes 引用候选新闻前的编号；不要改写编号，不要编造链接。系统会按编号回填真实来源。
 - 输出中文，直接返回 JSON，不要 Markdown。
 
 JSON 结构:
@@ -497,8 +499,9 @@ JSON 结构:
       "importance": "high | medium | low",
       "title": "string",
       "topic": "${DAILY_BRIEF_TOPICS[0]}",
+      "candidateIndexes": [1],
       "sourceNames": ["Reuters"],
-      "sourceUrls": ["https://..."],
+      "sourceUrls": [],
       "imageUrl": "https://... or null",
       "whatHappened": "发生了什么",
       "investmentImpact": "为什么影响价格/供需/产业链",
@@ -624,6 +627,15 @@ function normalizeDailyBriefRecord(
         importance: normalizeImportance(record.importance),
         title,
         topic: clampText(record.topic, 80) || DAILY_BRIEF_TOPICS[0],
+        candidateIndexes: Array.isArray(record.candidateIndexes)
+          ? Array.from(
+              new Set(
+                record.candidateIndexes
+                  .map((value) => Math.round(Number(value)))
+                  .filter((value) => Number.isInteger(value) && value > 0),
+              ),
+            ).slice(0, 4)
+          : [],
         sourceNames: stringArray(record.sourceNames, 4),
         sourceUrls: stringArray(record.sourceUrls, 4),
         imageUrl: safeHttpUrl(record.imageUrl),
@@ -676,11 +688,23 @@ function sanitizeBriefForCandidates(
   );
   const items = brief.items
     .map((item): DailyBriefItem | null => {
-      const matchedCandidates = item.sourceUrls
-        .map((sourceUrl) => candidateByCanonicalUrl.get(canonicalUrl(sourceUrl)))
-        .filter(
-          (candidate): candidate is DailyBriefCandidate => Boolean(candidate),
-        );
+      const matchedCandidates = Array.from(
+        new Map(
+          [
+            ...(item.candidateIndexes ?? []).map(
+              (candidateIndex) => candidates[candidateIndex - 1],
+            ),
+            ...item.sourceUrls.map((sourceUrl) =>
+              candidateByCanonicalUrl.get(canonicalUrl(sourceUrl)),
+            ),
+          ]
+            .filter(
+              (candidate): candidate is DailyBriefCandidate =>
+                Boolean(candidate),
+            )
+            .map((candidate) => [candidate.id, candidate] as const),
+        ).values(),
+      );
       if (matchedCandidates.length === 0) return null;
 
       const imageUrl =

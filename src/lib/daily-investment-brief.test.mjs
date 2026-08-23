@@ -239,6 +239,7 @@ assert.match(prompt, /宁缺毋滥/);
 assert.match(prompt, /不要从 Signal/);
 assert.match(prompt, /Reuters/);
 assert.match(prompt, /AP News/);
+assert.match(prompt, /candidateIndexes/);
 const independentPrompt = buildDailyBriefPrompt({
   period: getDailyBriefPeriod({ now: afterEight }),
   candidates: independentCandidates,
@@ -401,5 +402,35 @@ const badSourceSnapshot = await getOrCreateDailyInvestmentBrief({
 });
 assert.equal(badSourceSnapshot.status, "generated");
 assert.equal(badSourceSnapshot.brief?.items.length, 0);
+
+const indexedSourceDir = await mkdtemp(join(tmpdir(), "daily-brief-indexed-source-"));
+const indexedSourceSnapshot = await getOrCreateDailyInvestmentBrief({
+  force: true,
+  now: afterEight,
+  env: {
+    DAILY_BRIEF_DB: join(indexedSourceDir, "brief.sqlite"),
+    MINIMAX_API_KEY: "test-key",
+    AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+    AI_SUMMARY_MODEL: "MiniMax-M2.7",
+  },
+  collectCandidates: async () => candidates,
+  requestBrief: async ({ provider }) => ({
+    brief: {
+      ...parsed,
+      items: [
+        {
+          ...parsed.items[0],
+          candidateIndexes: [2],
+          sourceUrls: ["https://www.reuters.com/rewritten-by-the-model"],
+        },
+      ],
+    },
+    provider,
+  }),
+});
+assert.equal(indexedSourceSnapshot.brief?.items.length, 1);
+assert.deepEqual(indexedSourceSnapshot.brief?.items[0].sourceUrls, [
+  "https://www.reuters.com/technology/nvidia-ai-story",
+]);
 
 console.log("ok - daily investment brief cache and generation");
