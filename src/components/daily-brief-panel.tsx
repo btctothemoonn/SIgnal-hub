@@ -1,11 +1,27 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
-import { useState } from "react";
+import {
+  Bitcoin,
+  Cpu,
+  ExternalLink,
+  Globe2,
+  RefreshCw,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  groupDailyBriefItems,
+  type DailyBriefGroupId,
+} from "@/lib/daily-brief-display";
 import type {
   DailyBriefItem,
   DailyBriefSnapshot,
 } from "@/lib/daily-investment-brief";
+
+const BRIEF_GROUPS = [
+  { id: "ai", label: "AI 科技", icon: Cpu },
+  { id: "crypto", label: "币圈", icon: Bitcoin },
+  { id: "markets", label: "宏观市场", icon: Globe2 },
+] as const;
 
 function formatTime(value: string | null) {
   if (!value) return "暂无";
@@ -36,97 +52,123 @@ function sourceSummary(snapshot: DailyBriefSnapshot) {
 function ItemImage({ item }: { item: DailyBriefItem }) {
   if (!item.imageUrl) {
     return (
-      <div className="flex aspect-[16/7] items-center justify-center rounded-md border border-line bg-workspace-surface text-xs font-semibold text-muted">
-        {item.sourceNames[0] || "News"}
+      <div className="flex aspect-[16/7] min-h-28 items-center justify-center border-b border-line bg-workspace-canvas text-muted sm:aspect-auto sm:min-h-full sm:border-b-0 sm:border-r">
+        <div className="flex flex-col items-center gap-2">
+          <Globe2 aria-hidden className="h-5 w-5" />
+          <span className="text-xs font-semibold">
+            {item.sourceNames[0] || "News"}
+          </span>
+        </div>
       </div>
     );
   }
 
   return (
     <div
+      role="img"
       aria-label={`${item.title} 配图`}
-      className="aspect-[16/7] rounded-md border border-line bg-cover bg-center bg-no-repeat"
+      className="aspect-[16/7] min-h-28 border-b border-line bg-workspace-canvas bg-cover bg-center bg-no-repeat sm:aspect-auto sm:min-h-full sm:border-b-0 sm:border-r"
       style={{ backgroundImage: `url("${item.imageUrl}")` }}
     />
   );
 }
 
+function BriefFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 gap-1 px-3 py-2.5 sm:grid-cols-[4.75rem_minmax(0,1fr)] sm:gap-3">
+      <div className="text-[11px] font-semibold text-muted">{label}</div>
+      <p className="min-w-0 text-[13px] leading-relaxed text-foreground">
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function BriefItemCard({ item }: { item: DailyBriefItem }) {
-  const importanceTone =
+  const tone =
     item.importance === "high"
-      ? "bg-danger text-danger"
+      ? {
+          border: "border-l-danger",
+          badge: "border-danger/25 bg-danger-soft text-danger",
+          label: "高优先",
+        }
       : item.importance === "medium"
-        ? "bg-warning text-warning"
-        : "bg-info text-info";
+        ? {
+            border: "border-l-warning",
+            badge: "border-warning/25 bg-warning-soft text-warning",
+            label: "中优先",
+          }
+        : {
+            border: "border-l-info",
+            badge: "border-info/25 bg-info-soft text-info",
+            label: "观察",
+          };
 
   return (
-    <article className="rounded-lg border border-workspace-line-strong bg-workspace-surface p-3 shadow-sm">
-      <div className="grid gap-3 xl:grid-cols-[15rem_minmax(0,1fr)]">
+    <article
+      data-daily-brief-card
+      className={[
+        "min-w-0 overflow-hidden rounded-lg border border-l-2 border-workspace-line-strong bg-workspace-surface shadow-sm",
+        tone.border,
+      ].join(" ")}
+    >
+      <div className="grid min-w-0 sm:grid-cols-[9.5rem_minmax(0,1fr)]">
         <ItemImage item={item} />
-        <div className="min-w-0">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-md border border-line px-2 py-0.5 text-xs font-semibold text-muted">
+        <div className="min-w-0 p-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-muted">
               #{item.rank}
             </span>
             <span
               className={[
-                "inline-flex items-center rounded-md bg-opacity-10 px-2 py-0.5 text-xs font-semibold",
-                importanceTone,
+                "rounded-md border px-1.5 py-0.5 text-[10px] font-semibold",
+                tone.badge,
               ].join(" ")}
             >
-              {item.importance.toUpperCase()}
+              {tone.label}
             </span>
-            <span className="rounded-md border border-line px-2 py-0.5 text-xs font-semibold text-muted">
+            <span className="min-w-0 truncate text-[11px] font-semibold text-muted">
               {item.topic}
             </span>
           </div>
-          <h3 className="text-base font-semibold leading-snug text-foreground">
+
+          <h3 className="mt-2 text-[15px] font-semibold leading-snug text-foreground">
             {item.title}
           </h3>
-          <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted">
-            {(item.sourceNames.length > 0 ? item.sourceNames : ["Reuters", "AP News"]).map(
-              (source) => (
-                <span
-                  key={source}
-                  className="rounded-md border border-line bg-workspace-surface-raised px-2 py-0.5 font-semibold"
-                >
-                  {source}
-                </span>
-              ),
-            )}
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+            {(item.sourceNames.length > 0
+              ? item.sourceNames
+              : ["Reuters", "AP News"]
+            ).map((source) => (
+              <span
+                key={source}
+                className="rounded-md border border-line bg-workspace-surface-raised px-1.5 py-0.5 font-semibold"
+              >
+                {source}
+              </span>
+            ))}
             {item.sourceUrls.map((sourceUrl, index) => (
               <a
                 key={sourceUrl}
                 href={sourceUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-md border border-accent/30 bg-accent-soft px-2 py-0.5 font-semibold text-accent transition-colors hover:border-accent/60"
+                aria-label={`打开原文 ${index + 1}`}
+                className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-accent-soft px-1.5 py-0.5 font-semibold text-accent transition-colors hover:border-accent/60"
               >
                 原文 {index + 1}
+                <ExternalLink aria-hidden className="h-3 w-3" />
               </a>
             ))}
           </div>
-          <div className="mt-3 grid gap-2 text-sm leading-relaxed text-foreground lg:grid-cols-3">
-            <div>
-              <div className="mb-1 text-xs font-semibold text-muted">
-                发生了什么
-              </div>
-              <p>{item.whatHappened || "证据不足。"}</p>
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-semibold text-muted">
-                投资影响
-              </div>
-              <p>{item.investmentImpact || "等待更多确认。"}</p>
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-semibold text-muted">
-                后续关注
-              </div>
-              <p>{item.watchNext || "继续观察后续数据。"}</p>
-            </div>
-          </div>
         </div>
+      </div>
+
+      <div className="divide-y divide-line border-t border-line bg-workspace-surface-raised/45">
+        <BriefFact label="发生了什么" value={item.whatHappened || "证据不足。"} />
+        <BriefFact label="投资影响" value={item.investmentImpact || "等待更多确认。"} />
+        <BriefFact label="后续关注" value={item.watchNext || "继续观察后续数据。"} />
       </div>
     </article>
   );
@@ -138,8 +180,13 @@ export function DailyBriefPanel({
   initialSnapshot: DailyBriefSnapshot;
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [activeGroup, setActiveGroup] = useState<DailyBriefGroupId>("ai");
   const [pending, setPending] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
+  const groupedItems = useMemo(
+    () => groupDailyBriefItems(snapshot.brief?.items ?? []),
+    [snapshot.brief?.items],
+  );
 
   const regenerate = async () => {
     setPending(true);
@@ -156,9 +203,7 @@ export function DailyBriefPanel({
       if (!response.ok) {
         throw new Error(next?.error || `HTTP ${response.status}`);
       }
-      if (!next) {
-        throw new Error("接口没有返回可读取的简报数据");
-      }
+      if (!next) throw new Error("接口没有返回可读取的简报数据");
       setSnapshot(next);
       if (!next.success && next.error) {
         setUiError(`生成请求失败：${next.error}`);
@@ -173,7 +218,7 @@ export function DailyBriefPanel({
   };
 
   return (
-    <section data-daily-brief className="mx-auto w-full max-w-6xl">
+    <section data-daily-brief className="mx-auto w-full max-w-[1400px]">
       <div className="mb-3 flex flex-col gap-3 rounded-lg border border-workspace-line-strong bg-workspace-surface p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -184,10 +229,10 @@ export function DailyBriefPanel({
               {statusLabel(snapshot, pending)}
             </span>
           </div>
-          <h2 className="mt-3 text-2xl font-semibold leading-tight text-foreground">
+          <h2 className="mt-2.5 text-xl font-semibold leading-tight text-foreground sm:text-2xl">
             {snapshot.brief?.title || "每日投资简报"}
           </h2>
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-1 text-xs leading-relaxed text-muted sm:text-sm">
             {snapshot.period.label} · 更新 {formatTime(snapshot.generatedAt)} ·{" "}
             {snapshot.model} · 来源 {sourceSummary(snapshot)}
           </p>
@@ -196,7 +241,7 @@ export function DailyBriefPanel({
           type="button"
           onClick={regenerate}
           disabled={pending}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-accent/35 bg-accent-soft px-4 text-sm font-semibold text-accent transition-colors hover:border-accent/60 disabled:cursor-wait disabled:opacity-60"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md border border-accent/35 bg-accent-soft px-3 text-sm font-semibold text-accent transition-colors hover:border-accent/60 disabled:cursor-wait disabled:opacity-60"
         >
           <RefreshCw
             aria-hidden
@@ -229,36 +274,108 @@ export function DailyBriefPanel({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="rounded-lg border border-workspace-line-strong bg-workspace-surface p-4 shadow-sm">
-            <div className="mb-2 text-xs font-semibold uppercase text-muted">
-              Market Pulse
+          <div className="rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
+            <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className="min-w-0 p-4">
+                <div className="mb-1.5 text-[11px] font-semibold text-muted">
+                  MARKET PULSE
+                </div>
+                <p className="text-sm leading-relaxed text-foreground sm:text-[15px]">
+                  {snapshot.brief.marketPulse}
+                </p>
+              </div>
+              {snapshot.brief.priorityLine ? (
+                <div className="border-t border-line px-4 py-3 lg:border-l lg:border-t-0">
+                  <div className="mb-1.5 text-[11px] font-semibold text-muted">
+                    今日主线
+                  </div>
+                  <p className="text-sm font-semibold leading-relaxed text-foreground">
+                    {snapshot.brief.priorityLine}
+                  </p>
+                </div>
+              ) : null}
             </div>
-            <p className="text-base leading-relaxed text-foreground">
-              {snapshot.brief.marketPulse}
-            </p>
-            {snapshot.brief.priorityLine ? (
-              <p className="mt-3 rounded-md border border-line bg-workspace-surface-raised px-3 py-2 text-sm font-semibold text-foreground">
-                {snapshot.brief.priorityLine}
-              </p>
+            {snapshot.brief.watchVariables.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 border-t border-line px-4 py-2.5">
+                {snapshot.brief.watchVariables.map((variable) => (
+                  <span
+                    key={variable}
+                    className="rounded-md border border-line bg-workspace-surface-raised px-2 py-1 text-[11px] font-semibold text-muted"
+                  >
+                    {variable}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </div>
 
-          {snapshot.brief.watchVariables.length > 0 ? (
-            <div className="flex flex-wrap gap-2 rounded-lg border border-workspace-line-strong bg-workspace-surface p-3 shadow-sm">
-              {snapshot.brief.watchVariables.map((variable) => (
-                <span
-                  key={variable}
-                  className="rounded-md border border-line bg-workspace-surface-raised px-2.5 py-1 text-xs font-semibold text-muted"
-                >
-                  {variable}
-                </span>
-              ))}
+          <div className="rounded-lg border border-workspace-line-strong bg-workspace-toolbar p-1 shadow-sm">
+            <div
+              role="tablist"
+              aria-label="投资情报分类"
+              className="grid grid-cols-3 gap-1"
+            >
+              {BRIEF_GROUPS.map((group) => {
+                const selected = activeGroup === group.id;
+                const Icon = group.icon;
+                return (
+                  <button
+                    key={group.id}
+                    id={`daily-brief-tab-${group.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls={`daily-brief-panel-${group.id}`}
+                    tabIndex={selected ? 0 : -1}
+                    onClick={() => setActiveGroup(group.id)}
+                    className={[
+                      "flex h-10 min-w-0 items-center justify-center gap-1 rounded-md border px-1 text-[11px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm",
+                      selected
+                        ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
+                        : "border-transparent text-muted hover:bg-workspace-surface hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    <Icon aria-hidden className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
+                    <span className="whitespace-nowrap">{group.label}</span>
+                    <span
+                      className={[
+                        "inline-flex min-w-4 items-center justify-center rounded-md px-0.5 py-0.5 text-[10px] sm:min-w-5 sm:px-1",
+                        selected
+                          ? "bg-workspace-surface text-foreground"
+                          : "bg-workspace-surface-raised text-muted",
+                      ].join(" ")}
+                    >
+                      {groupedItems[group.id].length}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          ) : null}
+          </div>
 
-          {snapshot.brief.items.map((item) => (
-            <BriefItemCard key={`${item.rank}:${item.title}`} item={item} />
-          ))}
+          <div
+            id={`daily-brief-panel-${activeGroup}`}
+            role="tabpanel"
+            aria-labelledby={`daily-brief-tab-${activeGroup}`}
+          >
+            {groupedItems[activeGroup].length > 0 ? (
+              <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+                {groupedItems[activeGroup].map((item) => (
+                  <BriefItemCard
+                    key={`${item.rank}:${item.title}`}
+                    item={item}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed border-workspace-line-strong bg-workspace-surface px-4 text-center">
+                <Globe2 aria-hidden className="h-5 w-5 text-muted" />
+                <div className="mt-2 text-sm font-semibold text-foreground">
+                  当前分类暂无重点情报
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

@@ -18,5 +18,14 @@ assert.match(source, /生成请求失败/);
 assert.doesNotMatch(source, /Signal 流/);
 assert.match(source, /独立新闻源/);
 assert.doesNotMatch(source, /entries\.length === 0\) return "Reuters \/ AP News"/);
+assert.match(source, /role="tablist"/);
+assert.match(source, /AI 科技/);
+assert.match(source, /币圈/);
+assert.match(source, /宏观市场/);
+assert.match(source, /aria-selected/);
+assert.match(source, /data-daily-brief-card/);
+assert.match(source, /lg:grid-cols-2/);
+assert.match(source, /getDailyBriefGroup|groupDailyBriefItems/);
+assert.doesNotMatch(source, /className="truncate">\{group\.label\}/);
 
 console.log("ok - daily brief panel renders cached brief");
