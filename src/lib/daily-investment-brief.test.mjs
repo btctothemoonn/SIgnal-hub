@@ -97,6 +97,95 @@ assert.deepEqual(
 );
 assert.equal(candidates.find((candidate) => candidate.source === "Reuters")?.imageUrl, "https://www.reuters.com/image.jpg");
 
+const independentSourceCalls = [];
+const independentCandidates = await collectDailyBriefCandidates({
+  now: afterEight,
+  env: {
+    DAILY_BRIEF_GDELT_ENABLED: "false",
+    DAILY_BRIEF_MAX_CANDIDATES: "10",
+    MINIMAX_WEB_SEARCH_API_KEY: "sk-cp-test-key",
+    STOCKS_FMP_API_KEY: "fmp-test-key",
+    STOCKS_FINNHUB_API_KEY: "finnhub-test-key",
+  },
+  fetchFn: async (input, init) => {
+    const url = String(input);
+    independentSourceCalls.push(url);
+    if (url.endsWith("/v1/coding_plan/search")) {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      const isApQuery = String(body.q).includes("AP News");
+      return Response.json({
+        base_resp: { status_code: 0, status_msg: "success" },
+        organic: [
+          isApQuery
+            ? {
+                title: "AP tracks fresh Federal Reserve risks",
+                link: "https://apnews.com/article/fed-market-risk",
+                snippet: "Policy expectations are moving bond and equity markets.",
+                date: "2026-08-23T00:15:00.000Z",
+              }
+            : {
+                title: "Reuters tracks semiconductor spending",
+                link: "https://www.reuters.com/technology/ai-chip-spending",
+                snippet: "AI infrastructure demand remains the main investment catalyst.",
+                date: "2026-08-23T00:10:00.000Z",
+              },
+        ],
+      });
+    }
+    if (url.includes("financialmodelingprep.com/stable/news/general-latest")) {
+      return Response.json([
+        {
+          title: "Global markets prepare for central-bank signals",
+          text: "Rates and the dollar are the main cross-asset variables.",
+          url: "https://example.net/fmp-market-brief",
+          publishedDate: "2026-08-23T00:20:00.000Z",
+          site: "Market Desk",
+          image: "https://example.net/fmp.jpg",
+        },
+      ]);
+    }
+    if (url.includes("finnhub.io/api/v1/news")) {
+      return Response.json([
+        {
+          headline: "Oil volatility rises with geopolitical risk",
+          summary: "Energy markets are repricing supply uncertainty.",
+          url: "https://example.org/finnhub-energy",
+          datetime: 1_787_444_100,
+          source: "Energy Wire",
+          image: "https://example.org/oil.jpg",
+        },
+      ]);
+    }
+    throw new Error(`unexpected independent source request: ${url}`);
+  },
+});
+assert.deepEqual(
+  new Set(independentCandidates.map((candidate) => candidate.source)),
+  new Set(["Reuters", "AP News", "FMP", "Finnhub"]),
+);
+assert.ok(
+  independentCandidates.some((candidate) =>
+    candidate.summary?.includes("AI infrastructure demand"),
+  ),
+);
+assert.ok(
+  independentSourceCalls.some((url) => url.endsWith("/v1/coding_plan/search")),
+);
+assert.ok(
+  independentSourceCalls.some((url) =>
+    url.includes("financialmodelingprep.com/stable/news/general-latest"),
+  ),
+);
+assert.ok(
+  independentSourceCalls.some((url) => url.includes("finnhub.io/api/v1/news")),
+);
+assert.equal(
+  independentCandidates.some((candidate) =>
+    /telegram|signal|twitter|\bx\b/i.test(candidate.source),
+  ),
+  false,
+);
+
 const prompt = buildDailyBriefPrompt({
   period: getDailyBriefPeriod({ now: afterEight }),
   candidates,
@@ -110,6 +199,12 @@ assert.match(prompt, /宁缺毋滥/);
 assert.match(prompt, /不要从 Signal/);
 assert.match(prompt, /Reuters/);
 assert.match(prompt, /AP News/);
+const independentPrompt = buildDailyBriefPrompt({
+  period: getDailyBriefPeriod({ now: afterEight }),
+  candidates: independentCandidates,
+  maxItems: 10,
+});
+assert.match(independentPrompt, /AI infrastructure demand remains/);
 
 const parsed = parseDailyBriefContent(`<think>draft</think>
 \`\`\`json

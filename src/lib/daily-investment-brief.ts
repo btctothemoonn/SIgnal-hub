@@ -11,6 +11,7 @@ import {
   runWithAiProviderFallback,
   type AiProviderConfig,
 } from "./ai-provider-fallback.ts";
+import { collectIndependentDailyBriefCandidates } from "./daily-brief-independent-sources.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 type EnvLike = Record<string, string | undefined>;
@@ -40,6 +41,7 @@ export type DailyBriefCandidate = {
   id: string;
   source: string;
   title: string;
+  summary?: string | null;
   url: string;
   publishedAt: string;
   imageUrl: string | null;
@@ -385,10 +387,6 @@ export async function collectDailyBriefCandidates({
   env?: EnvLike;
   fetchFn?: FetchLike;
 } = {}) {
-  if (!isEnabled(env.DAILY_BRIEF_GDELT_ENABLED, true)) {
-    return [];
-  }
-
   const timespan = `${positiveInt(
     env.DAILY_BRIEF_LOOKBACK_HOURS,
     DEFAULT_LOOKBACK_HOURS,
@@ -402,9 +400,13 @@ export async function collectDailyBriefCandidates({
     DEFAULT_MAX_CANDIDATES,
   );
   const allowedDomains = getAllowedDailyBriefDomains(env);
-  const candidates: DailyBriefCandidate[] = [];
+  const candidates: DailyBriefCandidate[] =
+    await collectIndependentDailyBriefCandidates({ now, env, fetchFn });
 
-  for (const { source, query } of DEFAULT_GDELT_QUERIES) {
+  for (const { source, query } of candidates.length === 0 &&
+  isEnabled(env.DAILY_BRIEF_GDELT_ENABLED, true)
+    ? DEFAULT_GDELT_QUERIES
+    : []) {
     try {
       const response = await fetchFn(
         buildDailyBriefGdeltUrl({ query, timespan, maxRecords }),
@@ -457,6 +459,7 @@ function candidateLines(candidates: DailyBriefCandidate[]) {
       [
         `[${index + 1}] ${candidate.source} ${candidate.publishedAt}`,
         `标题: ${candidate.title}`,
+        candidate.summary ? `摘要: ${candidate.summary}` : "摘要: n/a",
         `链接: ${candidate.url}`,
         candidate.imageUrl ? `配图: ${candidate.imageUrl}` : "配图: n/a",
       ].join("\n"),
@@ -747,6 +750,7 @@ function inputHashForCandidates(candidates: DailyBriefCandidate[]) {
         candidates.map((candidate) => [
           candidate.id,
           candidate.title,
+          candidate.summary,
           candidate.publishedAt,
           candidate.imageUrl,
         ]),

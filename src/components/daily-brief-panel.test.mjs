@@ -16,5 +16,7 @@ assert.match(source, /Reuters|AP News/);
 assert.match(source, /sourceUrls/);
 assert.match(source, /生成请求失败/);
 assert.doesNotMatch(source, /Signal 流/);
+assert.match(source, /独立新闻源/);
+assert.doesNotMatch(source, /entries\.length === 0\) return "Reuters \/ AP News"/);
 
 console.log("ok - daily brief panel renders cached brief");

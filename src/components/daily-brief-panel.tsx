@@ -29,7 +29,7 @@ function statusLabel(snapshot: DailyBriefSnapshot, pending: boolean) {
 
 function sourceSummary(snapshot: DailyBriefSnapshot) {
   const entries = Object.entries(snapshot.sourceCounts);
-  if (entries.length === 0) return "Reuters / AP News";
+  if (entries.length === 0) return "独立新闻源暂未返回内容";
   return entries.map(([name, count]) => `${name} ${count}`).join(" · ");
 }
 
