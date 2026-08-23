@@ -186,6 +186,46 @@ assert.equal(
   false,
 );
 
+const rssCalls = [];
+const rssCandidates = await collectDailyBriefCandidates({
+  now: afterEight,
+  env: {
+    DAILY_BRIEF_GDELT_ENABLED: "false",
+    DAILY_BRIEF_MAX_CANDIDATES: "10",
+    MINIMAX_WEB_SEARCH_API_KEY: "sk-cp-test-key",
+  },
+  fetchFn: async (input) => {
+    const url = String(input);
+    rssCalls.push(url);
+    if (!url.includes("news.google.com/rss/search")) {
+      throw new Error(`unexpected RSS source request: ${url}`);
+    }
+    const isAp = decodeURIComponent(url).includes("site:apnews.com");
+    const source = isAp ? "AP News" : "Reuters";
+    const sourceUrl = isAp ? "https://apnews.com" : "https://www.reuters.com";
+    return new Response(`<?xml version="1.0"?><rss><channel><item>
+      <title>${source} market headline</title>
+      <link>https://news.google.com/rss/articles/${isAp ? "ap" : "reuters"}?oc=5</link>
+      <pubDate>Sun, 23 Aug 2026 00:${isAp ? "20" : "10"}:00 GMT</pubDate>
+      <description>${source} market headline</description>
+      <source url="${sourceUrl}">${source}</source>
+    </item></channel></rss>`);
+  },
+});
+assert.deepEqual(
+  new Set(rssCandidates.map((candidate) => candidate.source)),
+  new Set(["Reuters", "AP News"]),
+);
+assert.equal(
+  rssCalls.filter((url) => url.includes("news.google.com/rss/search")).length,
+  2,
+);
+assert.equal(
+  rssCalls.some((url) => url.endsWith("/v1/coding_plan/search")),
+  false,
+  "MiniMax search should only run when Reuters/AP RSS is unavailable",
+);
+
 const prompt = buildDailyBriefPrompt({
   period: getDailyBriefPeriod({ now: afterEight }),
   candidates,

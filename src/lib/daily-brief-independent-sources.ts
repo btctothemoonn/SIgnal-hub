@@ -65,6 +65,27 @@ function clampText(value: unknown, maxChars: number) {
   return text.length > maxChars ? `${text.slice(0, maxChars).trim()}...` : text;
 }
 
+function decodeXml(value: string) {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function stripHtml(value: string) {
+  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function xmlTag(block: string, tag: string) {
+  const match = block.match(
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"),
+  );
+  return match ? stripHtml(decodeXml(match[1])).trim() : "";
+}
+
 function publishedAt(value: unknown, now: Date) {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString();
@@ -113,6 +134,93 @@ function sourceFromNewsUrl(url: string) {
     }
   } catch {}
   return null;
+}
+
+function googleNewsRssUrl(domain: string) {
+  const params = new URLSearchParams({
+    q: `site:${domain} when:2d`,
+    hl: "en-US",
+    gl: "US",
+    ceid: "US:en",
+  });
+  return `https://news.google.com/rss/search?${params.toString()}`;
+}
+
+async function collectReutersApRssCandidates({
+  now,
+  env,
+  fetchFn,
+  lookbackHours,
+  timeoutMs,
+}: {
+  now: Date;
+  env: EnvLike;
+  fetchFn: FetchLike;
+  lookbackHours: number;
+  timeoutMs: number;
+}) {
+  if (!isEnabled(env.DAILY_BRIEF_REUTERS_AP_RSS_ENABLED, true)) return [];
+  const sources = [
+    { domain: "reuters.com", source: "Reuters" },
+    { domain: "apnews.com", source: "AP News" },
+  ] as const;
+  const groups = await Promise.all(
+    sources.map(async ({ domain, source }) => {
+      try {
+        const response = await fetchFn(googleNewsRssUrl(domain), {
+          cache: "no-store",
+          headers: { "User-Agent": "SignalHubDailyBrief/1.0" },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const xml = await response.text();
+        return Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi))
+          .map((match): IndependentDailyBriefCandidate | null => {
+            const block = match[1];
+            const articleSource = xmlTag(block, "source");
+            if (articleSource.toLowerCase() !== source.toLowerCase()) return null;
+            const url = safeHttpUrl(xmlTag(block, "link"));
+            const rawTitle = xmlTag(block, "title");
+            const title = clampText(
+              rawTitle.replace(new RegExp(`\\s+-\\s+${source}$`, "i"), ""),
+              220,
+            );
+            if (!url || !title) return null;
+            const seenAt = publishedAt(xmlTag(block, "pubDate"), now);
+            if (!isFresh(seenAt, now, lookbackHours)) return null;
+            const description = clampText(xmlTag(block, "description"), 1_200);
+            return {
+              id: url,
+              source,
+              title,
+              summary:
+                description && description.toLowerCase() !== rawTitle.toLowerCase()
+                  ? description
+                  : null,
+              url,
+              publishedAt: seenAt,
+              imageUrl: null,
+              language: "English",
+              country: null,
+            };
+          })
+          .filter(
+            (candidate): candidate is IndependentDailyBriefCandidate =>
+              candidate !== null,
+          );
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "daily_brief.source.failed",
+            source: `${source} RSS`,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return [];
+      }
+    }),
+  );
+  return groups.flat();
 }
 
 async function collectMiniMaxCandidates({
@@ -334,10 +442,12 @@ export async function collectIndependentDailyBriefCandidates({
   const lookbackHours = positiveInt(env.DAILY_BRIEF_LOOKBACK_HOURS, 36, 168);
   const timeoutMs = positiveInt(env.DAILY_BRIEF_SOURCE_TIMEOUT_MS, 25_000, 60_000);
   const options = { now, env, fetchFn, lookbackHours, timeoutMs };
-  const [miniMax, fmp, finnhub] = await Promise.all([
-    collectMiniMaxCandidates(options),
+  const [rss, fmp, finnhub] = await Promise.all([
+    collectReutersApRssCandidates(options),
     collectFmpCandidates(options),
     collectFinnhubCandidates(options),
   ]);
-  return [...miniMax, ...fmp, ...finnhub];
+  const miniMax =
+    rss.length > 0 ? [] : await collectMiniMaxCandidates(options);
+  return [...rss, ...miniMax, ...fmp, ...finnhub];
 }
