@@ -277,6 +277,19 @@ assert.equal(
 );
 assert.equal(parsed.watchVariables[1], "BTC 8 万美元");
 
+const repairedQuotedContent = parseDailyBriefContent(`{
+  "title": "每日投资简报｜2026 年 8 月 23 日",
+  "marketPulse": "市场正在评估未转义的"higher for longer"利率表述",
+  "items": [],
+  "watchVariables": ["美债收益率"]
+  "priorityLine": "利率 > AI capex"
+}`);
+assert.equal(
+  repairedQuotedContent.marketPulse,
+  '市场正在评估未转义的"higher for longer"利率表述',
+);
+assert.equal(repairedQuotedContent.priorityLine, "利率 > AI capex");
+
 const dir = await mkdtemp(join(tmpdir(), "daily-brief-test-"));
 const dbPath = join(dir, "brief.sqlite");
 const generated = await getOrCreateDailyInvestmentBrief({

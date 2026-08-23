@@ -516,11 +516,60 @@ ${candidateLines(candidates)}
 `.trim();
 }
 
+function repairUnescapedJsonStringContent(content: string) {
+  let repaired = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    if (!inString) {
+      if (char === '"') inString = true;
+      repaired += char;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      repaired += char;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      repaired += char;
+      continue;
+    }
+    if (char === "\n" || char === "\r") {
+      repaired += "\\n";
+      if (char === "\r" && content[index + 1] === "\n") index += 1;
+      continue;
+    }
+    if (char !== '"') {
+      repaired += char;
+      continue;
+    }
+
+    let nextIndex = index + 1;
+    while (nextIndex < content.length && /\s/.test(content[nextIndex])) {
+      nextIndex += 1;
+    }
+    const next = content[nextIndex];
+    if (next === undefined || next === ":" || next === "," || next === "}" || next === "]") {
+      inString = false;
+      repaired += char;
+    } else {
+      repaired += '\\"';
+    }
+  }
+
+  return repaired;
+}
+
 function repairCommonAiJsonIssues(content: string) {
-  return content
+  const structuralRepair = content
     .replace(/,\s*([}\]])/g, "$1")
     .replace(/"\s*\n\s*"/g, '",\n"')
     .replace(/([}\]])\s*\n\s*"/g, '$1,\n"');
+  return repairUnescapedJsonStringContent(structuralRepair);
 }
 
 function extractFirstJsonObject(content: string) {
