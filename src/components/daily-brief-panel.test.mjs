@@ -27,5 +27,10 @@ assert.match(source, /data-daily-brief-card/);
 assert.match(source, /lg:grid-cols-2/);
 assert.match(source, /getDailyBriefGroup|groupDailyBriefItems/);
 assert.doesNotMatch(source, /className="truncate">\{group\.label\}/);
+assert.match(source, /initialHistory/);
+assert.match(source, /历史简报/);
+assert.match(source, /\/api\/daily-brief\?date=/);
+assert.match(source, /overflow-x-auto/);
+assert.match(source, /aria-pressed/);
 
 console.log("ok - daily brief panel renders cached brief");

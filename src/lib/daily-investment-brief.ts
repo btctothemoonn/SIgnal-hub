@@ -84,6 +84,14 @@ export type DailyBriefSnapshot = {
   error: string | null;
 };
 
+export type DailyBriefHistoryEntry = {
+  dateKey: string;
+  label: string;
+  generatedAt: string | null;
+  title: string;
+  itemCount: number;
+};
+
 type DailyBriefRequestDeps = {
   collectCandidates?: (request: {
     now: Date;
@@ -104,6 +112,7 @@ const DEFAULT_GDELT_MAX_RECORDS = 60;
 const DEFAULT_MAX_CANDIDATES = 80;
 const DEFAULT_MAX_ITEMS = 10;
 const DEFAULT_AI_TIMEOUT_MS = 120_000;
+const DEFAULT_HISTORY_DAYS = 15;
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
 const DEFAULT_GDELT_QUERIES = [
@@ -253,6 +262,12 @@ export function getDailyBriefPeriod({
     endAt: now.toISOString(),
     timeZone: env.DAILY_BRIEF_TIME_ZONE?.trim() || DEFAULT_TIME_ZONE,
   };
+}
+
+function isValidDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export function isDailyBriefDue({
@@ -445,13 +460,21 @@ export async function collectDailyBriefCandidates({
     }
   }
 
-  return Array.from(byUrl.values())
-    .sort(
-      (left, right) =>
-        Date.parse(right.publishedAt) - Date.parse(left.publishedAt) ||
-        left.source.localeCompare(right.source),
-    )
-    .slice(0, maxCandidates);
+  const byRecency = (left: DailyBriefCandidate, right: DailyBriefCandidate) =>
+    Date.parse(right.publishedAt) - Date.parse(left.publishedAt) ||
+    left.source.localeCompare(right.source);
+  const deduped = Array.from(byUrl.values());
+  const blockBeatsQuota = Math.min(30, Math.floor(maxCandidates * 0.375));
+  const blockBeats = deduped
+    .filter((candidate) => candidate.source === "BlockBeats")
+    .slice(0, blockBeatsQuota);
+  const selectedBlockBeats = new Set(blockBeats.map((candidate) => candidate.id));
+  const remaining = deduped
+    .filter((candidate) => !selectedBlockBeats.has(candidate.id))
+    .sort(byRecency)
+    .slice(0, Math.max(0, maxCandidates - blockBeats.length));
+
+  return [...blockBeats, ...remaining].sort(byRecency);
 }
 
 function candidateLines(candidates: DailyBriefCandidate[]) {
@@ -973,6 +996,68 @@ export async function getLatestDailyInvestmentBrief({
         : latest;
     }
     return latest;
+  } finally {
+    db.close();
+  }
+}
+
+export async function getDailyInvestmentBriefByDate({
+  dateKey,
+  env = process.env,
+}: {
+  dateKey: string;
+  env?: EnvLike;
+}): Promise<DailyBriefSnapshot | null> {
+  if (!isValidDateKey(dateKey)) return null;
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try {
+    const snapshot = readCachedBrief(dateKey, db);
+    if (!snapshot?.success || !snapshot.brief) return null;
+    return { ...snapshot, status: "cached" };
+  } finally {
+    db.close();
+  }
+}
+
+export async function getDailyInvestmentBriefHistory({
+  now = new Date(),
+  days = DEFAULT_HISTORY_DAYS,
+  env = process.env,
+}: {
+  now?: Date;
+  days?: number;
+  env?: EnvLike;
+} = {}): Promise<DailyBriefHistoryEntry[]> {
+  const boundedDays = Number.isInteger(days) && days > 0 ? Math.min(days, 90) : DEFAULT_HISTORY_DAYS;
+  const endDateKey = getDailyBriefPeriod({ now, env }).dateKey;
+  const startDateKey = getDailyBriefPeriod({
+    now: new Date(now.getTime() - (boundedDays - 1) * 24 * 60 * 60 * 1000),
+    env,
+  }).dateKey;
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try {
+    const rows = db
+      .prepare(
+        `select snapshot_json
+         from daily_brief_cache
+         where date_key between ? and ?
+         order by date_key desc`,
+      )
+      .all(startDateKey, endDateKey) as DbRow[];
+
+    return rows.flatMap((row) => {
+      const snapshot = parseSnapshot(row.snapshot_json);
+      if (!snapshot?.success || !snapshot.brief) return [];
+      return [
+        {
+          dateKey: snapshot.period.dateKey,
+          label: snapshot.period.label,
+          generatedAt: snapshot.generatedAt,
+          title: snapshot.brief.title,
+          itemCount: snapshot.brief.items.length,
+        },
+      ];
+    });
   } finally {
     db.close();
   }

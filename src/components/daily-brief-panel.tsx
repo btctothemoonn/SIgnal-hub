@@ -2,9 +2,11 @@
 
 import {
   Bitcoin,
+  CalendarDays,
   Cpu,
   ExternalLink,
   Globe2,
+  LoaderCircle,
   RefreshCw,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -13,6 +15,7 @@ import {
   type DailyBriefGroupId,
 } from "@/lib/daily-brief-display";
 import type {
+  DailyBriefHistoryEntry,
   DailyBriefItem,
   DailyBriefSnapshot,
 } from "@/lib/daily-investment-brief";
@@ -32,6 +35,24 @@ function formatTime(value: string | null) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function formatHistoryDate(dateKey: string) {
+  const [, month, day] = dateKey.split("-").map(Number);
+  return `${month}月${day}日`;
+}
+
+function historyEntryFromSnapshot(
+  snapshot: DailyBriefSnapshot,
+): DailyBriefHistoryEntry | null {
+  if (!snapshot.success || !snapshot.brief) return null;
+  return {
+    dateKey: snapshot.period.dateKey,
+    label: snapshot.period.label,
+    generatedAt: snapshot.generatedAt,
+    title: snapshot.brief.title,
+    itemCount: snapshot.brief.items.length,
+  };
 }
 
 function statusLabel(snapshot: DailyBriefSnapshot, pending: boolean) {
@@ -176,10 +197,22 @@ function BriefItemCard({ item }: { item: DailyBriefItem }) {
 
 export function DailyBriefPanel({
   initialSnapshot,
+  initialHistory,
 }: {
   initialSnapshot: DailyBriefSnapshot;
+  initialHistory: DailyBriefHistoryEntry[];
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [history, setHistory] = useState(initialHistory);
+  const [selectedDate, setSelectedDate] = useState(
+    initialSnapshot.period.dateKey,
+  );
+  const [snapshotCache, setSnapshotCache] = useState<
+    Record<string, DailyBriefSnapshot>
+  >(() => ({ [initialSnapshot.period.dateKey]: initialSnapshot }));
+  const [historyPendingDate, setHistoryPendingDate] = useState<string | null>(
+    null,
+  );
   const [activeGroup, setActiveGroup] = useState<DailyBriefGroupId>("ai");
   const [pending, setPending] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
@@ -205,6 +238,24 @@ export function DailyBriefPanel({
       }
       if (!next) throw new Error("接口没有返回可读取的简报数据");
       setSnapshot(next);
+      setSelectedDate(next.period.dateKey);
+      setSnapshotCache((current) => ({
+        ...current,
+        [next.period.dateKey]: next,
+      }));
+      const nextHistoryEntry = historyEntryFromSnapshot(next);
+      if (nextHistoryEntry) {
+        setHistory((current) =>
+          [
+            nextHistoryEntry,
+            ...current.filter(
+              (entry) => entry.dateKey !== nextHistoryEntry.dateKey,
+            ),
+          ]
+            .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
+            .slice(0, 15),
+        );
+      }
       if (!next.success && next.error) {
         setUiError(`生成请求失败：${next.error}`);
       }
@@ -214,6 +265,44 @@ export function DailyBriefPanel({
       );
     } finally {
       setPending(false);
+    }
+  };
+
+  const selectHistoryDate = async (dateKey: string) => {
+    if (dateKey === selectedDate || historyPendingDate) return;
+    setUiError(null);
+    const cachedSnapshot = snapshotCache[dateKey];
+    if (cachedSnapshot) {
+      setSnapshot(cachedSnapshot);
+      setSelectedDate(dateKey);
+      setActiveGroup("ai");
+      return;
+    }
+
+    setHistoryPendingDate(dateKey);
+    try {
+      const response = await fetch(
+        `/api/daily-brief?date=${encodeURIComponent(dateKey)}`,
+        { cache: "no-store" },
+      );
+      const next = (await response.json().catch(() => null)) as
+        | DailyBriefSnapshot
+        | { error?: string }
+        | null;
+      if (!response.ok || !next || !("period" in next)) {
+        const message = next && "error" in next ? next.error : null;
+        throw new Error(message || `HTTP ${response.status}`);
+      }
+      setSnapshot(next);
+      setSelectedDate(dateKey);
+      setActiveGroup("ai");
+      setSnapshotCache((current) => ({ ...current, [dateKey]: next }));
+    } catch (error) {
+      setUiError(
+        `历史简报读取失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setHistoryPendingDate(null);
     }
   };
 
@@ -250,6 +339,50 @@ export function DailyBriefPanel({
           手动生成
         </button>
       </div>
+
+      {history.length > 0 ? (
+        <div className="mb-3 flex min-w-0 flex-col gap-2 rounded-lg border border-workspace-line-strong bg-workspace-toolbar px-3 py-2.5 shadow-sm sm:flex-row sm:items-center">
+          <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-muted">
+            <CalendarDays aria-hidden className="h-4 w-4" />
+            <span>历史简报</span>
+            <span className="rounded-md bg-workspace-surface-raised px-1.5 py-0.5 text-[10px]">
+              近15天
+            </span>
+          </div>
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <div className="flex w-max gap-1.5">
+              {history.map((entry) => {
+                const selected = selectedDate === entry.dateKey;
+                const loading = historyPendingDate === entry.dateKey;
+                return (
+                  <button
+                    key={entry.dateKey}
+                    type="button"
+                    aria-pressed={selected}
+                    title={entry.title}
+                    disabled={historyPendingDate !== null}
+                    onClick={() => selectHistoryDate(entry.dateKey)}
+                    className={[
+                      "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60",
+                      selected
+                        ? "border-accent/40 bg-accent-soft text-foreground"
+                        : "border-line bg-workspace-surface text-muted hover:border-workspace-line-strong hover:text-foreground",
+                    ].join(" ")}
+                  >
+                    {loading ? (
+                      <LoaderCircle aria-hidden className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    <span>{formatHistoryDate(entry.dateKey)}</span>
+                    <span className="text-[10px] font-medium text-muted">
+                      {entry.itemCount}条
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {snapshot.error ? (
         <div className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm font-semibold text-danger">

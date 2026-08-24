@@ -9,6 +9,8 @@ const {
   buildDailyBriefPrompt,
   collectDailyBriefCandidates,
   getDailyBriefDbPath,
+  getDailyInvestmentBriefByDate,
+  getDailyInvestmentBriefHistory,
   getDailyBriefPeriod,
   getLatestDailyInvestmentBrief,
   getOrCreateDailyInvestmentBrief,
@@ -48,6 +50,8 @@ const candidates = await collectDailyBriefCandidates({
   env: {
     DAILY_BRIEF_LOOKBACK_HOURS: "36",
     DAILY_BRIEF_MAX_CANDIDATES: "5",
+    DAILY_BRIEF_REUTERS_AP_RSS_ENABLED: "false",
+    DAILY_BRIEF_BLOCKBEATS_ENABLED: "false",
   },
   fetchFn: async (url) => {
     fetchCalls.push(String(url));
@@ -103,6 +107,7 @@ const independentCandidates = await collectDailyBriefCandidates({
   env: {
     DAILY_BRIEF_GDELT_ENABLED: "false",
     DAILY_BRIEF_MAX_CANDIDATES: "10",
+    DAILY_BRIEF_BLOCKBEATS_ENABLED: "false",
     MINIMAX_WEB_SEARCH_API_KEY: "sk-cp-test-key",
     STOCKS_FMP_API_KEY: "fmp-test-key",
     STOCKS_FINNHUB_API_KEY: "finnhub-test-key",
@@ -192,6 +197,7 @@ const rssCandidates = await collectDailyBriefCandidates({
   env: {
     DAILY_BRIEF_GDELT_ENABLED: "false",
     DAILY_BRIEF_MAX_CANDIDATES: "10",
+    DAILY_BRIEF_BLOCKBEATS_ENABLED: "false",
     MINIMAX_WEB_SEARCH_API_KEY: "sk-cp-test-key",
   },
   fetchFn: async (input) => {
@@ -375,6 +381,39 @@ assert.equal(
   latestAfterFailure.brief?.items[0].title,
   "恢复后的新日报",
 );
+
+const history = await getDailyInvestmentBriefHistory({
+  now: nextDay,
+  days: 15,
+  env: { DAILY_BRIEF_DB: dbPath },
+});
+assert.deepEqual(
+  history.map((entry) => entry.dateKey),
+  ["2026-08-24", "2026-08-23"],
+);
+assert.equal(history[0].itemCount, 1);
+assert.equal(history[0].title, "每日投资简报｜2026 年 8 月 24 日");
+
+const historicalBrief = await getDailyInvestmentBriefByDate({
+  dateKey: "2026-08-23",
+  env: { DAILY_BRIEF_DB: dbPath },
+});
+assert.equal(historicalBrief?.status, "cached");
+assert.equal(historicalBrief?.brief?.title, "每日投资简报｜2026 年 8 月 23 日");
+assert.equal(
+  await getDailyInvestmentBriefByDate({
+    dateKey: "not-a-date",
+    env: { DAILY_BRIEF_DB: dbPath },
+  }),
+  null,
+);
+
+const expiredHistory = await getDailyInvestmentBriefHistory({
+  now: new Date("2026-09-08T00:00:00.000Z"),
+  days: 15,
+  env: { DAILY_BRIEF_DB: dbPath },
+});
+assert.deepEqual(expiredHistory, []);
 
 const badSourceDir = await mkdtemp(join(tmpdir(), "daily-brief-bad-source-"));
 const badSourceSnapshot = await getOrCreateDailyInvestmentBrief({

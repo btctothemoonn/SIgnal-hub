@@ -21,6 +21,11 @@ const MINIMAX_NEWS_QUERIES = [
   "AP News latest investment news Federal Reserve economy oil geopolitics China markets",
 ] as const;
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
+const BLOCKBEATS_RSS_BASE = "https://api.theblockbeats.news/v2/rss";
+const BLOCKBEATS_IMPORTANT_PATTERN =
+  /SEC|CFTC|ETF|美联储|降息|加息|利率|监管|法案|法院|批准|否决|制裁|黑客|攻击|漏洞|被盗|脱锚|清算|爆仓|破产|暂停(?:提现|提币)|交易所异常|系统性风险|比特币|BTC|以太坊|ETH|稳定币|USDT|USDC/i;
+const BLOCKBEATS_ARTICLE_PATTERN =
+  /深度|研究|研报|专访|观点|解读|复盘|盘点|一文|详解|报告|周报|月报|市场观察|律动晚报/i;
 
 function isEnabled(raw: string | undefined, fallback = true) {
   const normalized = raw?.trim().toLowerCase();
@@ -296,6 +301,197 @@ async function collectMiniMaxCandidates({
   return candidates;
 }
 
+function normalizeBlockBeatsTitle(value: string) {
+  return value.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+function isBlockBeatsArticle(candidate: IndependentDailyBriefCandidate) {
+  try {
+    return (
+      new URL(candidate.url).pathname.includes("/news/") ||
+      BLOCKBEATS_ARTICLE_PATTERN.test(candidate.title)
+    );
+  } catch {
+    return BLOCKBEATS_ARTICLE_PATTERN.test(candidate.title);
+  }
+}
+
+function isImportantBlockBeatsCandidate(candidate: IndependentDailyBriefCandidate) {
+  return BLOCKBEATS_IMPORTANT_PATTERN.test(`${candidate.title} ${candidate.summary ?? ""}`);
+}
+
+function selectBlockBeatsCandidates(
+  candidates: IndependentDailyBriefCandidate[],
+  env: EnvLike,
+) {
+  const totalLimit = positiveInt(env.DAILY_BRIEF_BLOCKBEATS_LIMIT, 30, 60);
+  const importantLimit = positiveInt(
+    env.DAILY_BRIEF_BLOCKBEATS_IMPORTANT_LIMIT,
+    20,
+    totalLimit,
+  );
+  const latestLimit = positiveInt(
+    env.DAILY_BRIEF_BLOCKBEATS_LATEST_LIMIT,
+    5,
+    totalLimit,
+  );
+  const articleLimit = positiveInt(
+    env.DAILY_BRIEF_BLOCKBEATS_ARTICLE_LIMIT,
+    5,
+    totalLimit,
+  );
+  const sorted = [...candidates].sort(
+    (left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt),
+  );
+  const unique = new Map<string, IndependentDailyBriefCandidate>();
+  for (const candidate of sorted) {
+    const key = normalizeBlockBeatsTitle(candidate.title) || candidate.id;
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const pool = Array.from(unique.values());
+  const selected: IndependentDailyBriefCandidate[] = [];
+  const selectedIds = new Set<string>();
+  const take = (
+    predicate: (candidate: IndependentDailyBriefCandidate) => boolean,
+    limit: number,
+  ) => {
+    for (const candidate of pool) {
+      if (selected.length >= totalLimit || limit <= 0) break;
+      if (selectedIds.has(candidate.id) || !predicate(candidate)) continue;
+      selected.push(candidate);
+      selectedIds.add(candidate.id);
+      limit -= 1;
+    }
+  };
+
+  take(isImportantBlockBeatsCandidate, importantLimit);
+  take((candidate) => !isBlockBeatsArticle(candidate), latestLimit);
+  take(isBlockBeatsArticle, articleLimit);
+  take(() => true, totalLimit - selected.length);
+  return selected.slice(0, totalLimit);
+}
+
+function blockBeatsGoogleNewsRssUrl() {
+  const params = new URLSearchParams({
+    q: "site:theblockbeats.info when:2d",
+    hl: "zh-CN",
+    gl: "CN",
+    ceid: "CN:zh-Hans",
+  });
+  return `https://news.google.com/rss/search?${params.toString()}`;
+}
+
+function parseBlockBeatsXmlCandidates({
+  xml,
+  now,
+  lookbackHours,
+}: {
+  xml: string;
+  now: Date;
+  lookbackHours: number;
+}) {
+  return Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi))
+    .map((match): IndependentDailyBriefCandidate | null => {
+      const block = match[1];
+      const url = safeHttpUrl(xmlTag(block, "link"));
+      const title = clampText(
+        xmlTag(block, "title").replace(/\s+-\s+(?:律动\s*)?BlockBeats$/i, ""),
+        220,
+      );
+      if (!url || !title) return null;
+      const seenAt = publishedAt(xmlTag(block, "pubDate"), now);
+      if (!isFresh(seenAt, now, lookbackHours)) return null;
+      const description = clampText(xmlTag(block, "description"), 1_200);
+      return {
+        id: url,
+        source: "BlockBeats",
+        title,
+        summary: description && description !== title ? description : null,
+        url,
+        publishedAt: seenAt,
+        imageUrl: null,
+        language: "zh-CN",
+        country: "CN",
+      };
+    })
+    .filter(
+      (candidate): candidate is IndependentDailyBriefCandidate =>
+        candidate !== null,
+    );
+}
+
+async function collectBlockBeatsCandidates({
+  now,
+  env,
+  fetchFn,
+  lookbackHours,
+  timeoutMs,
+}: {
+  now: Date;
+  env: EnvLike;
+  fetchFn: FetchLike;
+  lookbackHours: number;
+  timeoutMs: number;
+}) {
+  if (!isEnabled(env.DAILY_BRIEF_BLOCKBEATS_ENABLED, true)) return [];
+  const feeds = ["newsflash", "article"] as const;
+  const groups = await Promise.all(
+    feeds.map(async (feed) => {
+      try {
+        const response = await fetchFn(`${BLOCKBEATS_RSS_BASE}/${feed}`, {
+          cache: "no-store",
+          headers: {
+            language: "cn",
+            "User-Agent": "SignalHubDailyBrief/1.0",
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const xml = await response.text();
+        return parseBlockBeatsXmlCandidates({ xml, now, lookbackHours });
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            event: "daily_brief.source.failed",
+            source: `BlockBeats ${feed}`,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return [];
+      }
+    }),
+  );
+  let candidates = groups.flat();
+  if (
+    candidates.length === 0 &&
+    isEnabled(env.DAILY_BRIEF_BLOCKBEATS_GOOGLE_FALLBACK_ENABLED, true)
+  ) {
+    try {
+      const response = await fetchFn(blockBeatsGoogleNewsRssUrl(), {
+        cache: "no-store",
+        headers: { "User-Agent": "SignalHubDailyBrief/1.0" },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      candidates = parseBlockBeatsXmlCandidates({
+        xml: await response.text(),
+        now,
+        lookbackHours,
+      });
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "daily_brief.source.failed",
+          source: "BlockBeats Google RSS fallback",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+  return selectBlockBeatsCandidates(candidates, env);
+}
+
 async function collectFmpCandidates({
   now,
   env,
@@ -442,12 +638,13 @@ export async function collectIndependentDailyBriefCandidates({
   const lookbackHours = positiveInt(env.DAILY_BRIEF_LOOKBACK_HOURS, 36, 168);
   const timeoutMs = positiveInt(env.DAILY_BRIEF_SOURCE_TIMEOUT_MS, 25_000, 60_000);
   const options = { now, env, fetchFn, lookbackHours, timeoutMs };
-  const [rss, fmp, finnhub] = await Promise.all([
+  const [rss, blockBeats, fmp, finnhub] = await Promise.all([
     collectReutersApRssCandidates(options),
+    collectBlockBeatsCandidates(options),
     collectFmpCandidates(options),
     collectFinnhubCandidates(options),
   ]);
   const miniMax =
     rss.length > 0 ? [] : await collectMiniMaxCandidates(options);
-  return [...rss, ...miniMax, ...fmp, ...finnhub];
+  return [...rss, ...miniMax, ...blockBeats, ...fmp, ...finnhub];
 }

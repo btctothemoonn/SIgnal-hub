@@ -1,11 +1,17 @@
 import { AppShell } from "@/components/app-shell";
 import { DailyBriefPanel } from "@/components/daily-brief-panel";
-import { getLatestDailyInvestmentBrief } from "@/lib/daily-investment-brief";
+import {
+  getDailyInvestmentBriefHistory,
+  getLatestDailyInvestmentBrief,
+} from "@/lib/daily-investment-brief";
 
 export const dynamic = "force-dynamic";
 
 export default async function IntelPage() {
-  const snapshot = await getLatestDailyInvestmentBrief();
+  const [snapshot, history] = await Promise.all([
+    getLatestDailyInvestmentBrief(),
+    getDailyInvestmentBriefHistory({ days: 15 }),
+  ]);
 
   return (
     <AppShell
@@ -13,7 +19,7 @@ export default async function IntelPage() {
       subtitle="AI + 币圈投资情报站"
       mainClassName="mx-auto w-full max-w-[1500px] min-h-0 px-3 py-3 sm:px-5 lg:py-4"
     >
-      <DailyBriefPanel initialSnapshot={snapshot} />
+      <DailyBriefPanel initialSnapshot={snapshot} initialHistory={history} />
     </AppShell>
   );
 }

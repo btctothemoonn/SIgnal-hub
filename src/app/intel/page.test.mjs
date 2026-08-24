@@ -7,6 +7,8 @@ assert.match(source, /activeNav="intel"/);
 assert.match(source, /subtitle="AI \+ 币圈投资情报站"/);
 assert.match(source, /import \{ DailyBriefPanel \}/);
 assert.match(source, /getLatestDailyInvestmentBrief/);
+assert.match(source, /getDailyInvestmentBriefHistory/);
+assert.match(source, /initialHistory=/);
 assert.match(source, /<DailyBriefPanel/);
 assert.doesNotMatch(source, /SignalsResponsiveLayout/);
 assert.doesNotMatch(source, /getTelegramPipelineSnapshot/);
