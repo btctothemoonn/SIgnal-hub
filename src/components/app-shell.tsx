@@ -281,12 +281,25 @@ export function AppShell({
               <Link
                 key={item.key}
                 href={item.href}
+                prefetch={item.key === "intel" ? false : undefined}
                 title={item.label}
                 aria-label={item.label}
-                onClick={() => setPendingNavigation(item.key)}
-                onFocus={() => warmRoute(item)}
-                onPointerDown={() => warmRoute(item)}
-                onPointerEnter={() => warmRoute(item)}
+                onClick={(event) => {
+                  setPendingNavigation(item.key);
+                  if (item.key === "intel") {
+                    event.preventDefault();
+                    window.location.assign(item.href);
+                  }
+                }}
+                onFocus={() => {
+                  if (item.key !== "intel") warmRoute(item);
+                }}
+                onPointerDown={() => {
+                  if (item.key !== "intel") warmRoute(item);
+                }}
+                onPointerEnter={() => {
+                  if (item.key !== "intel") warmRoute(item);
+                }}
                 className={[
                   "flex h-12 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] font-semibold transition-all duration-75 active:scale-[0.98]",
                   active
