@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  getDailyBriefWorkerDelayMs,
   getDailyBriefWorkerIntervalMs,
   isDailyBriefPrewarmEnabled,
   prewarmDailyInvestmentBrief,
@@ -38,12 +39,12 @@ async function loadEnv() {
 async function runPrewarm(reason) {
   if (running) {
     log("daily_brief.prewarm.skip", { reason, cause: "already_running" });
-    return;
+    return { shouldRetry: true };
   }
 
   if (!isDailyBriefPrewarmEnabled(process.env)) {
     log("daily_brief.prewarm.disabled", { reason });
-    return;
+    return { shouldRetry: false };
   }
 
   running = true;
@@ -59,12 +60,14 @@ async function runPrewarm(reason) {
       durationMs: Date.now() - startedAt,
       result,
     });
+    return result;
   } catch (error) {
     log("daily_brief.prewarm.error", {
       reason,
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),
     });
+    return { shouldRetry: true };
   } finally {
     running = false;
   }
@@ -84,18 +87,31 @@ await loadEnv();
 installShutdownHandlers();
 
 const once = process.argv.includes("--once");
-await runPrewarm("startup");
+let previousResult = await runPrewarm("startup");
 
 if (once) {
   process.exit(0);
 }
 
 const intervalMs = getDailyBriefWorkerIntervalMs(process.env);
-log("daily_brief.worker.ready", { intervalMs });
+log("daily_brief.worker.ready", { retryIntervalMs: intervalMs });
 
 while (!stopRequested) {
-  await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  const now = new Date();
+  const retry = previousResult?.shouldRetry === true;
+  const delayMs = getDailyBriefWorkerDelayMs({
+    now,
+    env: process.env,
+    shouldRetry: retry,
+  });
+  const mode = retry && delayMs === intervalMs ? "retry" : "schedule";
+  log("daily_brief.worker.wait", {
+    mode,
+    delayMs,
+    wakeAt: new Date(now.getTime() + delayMs).toISOString(),
+  });
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
   if (!stopRequested) {
-    await runPrewarm("interval");
+    previousResult = await runPrewarm(mode);
   }
 }

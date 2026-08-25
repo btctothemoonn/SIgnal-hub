@@ -1,4 +1,6 @@
 import {
+  getLatestDailyInvestmentBrief,
+  getNextDailyBriefScheduleAt,
   getOrCreateDailyInvestmentBrief,
   isDailyBriefDue,
   type DailyBriefSnapshot,
@@ -7,7 +9,12 @@ import {
 type EnvLike = Record<string, string | undefined>;
 
 type GenerateBrief = (request: {
-  force: false;
+  force: true;
+  now: Date;
+  env: EnvLike;
+}) => Promise<DailyBriefSnapshot>;
+
+type GetLatestBrief = (request: {
   now: Date;
   env: EnvLike;
 }) => Promise<DailyBriefSnapshot>;
@@ -18,6 +25,7 @@ export type DailyBriefPrewarmResult = {
   generatedAt: string | null;
   candidateCount: number;
   error: string | null;
+  shouldRetry: boolean;
 };
 
 const DEFAULT_WORKER_INTERVAL_MS = 15 * 60 * 1000;
@@ -37,33 +45,81 @@ export function getDailyBriefWorkerIntervalMs(env: EnvLike = process.env) {
   return positiveInt(env.DAILY_BRIEF_WORKER_INTERVAL_MS, DEFAULT_WORKER_INTERVAL_MS);
 }
 
+export function getDailyBriefNextRunDelayMs({
+  now = new Date(),
+  env = process.env,
+}: {
+  now?: Date;
+  env?: EnvLike;
+} = {}) {
+  return Math.max(
+    1_000,
+    Date.parse(getNextDailyBriefScheduleAt({ now, env })) - now.getTime(),
+  );
+}
+
+export function getDailyBriefWorkerDelayMs({
+  now = new Date(),
+  env = process.env,
+  shouldRetry = false,
+}: {
+  now?: Date;
+  env?: EnvLike;
+  shouldRetry?: boolean;
+} = {}) {
+  const scheduleDelayMs = getDailyBriefNextRunDelayMs({ now, env });
+  return shouldRetry
+    ? Math.min(getDailyBriefWorkerIntervalMs(env), scheduleDelayMs)
+    : scheduleDelayMs;
+}
+
 export async function prewarmDailyInvestmentBrief({
   env = process.env,
   now = new Date(),
+  getLatestBrief = getLatestDailyInvestmentBrief as GetLatestBrief,
   generateBrief = getOrCreateDailyInvestmentBrief as GenerateBrief,
 }: {
   env?: EnvLike;
   now?: Date;
+  getLatestBrief?: GetLatestBrief;
   generateBrief?: GenerateBrief;
 } = {}): Promise<DailyBriefPrewarmResult> {
-  if (!isDailyBriefPrewarmEnabled(env) || !isDailyBriefDue({ now, env })) {
+  if (!isDailyBriefPrewarmEnabled(env)) {
     return {
       success: true,
       status: "skipped",
       generatedAt: null,
       candidateCount: 0,
       error: null,
+      shouldRetry: false,
     };
   }
 
   try {
-    const snapshot = await generateBrief({ force: false, now, env });
+    const latest = await getLatestBrief({ now, env });
+    const generatedAt = latest.success ? latest.generatedAt : null;
+    if (!isDailyBriefDue({ now, env, generatedAt })) {
+      return {
+        success: true,
+        status: "skipped",
+        generatedAt,
+        candidateCount: latest.candidateCount,
+        error: null,
+        shouldRetry: false,
+      };
+    }
+
+    const snapshot = await generateBrief({ force: true, now, env });
+    const fulfilled =
+      snapshot.success &&
+      !isDailyBriefDue({ now, env, generatedAt: snapshot.generatedAt });
     return {
       success: snapshot.success,
       status: snapshot.status,
       generatedAt: snapshot.generatedAt,
       candidateCount: snapshot.candidateCount,
       error: snapshot.error,
+      shouldRetry: !fulfilled,
     };
   } catch (error) {
     return {
@@ -72,6 +128,7 @@ export async function prewarmDailyInvestmentBrief({
       generatedAt: null,
       candidateCount: 0,
       error: error instanceof Error ? error.message : String(error),
+      shouldRetry: true,
     };
   }
 }

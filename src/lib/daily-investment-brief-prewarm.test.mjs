@@ -19,12 +19,22 @@ assert.equal(existsSync(prewarmModuleUrl), true);
 assert.equal(existsSync(workerUrl), true);
 
 const {
+  getDailyBriefWorkerDelayMs,
   getDailyBriefWorkerIntervalMs,
   isDailyBriefPrewarmEnabled,
   prewarmDailyInvestmentBrief,
 } = await import("./daily-investment-brief-prewarm.ts");
 
 assert.equal(getDailyBriefWorkerIntervalMs({}), 15 * 60 * 1000);
+assert.equal(
+  getDailyBriefWorkerDelayMs({
+    now: new Date("2026-08-22T23:55:00.000Z"),
+    env: { DAILY_BRIEF_WORKER_INTERVAL_MS: "900000" },
+    shouldRetry: true,
+  }),
+  5 * 60 * 1000,
+  "a retry shortly before 08:00 Beijing time must wake at the scheduled slot",
+);
 assert.equal(
   isDailyBriefPrewarmEnabled({ DAILY_BRIEF_ENABLED: "false" }),
   false,
@@ -34,17 +44,56 @@ const calls = [];
 const skipped = await prewarmDailyInvestmentBrief({
   now: new Date("2026-08-22T23:59:00.000Z"),
   env: {},
+  getLatestBrief: async () => ({
+    success: true,
+    status: "cached",
+    configured: true,
+    period: {
+      key: "2026-08-23",
+      dateKey: "2026-08-23",
+      label: "2026 年 8 月 23 日",
+      startAt: "2026-08-21T12:00:00.000Z",
+      endAt: "2026-08-22T16:01:00.000Z",
+      timeZone: "Asia/Shanghai",
+    },
+    generatedAt: "2026-08-22T16:01:00.000Z",
+    model: "MiniMax-M2.7",
+    candidateCount: 2,
+    sourceCounts: { Reuters: 1, "AP News": 1 },
+    brief: null,
+    error: null,
+  }),
   generateBrief: async (request) => {
     calls.push(request);
-    throw new Error("must not run before target time");
+    throw new Error("must not rerun a fulfilled midnight slot");
   },
 });
 assert.equal(skipped.status, "skipped");
+assert.equal(skipped.shouldRetry, false);
 assert.equal(calls.length, 0);
 
 const due = await prewarmDailyInvestmentBrief({
   now: new Date("2026-08-23T00:00:00.000Z"),
   env: {},
+  getLatestBrief: async () => ({
+    success: true,
+    status: "cached",
+    configured: true,
+    period: {
+      key: "2026-08-23",
+      dateKey: "2026-08-23",
+      label: "2026 年 8 月 23 日",
+      startAt: "2026-08-21T12:00:00.000Z",
+      endAt: "2026-08-22T16:01:00.000Z",
+      timeZone: "Asia/Shanghai",
+    },
+    generatedAt: "2026-08-22T16:01:00.000Z",
+    model: "MiniMax-M2.7",
+    candidateCount: 2,
+    sourceCounts: { Reuters: 1, "AP News": 1 },
+    brief: null,
+    error: null,
+  }),
   generateBrief: async (request) => {
     calls.push(request);
     return {
@@ -69,7 +118,8 @@ const due = await prewarmDailyInvestmentBrief({
   },
 });
 assert.equal(due.status, "cached");
-assert.equal(calls[0].force, false);
+assert.equal(due.shouldRetry, false);
+assert.equal(calls[0].force, true);
 
 const packageJson = JSON.parse(readFileSync(packageJsonUrl, "utf8"));
 assert.equal(typeof packageJson.scripts["daily-brief:prewarm"], "string");

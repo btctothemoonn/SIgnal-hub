@@ -11,6 +11,7 @@ import {
   runWithAiProviderFallback,
   type AiProviderConfig,
 } from "./ai-provider-fallback.ts";
+import { getDailyBriefGroup } from "./daily-brief-display.ts";
 import { collectIndependentDailyBriefCandidates } from "./daily-brief-independent-sources.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
@@ -35,6 +36,13 @@ export type DailyBriefPeriod = {
   startAt: string;
   endAt: string;
   timeZone: string;
+};
+
+export type DailyBriefScheduleSlot = {
+  dateKey: string;
+  hour: number;
+  key: string;
+  scheduledAt: string;
 };
 
 export type DailyBriefCandidate = {
@@ -81,6 +89,8 @@ export type DailyBriefSnapshot = {
   candidateCount: number;
   sourceCounts: Record<string, number>;
   brief: DailyBriefContent | null;
+  briefDateKey?: string | null;
+  lastAttemptAt?: string | null;
   error: string | null;
 };
 
@@ -110,7 +120,8 @@ const DEFAULT_TIME_ZONE = "Asia/Shanghai";
 const DEFAULT_LOOKBACK_HOURS = 36;
 const DEFAULT_GDELT_MAX_RECORDS = 60;
 const DEFAULT_MAX_CANDIDATES = 80;
-const DEFAULT_MAX_ITEMS = 10;
+const DEFAULT_MAX_ITEMS_PER_GROUP = 10;
+const DEFAULT_SCHEDULE_HOURS = [0, 8, 16] as const;
 const DEFAULT_AI_TIMEOUT_MS = 120_000;
 const DEFAULT_HISTORY_DAYS = 15;
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
@@ -233,6 +244,25 @@ function formatDateLabel(parts: ReturnType<typeof getShanghaiParts>) {
   return `${parts.year} 年 ${parts.month} 月 ${parts.day} 日`;
 }
 
+function getDailyBriefScheduleHours(env: EnvLike) {
+  const configured = csvValues(env.DAILY_BRIEF_SCHEDULE_HOURS)
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0 && value <= 23);
+  return configured.length > 0
+    ? Array.from(new Set(configured)).sort((left, right) => left - right)
+    : [...DEFAULT_SCHEDULE_HOURS];
+}
+
+function maxItemsPerGroupFromEnv(env: EnvLike) {
+  return Math.min(
+    DEFAULT_MAX_ITEMS_PER_GROUP,
+    positiveInt(
+      env.DAILY_BRIEF_MAX_ITEMS_PER_GROUP || env.DAILY_BRIEF_MAX_ITEMS,
+      DEFAULT_MAX_ITEMS_PER_GROUP,
+    ),
+  );
+}
+
 export function getDailyBriefDbPath(env: EnvLike = process.env) {
   return (
     env.DAILY_BRIEF_DB?.trim() ||
@@ -264,6 +294,61 @@ export function getDailyBriefPeriod({
   };
 }
 
+export function getDailyBriefScheduleSlot({
+  now = new Date(),
+  env = process.env,
+}: {
+  now?: Date;
+  env?: EnvLike;
+} = {}): DailyBriefScheduleSlot {
+  const parts = getShanghaiParts(now);
+  const scheduleHours = getDailyBriefScheduleHours(env);
+  let hour = scheduleHours.findLast((candidate) => candidate <= parts.hour);
+  let dayOffset = 0;
+  if (hour === undefined) {
+    hour = scheduleHours[scheduleHours.length - 1];
+    dayOffset = -1;
+  }
+  const scheduledAt = new Date(
+    Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day + dayOffset,
+      hour - 8,
+    ),
+  );
+  const scheduledParts = getShanghaiParts(scheduledAt);
+  const dateKey = `${scheduledParts.year}-${pad2(scheduledParts.month)}-${pad2(scheduledParts.day)}`;
+  return {
+    dateKey,
+    hour,
+    key: `${dateKey}@${pad2(hour)}`,
+    scheduledAt: scheduledAt.toISOString(),
+  };
+}
+
+export function getNextDailyBriefScheduleAt({
+  now = new Date(),
+  env = process.env,
+}: {
+  now?: Date;
+  env?: EnvLike;
+} = {}) {
+  const parts = getShanghaiParts(now);
+  const scheduleHours = getDailyBriefScheduleHours(env);
+  const localDayStartUtc =
+    Date.UTC(parts.year, parts.month - 1, parts.day) - 8 * 60 * 60 * 1000;
+  for (const hour of scheduleHours) {
+    const candidate = localDayStartUtc + hour * 60 * 60 * 1000;
+    if (candidate > now.getTime()) return new Date(candidate).toISOString();
+  }
+  return new Date(
+    localDayStartUtc +
+      24 * 60 * 60 * 1000 +
+      scheduleHours[0] * 60 * 60 * 1000,
+  ).toISOString();
+}
+
 function isValidDateKey(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -273,17 +358,16 @@ function isValidDateKey(value: string) {
 export function isDailyBriefDue({
   now = new Date(),
   env = process.env,
+  generatedAt = null,
 }: {
   now?: Date;
   env?: EnvLike;
+  generatedAt?: string | null;
 } = {}) {
-  const parts = getShanghaiParts(now);
-  const targetHour = positiveInt(env.DAILY_BRIEF_TARGET_HOUR, 8);
-  const targetMinute = positiveInt(env.DAILY_BRIEF_TARGET_MINUTE, 0);
-  return (
-    parts.hour > targetHour ||
-    (parts.hour === targetHour && parts.minute >= targetMinute)
-  );
+  const generatedAtMs = Date.parse(generatedAt ?? "");
+  if (!Number.isFinite(generatedAtMs)) return true;
+  const slot = getDailyBriefScheduleSlot({ now, env });
+  return generatedAtMs < Date.parse(slot.scheduledAt);
 }
 
 export function buildDailyBriefGdeltUrl({
@@ -491,25 +575,60 @@ function candidateLines(candidates: DailyBriefCandidate[]) {
     .join("\n\n");
 }
 
+function dailyBriefForPrompt(brief: DailyBriefContent) {
+  return {
+    ...brief,
+    items: brief.items.map((item) => ({
+      rank: item.rank,
+      importance: item.importance,
+      title: item.title,
+      topic: item.topic,
+      sourceNames: item.sourceNames,
+      sourceUrls: item.sourceUrls,
+      imageUrl: item.imageUrl,
+      whatHappened: item.whatHappened,
+      investmentImpact: item.investmentImpact,
+      watchNext: item.watchNext,
+    })),
+  };
+}
+
 export function buildDailyBriefPrompt({
   period,
   candidates,
-  maxItems = DEFAULT_MAX_ITEMS,
+  existingBrief = null,
+  maxItems,
+  maxItemsPerGroup,
 }: {
   period: DailyBriefPeriod;
   candidates: DailyBriefCandidate[];
   maxItems?: number;
+  existingBrief?: DailyBriefContent | null;
+  maxItemsPerGroup?: number;
 }) {
+  const groupLimit = Math.min(
+    DEFAULT_MAX_ITEMS_PER_GROUP,
+    Math.max(
+      1,
+      Math.round(maxItemsPerGroup ?? maxItems ?? DEFAULT_MAX_ITEMS_PER_GROUP),
+    ),
+  );
+  const existingBriefSection = existingBrief
+    ? `当天现有简报（请与本轮新信息综合，保留仍重要且未重复的内容）:\n${JSON.stringify(dailyBriefForPrompt(existingBrief))}`
+    : "当天现有简报: 暂无，这是当天第一版。";
   return `
 你是中文每日投资简报编辑。请只基于下面的 Reuters / AP News / 官方候选新闻，生成「每日投资简报」。
 
 硬性边界:
 - 不要从 Signal、Telegram、X、985、6551 或 KOL 观点流里总结；这些候选新闻才是素材。
 - 不要编造候选新闻里没有的事实；不确定就写“证据不足”。
-- 每天最多 ${maxItems} 条，宁缺毋滥；如果真正重要的少于 ${maxItems} 条，就少写。
+- 按「AI 科技」「币圈」「宏观市场」三个分类组织；每个分类最多 ${groupLimit} 条，总计最多 ${groupLimit * 3} 条。
+- 宁缺毋滥，不要为了凑满数量加入低价值信息。
+- 这是当天滚动更新；结合当天现有简报和本轮候选新闻，输出一份完整的当天综合简报。
 - 重点范围: ${DAILY_BRIEF_TOPICS.join("、")}。
 - 每条都要有: 标题、配图、发生了什么、投资影响、后续关注什么。
 - 每条必须用 candidateIndexes 引用候选新闻前的编号；不要改写编号，不要编造链接。系统会按编号回填真实来源。
+- 当天现有简报没有本轮 candidateIndexes；不要为旧条目猜编号，只能给本轮候选新闻填写本轮编号。
 - 输出中文，直接返回 JSON，不要 Markdown。
 
 JSON 结构:
@@ -536,6 +655,8 @@ JSON 结构:
 }
 
 候选新闻窗口: ${period.startAt} 至 ${period.endAt} (${period.timeZone})
+
+${existingBriefSection}
 
 候选新闻:
 ${candidateLines(candidates)}
@@ -635,41 +756,58 @@ function normalizeImportance(value: unknown): DailyBriefItem["importance"] {
     : "medium";
 }
 
+function limitDailyBriefItemsByGroup(
+  items: DailyBriefItem[],
+  maxItemsPerGroup = DEFAULT_MAX_ITEMS_PER_GROUP,
+) {
+  const counts = { ai: 0, crypto: 0, markets: 0 };
+  const limited: DailyBriefItem[] = [];
+  for (const item of items) {
+    const group = getDailyBriefGroup(item);
+    if (counts[group] >= maxItemsPerGroup) continue;
+    counts[group] += 1;
+    limited.push(item);
+  }
+  return limited.map((item, index) => ({ ...item, rank: index + 1 }));
+}
+
 function normalizeDailyBriefRecord(
   parsed: Record<string, unknown>,
+  maxItemsPerGroup = DEFAULT_MAX_ITEMS_PER_GROUP,
 ): DailyBriefContent {
   const itemsRaw = Array.isArray(parsed.items) ? parsed.items : [];
-  const items = itemsRaw
-    .map((item, index): DailyBriefItem | null => {
-      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-      const record = item as Record<string, unknown>;
-      const title = clampText(record.title, 180);
-      if (!title) return null;
-      return {
-        rank: Math.max(1, Math.round(Number(record.rank) || index + 1)),
-        importance: normalizeImportance(record.importance),
-        title,
-        topic: clampText(record.topic, 80) || DAILY_BRIEF_TOPICS[0],
-        candidateIndexes: Array.isArray(record.candidateIndexes)
-          ? Array.from(
-              new Set(
-                record.candidateIndexes
-                  .map((value) => Math.round(Number(value)))
-                  .filter((value) => Number.isInteger(value) && value > 0),
-              ),
-            ).slice(0, 4)
-          : [],
-        sourceNames: stringArray(record.sourceNames, 4),
-        sourceUrls: stringArray(record.sourceUrls, 4),
-        imageUrl: safeHttpUrl(record.imageUrl),
-        whatHappened: clampText(record.whatHappened, 520),
-        investmentImpact: clampText(record.investmentImpact, 520),
-        watchNext: clampText(record.watchNext, 520),
-      };
-    })
-    .filter((item): item is DailyBriefItem => Boolean(item))
-    .slice(0, DEFAULT_MAX_ITEMS)
-    .map((item, index) => ({ ...item, rank: index + 1 }));
+  const items = limitDailyBriefItemsByGroup(
+    itemsRaw
+      .map((item, index): DailyBriefItem | null => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+        const record = item as Record<string, unknown>;
+        const title = clampText(record.title, 180);
+        if (!title) return null;
+        return {
+          rank: Math.max(1, Math.round(Number(record.rank) || index + 1)),
+          importance: normalizeImportance(record.importance),
+          title,
+          topic: clampText(record.topic, 80) || DAILY_BRIEF_TOPICS[0],
+          candidateIndexes: Array.isArray(record.candidateIndexes)
+            ? Array.from(
+                new Set(
+                  record.candidateIndexes
+                    .map((value) => Math.round(Number(value)))
+                    .filter((value) => Number.isInteger(value) && value > 0),
+                ),
+              ).slice(0, 4)
+            : [],
+          sourceNames: stringArray(record.sourceNames, 4),
+          sourceUrls: stringArray(record.sourceUrls, 4),
+          imageUrl: safeHttpUrl(record.imageUrl),
+          whatHappened: clampText(record.whatHappened, 520),
+          investmentImpact: clampText(record.investmentImpact, 520),
+          watchNext: clampText(record.watchNext, 520),
+        };
+      })
+      .filter((item): item is DailyBriefItem => Boolean(item)),
+    maxItemsPerGroup,
+  );
 
   return {
     title: clampText(parsed.title, 160) || "每日投资简报",
@@ -680,7 +818,10 @@ function normalizeDailyBriefRecord(
   };
 }
 
-export function parseDailyBriefContent(content: string): DailyBriefContent {
+export function parseDailyBriefContent(
+  content: string,
+  maxItemsPerGroup = DEFAULT_MAX_ITEMS_PER_GROUP,
+): DailyBriefContent {
   const cleanedBase = content
     .trim()
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -695,7 +836,7 @@ export function parseDailyBriefContent(content: string): DailyBriefContent {
   } catch {
     parsed = JSON.parse(repairCommonAiJsonIssues(cleaned)) as Record<string, unknown>;
   }
-  return normalizeDailyBriefRecord(parsed);
+  return normalizeDailyBriefRecord(parsed, maxItemsPerGroup);
 }
 
 function uniqueStrings(values: string[]) {
@@ -705,12 +846,14 @@ function uniqueStrings(values: string[]) {
 function sanitizeBriefForCandidates(
   brief: DailyBriefContent,
   candidates: DailyBriefCandidate[],
+  maxItemsPerGroup = DEFAULT_MAX_ITEMS_PER_GROUP,
 ): DailyBriefContent {
   const candidateByCanonicalUrl = new Map(
     candidates.map((candidate) => [candidate.id, candidate] as const),
   );
-  const items = brief.items
-    .map((item): DailyBriefItem | null => {
+  const items = limitDailyBriefItemsByGroup(
+    brief.items
+      .map((item): DailyBriefItem | null => {
       const matchedCandidates = Array.from(
         new Map(
           [
@@ -744,12 +887,132 @@ function sanitizeBriefForCandidates(
         ),
         imageUrl,
       };
-    })
-    .filter((item): item is DailyBriefItem => Boolean(item))
-    .slice(0, DEFAULT_MAX_ITEMS)
-    .map((item, index) => ({ ...item, rank: index + 1 }));
+      })
+      .filter((item): item is DailyBriefItem => Boolean(item)),
+    maxItemsPerGroup,
+  );
 
   return { ...brief, items };
+}
+
+function normalizedDailyBriefTitle(title: string) {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+function canonicalDailyBriefUrls(item: DailyBriefItem) {
+  return new Set(item.sourceUrls.map(canonicalUrl).filter(Boolean));
+}
+
+function dailyBriefItemsShareSource(
+  left: DailyBriefItem,
+  right: DailyBriefItem,
+) {
+  const leftUrls = canonicalDailyBriefUrls(left);
+  return Array.from(canonicalDailyBriefUrls(right)).some((url) =>
+    leftUrls.has(url),
+  );
+}
+
+function mergeDailyBriefContent(
+  current: DailyBriefContent,
+  previous: DailyBriefContent | null,
+  maxItemsPerGroup: number,
+): DailyBriefContent {
+  if (!previous) {
+    return {
+      ...current,
+      items: limitDailyBriefItemsByGroup(current.items, maxItemsPerGroup),
+    };
+  }
+
+  type MergeEntry = {
+    item: DailyBriefItem;
+    fromPrevious: boolean;
+    previousOrder: number;
+    currentOrder: number | null;
+  };
+  const entries: MergeEntry[] = previous.items.map((item, previousOrder) => ({
+    item,
+    fromPrevious: true,
+    previousOrder,
+    currentOrder: null,
+  }));
+
+  for (const [currentOrder, item] of current.items.entries()) {
+    const titleKey = normalizedDailyBriefTitle(item.title);
+    const titleDuplicateIndex = entries.findIndex(
+      (entry) => normalizedDailyBriefTitle(entry.item.title) === titleKey,
+    );
+    if (titleDuplicateIndex !== -1) {
+      const duplicate = entries[titleDuplicateIndex];
+      if (!dailyBriefItemsShareSource(duplicate.item, item)) continue;
+      entries[titleDuplicateIndex] = { ...duplicate, item, currentOrder };
+      continue;
+    }
+
+    const duplicateIndex = entries.findIndex((entry) =>
+      dailyBriefItemsShareSource(entry.item, item),
+    );
+    if (duplicateIndex === -1) {
+      entries.push({
+        item,
+        fromPrevious: false,
+        previousOrder: Number.MAX_SAFE_INTEGER,
+        currentOrder,
+      });
+      continue;
+    }
+
+    const duplicate = entries[duplicateIndex];
+    entries[duplicateIndex] = { ...duplicate, item, currentOrder };
+  }
+
+  const counts = { ai: 0, crypto: 0, markets: 0 };
+  const selected = [...entries]
+    .sort(
+      (left, right) =>
+        Number(right.fromPrevious) - Number(left.fromPrevious) ||
+        left.previousOrder - right.previousOrder ||
+        (left.currentOrder ?? Number.MAX_SAFE_INTEGER) -
+          (right.currentOrder ?? Number.MAX_SAFE_INTEGER),
+    )
+    .filter((entry) => {
+      const group = getDailyBriefGroup(entry.item);
+      if (counts[group] >= maxItemsPerGroup) return false;
+      counts[group] += 1;
+      return true;
+    })
+    .sort((left, right) => {
+      if (left.currentOrder !== null && right.currentOrder !== null) {
+        return left.currentOrder - right.currentOrder;
+      }
+      if (left.currentOrder !== null) return -1;
+      if (right.currentOrder !== null) return 1;
+      return left.previousOrder - right.previousOrder;
+    });
+
+  return {
+    title: current.title || previous.title,
+    marketPulse: current.marketPulse || previous.marketPulse,
+    items: selected.map((entry, index) => ({
+      ...entry.item,
+      rank: index + 1,
+    })),
+    watchVariables: uniqueStrings([
+      ...current.watchVariables,
+      ...previous.watchVariables,
+    ]).slice(0, 8),
+    priorityLine: current.priorityLine || previous.priorityLine,
+  };
+}
+
+function getSnapshotBriefDateKey(snapshot: DailyBriefSnapshot | null) {
+  if (!snapshot?.brief) return null;
+  if (snapshot.briefDateKey) return snapshot.briefDateKey;
+  return snapshot.success ? snapshot.period.dateKey : null;
 }
 
 function openDailyBriefDb(path = getDailyBriefDbPath()) {
@@ -839,6 +1102,37 @@ function writeCachedBrief(snapshot: DailyBriefSnapshot, inputHash: string, db: D
   );
 }
 
+function writeFailedDailyBriefAttempt({
+  snapshot,
+  cached,
+  cachedSameDayBrief,
+  inputHash,
+  db,
+}: {
+  snapshot: DailyBriefSnapshot;
+  cached: DailyBriefSnapshot | null;
+  cachedSameDayBrief: DailyBriefContent | null;
+  inputHash: string;
+  db: DatabaseSync;
+}) {
+  if (cached?.success && cachedSameDayBrief) {
+    writeCachedBrief(
+      {
+        ...cached,
+        status: "generated",
+        candidateCount: snapshot.candidateCount,
+        sourceCounts: snapshot.sourceCounts,
+        lastAttemptAt: snapshot.lastAttemptAt ?? snapshot.generatedAt,
+        error: snapshot.error,
+      },
+      inputHash,
+      db,
+    );
+    return;
+  }
+  writeCachedBrief(snapshot, inputHash, db);
+}
+
 function inputHashForCandidates(candidates: DailyBriefCandidate[]) {
   return createHash("sha256")
     .update(
@@ -916,12 +1210,14 @@ async function runDailyBriefAi({
   period,
   candidates,
   env,
+  maxItemsPerGroup,
   requestBrief,
 }: {
   prompt: string;
   period: DailyBriefPeriod;
   candidates: DailyBriefCandidate[];
   env: EnvLike;
+  maxItemsPerGroup: number;
   requestBrief?: DailyBriefRequestDeps["requestBrief"];
 }) {
   const providers = getAlphaSummaryProviderCandidates(env);
@@ -945,7 +1241,11 @@ async function runDailyBriefAi({
         : requestDailyBrief({ prompt, provider, env }),
   });
   return {
-    brief: sanitizeBriefForCandidates(result.value, candidates),
+    brief: sanitizeBriefForCandidates(
+      result.value,
+      candidates,
+      maxItemsPerGroup,
+    ),
     provider: result.provider,
   };
 }
@@ -972,6 +1272,8 @@ function emptySnapshot({
     candidateCount: 0,
     sourceCounts: {},
     brief: null,
+    briefDateKey: null,
+    lastAttemptAt: null,
     error,
   };
 }
@@ -1076,10 +1378,15 @@ export async function getOrCreateDailyInvestmentBrief({
 } & DailyBriefRequestDeps = {}): Promise<DailyBriefSnapshot> {
   const period = getDailyBriefPeriod({ now, env });
   const providers = getAlphaSummaryProviderCandidates(env);
+  const maxItemsPerGroup = maxItemsPerGroupFromEnv(env);
   const db = openDailyBriefDb(getDailyBriefDbPath(env));
   try {
     const cached = readCachedBrief(period.dateKey, db);
     const fallbackWithContent = cached?.brief ? cached : readLatestBriefWithContent(db);
+    const cachedSameDayBrief =
+      getSnapshotBriefDateKey(cached) === period.dateKey
+        ? cached?.brief ?? null
+        : null;
     if (
       cached?.brief &&
       cached.success &&
@@ -1109,6 +1416,7 @@ export async function getOrCreateDailyInvestmentBrief({
     }
 
     if (providers.length === 0) {
+      const attemptedAt = now.toISOString();
       const snapshot: DailyBriefSnapshot = {
         success: false,
         status: "needs_key",
@@ -1119,10 +1427,18 @@ export async function getOrCreateDailyInvestmentBrief({
         candidateCount: candidates.length,
         sourceCounts,
         brief: fallbackWithContent?.brief ?? null,
+        briefDateKey: getSnapshotBriefDateKey(fallbackWithContent),
+        lastAttemptAt: attemptedAt,
         error:
           "MINIMAX_API_KEY, AI_SUMMARY_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY is required",
       };
-      writeCachedBrief(snapshot, inputHash, db);
+      writeFailedDailyBriefAttempt({
+        snapshot,
+        cached,
+        cachedSameDayBrief,
+        inputHash,
+        db,
+      });
       return snapshot;
     }
 
@@ -1131,13 +1447,20 @@ export async function getOrCreateDailyInvestmentBrief({
         prompt: buildDailyBriefPrompt({
           period,
           candidates,
-          maxItems: positiveInt(env.DAILY_BRIEF_MAX_ITEMS, DEFAULT_MAX_ITEMS),
+          existingBrief: cachedSameDayBrief,
+          maxItemsPerGroup,
         }),
         period,
         candidates,
         env,
+        maxItemsPerGroup,
         requestBrief,
       });
+      const consolidatedBrief = mergeDailyBriefContent(
+        brief,
+        cachedSameDayBrief,
+        maxItemsPerGroup,
+      );
       const snapshot: DailyBriefSnapshot = {
         success: true,
         status: "generated",
@@ -1147,7 +1470,9 @@ export async function getOrCreateDailyInvestmentBrief({
         model: provider.model,
         candidateCount: candidates.length,
         sourceCounts,
-        brief,
+        brief: consolidatedBrief,
+        briefDateKey: period.dateKey,
+        lastAttemptAt: now.toISOString(),
         error: null,
       };
       writeCachedBrief(snapshot, inputHash, db);
@@ -1163,9 +1488,17 @@ export async function getOrCreateDailyInvestmentBrief({
         candidateCount: candidates.length,
         sourceCounts,
         brief: fallbackWithContent?.brief ?? null,
+        briefDateKey: getSnapshotBriefDateKey(fallbackWithContent),
+        lastAttemptAt: now.toISOString(),
         error: error instanceof Error ? error.message : String(error),
       };
-      writeCachedBrief(snapshot, inputHash, db);
+      writeFailedDailyBriefAttempt({
+        snapshot,
+        cached,
+        cachedSameDayBrief,
+        inputHash,
+        db,
+      });
       return snapshot;
     }
   } finally {

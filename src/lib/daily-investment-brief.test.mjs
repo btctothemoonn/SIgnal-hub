@@ -30,7 +30,14 @@ assert.match(getDailyBriefDbPath({}), /daily-investment-brief\.sqlite$/);
 const beforeEight = new Date("2026-08-22T23:59:00.000Z");
 const afterEight = new Date("2026-08-23T00:00:00.000Z");
 assert.equal(getDailyBriefPeriod({ now: afterEight }).dateKey, "2026-08-23");
-assert.equal(isDailyBriefDue({ now: beforeEight, env: {} }), false);
+assert.equal(
+  isDailyBriefDue({
+    now: beforeEight,
+    env: {},
+    generatedAt: "2026-08-22T16:01:00.000Z",
+  }),
+  false,
+);
 assert.equal(isDailyBriefDue({ now: afterEight, env: {} }), true);
 
 const gdeltUrl = buildDailyBriefGdeltUrl({
@@ -344,6 +351,17 @@ assert.equal(failed.status, "error");
 assert.equal(failed.brief?.title, "每日投资简报｜2026 年 8 月 23 日");
 assert.match(failed.error ?? "", /provider timeout/);
 
+const latestFailure = await getLatestDailyInvestmentBrief({
+  now: nextDay,
+  env: { DAILY_BRIEF_DB: dbPath },
+});
+assert.equal(latestFailure.status, "error");
+assert.equal(
+  latestFailure.brief?.title,
+  "每日投资简报｜2026 年 8 月 23 日",
+);
+assert.match(latestFailure.error ?? "", /provider timeout/);
+
 const recovered = await getOrCreateDailyInvestmentBrief({
   force: false,
   now: nextDay,
@@ -371,6 +389,7 @@ const recovered = await getOrCreateDailyInvestmentBrief({
 });
 assert.equal(recovered.status, "generated");
 assert.equal(recovered.brief?.items[0].title, "恢复后的新日报");
+assert.equal(recovered.brief?.items.length, 1);
 
 const latestAfterFailure = await getLatestDailyInvestmentBrief({
   now: nextDay,
