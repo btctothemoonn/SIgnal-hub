@@ -1,6 +1,7 @@
 import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
 import { runVolatilityRestScan } from "../src/lib/market-alerts-binance.ts";
 import { createMarketAlertDeliverer } from "../src/lib/market-alerts-delivery.ts";
+import { writeMarketAlertKlineChart } from "../src/lib/market-alerts-chart.ts";
 import {
   installWorkerShutdown,
   loadWorkerEnv,
@@ -19,7 +20,11 @@ const deliverAlert = createMarketAlertDeliverer({ env: process.env });
 async function run(reason) {
   const startedAt = Date.now();
   logWorker("market.volatility_rest.start", { reason });
-  const result = await runVolatilityRestScan({ config, deliverAlert });
+  const result = await runVolatilityRestScan({
+    config,
+    deliverAlert,
+    writeChart: writeMarketAlertKlineChart,
+  });
   logWorker("market.volatility_rest.done", {
     reason,
     durationMs: Date.now() - startedAt,

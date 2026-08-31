@@ -278,19 +278,88 @@ try {
       updatedAt: "2026-08-31T00:00:02.000Z",
     },
   ]);
+  const revisionBeforeChart = b.getMarketAlertsRevision();
+  assert.equal(a.upsertMarketAlertChart({
+    symbol: "BTCUSDT",
+    eventId: event.id,
+    interval: "5m",
+    updatedAt: "2026-08-31T00:00:03.000Z",
+    sourceKey: "1788134400000_1788134400000_aaaaaaaaaaaa",
+  }).accepted, true);
+  assert.ok(b.getMarketAlertsRevision() > revisionBeforeChart);
+  assert.deepEqual(b.getMarketAlertChart("btcusdt"), {
+    symbol: "BTCUSDT",
+    eventId: event.id,
+    interval: "5m",
+    updatedAt: "2026-08-31T00:00:03.000Z",
+    sourceKey: "1788134400000_1788134400000_aaaaaaaaaaaa",
+  });
+
+  const newerEvent = a.insertMarketAlertEvent({
+    id: "volatility:LONG:BTCUSDT:newer",
+    type: "volatility",
+    symbol: "BTCUSDT",
+    side: "LONG",
+    level: 3,
+    stage: "暴涨升级",
+    trigger: "A趋势·确认",
+    source: "ws",
+    price: 105,
+    changePct: 20,
+    volumeRatio: 3,
+    score: null,
+    metrics: { pct5m: 20 },
+    reasons: ["近25m上涨20%"],
+    occurredAt: "2026-08-31T00:01:00.000Z",
+    createdAt: "2026-08-31T00:01:00.000Z",
+  });
+  a.setMarketAlertsHeartbeat({
+    worker: "volatility-ws",
+    status: "live",
+    detail: "newer heartbeat masks chart timestamp",
+    now: "2026-08-31T00:05:00.000Z",
+  });
+  const revisionBeforeMaskedChart = b.getMarketAlertsRevision();
+  const newerRegistration = a.upsertMarketAlertChart({
+    symbol: "BTCUSDT",
+    eventId: newerEvent.id,
+    interval: "5m",
+    updatedAt: "2026-08-31T00:01:01.000Z",
+    sourceKey: "1788134460000_1788134460000_bbbbbbbbbbbb",
+  });
+  assert.equal(newerRegistration.accepted, true);
+  assert.equal(
+    newerRegistration.replacedSourceKey,
+    "1788134400000_1788134400000_aaaaaaaaaaaa",
+  );
+  assert.ok(b.getMarketAlertsRevision() > revisionBeforeMaskedChart);
+  assert.equal(a.upsertMarketAlertChart({
+    symbol: "BTCUSDT",
+    eventId: event.id,
+    interval: "5m",
+    updatedAt: "2026-08-31T00:02:00.000Z",
+    sourceKey: "1788134400000_1788134400000_aaaaaaaaaaaa",
+  }).accepted, false);
   const snapshot = b.getMarketAlertsSnapshot({
     limit: 10,
     now: "2026-08-31T00:05:00.000Z",
   });
-  assert.equal(snapshot.events[0].symbol, "BTCUSDT");
+  assert.equal(snapshot.events[0].id, newerEvent.id);
+  assert.equal(
+    snapshot.events[0].chartUrl,
+    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb",
+  );
+  assert.equal(snapshot.events[0].chartUpdatedAt, "2026-08-31T00:01:01.000Z");
+  assert.equal(snapshot.events[1].id, event.id);
+  assert.equal(snapshot.events[1].chartUrl, null);
   assert.equal(snapshot.health.volatilityRest?.status, "live");
   assert.equal(snapshot.health.volatilityRest?.lastError, "Telegram delivery failed");
   assert.equal(snapshot.health.squeeze?.status, "live");
   assert.equal(snapshot.health.squeeze?.lastError, "temporary upstream error");
   assert.equal(snapshot.health.squeeze?.lastErrorAt, "2026-08-31T00:00:01.000Z");
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
-  assert.equal(snapshot.marketRanking[0].counts.pump, 1);
-  assert.equal(snapshot.latestUpdatedAt, "2026-08-31T00:00:02.000Z");
+  assert.equal(snapshot.marketRanking[0].counts.pump, 2);
+  assert.equal(snapshot.latestUpdatedAt, "2026-08-31T00:05:00.000Z");
   assert.deepEqual(
     b.getRecentlyTriggeredSymbols("2026-08-30T00:00:00.000Z"),
     ["BTCUSDT"],

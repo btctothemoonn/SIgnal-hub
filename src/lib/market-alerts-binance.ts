@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getMarketAlertsConfig } from "./market-alerts-config.ts";
 import type { MarketAlertsConfig } from "./market-alerts-config.ts";
 import {
@@ -32,6 +33,21 @@ export interface BinanceMarketClient {
 type DeliverAlert = (
   event: ReturnType<Store["insertMarketAlertEvent"]>,
 ) => Promise<{ status?: string; messageId?: number | null } | void>;
+
+export type MarketAlertChartWriter = (input: {
+  symbol: string;
+  interval: "5m";
+  klines: KlineRow[];
+  generatedAt: string;
+  sourceKey: string;
+}) => Promise<{
+  symbol: string;
+  interval: string;
+  updatedAt: string;
+  sourceKey: string;
+  removeSource?: (sourceKey: string) => Promise<void>;
+  pruneOlder?: (sourceKey: string) => Promise<void>;
+}>;
 
 function numberValue(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -365,6 +381,76 @@ async function isFdvEligible(
   return fdv === null || !Number.isFinite(fdv) || fdv <= 0 || fdv >= minFdvUsd;
 }
 
+async function persistMarketAlertChart(input: {
+  event: ReturnType<Store["insertMarketAlertEvent"]>;
+  client: BinanceMarketClient;
+  store: Store;
+  writeChart?: MarketAlertChartWriter;
+}) {
+  if (!input.writeChart) return;
+  try {
+    const klines = await input.client.getKlines(input.event.symbol, "5m", 120);
+    const occurredAtMs = Date.parse(input.event.occurredAt);
+    const createdAtMs = Date.parse(input.event.createdAt);
+    const sourceKey = [
+      Math.max(0, Number.isFinite(occurredAtMs) ? occurredAtMs : 0)
+        .toString()
+        .padStart(13, "0"),
+      Math.max(0, Number.isFinite(createdAtMs) ? createdAtMs : 0)
+        .toString()
+        .padStart(13, "0"),
+      createHash("sha256").update(input.event.id).digest("hex").slice(0, 12),
+    ].join("_");
+    const generatedAt = new Date().toISOString();
+    const result = await input.writeChart({
+      symbol: input.event.symbol,
+      interval: "5m",
+      klines,
+      generatedAt,
+      sourceKey,
+    });
+    const registration = input.store.upsertMarketAlertChart({
+      symbol: input.event.symbol,
+      eventId: input.event.id,
+      interval: result.interval,
+      updatedAt: result.updatedAt,
+      sourceKey: result.sourceKey,
+    });
+    if (!registration.accepted) {
+      await result.removeSource?.(result.sourceKey);
+    } else if (result.pruneOlder) {
+      await result.pruneOlder(result.sourceKey);
+    } else if (registration.replacedSourceKey) {
+      await result.removeSource?.(registration.replacedSourceKey);
+    }
+  } catch (error) {
+    console.error(`[MARKET-ALERT-CHART] ${input.event.symbol}: ${safeError(error)}`);
+  }
+}
+
+function createMarketAlertChartQueue(input: {
+  client: BinanceMarketClient;
+  store: Store;
+  writeChart?: MarketAlertChartWriter;
+}) {
+  const pending = new Set<Promise<void>>();
+  const enqueue = (event: ReturnType<Store["insertMarketAlertEvent"]>) => {
+    if (!input.writeChart) return;
+    const task = persistMarketAlertChart({ ...input, event });
+    pending.add(task);
+    void task.then(
+      () => pending.delete(task),
+      () => pending.delete(task),
+    );
+  };
+  const drain = async () => {
+    while (pending.size) {
+      await Promise.allSettled([...pending]);
+    }
+  };
+  return { enqueue, drain };
+}
+
 async function persistVolatilitySignal(input: {
   signal: VolatilitySignal;
   market: SelectedMarket;
@@ -372,6 +458,7 @@ async function persistVolatilitySignal(input: {
   owner: string;
   nowMs: number;
   deliverAlert?: DeliverAlert;
+  scheduleChart?: (event: ReturnType<Store["insertMarketAlertEvent"]>) => void;
   onDeliveryError?: (error: unknown) => void;
   isEligible?: () => Promise<boolean>;
 }) {
@@ -383,13 +470,20 @@ async function persistVolatilitySignal(input: {
     owner: input.owner,
   });
   if (!reservation.send || !reservation.next) return false;
+  let event: ReturnType<Store["insertMarketAlertEvent"]> | null = null;
+  let chartScheduled = false;
+  const scheduleChart = () => {
+    if (!event || chartScheduled) return;
+    chartScheduled = true;
+    input.scheduleChart?.(event);
+  };
   try {
     if (input.isEligible && !(await input.isEligible())) {
       input.store.releaseVolatilityAlert(key, input.owner);
       return false;
     }
     const occurredAt = new Date(input.signal.occurredAtMs || input.nowMs).toISOString();
-    const event = input.store.insertMarketAlertEvent({
+    event = input.store.insertMarketAlertEvent({
       id: `volatility:${input.signal.side}:${input.signal.symbol}:${input.signal.occurredAtMs || input.nowMs}:${input.signal.level}`,
       type: "volatility",
       symbol: input.signal.symbol,
@@ -434,6 +528,7 @@ async function persistVolatilitySignal(input: {
           }
           reportDeliveryError(input.onDeliveryError, error);
           console.error(`[MARKET-ALERT-DELIVERY] ${event.symbol}: ${safeError(error)}`);
+          scheduleChart();
           return true;
         }
         input.store.updateMarketAlertDelivery(event.id, "failed");
@@ -444,9 +539,11 @@ async function persistVolatilitySignal(input: {
     if (!input.store.commitVolatilityAlert(key, input.owner, reservation.next)) {
       throw new Error(`volatility state commit lost ownership for ${key}`);
     }
+    scheduleChart();
     return true;
   } catch (error) {
     input.store.releaseVolatilityAlert(key, input.owner);
+    scheduleChart();
     throw error;
   }
 }
@@ -481,6 +578,7 @@ export async function runVolatilityRestScan(input: {
   nowMs?: number;
   config?: Partial<MarketAlertsConfig>;
   deliverAlert?: DeliverAlert;
+  writeChart?: MarketAlertChartWriter;
 } = {}) {
   const config = mergeConfig(input.config);
   const client = input.client ?? createBinanceFuturesClient(config);
@@ -488,6 +586,11 @@ export async function runVolatilityRestScan(input: {
   const ownsStore = !input.store;
   const nowMs = input.nowMs ?? Date.now();
   const scanIso = new Date(nowMs).toISOString();
+  const chartQueue = createMarketAlertChartQueue({
+    client,
+    store,
+    writeChart: input.writeChart,
+  });
   try {
     store.setMarketAlertsHeartbeat({
       worker: "volatility-rest",
@@ -562,6 +665,7 @@ export async function runVolatilityRestScan(input: {
           owner: `rest:${process.pid}:${market.symbol}:${nowMs}`,
           nowMs,
           deliverAlert: input.deliverAlert,
+          scheduleChart: chartQueue.enqueue,
           onDeliveryError: (error) => {
             latestError = safeError(error);
           },
@@ -598,6 +702,7 @@ export async function runVolatilityRestScan(input: {
     });
     throw error;
   } finally {
+    await chartQueue.drain();
     if (ownsStore) store.close();
   }
 }
@@ -663,6 +768,7 @@ export async function runSqueezeScan(input: {
   nowMs?: number;
   config?: Partial<MarketAlertsConfig>;
   deliverAlert?: DeliverAlert;
+  writeChart?: MarketAlertChartWriter;
 } = {}) {
   const config = mergeConfig(input.config);
   const client = input.client ?? createBinanceFuturesClient(config);
@@ -670,6 +776,11 @@ export async function runSqueezeScan(input: {
   const ownsStore = !input.store;
   const nowMs = input.nowMs ?? Date.now();
   const scanIso = new Date(nowMs).toISOString();
+  const chartQueue = createMarketAlertChartQueue({
+    client,
+    store,
+    writeChart: input.writeChart,
+  });
   try {
     if (!client.getPremiumIndex || !client.getOpenInterestHistory) {
       throw new Error("Binance client does not support squeeze metrics");
@@ -789,8 +900,15 @@ export async function runSqueezeScan(input: {
       if (!item.result.eligible) continue;
       const level = item.result.level;
       if (!store.beginSqueezeDelivery(item.market.symbol, level, nowMs)) continue;
+      let event: ReturnType<Store["insertMarketAlertEvent"]> | null = null;
+      let chartScheduled = false;
+      const scheduleChart = () => {
+        if (!event || chartScheduled) return;
+        chartScheduled = true;
+        chartQueue.enqueue(event);
+      };
       try {
-        const event = store.insertMarketAlertEvent({
+        event = store.insertMarketAlertEvent({
           id: `short_squeeze:LONG:${item.market.symbol}:${nowMs}:${level}`,
           type: "short_squeeze",
           symbol: item.market.symbol,
@@ -853,9 +971,11 @@ export async function runSqueezeScan(input: {
           item.result.score,
           nowMs,
         );
+        scheduleChart();
         alerts += 1;
       } catch (error) {
         store.releaseSqueezeDelivery(item.market.symbol, level);
+        scheduleChart();
         throw error;
       }
     }
@@ -876,6 +996,7 @@ export async function runSqueezeScan(input: {
     });
     throw error;
   } finally {
+    await chartQueue.drain();
     if (ownsStore) store.close();
   }
 }
@@ -916,6 +1037,7 @@ export async function startVolatilityWebSocketWorker(input: {
   store?: Store;
   config?: Partial<MarketAlertsConfig>;
   deliverAlert?: DeliverAlert;
+  writeChart?: MarketAlertChartWriter;
   createWebSocket?: (url: string) => Pick<WebSocket, "addEventListener" | "close">;
   once?: boolean;
   signal?: AbortSignal;
@@ -924,6 +1046,11 @@ export async function startVolatilityWebSocketWorker(input: {
   const client = input.client ?? createBinanceFuturesClient(config);
   const store = input.store ?? openMarketAlertsStore();
   const ownsStore = !input.store;
+  const chartQueue = createMarketAlertChartQueue({
+    client,
+    store,
+    writeChart: input.writeChart,
+  });
   try {
     const [exchangeInfo, tickers] = await Promise.all([
       client.getExchangeInfo(),
@@ -1111,6 +1238,7 @@ export async function startVolatilityWebSocketWorker(input: {
                 owner: `ws:${process.pid}:${symbol}:${nowMs}`,
                 nowMs,
                 deliverAlert: input.deliverAlert,
+                scheduleChart: chartQueue.enqueue,
                 onDeliveryError: recordWsError,
                 isEligible: () => cachedFdvEligibility(item.market),
               })
@@ -1177,6 +1305,7 @@ export async function startVolatilityWebSocketWorker(input: {
     });
     throw error;
   } finally {
+    await chartQueue.drain();
     if (ownsStore) store.close();
   }
 }

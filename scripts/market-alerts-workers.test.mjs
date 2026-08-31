@@ -8,10 +8,16 @@ const deploy = readFileSync(new URL("./deploy-vps.sh", import.meta.url), "utf8")
 const localStart = readFileSync(new URL("./start-signal-hub.ps1", import.meta.url), "utf8");
 
 assert.match(volRest, /runVolatilityRestScan/);
+assert.match(volRest, /writeMarketAlertKlineChart/);
+assert.match(volRest, /writeChart:\s*writeMarketAlertKlineChart/);
 assert.match(volRest, /--once/);
 assert.match(volWs, /startVolatilityWebSocketWorker/);
+assert.match(volWs, /writeMarketAlertKlineChart/);
+assert.match(volWs, /writeChart:\s*writeMarketAlertKlineChart/);
 assert.match(volWs, /--once/);
 assert.match(squeeze, /runSqueezeScan/);
+assert.match(squeeze, /writeMarketAlertKlineChart/);
+assert.match(squeeze, /writeChart:\s*writeMarketAlertKlineChart/);
 assert.match(squeeze, /--once/);
 assert.match(deploy, /signal-hub-market-volatility-rest/);
 assert.match(deploy, /signal-hub-market-volatility-ws/);

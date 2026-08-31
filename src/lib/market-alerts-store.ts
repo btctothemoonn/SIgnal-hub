@@ -66,6 +66,14 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function normalizeChartSourceKey(value: string) {
+  const sourceKey = value.trim();
+  if (!/^\d{13}_\d{13}_[a-f0-9]{12}$/.test(sourceKey)) {
+    throw new Error("Invalid market alert chart source key");
+  }
+  return sourceKey;
+}
+
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string" || !value) return fallback;
   try {
@@ -90,6 +98,8 @@ function rowToVolatilityState(row: DbRow | undefined): VolatilitySignalState | n
 }
 
 function rowToEvent(row: DbRow) {
+  const chartUpdatedAt = stringValue(row.chart_updated_at) || null;
+  const chartSourceKey = stringValue(row.chart_source_key) || null;
   return {
     id: stringValue(row.id),
     type: stringValue(row.type) as MarketAlertType,
@@ -107,6 +117,11 @@ function rowToEvent(row: DbRow) {
     reasons: parseJson<string[]>(row.reasons_json, []),
     deliveryStatus: stringValue(row.delivery_status),
     telegramMessageId: nullableNumber(row.telegram_message_id),
+    chartUrl:
+      chartUpdatedAt && chartSourceKey
+        ? `/api/market-alerts/charts/${encodeURIComponent(stringValue(row.symbol))}?v=${encodeURIComponent(chartSourceKey)}`
+        : null,
+    chartUpdatedAt,
     occurredAt: stringValue(row.occurred_at),
     createdAt: stringValue(row.created_at),
   };
@@ -207,6 +222,15 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     );
     CREATE INDEX IF NOT EXISTS idx_market_alert_tickers_updated
       ON market_alert_tickers (updated_at DESC);
+    CREATE TABLE IF NOT EXISTS market_alert_charts (
+      symbol TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      interval TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      source_key TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_alert_charts_updated
+      ON market_alert_charts (updated_at DESC);
   `);
 
   const heartbeatColumns = new Set(
@@ -219,6 +243,41 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   }
   if (!heartbeatColumns.has("last_error_at")) {
     db.exec("ALTER TABLE market_alert_heartbeat ADD COLUMN last_error_at TEXT;");
+  }
+  const chartColumns = new Set(
+    (db.prepare("PRAGMA table_info(market_alert_charts)").all() as DbRow[]).map(
+      (row) => stringValue(row.name),
+    ),
+  );
+  if (!chartColumns.has("source_key")) {
+    db.exec("ALTER TABLE market_alert_charts ADD COLUMN source_key TEXT NOT NULL DEFAULT '';");
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS market_alert_revision (
+      id INTEGER PRIMARY KEY CHECK (id=1),
+      revision INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO market_alert_revision (id, revision) VALUES (1, 0);
+  `);
+  const revisionTables = [
+    "market_volatility_state",
+    "market_squeeze_active",
+    "market_alert_events",
+    "market_alert_heartbeat",
+    "market_alert_tickers",
+    "market_alert_charts",
+  ];
+  for (const table of revisionTables) {
+    for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS market_alert_revision_${table}_${operation.toLowerCase()}
+        AFTER ${operation} ON ${table}
+        BEGIN
+          UPDATE market_alert_revision SET revision=revision+1 WHERE id=1;
+        END;
+      `);
+    }
   }
 
   const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
@@ -393,6 +452,20 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       pct_24h=excluded.pct_24h,
       quote_volume=excluded.quote_volume,
       updated_at=excluded.updated_at
+  `);
+  const chartUpsert = db.prepare(`
+    INSERT INTO market_alert_charts (symbol, event_id, interval, updated_at, source_key)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(symbol) DO UPDATE SET
+      event_id=excluded.event_id,
+      interval=excluded.interval,
+      updated_at=excluded.updated_at,
+      source_key=excluded.source_key
+    WHERE excluded.source_key > market_alert_charts.source_key
+  `);
+  const chartGet = db.prepare(`
+    SELECT symbol, event_id, interval, updated_at, source_key
+    FROM market_alert_charts WHERE symbol=?
   `);
 
   function reserveVolatilityAlert(input: {
@@ -735,6 +808,64 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     });
   }
 
+  function upsertMarketAlertChart(input: {
+    symbol: string;
+    eventId: string;
+    interval: string;
+    updatedAt?: string;
+    sourceKey: string;
+  }) {
+    const symbol = input.symbol.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,30}$/.test(symbol)) {
+      throw new Error("Invalid market alert chart symbol");
+    }
+    const updatedAt = input.updatedAt ?? nowIso();
+    const sourceKey = normalizeChartSourceKey(input.sourceKey);
+    return transaction(() => {
+      const previous = chartGet.get(symbol) as DbRow | undefined;
+      const result = run(
+        chartUpsert,
+        symbol,
+        input.eventId,
+        input.interval,
+        updatedAt,
+        sourceKey,
+      );
+      const current = chartGet.get(symbol) as DbRow | undefined;
+      const accepted =
+        Number(result.changes) > 0 ||
+        (stringValue(current?.event_id) === input.eventId &&
+          stringValue(current?.source_key) === sourceKey);
+      const previousSourceKey = stringValue(previous?.source_key) || null;
+      return {
+        symbol,
+        eventId: input.eventId,
+        interval: input.interval,
+        updatedAt,
+        sourceKey,
+        accepted,
+        replacedSourceKey:
+          accepted && previousSourceKey && previousSourceKey !== sourceKey
+            ? previousSourceKey
+            : null,
+      };
+    });
+  }
+
+  function getMarketAlertChart(symbolInput: string) {
+    const symbol = symbolInput.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,30}$/.test(symbol)) return null;
+    const row = chartGet.get(symbol) as DbRow | undefined;
+    if (!row) return null;
+    return {
+      symbol: stringValue(row.symbol),
+      eventId: stringValue(row.event_id),
+      interval: stringValue(row.interval),
+      updatedAt: stringValue(row.updated_at),
+      sourceKey: stringValue(row.source_key),
+    };
+  }
+
   function getMarketAlertsSnapshot(options: {
     limit?: number;
     page?: number;
@@ -751,35 +882,38 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     const where: string[] = [];
     const values: DbValue[] = [];
     if (options.type) {
-      where.push("type=?");
+      where.push("e.type=?");
       values.push(options.type);
     }
     if (options.symbol) {
-      where.push("symbol=?");
+      where.push("e.symbol=?");
       values.push(options.symbol.toUpperCase());
     }
     if (options.level) {
-      where.push("level=?");
+      where.push("e.level=?");
       values.push(options.level);
     }
     if (options.from) {
-      where.push("occurred_at>=?");
+      where.push("e.occurred_at>=?");
       values.push(options.from);
     }
     if (options.to) {
-      where.push("occurred_at<=?");
+      where.push("e.occurred_at<=?");
       values.push(options.to);
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const events = db
       .prepare(`
-        SELECT * FROM market_alert_events ${whereSql}
-        ORDER BY occurred_at DESC, created_at DESC LIMIT ? OFFSET ?
+        SELECT e.*, c.updated_at AS chart_updated_at, c.source_key AS chart_source_key
+        FROM market_alert_events e
+        LEFT JOIN market_alert_charts c ON c.event_id=e.id
+        ${whereSql}
+        ORDER BY e.occurred_at DESC, e.created_at DESC LIMIT ? OFFSET ?
       `)
       .all(...values, limit, (page - 1) * limit)
       .map((row) => rowToEvent(row as DbRow));
     const total = numberValue(
-      (db.prepare(`SELECT COUNT(*) AS value FROM market_alert_events ${whereSql}`).get(
+      (db.prepare(`SELECT COUNT(*) AS value FROM market_alert_events e ${whereSql}`).get(
         ...values,
       ) as DbRow).value,
     );
@@ -842,6 +976,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
           SELECT MAX(created_at) AS value FROM market_alert_events
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_charts
         )
       `).get() as DbRow).value,
     );
@@ -876,8 +1011,16 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
           SELECT MAX(created_at) AS value FROM market_alert_events
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_charts
         )
       `).get() as DbRow).value,
+    );
+  }
+
+  function getMarketAlertsRevision() {
+    return numberValue(
+      (db.prepare("SELECT revision AS value FROM market_alert_revision WHERE id=1").get() as DbRow)
+        .value,
     );
   }
 
@@ -900,9 +1043,12 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     updateMarketAlertDelivery,
     setMarketAlertsHeartbeat,
     upsertMarketTickers,
+    upsertMarketAlertChart,
+    getMarketAlertChart,
     getRecentlyTriggeredSymbols,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
+    getMarketAlertsRevision,
     close() {
       db.close();
     },
@@ -924,6 +1070,15 @@ export function getMarketAlertsLatestUpdatedAt() {
   const store = openMarketAlertsStore();
   try {
     return store.getMarketAlertsLatestUpdatedAt();
+  } finally {
+    store.close();
+  }
+}
+
+export function getMarketAlertsRevision() {
+  const store = openMarketAlertsStore();
+  try {
+    return store.getMarketAlertsRevision();
   } finally {
     store.close();
   }

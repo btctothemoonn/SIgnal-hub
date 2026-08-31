@@ -1,6 +1,6 @@
 import { getMarketAlertsConfig } from "@/lib/market-alerts-config";
 import {
-  getMarketAlertsLatestUpdatedAt,
+  getMarketAlertsRevision,
   getMarketAlertsSnapshot,
 } from "@/lib/market-alerts-store";
 
@@ -13,17 +13,17 @@ function encodeEvent(event: string, data: unknown) {
 
 export async function GET() {
   const encoder = new TextEncoder();
-  let lastUpdatedAt: string | null = null;
+  let lastRevision: number | null = null;
   let sentInitial = false;
   let timer: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream({
     start(controller) {
       const sendSnapshotIfChanged = () => {
-        const updatedAt = getMarketAlertsLatestUpdatedAt();
-        if (!sentInitial || (updatedAt && updatedAt !== lastUpdatedAt)) {
+        const revision = getMarketAlertsRevision();
+        if (!sentInitial || revision !== lastRevision) {
           sentInitial = true;
-          lastUpdatedAt = updatedAt;
+          lastRevision = revision;
           controller.enqueue(
             encoder.encode(
               encodeEvent(

@@ -1,6 +1,7 @@
 import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
 import { startVolatilityWebSocketWorker } from "../src/lib/market-alerts-binance.ts";
 import { createMarketAlertDeliverer } from "../src/lib/market-alerts-delivery.ts";
+import { writeMarketAlertKlineChart } from "../src/lib/market-alerts-chart.ts";
 import {
   installWorkerShutdown,
   loadWorkerEnv,
@@ -26,6 +27,7 @@ do {
     const result = await startVolatilityWebSocketWorker({
       config,
       deliverAlert,
+      writeChart: writeMarketAlertKlineChart,
       once,
       signal: controller.signal,
     });

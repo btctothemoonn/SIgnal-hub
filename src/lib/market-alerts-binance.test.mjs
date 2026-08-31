@@ -127,11 +127,16 @@ const directory = mkdtempSync(join(tmpdir(), "market-alerts-binance-"));
 let store;
 try {
   store = openMarketAlertsStore(join(directory, "alerts.sqlite"));
+  const chartWrites = [];
+  const chartPrunes = [];
   const client = {
     getExchangeInfo: async () => exchangeInfo,
     getTickers24h: async () => tickers.filter((ticker) => ticker.symbol !== "AAPLUSDT"),
-    getKlines: async (symbol, interval) => {
+    getKlines: async (symbol, interval, limit) => {
       if (symbol === "BTCUSDT") {
+        if (interval === "5m" && limit === 120) {
+          return flatKlines(300_000, 120);
+        }
         return interval === "5m" ? pumpKlines5m() : pump1m;
       }
       return flatKlines(interval === "5m" ? 300_000 : 60_000, interval === "5m" ? 36 : 40);
@@ -143,6 +148,16 @@ try {
     store,
     nowMs: TEST_NOW_MS,
     config: { restTopN: 2, restCoreN: 2, minFdvUsd: 10_000_000 },
+    writeChart: async (input) => {
+      chartWrites.push(input);
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+        pruneOlder: async (sourceKey) => chartPrunes.push(sourceKey),
+      };
+    },
   });
   assert.equal(result.scanned, 2);
   assert.equal(result.alerts, 1);
@@ -150,16 +165,121 @@ try {
     now: new Date(TEST_NOW_MS).toISOString(),
   });
   assert.equal(snapshot.events[0].symbol, "BTCUSDT");
+  assert.equal(
+    snapshot.events[0].chartUrl,
+    `/api/market-alerts/charts/BTCUSDT?v=${chartWrites[0].sourceKey}`,
+  );
+  assert.ok(
+    Date.parse(snapshot.events[0].chartUpdatedAt) >=
+      Date.parse(snapshot.events[0].createdAt),
+    "chart registration must advance the live snapshot after event insertion",
+  );
+  assert.equal(chartWrites.length, 1);
+  assert.equal(chartWrites[0].symbol, "BTCUSDT");
+  assert.equal(chartWrites[0].interval, "5m");
+  assert.equal(chartWrites[0].klines.length, 120);
+  assert.match(chartWrites[0].sourceKey, /^\d{13}_\d{13}_[a-f0-9]{12}$/);
+  assert.deepEqual(chartPrunes, [chartWrites[0].sourceKey]);
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
 } finally {
   store?.close();
   rmSync(directory, { recursive: true, force: true });
 }
 
+const chartOrderingDirectory = mkdtempSync(join(tmpdir(), "market-alerts-chart-order-"));
+let chartOrderingStore;
+try {
+  chartOrderingStore = openMarketAlertsStore(join(chartOrderingDirectory, "alerts.sqlite"));
+  let releaseChart;
+  let announceChartStart;
+  let deliveries = 0;
+  const chartStarted = new Promise((resolve) => {
+    announceChartStart = resolve;
+  });
+  const chartReleased = new Promise((resolve) => {
+    releaseChart = resolve;
+  });
+  const scan = runVolatilityRestScan({
+    client: {
+      getExchangeInfo: async () => exchangeInfo,
+      getTickers24h: async () => tickers.filter((ticker) => ticker.symbol === "BTCUSDT"),
+      getKlines: async (_symbol, interval, limit) =>
+        interval === "5m" && limit === 120
+          ? flatKlines(300_000, 120)
+          : interval === "5m" ? pumpKlines5m() : pump1m,
+      getFullyDilutedValuation: async () => 20_000_000,
+    },
+    store: chartOrderingStore,
+    nowMs: TEST_NOW_MS,
+    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000 },
+    deliverAlert: async () => {
+      deliveries += 1;
+      return { status: "sent", messageId: 41 };
+    },
+    writeChart: async (input) => {
+      announceChartStart();
+      await chartReleased;
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+      };
+    },
+  });
+  await chartStarted;
+  const deliveriesBeforeChartCompleted = deliveries;
+  releaseChart();
+  const result = await scan;
+  assert.equal(result.alerts, 1);
+  assert.equal(deliveriesBeforeChartCompleted, 1);
+} finally {
+  chartOrderingStore?.close();
+  rmSync(chartOrderingDirectory, { recursive: true, force: true });
+}
+
+const chartFailureDirectory = mkdtempSync(join(tmpdir(), "market-alerts-chart-failure-"));
+let chartFailureStore;
+const originalConsoleError = console.error;
+try {
+  chartFailureStore = openMarketAlertsStore(join(chartFailureDirectory, "alerts.sqlite"));
+  let deliveries = 0;
+  console.error = () => {};
+  const result = await runVolatilityRestScan({
+    client: {
+      getExchangeInfo: async () => exchangeInfo,
+      getTickers24h: async () => tickers.filter((ticker) => ticker.symbol === "BTCUSDT"),
+      getKlines: async (_symbol, interval) =>
+        interval === "5m" ? pumpKlines5m() : pump1m,
+      getFullyDilutedValuation: async () => 20_000_000,
+    },
+    store: chartFailureStore,
+    nowMs: TEST_NOW_MS,
+    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000 },
+    writeChart: async () => {
+      throw new Error("chart disk unavailable");
+    },
+    deliverAlert: async () => {
+      deliveries += 1;
+      return { status: "sent", messageId: 42 };
+    },
+  });
+  const snapshot = chartFailureStore.getMarketAlertsSnapshot({ limit: 10 });
+  assert.equal(result.alerts, 1);
+  assert.equal(deliveries, 1);
+  assert.equal(snapshot.events[0].deliveryStatus, "sent");
+  assert.equal(snapshot.events[0].chartUrl, null);
+} finally {
+  console.error = originalConsoleError;
+  chartFailureStore?.close();
+  rmSync(chartFailureDirectory, { recursive: true, force: true });
+}
+
 const squeezeDirectory = mkdtempSync(join(tmpdir(), "market-alerts-squeeze-"));
 let squeezeStore;
 try {
   squeezeStore = openMarketAlertsStore(join(squeezeDirectory, "alerts.sqlite"));
+  const squeezeChartWrites = [];
   const squeezeKlines = flatKlines(300_000, 25);
   squeezeKlines[21] = kline(21, 100, 100, 10);
   squeezeKlines[22] = kline(22, 100, 101, 10);
@@ -178,7 +298,8 @@ try {
       { sumOpenInterestValue: "7500000" },
       { sumOpenInterestValue: "8000000" },
     ],
-    getKlines: async () => squeezeKlines,
+    getKlines: async (_symbol, _interval, limit) =>
+      limit === 120 ? flatKlines(300_000, 120) : squeezeKlines,
     getGlobalLongShortRatio: async () => 0.72,
     getTopTraderPositionRatio: async () => 0.81,
     getTakerBuySellRatio: async () => 1.35,
@@ -188,6 +309,15 @@ try {
     store: squeezeStore,
     nowMs: TEST_NOW_MS,
     config: { squeezeTopN: 1, squeezeWorkers: 1, minOiNotional: 2_000_000 },
+    writeChart: async (input) => {
+      squeezeChartWrites.push(input);
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+      };
+    },
   });
   assert.equal(result.scanned, 1);
   assert.equal(result.alerts, 1);
@@ -196,6 +326,12 @@ try {
   });
   assert.equal(snapshot.events[0].type, "short_squeeze");
   assert.equal(snapshot.events[0].level, 3);
+  assert.equal(
+    snapshot.events[0].chartUrl,
+    `/api/market-alerts/charts/BTCUSDT?v=${squeezeChartWrites[0].sourceKey}`,
+  );
+  assert.equal(squeezeChartWrites.length, 1);
+  assert.equal(squeezeChartWrites[0].klines.length, 120);
 } finally {
   squeezeStore?.close();
   rmSync(squeezeDirectory, { recursive: true, force: true });
