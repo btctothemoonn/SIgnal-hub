@@ -48,6 +48,12 @@ import {
   parseSignalFeedReadingAnchor,
   type SignalFeedReadingAnchor,
 } from "@/lib/signal-feed-reading-position";
+import {
+  SIGNAL_FEED_RENDER_BATCH_SIZE,
+  initialSignalFeedRenderCount,
+  nextSignalFeedRenderCount,
+  signalFeedRenderCountForTarget,
+} from "@/lib/signal-feed-render-window";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
 import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
 import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
@@ -569,6 +575,10 @@ type Monitor985RefreshResponse = {
 
 type FeedTab = SignalFeedTab;
 
+type PendingFeedNavigation =
+  | { type: "oldest" }
+  | { type: "saved"; anchor: SignalFeedReadingAnchor };
+
 const SOURCE_ICON: Record<string, { letter: string; tone: string }> = {
   telegram: { letter: "T", tone: "bg-info text-background" },
   x: { letter: "X", tone: "bg-foreground text-background" },
@@ -645,6 +655,10 @@ export function UnifiedNewsPanel({
   );
   const [authorMenuOpen, setAuthorMenuOpen] = useState(false);
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
+  const [feedRenderWindow, setFeedRenderWindow] = useState({
+    key: "",
+    count: SIGNAL_FEED_RENDER_BATCH_SIZE,
+  });
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
   const portalRoot = useSyncExternalStore(
     subscribeDocumentBody,
@@ -653,6 +667,10 @@ export function UnifiedNewsPanel({
   );
   const authorMenuRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const filteredFeedRef = useRef<UnifiedNewsItem[]>([]);
+  const feedRenderWindowKeyRef = useRef("");
+  const pendingFeedNavigationRef = useRef<PendingFeedNavigation | null>(null);
   const stagedReadingPositionRef = useRef<SignalFeedReadingAnchor | null>(null);
   const readingAnchorFrameRef = useRef<number | null>(null);
   const [readingPositionStatus, setReadingPositionStatus] = useState<string | null>(
@@ -725,10 +743,21 @@ export function UnifiedNewsPanel({
   }, []);
 
   const scrollToOldestSignal = useCallback(() => {
+    const allItems = filteredFeedRef.current;
+    if (allItems.length === 0) return;
     const items = timelineRef.current?.querySelectorAll<HTMLElement>(
       "[data-signal-feed-item-id]",
     );
     if (!items?.length) return;
+
+    if (items.length < allItems.length) {
+      pendingFeedNavigationRef.current = { type: "oldest" };
+      setFeedRenderWindow({
+        key: feedRenderWindowKeyRef.current,
+        count: allItems.length,
+      });
+      return;
+    }
 
     items.item(items.length - 1).scrollIntoView({
       behavior: "smooth",
@@ -831,6 +860,22 @@ export function UnifiedNewsPanel({
 
     const item = findTimelineItem(anchor.itemId);
     if (!item) {
+      const allItems = filteredFeedRef.current;
+      const requiredCount = signalFeedRenderCountForTarget(
+        allItems,
+        anchor.itemId,
+        timelineRef.current?.querySelectorAll("[data-signal-feed-item-id]")
+          .length ?? 0,
+      );
+      if (requiredCount > 0 && allItems[requiredCount - 1]?.id === anchor.itemId) {
+        pendingFeedNavigationRef.current = { type: "saved", anchor };
+        setFeedRenderWindow({
+          key: feedRenderWindowKeyRef.current,
+          count: requiredCount,
+        });
+        setReadingPositionStatus("正在返回上次阅读位置...");
+        return;
+      }
       setReadingPositionStatus("上次阅读内容不在当前列表");
       return;
     }
@@ -1052,11 +1097,88 @@ export function UnifiedNewsPanel({
     feedRange,
   ]);
 
-  const deferredFeed = filteredFeed;
+  const feedRenderWindowKey = [
+    activeTab,
+    feedRange,
+    effectiveAuthorFilter,
+    deferredSearchQuery.trim().toLowerCase(),
+  ].join("\u0000");
+  const renderedFeedCount =
+    feedRenderWindow.key === feedRenderWindowKey
+      ? Math.min(feedRenderWindow.count, filteredFeed.length)
+      : initialSignalFeedRenderCount(filteredFeed.length);
+  const deferredFeed = useMemo(
+    () => filteredFeed.slice(0, renderedFeedCount),
+    [filteredFeed, renderedFeedCount],
+  );
+  const hasMoreFeedItems = deferredFeed.length < filteredFeed.length;
+
+  useLayoutEffect(() => {
+    filteredFeedRef.current = filteredFeed;
+    feedRenderWindowKeyRef.current = feedRenderWindowKey;
+  }, [feedRenderWindowKey, filteredFeed]);
+
+  const loadMoreFeed = useCallback(() => {
+    setFeedRenderWindow((current) => {
+      const currentCount =
+        current.key === feedRenderWindowKey
+          ? current.count
+          : initialSignalFeedRenderCount(filteredFeed.length);
+      return {
+        key: feedRenderWindowKey,
+        count: nextSignalFeedRenderCount(currentCount, filteredFeed.length),
+      };
+    });
+  }, [feedRenderWindowKey, filteredFeed.length]);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    if (
+      !sentinel ||
+      !hasMoreFeedItems ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) loadMoreFeed();
+      },
+      {
+        root: rail ? timelineRef.current : null,
+        rootMargin: "360px 0px",
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreFeedItems, loadMoreFeed, rail]);
 
   useLayoutEffect(() => {
     restoreStagedReadingPosition();
   }, [deferredFeed, restoreStagedReadingPosition]);
+
+  useLayoutEffect(() => {
+    const pending = pendingFeedNavigationRef.current;
+    if (!pending) return;
+
+    const target =
+      pending.type === "oldest"
+        ? timelineRef.current
+            ?.querySelectorAll<HTMLElement>("[data-signal-feed-item-id]")
+            .item(deferredFeed.length - 1)
+        : findTimelineItem(pending.anchor.itemId);
+    if (!target) return;
+    pendingFeedNavigationRef.current = null;
+    window.requestAnimationFrame(() => {
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: pending.type === "oldest" ? "end" : "center",
+      });
+      if (pending.type === "saved") {
+        setReadingPositionStatus("已返回上次阅读位置");
+      }
+    });
+  }, [deferredFeed, findTimelineItem]);
 
   useEffect(() => {
     const timeline = timelineRef.current;
@@ -1586,10 +1708,13 @@ export function UnifiedNewsPanel({
               </p>
             </div>
 
-            <div className="flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg border border-workspace-line-strong bg-workspace-canvas p-1 xl:w-[34rem] xl:overflow-visible">
+            <div
+              data-signal-source-tabs
+              className="grid w-full min-w-0 grid-cols-4 gap-1 rounded-lg border border-workspace-line-strong bg-workspace-canvas p-1 xl:w-[34rem]"
+            >
               <button
                 onClick={() => selectActiveTab("all")}
-                className={`relative min-w-[5.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
+                className={`relative min-w-0 whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
                   activeTab === "all"
                     ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
@@ -1613,7 +1738,7 @@ export function UnifiedNewsPanel({
                   <button
                     key={tab.id}
                     onClick={() => selectActiveTab(tab.id)}
-                    className={`relative min-w-[6.25rem] flex-1 shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-xs font-medium transition-colors ${
+                    className={`relative min-w-0 whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
                       activeTab === tab.id
                         ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                         : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
@@ -1790,7 +1915,10 @@ export function UnifiedNewsPanel({
         </div>
 
         <div className="border-t border-workspace-line-strong/70 px-2.5 py-1.5 text-[11px] text-muted">
-          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+          <div
+            data-signal-utility-strip
+            className="flex flex-wrap items-center gap-2 whitespace-nowrap"
+          >
             <button
               type="button"
               onClick={returnToSavedReadingPosition}
@@ -1928,7 +2056,8 @@ export function UnifiedNewsPanel({
         }`}
       >
         {deferredFeed.length > 0 ? (
-          deferredFeed.map((item) => {
+          <>
+          {deferredFeed.map((item) => {
             const mediaViewport = getMediaViewport(item.media);
             const isRead = readItems.has(item.id);
             const icon = SOURCE_ICON[item.source] || SOURCE_ICON.alert;
@@ -2232,7 +2361,23 @@ export function UnifiedNewsPanel({
                 </div>
               </article>
             );
-          })
+          })}
+          {hasMoreFeedItems ? (
+            <div
+              ref={loadMoreSentinelRef}
+              data-signal-feed-load-more
+              className="flex justify-center px-3 py-4"
+            >
+              <button
+                type="button"
+                onClick={loadMoreFeed}
+                className="h-9 rounded-md border border-workspace-line-strong bg-workspace-surface px-4 text-xs font-semibold text-muted transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-foreground"
+              >
+                继续加载（已显示 {deferredFeed.length} / {filteredFeed.length}）
+              </button>
+            </div>
+          ) : null}
+          </>
         ) : (
           <div className="px-4 py-12 text-center">
             <p className="text-sm font-medium text-foreground">没有匹配的消息</p>

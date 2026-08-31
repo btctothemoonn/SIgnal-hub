@@ -12,11 +12,11 @@ assert.match(
   /import \{ StocksHynixPremiumCurve \} from "@\/components\/stocks-hynix-premium-curve";/,
 );
 assert.ok(
-  component.indexOf("<StocksHynixPremiumCurve />") >= 0,
+  component.indexOf("<StocksHynixPremiumCurve compactByDefault />") >= 0,
   "homepage renders the Binance Hynix premium curve",
 );
 assert.ok(
-  component.indexOf("<StocksHynixPremiumCurve />") <
+  component.indexOf("<StocksHynixPremiumCurve compactByDefault />") <
     component.indexOf("<UnifiedNewsPanel"),
   "homepage premium curve appears above the signal feed",
 );

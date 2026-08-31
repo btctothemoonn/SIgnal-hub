@@ -7,6 +7,12 @@ const source = readFileSync(
 );
 
 assert.match(source, /币安海力士溢价曲线/);
+assert.match(source, /type StocksHynixPremiumCurveProps =/);
+assert.match(source, /compactByDefault\?: boolean/);
+assert.match(source, /useState\(!compactByDefault\)/);
+assert.match(source, /aria-expanded=\{expanded\}/);
+assert.match(source, /展开图表/);
+assert.match(source, /收起图表/);
 assert.match(source, /SKHYUSDT/);
 assert.match(source, /PREMIUM_INTERVAL_OPTIONS/);
 assert.match(source, /\{ value: "1m",/);
@@ -58,7 +64,7 @@ assert.match(source, /CandlestickSeries/);
 assert.match(source, /HistogramSeries/);
 assert.match(source, /fitContent\(\)/);
 assert.match(source, /ResizeObserver/);
-assert.match(source, /className="min-h-\[32rem\][^"]*rounded-lg/);
+assert.match(source, /expanded \? "min-h-\[32rem\]" : "min-h-0"/);
 assert.doesNotMatch(source, /<svg/);
 assert.doesNotMatch(source, /polyline/);
 

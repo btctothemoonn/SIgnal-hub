@@ -82,8 +82,9 @@ await test("app shell exposes product sidebar and toolbar surfaces", () => {
   assert.doesNotMatch(appShell, /font-black|rgba\(0,232,135/);
   assert.match(
     appShell,
-    /overflow-x-auto[^\n]*\[scrollbar-width:none\][^\n]*\[&::\-webkit-scrollbar\]:hidden/,
+    /className="flex shrink-0 items-center gap-2"/,
   );
+  assert.doesNotMatch(appShell, /-mx-3 flex min-w-0 items-center gap-2 overflow-x-auto/);
   assert.doesNotMatch(appShell, /font-serif/);
   assert.doesNotMatch(appShell, /bg-info text-sm font-bold text-white/);
 });

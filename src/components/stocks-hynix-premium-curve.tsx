@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
@@ -121,7 +122,14 @@ function pointToVolume(point: BinanceHynixPremiumPoint): HistogramData {
   };
 }
 
-export function StocksHynixPremiumCurve() {
+type StocksHynixPremiumCurveProps = {
+  compactByDefault?: boolean;
+};
+
+export function StocksHynixPremiumCurve({
+  compactByDefault = false,
+}: StocksHynixPremiumCurveProps = {}) {
+  const [expanded, setExpanded] = useState(!compactByDefault);
   const [selectedInterval, setSelectedInterval] =
     useState<BinanceHynixPremiumInterval>("1m");
   const [liveSnapshot, setLiveSnapshot] =
@@ -306,7 +314,7 @@ export function StocksHynixPremiumCurve() {
       volumeSeriesRef.current = null;
       fittedRangeRef.current = null;
     };
-  }, [selectedInterval]);
+  }, [expanded, selectedInterval]);
 
   useEffect(() => {
     candleSeriesRef.current?.setData(candleData);
@@ -321,7 +329,7 @@ export function StocksHynixPremiumCurve() {
       chartRef.current?.timeScale().fitContent();
       fittedRangeRef.current = rangeKey;
     }
-  }, [candleData, selectedInterval, volumeData]);
+  }, [candleData, expanded, selectedInterval, volumeData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -521,7 +529,7 @@ export function StocksHynixPremiumCurve() {
   return (
     <section
       data-testid="stocks-hynix-premium-curve"
-      className="min-h-[32rem] min-w-0 rounded-lg border border-line/60 bg-panel-strong px-3 py-3 shadow-sm"
+      className={`${expanded ? "min-h-[32rem]" : "min-h-0"} min-w-0 rounded-lg border border-line/60 bg-panel-strong px-3 py-3 shadow-sm`}
     >
       {premiumAlertVisible ? (
         <div
@@ -576,40 +584,57 @@ export function StocksHynixPremiumCurve() {
             SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
             {selectedInterval === "1m" ? "最近3天" : "2026-07-14 起"}
           </p>
-          <div className="mt-2 inline-flex rounded-lg border border-line/70 bg-workspace-canvas p-1">
-            {PREMIUM_INTERVAL_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setSelectedInterval(option.value)}
-                className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                  selectedInterval === option.value
-                    ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
-                    : "border-transparent text-muted hover:text-foreground"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={premiumAlertEnabled}
-            onClick={() => writeCachedAlertEnabled(!premiumAlertEnabled)}
-            className={`mt-2 inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-              premiumAlertEnabled
-                ? "border-success/45 bg-success/10 text-success"
-                : "border-line/70 bg-background/45 text-muted hover:text-foreground"
-            }`}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                premiumAlertEnabled ? "bg-success" : "bg-muted"
+          {expanded ? (
+            <div className="mt-2 inline-flex rounded-lg border border-line/70 bg-workspace-canvas p-1">
+              {PREMIUM_INTERVAL_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedInterval(option.value)}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
+                    selectedInterval === option.value
+                      ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
+                      : "border-transparent text-muted hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={premiumAlertEnabled}
+              onClick={() => writeCachedAlertEnabled(!premiumAlertEnabled)}
+              className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
+                premiumAlertEnabled
+                  ? "border-success/45 bg-success/10 text-success"
+                  : "border-line/70 bg-background/45 text-muted hover:text-foreground"
               }`}
-            />
-            30% 溢价提醒 {premiumAlertEnabled ? "开" : "关"}
-          </button>
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  premiumAlertEnabled ? "bg-success" : "bg-muted"
+                }`}
+              />
+              30% 溢价提醒 {premiumAlertEnabled ? "开" : "关"}
+            </button>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((current) => !current)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-line/70 bg-workspace-canvas px-2.5 py-1 text-xs font-semibold text-muted transition hover:border-accent/40 hover:bg-accent-soft hover:text-foreground"
+            >
+              {expanded ? (
+                <ChevronUp aria-hidden className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown aria-hidden className="h-3.5 w-3.5" />
+              )}
+              {expanded ? "收起图表" : "展开图表"}
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-2 sm:min-w-[30rem]">
           <div className="rounded-lg border border-line/60 bg-workspace-canvas px-3 py-2">
@@ -637,6 +662,8 @@ export function StocksHynixPremiumCurve() {
         </div>
       </div>
 
+      {expanded ? (
+        <>
       <div className="relative min-w-0 overflow-hidden rounded-lg border border-line/60 bg-workspace-canvas">
         <div
           ref={chartContainerRef}
@@ -713,6 +740,21 @@ export function StocksHynixPremiumCurve() {
           <span className="text-warning">{fundingError}</span>
         ) : null}
       </div>
+        </>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/50 pt-2 text-[11px] text-muted">
+          <span>
+            {snapshot
+              ? `${shownPoints.length} 根 ${selectedInterval} K 线已缓存`
+              : "行情加载中"}
+          </span>
+          {latest ? <span>更新 {formatTime(latest.capturedAt)}</span> : null}
+          {error ? <span className="text-warning">{error}</span> : null}
+          {fundingError ? (
+            <span className="text-warning">{fundingError}</span>
+          ) : null}
+        </div>
+      )}
     </section>
   );
 }

@@ -564,6 +564,7 @@ const sharedEarningsPayloadCache = new Map();
 let publicOnlyAlphaRequests = 0;
 const publicOnlyInput = {
   stocks: [nvdaStock],
+  now: new Date("2026-08-15T00:00:00.000Z"),
   payloadCache: sharedEarningsPayloadCache,
   env: {
     STOCKS_FMP_API_KEY: "fmp-key",

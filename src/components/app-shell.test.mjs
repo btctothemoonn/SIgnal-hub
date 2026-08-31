@@ -15,10 +15,11 @@ assert.match(source, /data-workspace-rail/);
 assert.match(source, /data-workspace-topbar/);
 assert.match(source, /from "lucide-react"/);
 assert.doesNotMatch(source, /function ShellGlyph/);
-assert.match(source, /overflow-x-auto/);
 assert.match(source, /fixed bottom-0/);
 assert.match(source, /lg:hidden/);
-assert.match(source, /pb-\[calc\(5rem\+env\(safe-area-inset-bottom\)\)\] lg:pb-0/);
+assert.match(source, /pb-\[calc\(4\.25rem\+env\(safe-area-inset-bottom\)\)\]/);
+assert.match(source, /min-h-14 items-center justify-between/);
+assert.match(source, /hidden truncate text-xs text-muted sm:block/);
 assert.match(source, /\{subtitle \? \(/);
 assert.match(source, /router\.prefetch\("\/settings"\)/);
 assert.match(source, /label: "抖音"/);
@@ -32,7 +33,8 @@ assert.match(
   source,
   /item\.key === "intel"[\s\S]*event\.preventDefault\(\)[\s\S]*window\.location\.assign\(item\.href\)/,
 );
-assert.match(source, /grid-cols-6/);
+assert.match(source, /grid-cols-5/);
+assert.match(source, /mobileShellNavItems\.map/);
 assert.match(source, /item\.mobileLabel \?\? item\.label/);
 assert.doesNotMatch(source, /requestIdleCallback/);
 assert.doesNotMatch(source, /warmFrequentRoutes/);

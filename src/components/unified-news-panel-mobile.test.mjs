@@ -21,6 +21,14 @@ assert.match(source, /authorFavorites\.has\(option\.value\)/);
 assert.match(source, /aria-pressed=\{isFavorite\}/);
 assert.match(source, /setAuthorFilter\(option\.value\)/);
 assert.match(source, /data-signal-toolbar/);
+assert.match(source, /data-signal-source-tabs/);
+assert.match(source, /grid w-full min-w-0 grid-cols-4/);
+assert.match(source, /data-signal-utility-strip/);
+assert.match(source, /flex flex-wrap items-center gap-2/);
+assert.doesNotMatch(
+  source,
+  /flex w-full min-w-0 gap-1 overflow-x-auto rounded-lg/,
+);
 assert.match(source, /data-signal-feed-pane/);
 assert.match(source, /shouldRefreshSignalSnapshotsOnEffect/);
 assert.match(source, /signalRefreshRangeRef/);

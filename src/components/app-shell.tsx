@@ -13,6 +13,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { primaryMobileNavItems } from "@/lib/app-shell-navigation";
 
 export type AppShellNavKey =
   | "signals"
@@ -58,6 +59,7 @@ const primaryShellNavItems = shellNavItems.filter(
 const settingsShellNavItem = shellNavItems.find(
   (item) => item.key === "settings",
 );
+const mobileShellNavItems = primaryMobileNavItems(shellNavItems);
 const NAV_PENDING_TIMEOUT_MS = 1_500;
 
 function ShellNavItem({
@@ -108,7 +110,7 @@ function StatusPill({
   tone = "text-success",
 }: AppShellStatusPill) {
   return (
-    <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-workspace-line-strong bg-workspace-surface px-2.5 text-xs text-muted shadow-sm">
+    <div className="hidden h-9 items-center gap-2 rounded-lg border border-workspace-line-strong bg-workspace-surface px-2.5 text-xs text-muted shadow-sm sm:inline-flex">
       <span className="font-semibold text-foreground">{label}</span>
       <span>{children}</span>
       <span className="h-1 w-1 rounded-full bg-line" />
@@ -174,7 +176,7 @@ export function AppShell({
     <div
       data-mobile-command-shell
       data-workspace-shell
-      className="min-h-screen bg-workspace-canvas pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-0 text-foreground"
+      className="min-h-screen bg-workspace-canvas pb-[calc(4.25rem+env(safe-area-inset-bottom))] text-foreground lg:pb-0"
     >
       <div className="flex min-h-screen">
         <aside className="hidden w-[13.5rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-3 py-4 shadow-[8px_0_28px_-24px_rgba(15,23,42,0.28)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>
@@ -219,9 +221,9 @@ export function AppShell({
             data-workspace-topbar
             className="sticky top-0 z-40 border-b border-workspace-line-strong bg-workspace-toolbar/95 backdrop-blur-xl"
           >
-            <div className="flex min-h-[4.25rem] flex-col gap-2 px-3 py-2.5 sm:px-5 lg:min-h-[4.75rem] lg:flex-row lg:items-center lg:justify-between lg:py-3">
+            <div className="flex min-h-14 items-center justify-between gap-2 px-3 py-2 sm:min-h-[4.25rem] sm:px-5 lg:min-h-[4.75rem] lg:py-3">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent-soft font-mono text-xs font-bold text-accent shadow-sm lg:hidden">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent-soft font-mono text-[11px] font-bold text-accent shadow-sm lg:hidden">
                   SH
                 </div>
                 <div className="min-w-0">
@@ -229,14 +231,14 @@ export function AppShell({
                     Signal Hub
                   </h1>
                   {subtitle ? (
-                    <p className="mt-0.5 truncate text-xs text-muted">
+                    <p className="mt-0.5 hidden truncate text-xs text-muted sm:block">
                       {subtitle}
                     </p>
                   ) : null}
                 </div>
               </div>
 
-              <div className="-mx-3 flex min-w-0 items-center gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:px-0">
+              <div className="flex shrink-0 items-center gap-2">
                 {statusPills.map((pill) => (
                   <StatusPill key={pill.label} {...pill} />
                 ))}
@@ -248,7 +250,7 @@ export function AppShell({
                   onFocus={warmSettingsRoute}
                   onPointerDown={warmSettingsRoute}
                   onPointerEnter={warmSettingsRoute}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-workspace-line-strong bg-workspace-surface text-muted shadow-sm transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-accent lg:hidden"
                 >
                   <Settings aria-hidden className="h-4 w-4" />
                 </Link>
@@ -271,10 +273,10 @@ export function AppShell({
       </div>
       <nav
         aria-label="Mobile primary navigation"
-        className="fixed bottom-0 left-0 right-0 z-50 border-t border-workspace-line-strong bg-workspace-toolbar/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur-xl lg:hidden"
+        className="fixed bottom-0 left-0 right-0 z-50 border-t border-workspace-line-strong bg-workspace-toolbar/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1.5 backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-lg grid-cols-6 gap-1">
-          {shellNavItems.map((item) => {
+        <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
+          {mobileShellNavItems.map((item) => {
             const active = item.key === displayedActiveNav;
             const mobileLabel = item.mobileLabel ?? item.label;
             return (
@@ -301,7 +303,7 @@ export function AppShell({
                   if (item.key !== "intel") warmRoute(item);
                 }}
                 className={[
-                  "flex h-12 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] font-semibold transition-all duration-75 active:scale-[0.98]",
+                  "flex h-11 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] font-semibold transition-all duration-75 active:scale-[0.98]",
                   active
                     ? "border-accent/45 bg-accent-soft text-foreground"
                     : "border-transparent text-muted hover:bg-info-soft hover:text-foreground",

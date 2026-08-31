@@ -2081,15 +2081,17 @@ export async function fetchFmpStocksFinancialSnapshot({
   fetchImpl = fetch,
   env = process.env,
   payloadCache,
+  now = new Date(),
 }: {
   stocks: AlphaResearchStock[];
   fetchImpl?: FetchLike;
   env?: EnvLike;
   payloadCache?: StocksEarningsFallbackPayloadCache;
+  now?: Date;
 }): Promise<StocksFinancialSnapshot> {
   const apiKeys = fmpApiKeys(env);
   if (apiKeys.length === 0) throw new Error("FMP API key is not configured");
-  const generatedAt = new Date().toISOString();
+  const generatedAt = now.toISOString();
   const providerStocks = selectFmpFinancialStocksForRefresh(
     stocks,
     env,

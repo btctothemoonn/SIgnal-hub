@@ -52,7 +52,7 @@ function SignalFeedStack({
 }: SignalsResponsiveLayoutProps & { rail?: boolean }) {
   return (
     <div className="min-w-0 space-y-3">
-      <StocksHynixPremiumCurve />
+      <StocksHynixPremiumCurve compactByDefault />
       <UnifiedNewsPanel
         initialTelegramSnapshot={initialTelegramSnapshot}
         initialXSnapshot={initialXSnapshot}
