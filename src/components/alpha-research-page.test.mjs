@@ -9,6 +9,10 @@ const pageSource = readFileSync(
   new URL("../app/stocks/page.tsx", import.meta.url),
   "utf8",
 );
+const sectorSource = readFileSync(
+  new URL("./alpha-sector-list.tsx", import.meta.url),
+  "utf8",
+);
 
 assert.doesNotMatch(pageSource, /statusPills=/);
 assert.doesNotMatch(pageSource, /strongCount/);
@@ -28,6 +32,9 @@ assert.match(source, /StocksTodayChanges/);
 assert.match(source, /AlphaSummaryCard/);
 assert.match(source, /行情尝试接入 Yahoo，财报采用 FMP 标准化数据/);
 assert.match(source, /data-stocks-workspace/);
+assert.match(source, /data-stocks-command-bar/);
+assert.match(source, /hidden text-xs text-muted sm:block/);
+assert.match(source, /hidden truncate text-\[11px\] opacity-75 md:block/);
 assert.match(source, /data-stocks-chart-band/);
 assert.match(source, /data-stocks-research-split/);
 assert.match(source, /grid-cols-2/);
@@ -81,5 +88,7 @@ assert.doesNotMatch(source, /scheduleDeferredBrowserTask\(loadCatalystData/);
 assert.doesNotMatch(source, /performanceIssueLabel/);
 assert.doesNotMatch(source, /window\.localStorage\.getItem/);
 assert.doesNotMatch(source, /window\.localStorage\.setItem/);
+assert.match(sectorSource, /hidden text-\[11px\] leading-4 text-muted sm:block/);
+assert.match(sectorSource, /hidden min-w-0 flex-wrap gap-1 sm:flex/);
 
 console.log("ok - alpha research page retained Stocks contract");

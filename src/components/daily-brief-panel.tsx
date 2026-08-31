@@ -3,6 +3,8 @@
 import {
   Bitcoin,
   CalendarDays,
+  ChevronDown,
+  ChevronUp,
   Cpu,
   ExternalLink,
   Globe2,
@@ -214,6 +216,7 @@ export function DailyBriefPanel({
     null,
   );
   const [activeGroup, setActiveGroup] = useState<DailyBriefGroupId>("ai");
+  const [marketContextExpanded, setMarketContextExpanded] = useState(false);
   const [pending, setPending] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
   const groupedItems = useMemo(
@@ -308,7 +311,7 @@ export function DailyBriefPanel({
 
   return (
     <section data-daily-brief className="mx-auto w-full max-w-[1400px]">
-      <div className="mb-3 flex flex-col gap-3 rounded-lg border border-workspace-line-strong bg-workspace-surface p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+      <div className="mb-3 flex flex-col gap-2.5 rounded-lg border border-workspace-line-strong bg-workspace-surface p-3 shadow-sm sm:p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-line bg-workspace-surface-raised px-2.5 py-1 text-xs font-semibold text-muted">
@@ -318,7 +321,7 @@ export function DailyBriefPanel({
               {statusLabel(snapshot, pending)}
             </span>
           </div>
-          <h2 className="mt-2.5 text-xl font-semibold leading-tight text-foreground sm:text-2xl">
+          <h2 className="mt-2 text-lg font-semibold leading-tight text-foreground sm:mt-2.5 sm:text-2xl">
             {snapshot.brief?.title || "每日投资简报"}
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-muted sm:text-sm">
@@ -407,18 +410,33 @@ export function DailyBriefPanel({
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
+          <div
+            data-mobile-market-context
+            className="rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm"
+          >
             <div className="grid min-w-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
-              <div className="min-w-0 p-4">
+              <div className="min-w-0 p-3 sm:p-4">
                 <div className="mb-1.5 text-[11px] font-semibold text-muted">
                   MARKET PULSE
                 </div>
-                <p className="text-sm leading-relaxed text-foreground sm:text-[15px]">
+                <p
+                  className={[
+                    "text-sm leading-relaxed text-foreground sm:text-[15px]",
+                    marketContextExpanded
+                      ? ""
+                      : "line-clamp-3 lg:line-clamp-none",
+                  ].join(" ")}
+                >
                   {snapshot.brief.marketPulse}
                 </p>
               </div>
               {snapshot.brief.priorityLine ? (
-                <div className="border-t border-line px-4 py-3 lg:border-l lg:border-t-0">
+                <div
+                  className={[
+                    "border-t border-line px-3 py-3 sm:px-4 lg:border-l lg:border-t-0",
+                    marketContextExpanded ? "" : "hidden lg:block",
+                  ].join(" ")}
+                >
                   <div className="mb-1.5 text-[11px] font-semibold text-muted">
                     今日主线
                   </div>
@@ -429,7 +447,12 @@ export function DailyBriefPanel({
               ) : null}
             </div>
             {snapshot.brief.watchVariables.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5 border-t border-line px-4 py-2.5">
+              <div
+                className={[
+                  "flex flex-wrap gap-1.5 border-t border-line px-3 py-2.5 sm:px-4",
+                  marketContextExpanded ? "" : "hidden lg:flex",
+                ].join(" ")}
+              >
                 {snapshot.brief.watchVariables.map((variable) => (
                   <span
                     key={variable}
@@ -440,6 +463,19 @@ export function DailyBriefPanel({
                 ))}
               </div>
             ) : null}
+            <button
+              type="button"
+              aria-expanded={marketContextExpanded}
+              onClick={() => setMarketContextExpanded((current) => !current)}
+              className="flex h-9 w-full items-center justify-center gap-1.5 border-t border-line text-xs font-semibold text-muted transition-colors hover:bg-workspace-surface-raised hover:text-foreground lg:hidden"
+            >
+              {marketContextExpanded ? (
+                <ChevronUp aria-hidden className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown aria-hidden className="h-3.5 w-3.5" />
+              )}
+              {marketContextExpanded ? "收起背景" : "展开背景"}
+            </button>
           </div>
 
           <div className="rounded-lg border border-workspace-line-strong bg-workspace-toolbar p-1 shadow-sm">

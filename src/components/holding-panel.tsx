@@ -1449,19 +1449,17 @@ export function HoldingPanel() {
       : "U本位合约";
 
   return (
-    <div data-holding-workspace className="min-w-0 space-y-4">
-      <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-line/70 bg-panel-strong p-3 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-normal text-muted">
-            Holding
-          </div>
-          <h2 className="mt-1 text-lg font-semibold text-foreground">
-            持仓账户
-          </h2>
+    <div data-holding-workspace className="min-w-0 space-y-3 sm:space-y-4">
+      <div
+        data-holding-command-bar
+        className="flex min-w-0 items-center gap-2 rounded-lg border border-line/70 bg-panel-strong p-1.5 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] sm:justify-between sm:p-2"
+      >
+        <div className="hidden min-w-0 sm:block">
+          <h2 className="px-2 text-sm font-semibold text-foreground">持仓账户</h2>
         </div>
         <div
           data-holding-view-tabs
-          className="grid w-full min-w-0 grid-cols-3 gap-1 rounded-lg border border-line/70 bg-workspace-canvas p-1 sm:max-w-[30rem]"
+          className="grid w-full min-w-0 grid-cols-3 gap-1 rounded-md bg-workspace-canvas p-1 sm:max-w-[30rem]"
           role="tablist"
           aria-label="持仓账户视图"
         >
@@ -1528,18 +1526,18 @@ export function HoldingPanel() {
           role="tabpanel"
           aria-labelledby="holding-tab-binance"
         >
-      <div className="flex flex-col gap-3 border-b border-line/70 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-2.5 border-b border-line/70 px-3 py-3 sm:px-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-normal text-info">
+          <div className="hidden text-xs font-semibold uppercase tracking-normal text-info sm:block">
             Binance
           </div>
-          <h2 className="mt-1 text-2xl font-semibold leading-tight text-foreground">
+          <h2 className="text-lg font-semibold leading-tight text-foreground sm:mt-1 sm:text-2xl">
             Binance 持仓状况
           </h2>
-          <p className="mt-1 text-sm font-semibold text-muted">
+          <p className="hidden mt-1 text-sm font-semibold text-muted sm:block">
             实时跟踪 Binance 现货与合约表现，数据每 60 秒更新一次
           </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted sm:mt-2 sm:text-xs">
             <span>现货 + {accountModeLabel}</span>
             <span className="h-1 w-1 rounded-full bg-line" />
             <span>更新 {formatTime(snapshot?.updatedAt ?? null)}</span>
@@ -1560,7 +1558,7 @@ export function HoldingPanel() {
               setSaveError(null);
               setApiDialogOpen(true);
             }}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-info/30 bg-info-soft px-3 text-xs font-semibold text-info shadow-sm transition-colors hover:border-info/50 hover:bg-info-soft/80"
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-[6px] border border-info/30 bg-info-soft px-3 text-xs font-semibold text-info shadow-sm transition-colors hover:border-info/50 hover:bg-info-soft/80 sm:h-9"
           >
             <PlusIcon />
             添加 API
@@ -1569,7 +1567,7 @@ export function HoldingPanel() {
             type="button"
             onClick={() => void load({ force: true })}
             disabled={isBusy}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-[6px] border border-line/70 bg-panel px-3 text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-panel-strong disabled:cursor-not-allowed disabled:opacity-60 sm:h-9"
           >
             <RefreshIcon />
             {isBusy ? "刷新中" : "刷新"}
@@ -1577,7 +1575,7 @@ export function HoldingPanel() {
         </div>
       </div>
 
-      <div className="space-y-4 p-4">
+      <div className="space-y-3 p-3 sm:space-y-4 sm:p-4">
 
       {error ? (
         <div className="rounded-[6px] border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">

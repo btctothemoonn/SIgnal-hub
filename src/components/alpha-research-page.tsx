@@ -274,14 +274,16 @@ export function AlphaResearchPage() {
       data-stocks-workspace
       className="grid min-h-0 min-w-0 gap-3 overflow-x-clip"
     >
-      <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl">
-        <div className="grid gap-3 border-b border-line/60 px-3 py-3 sm:px-4 xl:grid-cols-[minmax(14rem,0.34fr)_minmax(0,0.66fr)] xl:items-center">
+      <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl" data-stocks-command-bar>
+        <div className="grid gap-2 border-b border-line/60 px-3 py-2.5 sm:px-4 sm:py-3 xl:grid-cols-[minmax(14rem,0.34fr)_minmax(0,0.66fr)] xl:items-center">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-foreground">
+            <h1 className="text-lg font-semibold text-foreground sm:text-2xl">
               STOCKS 美股投研池
             </h1>
-            <p className="mt-1 text-xs text-muted">
-              行情尝试接入 Yahoo，财报采用 FMP 标准化数据；失败时保留最近缓存。
+            <p className="hidden text-xs text-muted sm:block">
+              <span className="mt-1 block">
+                行情尝试接入 Yahoo，财报采用 FMP 标准化数据；失败时保留最近缓存。
+              </span>
             </p>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-1 rounded-lg border border-line/70 bg-workspace-canvas p-1">
@@ -294,14 +296,14 @@ export function AlphaResearchPage() {
                   aria-pressed={selected}
                   onClick={() => setActiveTab(tab.id)}
                   className={[
-                    "min-h-10 rounded-lg border px-2 py-1.5 text-left transition-colors",
+                    "min-h-9 rounded-md border px-2 py-1.5 text-left transition-colors sm:min-h-10 sm:rounded-lg",
                     selected
                       ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                       : "border-transparent text-muted hover:bg-panel hover:text-foreground",
                   ].join(" ")}
                 >
                   <span className="block text-xs font-semibold">{tab.label}</span>
-                  <span className="mt-0.5 block truncate text-[11px] opacity-75">
+                  <span className="hidden truncate text-[11px] opacity-75 md:block">
                     {tab.description}
                   </span>
                 </button>

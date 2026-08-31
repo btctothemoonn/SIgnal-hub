@@ -85,12 +85,12 @@ export function AlphaSectorList({
   return (
     <aside
       data-stocks-pool
-      className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-3 lg:sticky lg:top-[11.75rem] lg:max-h-[calc(100vh-12.5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain"
+      className="min-w-0 rounded-[6px] border border-line/70 bg-panel-strong p-2.5 sm:p-3 lg:sticky lg:top-[11.75rem] lg:max-h-[calc(100vh-12.5rem)] lg:self-start lg:overflow-y-auto lg:overscroll-contain"
     >
-      <div className="mb-3">
+      <div className="mb-2 sm:mb-3">
         <h2 className="text-sm font-semibold text-foreground">产业链股票池</h2>
-        <p className="mt-1 text-xs text-muted">
-          按板块分组，组内保留固定产业链顺序。
+        <p className="hidden text-xs text-muted sm:block">
+          <span className="mt-1 block">按板块分组，组内保留固定产业链顺序。</span>
         </p>
       </div>
 
@@ -102,8 +102,8 @@ export function AlphaSectorList({
                 <h3 className="text-xs font-semibold text-foreground">
                   {sector.name}
                 </h3>
-                <p className="mt-0.5 text-[11px] leading-4 text-muted">
-                  {sector.description}
+                <p className="hidden text-[11px] leading-4 text-muted sm:block">
+                  <span className="mt-0.5 block">{sector.description}</span>
                 </p>
               </div>
               <span className="shrink-0 rounded-[6px] bg-accent-soft px-2 py-1 font-mono text-[11px] font-semibold text-accent">
@@ -136,7 +136,7 @@ export function AlphaSectorList({
                     type="button"
                     onClick={() => onSelectTicker(stock.ticker)}
                     className={[
-                      "grid w-full min-w-0 grid-cols-[3.5rem_minmax(0,1fr)_4.75rem] items-center gap-1.5 rounded-[6px] border px-2 py-2 text-left transition-colors",
+                      "grid w-full min-w-0 grid-cols-[3.5rem_minmax(0,1fr)_4.75rem] items-center gap-1.5 rounded-[6px] border px-2 py-1.5 text-left transition-colors sm:py-2",
                       selected
                         ? "border-accent/45 bg-accent-soft"
                         : "border-line/60 bg-panel-strong/70 hover:border-line hover:bg-panel-strong",
@@ -158,7 +158,7 @@ export function AlphaSectorList({
                       >
                         {stock.companyName}
                       </span>
-                      <span className="mt-1 flex min-w-0 flex-wrap gap-1">
+                      <span className="hidden min-w-0 flex-wrap gap-1 sm:flex">
                         {stock.businessTags.slice(0, 2).map((tag) => (
                           <span
                             key={tag}
