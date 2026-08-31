@@ -659,6 +659,9 @@ export function UnifiedNewsPanel({
     key: "",
     count: SIGNAL_FEED_RENDER_BATCH_SIZE,
   });
+  const [stagedRenderTargetId, setStagedRenderTargetId] = useState<
+    string | null
+  >(null);
   const [lightboxMedia, setLightboxMedia] = useState<TelegramMediaPreview | null>(null);
   const portalRoot = useSyncExternalStore(
     subscribeDocumentBody,
@@ -810,7 +813,10 @@ export function UnifiedNewsPanel({
 
   const stageReadingPositionCompensation = useCallback(() => {
     const anchor = persistVisibleReadingAnchor();
-    if (anchor) stagedReadingPositionRef.current = anchor;
+    if (anchor) {
+      stagedReadingPositionRef.current = anchor;
+      setStagedRenderTargetId(anchor.itemId);
+    }
   }, [persistVisibleReadingAnchor]);
 
   const scrollReadingViewportBy = useCallback(
@@ -825,23 +831,37 @@ export function UnifiedNewsPanel({
     [timelineUsesInternalScroll],
   );
 
-  const restoreStagedReadingPosition = useCallback(() => {
-    const anchor = stagedReadingPositionRef.current;
-    if (!anchor) return;
-    stagedReadingPositionRef.current = null;
+  const restoreStagedReadingPosition = useCallback(
+    ({ renderCount, renderKey }: { renderCount: number; renderKey: string }) => {
+      const anchor = stagedReadingPositionRef.current;
+      if (!anchor) return;
 
-    window.requestAnimationFrame(() => {
-      const item = findTimelineItem(anchor.itemId);
-      if (!item) return;
+      window.requestAnimationFrame(() => {
+        if (stagedReadingPositionRef.current !== anchor) return;
 
-      const delta = calculateSignalFeedScrollDelta(
-        anchor.viewportTop,
-        item.getBoundingClientRect().top,
-      );
-      if (Math.abs(delta) < 1) return;
-      scrollReadingViewportBy(delta);
-    });
-  }, [findTimelineItem, scrollReadingViewportBy]);
+        stagedReadingPositionRef.current = null;
+        const item = findTimelineItem(anchor.itemId);
+        if (item) {
+          const delta = calculateSignalFeedScrollDelta(
+            anchor.viewportTop,
+            item.getBoundingClientRect().top,
+          );
+          if (Math.abs(delta) >= 1) scrollReadingViewportBy(delta);
+        }
+
+        setFeedRenderWindow((current) => {
+          const currentCount = current.key === renderKey ? current.count : 0;
+          const nextCount = Math.max(currentCount, renderCount);
+          if (current.key === renderKey && current.count === nextCount) {
+            return current;
+          }
+          return { key: renderKey, count: nextCount };
+        });
+        setStagedRenderTargetId(null);
+      });
+    },
+    [findTimelineItem, scrollReadingViewportBy],
+  );
 
   const returnToSavedReadingPosition = useCallback(() => {
     let anchor: SignalFeedReadingAnchor | null = null;
@@ -1103,10 +1123,17 @@ export function UnifiedNewsPanel({
     effectiveAuthorFilter,
     deferredSearchQuery.trim().toLowerCase(),
   ].join("\u0000");
-  const renderedFeedCount =
+  const baseRenderedFeedCount =
     feedRenderWindow.key === feedRenderWindowKey
       ? Math.min(feedRenderWindow.count, filteredFeed.length)
       : initialSignalFeedRenderCount(filteredFeed.length);
+  const renderedFeedCount = stagedRenderTargetId
+    ? signalFeedRenderCountForTarget(
+        filteredFeed,
+        stagedRenderTargetId,
+        baseRenderedFeedCount,
+      )
+    : baseRenderedFeedCount;
   const deferredFeed = useMemo(
     () => filteredFeed.slice(0, renderedFeedCount),
     [filteredFeed, renderedFeedCount],
@@ -1154,8 +1181,11 @@ export function UnifiedNewsPanel({
   }, [hasMoreFeedItems, loadMoreFeed, rail]);
 
   useLayoutEffect(() => {
-    restoreStagedReadingPosition();
-  }, [deferredFeed, restoreStagedReadingPosition]);
+    restoreStagedReadingPosition({
+      renderCount: deferredFeed.length,
+      renderKey: feedRenderWindowKey,
+    });
+  }, [deferredFeed, feedRenderWindowKey, restoreStagedReadingPosition]);
 
   useLayoutEffect(() => {
     const pending = pendingFeedNavigationRef.current;
@@ -1714,16 +1744,23 @@ export function UnifiedNewsPanel({
             >
               <button
                 onClick={() => selectActiveTab("all")}
-                className={`relative min-w-0 whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
+                className={`relative min-w-0 overflow-hidden whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
                   activeTab === "all"
                     ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                     : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                 }`}
               >
-                全部
+                <span className="inline-flex min-w-0 max-w-full items-center justify-center overflow-hidden">
+                  <span className="truncate">全部</span>
+                </span>
                 {activeTab !== "all" && newCounts.all > 0 ? (
-                  <span className="ml-1 inline-flex items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                    {newCounts.all > 99 ? "99+" : newCounts.all}
+                  <span
+                    aria-label={`${newCounts.all} 条新消息`}
+                    className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger sm:static sm:ml-1 sm:inline-flex sm:h-auto sm:min-w-[1.25rem] sm:items-center sm:justify-center sm:px-1.5 sm:py-0.5 sm:text-[10px] sm:font-semibold sm:leading-none sm:text-white"
+                  >
+                    <span className="hidden sm:inline">
+                      {newCounts.all > 99 ? "99+" : newCounts.all}
+                    </span>
                   </span>
                 ) : null}
               </button>
@@ -1738,18 +1775,27 @@ export function UnifiedNewsPanel({
                   <button
                     key={tab.id}
                     onClick={() => selectActiveTab(tab.id)}
-                    className={`relative min-w-0 whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
+                    className={`relative min-w-0 overflow-hidden whitespace-nowrap rounded-md border px-1 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 ${
                       activeTab === tab.id
                         ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
                         : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
                     }`}
                   >
-                    <span className="sm:hidden">{tab.shortLabel}</span>
-                    <span className="hidden sm:inline">{tab.label}</span>
-                    <span className="ml-1 opacity-50">{tab.count}</span>
+                    <span className="inline-flex min-w-0 max-w-full items-center justify-center overflow-hidden">
+                      <span className="truncate sm:hidden">{tab.shortLabel}</span>
+                      <span className="hidden truncate sm:inline">{tab.label}</span>
+                      <span className="ml-1 shrink-0 opacity-50">
+                        {formatMetric(tab.count)}
+                      </span>
+                    </span>
                     {activeTab !== tab.id && newCount > 0 ? (
-                      <span className="ml-1 inline-flex items-center justify-center rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
-                        {newCount > 99 ? "99+" : newCount}
+                      <span
+                        aria-label={`${newCount} 条新消息`}
+                        className="absolute right-1 top-1 h-2 w-2 rounded-full bg-danger sm:static sm:ml-1 sm:inline-flex sm:h-auto sm:min-w-[1.25rem] sm:items-center sm:justify-center sm:px-1.5 sm:py-0.5 sm:text-[10px] sm:font-semibold sm:leading-none sm:text-white"
+                      >
+                        <span className="hidden sm:inline">
+                          {newCount > 99 ? "99+" : newCount}
+                        </span>
                       </span>
                     ) : null}
                   </button>

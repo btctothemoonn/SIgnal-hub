@@ -14,6 +14,13 @@ assert.match(source, /data-signal-feed-item-id=\{item\.id\}/);
 assert.match(source, /captureVisibleReadingAnchor/);
 assert.match(source, /stageReadingPositionCompensation/);
 assert.match(source, /restoreStagedReadingPosition/);
+assert.match(source, /stagedRenderTargetId/);
+assert.match(source, /setStagedRenderTargetId\(anchor\.itemId\)/);
+assert.match(
+  source,
+  /signalFeedRenderCountForTarget\([\s\S]*?stagedRenderTargetId/,
+);
+assert.match(source, /renderCount:\s*deferredFeed\.length/);
 assert.match(source, /returnToSavedReadingPosition/);
 assert.match(source, /SignalFeedFloatingNavigation/);
 assert.match(source, /scrollToLatestSignal/);

@@ -23,6 +23,10 @@ assert.match(source, /setAuthorFilter\(option\.value\)/);
 assert.match(source, /data-signal-toolbar/);
 assert.match(source, /data-signal-source-tabs/);
 assert.match(source, /grid w-full min-w-0 grid-cols-4/);
+assert.match(source, /formatMetric\(tab\.count\)/);
+assert.match(source, /aria-label=\{`\$\{newCount\} 条新消息`\}/);
+assert.match(source, /h-2 w-2[^"]*sm:static/);
+assert.match(source, /overflow-hidden/);
 assert.match(source, /data-signal-utility-strip/);
 assert.match(source, /flex flex-wrap items-center gap-2/);
 assert.doesNotMatch(

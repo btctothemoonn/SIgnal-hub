@@ -18,4 +18,10 @@ assert.equal(signalFeedRenderCountForTarget(items, "item-74", 30), 75);
 assert.equal(signalFeedRenderCountForTarget(items, "item-4", 30), 30);
 assert.equal(signalFeedRenderCountForTarget(items, "missing", 30), 30);
 
+const refreshedItems = [
+  ...Array.from({ length: 5 }, (_, index) => ({ id: `new-${index}` })),
+  ...items,
+];
+assert.equal(signalFeedRenderCountForTarget(refreshedItems, "item-29", 30), 35);
+
 console.log("ok - signal feed render window grows without hiding navigation targets");
