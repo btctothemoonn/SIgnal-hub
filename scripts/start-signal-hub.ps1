@@ -199,6 +199,9 @@ try {
     Stop-ManagedNodeProcess -Name "signal-hub-daily-brief"
     Stop-ManagedNodeProcess -Name "signal-hub-stocks-cache"
     Stop-ManagedNodeProcess -Name "signal-hub-douyin"
+    Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-rest"
+    Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-ws"
+    Stop-ManagedNodeProcess -Name "signal-hub-market-squeeze"
     Write-Host "Local background workers are disabled. Use -WithWorkers only for deliberate local worker testing."
   } else {
     Start-ManagedNodeProcess `
@@ -263,6 +266,26 @@ try {
         -RestartExisting
     } else {
       Write-Host "signal-hub-douyin disabled (DOUYIN_WORKER_ENABLED=false)"
+    }
+
+    $marketAlertsEnabled = Get-ProjectEnvValue "MARKET_ALERTS_ENABLED"
+    if (-not $marketAlertsEnabled -or (Test-EnvEnabled $marketAlertsEnabled)) {
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-market-volatility-rest" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\market-volatility-rest-worker.mjs") `
+        -RestartExisting
+
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-market-volatility-ws" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\market-volatility-ws-worker.mjs") `
+        -RestartExisting
+
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-market-squeeze" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\market-squeeze-worker.mjs") `
+        -RestartExisting
+    } else {
+      Write-Host "market alert workers disabled (MARKET_ALERTS_ENABLED=false)"
     }
   }
 

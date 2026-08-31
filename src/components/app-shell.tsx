@@ -8,6 +8,7 @@ import {
   ChartNoAxesCombined,
   Clapperboard,
   LogOut,
+  Radar,
   Settings,
   Sparkles,
   WalletCards,
@@ -17,6 +18,7 @@ import { primaryMobileNavItems } from "@/lib/app-shell-navigation";
 
 export type AppShellNavKey =
   | "signals"
+  | "alerts"
   | "intel"
   | "holding"
   | "stocks"
@@ -40,6 +42,7 @@ type ShellNavItemConfig = {
 
 const shellNavItems: readonly ShellNavItemConfig[] = [
   { key: "signals", label: "信号", href: "/", icon: Activity },
+  { key: "alerts", label: "异动", href: "/alerts", icon: Radar },
   {
     key: "intel",
     label: "AI+币圈情报站",
@@ -275,7 +278,7 @@ export function AppShell({
         aria-label="Mobile primary navigation"
         className="fixed bottom-0 left-0 right-0 z-50 border-t border-workspace-line-strong bg-workspace-toolbar/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1.5 backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
+        <div className="mx-auto grid max-w-xl grid-cols-6 gap-1">
           {mobileShellNavItems.map((item) => {
             const active = item.key === displayedActiveNav;
             const mobileLabel = item.mobileLabel ?? item.label;

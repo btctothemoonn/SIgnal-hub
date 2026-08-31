@@ -7,6 +7,7 @@ const {
   buildSystemHealthSnapshot,
   systemHealthStatusRank,
   summarizeCachedStocksSnapshot,
+  summarizeMarketAlertsHeartbeat,
   summarizeServiceState,
 } = await import(moduleUrl);
 
@@ -69,6 +70,35 @@ const inactiveService = summarizeServiceState({
 assert.equal(inactiveService.status, "error");
 assert.equal(inactiveService.label, "Telegram 采集");
 assert.match(inactiveService.detail, /failed/);
+
+const liveMarketWorker = summarizeMarketAlertsHeartbeat({
+  id: "market-volatility-rest",
+  label: "暴涨暴跌 REST",
+  heartbeat: {
+    worker: "volatility-rest",
+    status: "live",
+    detail: "扫描 200 个合约",
+    meta: { scanned: 200 },
+    updatedAt: "2026-05-21T03:59:00.000Z",
+  },
+  now,
+  staleMs: 3 * 60 * 1000,
+});
+
+assert.equal(liveMarketWorker.status, "ok");
+assert.equal(liveMarketWorker.stale, false);
+assert.match(liveMarketWorker.detail, /200/);
+
+const missingMarketWorker = summarizeMarketAlertsHeartbeat({
+  id: "market-squeeze",
+  label: "轧空监控",
+  heartbeat: null,
+  now,
+  staleMs: 3 * 60 * 1000,
+});
+
+assert.equal(missingMarketWorker.status, "warning");
+assert.equal(missingMarketWorker.stale, true);
 
 const snapshot = buildSystemHealthSnapshot({
   generatedAt: now.toISOString(),

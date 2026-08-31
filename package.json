@@ -36,7 +36,13 @@
     "tiger:holdings": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs",
     "tiger:holdings:once": "node --experimental-strip-types --experimental-transform-types scripts/tiger-holdings-worker.mjs --once",
     "douyin:worker": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs",
-    "douyin:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs --once"
+    "douyin:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/douyin-worker.mjs --once",
+    "market:volatility:rest": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-rest-worker.mjs",
+    "market:volatility:rest:once": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-rest-worker.mjs --once",
+    "market:volatility:ws": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-ws-worker.mjs",
+    "market:volatility:ws:once": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-ws-worker.mjs --once",
+    "market:squeeze": "node --experimental-strip-types --experimental-transform-types scripts/market-squeeze-worker.mjs",
+    "market:squeeze:once": "node --experimental-strip-types --experimental-transform-types scripts/market-squeeze-worker.mjs --once"
   },
   "dependencies": {
     "@tigeropenapi/tigeropen": "^0.4.0",

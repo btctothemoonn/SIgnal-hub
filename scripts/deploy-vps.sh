@@ -64,6 +64,45 @@ EOF
   sudo systemctl enable signal-hub-daily-brief
 fi
 
+install_market_worker_service() {
+  local service_name="$1"
+  local description="$2"
+  local script_path="$3"
+  sudo tee "/etc/systemd/system/${service_name}.service" >/dev/null <<EOF
+[Unit]
+Description=$description
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=$APP_DIR
+Environment=NODE_ENV=production
+Environment=SIGNAL_HUB_RUNTIME_DIR=$APP_DIR/.signal-hub
+ExecStart=$NODE_BIN --experimental-strip-types --experimental-transform-types $APP_DIR/$script_path
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo systemctl enable "$service_name"
+}
+
+install_market_worker_service \
+  signal-hub-market-volatility-rest \
+  "Signal Hub volatility REST worker" \
+  scripts/market-volatility-rest-worker.mjs
+install_market_worker_service \
+  signal-hub-market-volatility-ws \
+  "Signal Hub volatility WebSocket worker" \
+  scripts/market-volatility-ws-worker.mjs
+install_market_worker_service \
+  signal-hub-market-squeeze \
+  "Signal Hub short squeeze worker" \
+  scripts/market-squeeze-worker.mjs
+
 sudo systemctl daemon-reload
 sudo systemctl restart \
   signal-hub-web \
@@ -74,6 +113,9 @@ sudo systemctl restart \
   signal-hub-x-hybrid \
   signal-hub-monitor985 \
   signal-hub-tiger-holdings \
-  signal-hub-douyin
+  signal-hub-douyin \
+  signal-hub-market-volatility-rest \
+  signal-hub-market-volatility-ws \
+  signal-hub-market-squeeze
 
 systemctl --no-pager --plain --type=service --state=running | grep signal-hub || true

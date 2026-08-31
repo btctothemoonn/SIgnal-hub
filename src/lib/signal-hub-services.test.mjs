@@ -15,8 +15,15 @@ assert.ok(names.includes("signal-hub-telegram"));
 assert.ok(names.includes("signal-hub-x-hybrid"));
 assert.ok(names.includes("signal-hub-tiger-holdings"));
 assert.ok(names.includes("signal-hub-douyin"));
+assert.ok(names.includes("signal-hub-market-volatility-rest"));
+assert.ok(names.includes("signal-hub-market-volatility-ws"));
+assert.ok(names.includes("signal-hub-market-squeeze"));
 assert.ok(!names.includes("signal-hub-opportunity"));
 assert.equal(getSignalHubSystemdServiceLabel("signal-hub-web"), "Web 应用");
+assert.equal(
+  getSignalHubSystemdServiceLabel("signal-hub-market-squeeze"),
+  "轧空监控",
+);
 assert.equal(
   getSignalHubSystemdServiceLabel("signal-hub-unknown"),
   "signal-hub-unknown",

@@ -29,11 +29,14 @@ assert.match(source, /label: "AI\+币圈情报站"/);
 assert.match(source, /mobileLabel: "AI情报"/);
 assert.match(source, /href: "\/intel"/);
 assert.match(source, /"intel"/);
+assert.match(source, /label: "异动"/);
+assert.match(source, /href: "\/alerts"/);
+assert.match(source, /"alerts"/);
 assert.match(
   source,
   /item\.key === "intel"[\s\S]*event\.preventDefault\(\)[\s\S]*window\.location\.assign\(item\.href\)/,
 );
-assert.match(source, /grid-cols-5/);
+assert.match(source, /grid-cols-6/);
 assert.match(source, /mobileShellNavItems\.map/);
 assert.match(source, /item\.mobileLabel \?\? item\.label/);
 assert.doesNotMatch(source, /requestIdleCallback/);

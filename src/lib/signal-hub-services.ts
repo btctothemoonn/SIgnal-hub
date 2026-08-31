@@ -60,6 +60,24 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
     category: "collector",
     required: true,
   },
+  {
+    name: "signal-hub-market-volatility-rest",
+    label: "暴涨暴跌 REST",
+    category: "collector",
+    required: true,
+  },
+  {
+    name: "signal-hub-market-volatility-ws",
+    label: "暴涨暴跌实时流",
+    category: "collector",
+    required: true,
+  },
+  {
+    name: "signal-hub-market-squeeze",
+    label: "轧空监控",
+    category: "collector",
+    required: true,
+  },
 ];
 
 export function getSignalHubSystemdServiceNames() {

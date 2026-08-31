@@ -1,0 +1,930 @@
+import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import type { StatementSync } from "node:sqlite";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
+import {
+  rankTriggeredMarkets,
+  shouldSendSqueezeAlert,
+  transitionVolatilityState,
+} from "./market-alerts-core.ts";
+import type {
+  MarketAlertType,
+  VolatilitySide,
+  VolatilitySignalState,
+} from "./market-alerts-core.ts";
+
+type DbValue = string | number | null;
+type DbRow = Record<string, unknown>;
+
+export type MarketAlertEventInput = {
+  id?: string;
+  type: MarketAlertType;
+  symbol: string;
+  side: VolatilitySide | null;
+  level: number;
+  stage: string;
+  trigger: string;
+  source: "ws" | "rest" | "squeeze";
+  price: number;
+  changePct: number | null;
+  volumeRatio: number | null;
+  score: number | null;
+  metrics: Record<string, unknown>;
+  reasons: string[];
+  occurredAt: string;
+  createdAt?: string;
+  deliveryStatus?: "site" | "sent" | "failed" | "uncertain";
+  telegramMessageId?: number | null;
+};
+
+export type MarketTickerInput = {
+  symbol: string;
+  price: number;
+  pct24h: number;
+  quoteVolume: number;
+  updatedAt?: string;
+};
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function numberValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function nullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function parseJson<T>(value: unknown, fallback: T): T {
+  if (typeof value !== "string" || !value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function run(statement: StatementSync, ...values: DbValue[]) {
+  return statement.run(...values);
+}
+
+function rowToVolatilityState(row: DbRow | undefined): VolatilitySignalState | null {
+  if (!row || numberValue(row.level) <= 0) return null;
+  return {
+    level: numberValue(row.level),
+    firstAt: numberValue(row.first_at),
+    lastSeenAt: numberValue(row.last_seen_at),
+    strength: numberValue(row.strength),
+  };
+}
+
+function rowToEvent(row: DbRow) {
+  return {
+    id: stringValue(row.id),
+    type: stringValue(row.type) as MarketAlertType,
+    symbol: stringValue(row.symbol),
+    side: (stringValue(row.side) || null) as VolatilitySide | null,
+    level: numberValue(row.level),
+    stage: stringValue(row.stage),
+    trigger: stringValue(row.trigger),
+    source: stringValue(row.source),
+    price: numberValue(row.price),
+    changePct: nullableNumber(row.change_pct),
+    volumeRatio: nullableNumber(row.volume_ratio),
+    score: nullableNumber(row.score),
+    metrics: parseJson<Record<string, unknown>>(row.metrics_json, {}),
+    reasons: parseJson<string[]>(row.reasons_json, []),
+    deliveryStatus: stringValue(row.delivery_status),
+    telegramMessageId: nullableNumber(row.telegram_message_id),
+    occurredAt: stringValue(row.occurred_at),
+    createdAt: stringValue(row.created_at),
+  };
+}
+
+function rowToHeartbeat(row: DbRow | undefined) {
+  if (!row) return null;
+  return {
+    worker: stringValue(row.worker),
+    status: stringValue(row.status),
+    detail: stringValue(row.detail),
+    meta: parseJson<Record<string, unknown>>(row.meta_json, {}),
+    updatedAt: stringValue(row.updated_at),
+    lastError: stringValue(row.last_error) || null,
+    lastErrorAt: stringValue(row.last_error_at) || null,
+  };
+}
+
+function defaultDbPath() {
+  return process.env.MARKET_ALERTS_DB?.trim() ||
+    getRuntimeDataPath(process.env, "market-alerts", "alerts.sqlite");
+}
+
+export function openMarketAlertsStore(dbPath = defaultDbPath()) {
+  mkdirSync(dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA busy_timeout=10000;");
+  db.exec("PRAGMA journal_mode=WAL;");
+  db.exec("PRAGMA synchronous=NORMAL;");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS market_volatility_state (
+      key TEXT PRIMARY KEY,
+      level INTEGER NOT NULL DEFAULT 0,
+      first_at INTEGER NOT NULL DEFAULT 0,
+      last_seen_at INTEGER NOT NULL DEFAULT 0,
+      strength REAL NOT NULL DEFAULT 0,
+      recovery_since INTEGER NOT NULL DEFAULT 0,
+      pending_owner TEXT,
+      pending_until INTEGER NOT NULL DEFAULT 0,
+      pending_next_json TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_squeeze_active (
+      symbol TEXT PRIMARY KEY,
+      level INTEGER NOT NULL DEFAULT 0,
+      recovery_count INTEGER NOT NULL DEFAULT 0,
+      last_alert_at INTEGER NOT NULL DEFAULT 0,
+      last_score INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_squeeze_delivery_guard (
+      symbol TEXT NOT NULL,
+      level INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      detail TEXT,
+      PRIMARY KEY (symbol, level)
+    );
+    CREATE TABLE IF NOT EXISTS market_alert_events (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      side TEXT,
+      level INTEGER NOT NULL,
+      stage TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      source TEXT NOT NULL,
+      price REAL NOT NULL,
+      change_pct REAL,
+      volume_ratio REAL,
+      score REAL,
+      metrics_json TEXT NOT NULL,
+      reasons_json TEXT NOT NULL,
+      delivery_status TEXT NOT NULL DEFAULT 'site',
+      telegram_message_id INTEGER,
+      occurred_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_alert_events_time
+      ON market_alert_events (occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_market_alert_events_filter
+      ON market_alert_events (type, symbol, level, occurred_at DESC);
+    CREATE TABLE IF NOT EXISTS market_alert_heartbeat (
+      worker TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      meta_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_error TEXT,
+      last_error_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS market_alert_tickers (
+      symbol TEXT PRIMARY KEY,
+      price REAL NOT NULL,
+      pct_24h REAL NOT NULL,
+      quote_volume REAL NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_alert_tickers_updated
+      ON market_alert_tickers (updated_at DESC);
+  `);
+
+  const heartbeatColumns = new Set(
+    (db.prepare("PRAGMA table_info(market_alert_heartbeat)").all() as DbRow[]).map(
+      (row) => stringValue(row.name),
+    ),
+  );
+  if (!heartbeatColumns.has("last_error")) {
+    db.exec("ALTER TABLE market_alert_heartbeat ADD COLUMN last_error TEXT;");
+  }
+  if (!heartbeatColumns.has("last_error_at")) {
+    db.exec("ALTER TABLE market_alert_heartbeat ADD COLUMN last_error_at TEXT;");
+  }
+
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  function withBusyRetry<T>(operation: () => T): T {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return operation();
+      } catch (error) {
+        lastError = error;
+        const signature = `${(error as { code?: string })?.code ?? ""} ${String(error)}`;
+        if (!/SQLITE_BUSY|database is locked/i.test(signature)) throw error;
+        Atomics.wait(waitBuffer, 0, 0, 25 * (attempt + 1));
+      }
+    }
+    throw lastError;
+  }
+
+  function transaction<T>(operation: () => T): T {
+    return withBusyRetry(() => {
+      db.exec("BEGIN IMMEDIATE;");
+      try {
+        const result = operation();
+        db.exec("COMMIT;");
+        return result;
+      } catch (error) {
+        try {
+          db.exec("ROLLBACK;");
+        } catch {
+          // The original database error is more useful than a rollback error.
+        }
+        throw error;
+      }
+    });
+  }
+
+  const volatilityGet = db.prepare("SELECT * FROM market_volatility_state WHERE key=?");
+  const volatilityReserve = db.prepare(`
+    INSERT INTO market_volatility_state (
+      key, level, first_at, last_seen_at, strength, recovery_since,
+      pending_owner, pending_until, pending_next_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      pending_owner=excluded.pending_owner,
+      pending_until=excluded.pending_until,
+      pending_next_json=excluded.pending_next_json,
+      recovery_since=0,
+      updated_at=excluded.updated_at
+  `);
+  const volatilityCommit = db.prepare(`
+    UPDATE market_volatility_state SET
+      level=?, first_at=?, last_seen_at=?, strength=?, recovery_since=0,
+      pending_owner=NULL, pending_until=0, pending_next_json=NULL, updated_at=?
+    WHERE key=? AND pending_owner=?
+  `);
+  const volatilityClearPending = db.prepare(`
+    UPDATE market_volatility_state SET
+      pending_owner=NULL, pending_until=0, pending_next_json=NULL, updated_at=?
+    WHERE key=? AND pending_owner=?
+  `);
+  const volatilityDeleteEmpty = db.prepare(`
+    DELETE FROM market_volatility_state
+    WHERE key=? AND level=0 AND pending_owner IS NULL
+  `);
+  const volatilityDelete = db.prepare("DELETE FROM market_volatility_state WHERE key=?");
+  const volatilityStartRecovery = db.prepare(`
+    UPDATE market_volatility_state SET recovery_since=?, updated_at=?
+    WHERE key=? AND recovery_since=0
+  `);
+  const volatilityResetRecovery = db.prepare(`
+    UPDATE market_volatility_state SET recovery_since=0, updated_at=?
+    WHERE key=? AND recovery_since<>0
+  `);
+  const volatilityObserve = db.prepare(`
+    UPDATE market_volatility_state SET
+      last_seen_at=?, strength=?, recovery_since=0, updated_at=?
+    WHERE key=? AND level>0
+  `);
+
+  const squeezeActiveGet = db.prepare("SELECT * FROM market_squeeze_active WHERE symbol=?");
+  const squeezeGuardBlocking = db.prepare(`
+    SELECT 1 FROM market_squeeze_delivery_guard
+    WHERE symbol=? AND status IN ('sending','uncertain') LIMIT 1
+  `);
+  const squeezeGuardDeleteStaleSending = db.prepare(`
+    DELETE FROM market_squeeze_delivery_guard
+    WHERE symbol=? AND status='sending' AND created_at<=?
+  `);
+  const squeezeGuardInsert = db.prepare(`
+    INSERT INTO market_squeeze_delivery_guard (symbol, level, status, created_at)
+    VALUES (?, ?, 'sending', ?)
+  `);
+  const squeezeEnsureActive = db.prepare(`
+    INSERT INTO market_squeeze_active (
+      symbol, level, recovery_count, last_alert_at, last_score, updated_at
+    ) VALUES (?, 0, 0, ?, 0, ?)
+    ON CONFLICT(symbol) DO NOTHING
+  `);
+  const squeezeMarkUncertain = db.prepare(`
+    UPDATE market_squeeze_delivery_guard SET status='uncertain', detail=?
+    WHERE symbol=? AND level=? AND status='sending'
+  `);
+  const squeezeCommitGuard = db.prepare(`
+    UPDATE market_squeeze_delivery_guard SET status='sent', detail=NULL
+    WHERE symbol=? AND level=?
+  `);
+  const squeezeReleaseGuard = db.prepare(`
+    DELETE FROM market_squeeze_delivery_guard
+    WHERE symbol=? AND level=? AND status='sending'
+  `);
+  const squeezeDeleteEmptyActive = db.prepare(`
+    DELETE FROM market_squeeze_active
+    WHERE symbol=? AND level=0
+      AND NOT EXISTS (
+        SELECT 1 FROM market_squeeze_delivery_guard WHERE symbol=?
+      )
+  `);
+  const squeezeCommitActive = db.prepare(`
+    INSERT INTO market_squeeze_active (
+      symbol, level, recovery_count, last_alert_at, last_score, updated_at
+    ) VALUES (?, ?, 0, ?, ?, ?)
+    ON CONFLICT(symbol) DO UPDATE SET
+      level=excluded.level,
+      recovery_count=0,
+      last_alert_at=excluded.last_alert_at,
+      last_score=excluded.last_score,
+      updated_at=excluded.updated_at
+  `);
+  const squeezeDeleteActive = db.prepare("DELETE FROM market_squeeze_active WHERE symbol=?");
+  const squeezeDeleteGuards = db.prepare(
+    "DELETE FROM market_squeeze_delivery_guard WHERE symbol=?",
+  );
+  const squeezeUpdateRecovery = db.prepare(`
+    UPDATE market_squeeze_active SET recovery_count=?, updated_at=? WHERE symbol=?
+  `);
+
+  const eventInsert = db.prepare(`
+    INSERT OR IGNORE INTO market_alert_events (
+      id, type, symbol, side, level, stage, trigger, source, price,
+      change_pct, volume_ratio, score, metrics_json, reasons_json,
+      delivery_status, telegram_message_id, occurred_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const heartbeatUpsert = db.prepare(`
+    INSERT INTO market_alert_heartbeat (
+      worker, status, detail, meta_json, updated_at, last_error, last_error_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(worker) DO UPDATE SET
+      status=excluded.status,
+      detail=excluded.detail,
+      meta_json=excluded.meta_json,
+      updated_at=excluded.updated_at,
+      last_error=CASE
+        WHEN excluded.last_error IS NOT NULL AND excluded.last_error<>'' THEN excluded.last_error
+        ELSE market_alert_heartbeat.last_error
+      END,
+      last_error_at=CASE
+        WHEN excluded.last_error IS NOT NULL AND excluded.last_error<>'' THEN excluded.last_error_at
+        ELSE market_alert_heartbeat.last_error_at
+      END
+  `);
+  const eventDeliveryUpdate = db.prepare(`
+    UPDATE market_alert_events
+    SET delivery_status=?, telegram_message_id=?
+    WHERE id=?
+  `);
+  const tickerUpsert = db.prepare(`
+    INSERT INTO market_alert_tickers (symbol, price, pct_24h, quote_volume, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(symbol) DO UPDATE SET
+      price=excluded.price,
+      pct_24h=excluded.pct_24h,
+      quote_volume=excluded.quote_volume,
+      updated_at=excluded.updated_at
+  `);
+
+  function reserveVolatilityAlert(input: {
+    key: string;
+    strength: number;
+    nowMs?: number;
+    owner?: string;
+    pendingTtlMs?: number;
+  }) {
+    const nowMs = input.nowMs ?? Date.now();
+    const owner = input.owner ?? String(process.pid);
+    const pendingTtlMs = input.pendingTtlMs ?? 5 * 60 * 1000;
+    return transaction(() => {
+      const row = volatilityGet.get(input.key) as DbRow | undefined;
+      if (row?.pending_owner && numberValue(row.pending_until) > nowMs) {
+        return { send: false, next: rowToVolatilityState(row), pending: true };
+      }
+      const previous = rowToVolatilityState(row);
+      const decision = transitionVolatilityState(previous, {
+        triggered: true,
+        strength: input.strength,
+        recovered: false,
+        now: nowMs,
+      });
+      if (!decision.send) {
+        if (decision.next && numberValue(row?.level) > 0) {
+          run(
+            volatilityObserve,
+            decision.next.lastSeenAt,
+            decision.next.strength,
+            new Date(nowMs).toISOString(),
+            input.key,
+          );
+        } else {
+          run(volatilityResetRecovery, new Date(nowMs).toISOString(), input.key);
+        }
+        if (row?.pending_owner) {
+          run(
+            volatilityClearPending,
+            new Date(nowMs).toISOString(),
+            input.key,
+            stringValue(row.pending_owner),
+          );
+          run(volatilityDeleteEmpty, input.key);
+        }
+        return decision;
+      }
+      const next = decision.next!;
+      run(
+        volatilityReserve,
+        input.key,
+        numberValue(row?.level),
+        numberValue(row?.first_at),
+        numberValue(row?.last_seen_at),
+        numberValue(row?.strength),
+        owner,
+        nowMs + pendingTtlMs,
+        JSON.stringify(next),
+        new Date(nowMs).toISOString(),
+      );
+      return { ...decision, owner };
+    });
+  }
+
+  function commitVolatilityAlert(
+    key: string,
+    owner: string,
+    next: VolatilitySignalState | null,
+  ) {
+    if (!next) return false;
+    const result = transaction(() =>
+      run(
+        volatilityCommit,
+        next.level,
+        next.firstAt,
+        next.lastSeenAt,
+        next.strength,
+        new Date(next.lastSeenAt).toISOString(),
+        key,
+        owner,
+      ),
+    );
+    return Number(result.changes) > 0;
+  }
+
+  function commitVolatilityAlertUncertain(
+    key: string,
+    owner: string,
+    next: VolatilitySignalState | null,
+    eventId: string,
+  ) {
+    if (!next) return false;
+    return transaction(() => {
+      const result = run(
+        volatilityCommit,
+        next.level,
+        next.firstAt,
+        next.lastSeenAt,
+        next.strength,
+        new Date(next.lastSeenAt).toISOString(),
+        key,
+        owner,
+      );
+      if (Number(result.changes) <= 0) return false;
+      run(eventDeliveryUpdate, "uncertain", null, eventId);
+      return true;
+    });
+  }
+
+  function releaseVolatilityAlert(key: string, owner: string) {
+    return transaction(() => {
+      run(volatilityClearPending, nowIso(), key, owner);
+      run(volatilityDeleteEmpty, key);
+      return true;
+    });
+  }
+
+  function recoverVolatilityAlert(
+    key: string,
+    nowMs = Date.now(),
+    recoveryHoldMs = 15 * 60 * 1000,
+  ) {
+    return transaction(() => {
+      const row = volatilityGet.get(key) as DbRow | undefined;
+      if (!row) return false;
+      if (row.pending_owner && numberValue(row.pending_until) > nowMs) return false;
+      const recoverySince = numberValue(row.recovery_since);
+      if (recoveryHoldMs > 0 && recoverySince <= 0) {
+        run(volatilityStartRecovery, nowMs, new Date(nowMs).toISOString(), key);
+        return false;
+      }
+      if (recoveryHoldMs > 0 && nowMs - recoverySince < recoveryHoldMs) return false;
+      return Number(run(volatilityDelete, key).changes) > 0;
+    });
+  }
+
+  function resetVolatilityRecovery(key: string, nowMs = Date.now()) {
+    const result = withBusyRetry(() =>
+      run(volatilityResetRecovery, new Date(nowMs).toISOString(), key),
+    );
+    return Number(result.changes) > 0;
+  }
+
+  function beginSqueezeDelivery(
+    symbol: string,
+    level: number,
+    nowMs = Date.now(),
+    pendingTtlMs = 5 * 60 * 1000,
+  ) {
+    return transaction(() => {
+      run(squeezeGuardDeleteStaleSending, symbol, nowMs - pendingTtlMs);
+      const active = squeezeActiveGet.get(symbol) as DbRow | undefined;
+      if (!shouldSendSqueezeAlert(numberValue(active?.level), level)) return false;
+      if (squeezeGuardBlocking.get(symbol)) return false;
+      try {
+        run(squeezeGuardInsert, symbol, level, nowMs);
+      } catch (error) {
+        if (/SQLITE_CONSTRAINT/i.test(String(error))) return false;
+        throw error;
+      }
+      run(squeezeEnsureActive, symbol, nowMs, new Date(nowMs).toISOString());
+      return true;
+    });
+  }
+
+  function markSqueezeDeliveryUncertain(symbol: string, level: number, detail: string) {
+    run(squeezeMarkUncertain, String(detail).slice(0, 500), symbol, level);
+  }
+
+  function commitSqueezeDeliveryUncertain(
+    symbol: string,
+    level: number,
+    eventId: string,
+    detail: string,
+  ) {
+    return transaction(() => {
+      const result = run(
+        squeezeMarkUncertain,
+        String(detail).slice(0, 500),
+        symbol,
+        level,
+      );
+      if (Number(result.changes) <= 0) return false;
+      run(eventDeliveryUpdate, "uncertain", null, eventId);
+      return true;
+    });
+  }
+
+  function commitSqueezeDeliverySuccess(
+    symbol: string,
+    level: number,
+    score: number,
+    nowMs = Date.now(),
+  ) {
+    transaction(() => {
+      run(squeezeCommitGuard, symbol, level);
+      run(
+        squeezeCommitActive,
+        symbol,
+        level,
+        nowMs,
+        score,
+        new Date(nowMs).toISOString(),
+      );
+    });
+  }
+
+  function releaseSqueezeDelivery(symbol: string, level: number) {
+    return transaction(() => {
+      const result = run(squeezeReleaseGuard, symbol, level);
+      run(squeezeDeleteEmptyActive, symbol, symbol);
+      return Number(result.changes) > 0;
+    });
+  }
+
+  function clearSqueezeState(symbol: string) {
+    transaction(() => {
+      run(squeezeDeleteActive, symbol);
+      run(squeezeDeleteGuards, symbol);
+    });
+  }
+
+  function updateSqueezeRecovery(symbol: string, recovered: boolean) {
+    return transaction(() => {
+      const row = squeezeActiveGet.get(symbol) as DbRow | undefined;
+      if (!row) return false;
+      const count = recovered ? numberValue(row.recovery_count) + 1 : 0;
+      if (count >= 3) {
+        run(squeezeDeleteActive, symbol);
+        run(squeezeDeleteGuards, symbol);
+        return true;
+      }
+      run(squeezeUpdateRecovery, count, nowIso(), symbol);
+      return false;
+    });
+  }
+
+  function getTrackedSqueezeSignals() {
+    return (db
+      .prepare(`
+        SELECT symbol, level, recovery_count, last_alert_at, last_score
+        FROM market_squeeze_active ORDER BY last_alert_at DESC, symbol ASC
+      `)
+      .all() as DbRow[]).map((row) => ({
+      symbol: stringValue(row.symbol),
+      level: numberValue(row.level),
+      recoveryCount: numberValue(row.recovery_count),
+      lastAlertAt: numberValue(row.last_alert_at),
+      lastScore: numberValue(row.last_score),
+    }));
+  }
+
+  function insertMarketAlertEvent(input: MarketAlertEventInput) {
+    const createdAt = input.createdAt ?? nowIso();
+    const id = input.id ??
+      `${input.type}:${input.side ?? "NA"}:${input.symbol}:${Date.parse(input.occurredAt)}:${randomUUID()}`;
+    run(
+      eventInsert,
+      id,
+      input.type,
+      input.symbol,
+      input.side,
+      input.level,
+      input.stage,
+      input.trigger,
+      input.source,
+      input.price,
+      input.changePct,
+      input.volumeRatio,
+      input.score,
+      JSON.stringify(input.metrics),
+      JSON.stringify(input.reasons),
+      input.deliveryStatus ?? "site",
+      input.telegramMessageId ?? null,
+      input.occurredAt,
+      createdAt,
+    );
+    const row = db.prepare("SELECT * FROM market_alert_events WHERE id=?").get(id) as DbRow;
+    return rowToEvent(row);
+  }
+
+  function updateMarketAlertDelivery(
+    id: string,
+    status: "site" | "sent" | "failed" | "uncertain",
+    telegramMessageId: number | null = null,
+  ) {
+    const result = withBusyRetry(() =>
+      run(eventDeliveryUpdate, status, telegramMessageId, id),
+    );
+    return Number(result.changes) > 0;
+  }
+
+  function setMarketAlertsHeartbeat(input: {
+    worker: string;
+    status: string;
+    detail: string;
+    meta?: Record<string, unknown>;
+    lastError?: string | null;
+    now?: string;
+  }) {
+    const updatedAt = input.now ?? nowIso();
+    const isError = input.status === "error";
+    const lastError = input.lastError?.trim() || (isError ? input.detail : null);
+    run(
+      heartbeatUpsert,
+      input.worker,
+      input.status,
+      input.detail,
+      JSON.stringify(input.meta ?? {}),
+      updatedAt,
+      lastError,
+      lastError ? updatedAt : null,
+    );
+  }
+
+  function getRecentlyTriggeredSymbols(since: string) {
+    return (
+      db
+        .prepare(`
+          SELECT DISTINCT symbol FROM market_alert_events
+          WHERE occurred_at>=? AND type IN ('volatility','short_squeeze')
+          ORDER BY symbol ASC
+        `)
+        .all(since) as DbRow[]
+    ).map((row) => stringValue(row.symbol));
+  }
+
+  function upsertMarketTickers(tickers: MarketTickerInput[]) {
+    transaction(() => {
+      for (const ticker of tickers) {
+        run(
+          tickerUpsert,
+          ticker.symbol,
+          ticker.price,
+          ticker.pct24h,
+          ticker.quoteVolume,
+          ticker.updatedAt ?? nowIso(),
+        );
+      }
+    });
+  }
+
+  function getMarketAlertsSnapshot(options: {
+    limit?: number;
+    page?: number;
+    type?: MarketAlertType | null;
+    symbol?: string | null;
+    level?: number | null;
+    from?: string | null;
+    to?: string | null;
+    now?: string;
+    tickerMaxAgeMs?: number;
+  } = {}) {
+    const limit = Math.min(200, Math.max(1, options.limit ?? 80));
+    const page = Math.max(1, options.page ?? 1);
+    const where: string[] = [];
+    const values: DbValue[] = [];
+    if (options.type) {
+      where.push("type=?");
+      values.push(options.type);
+    }
+    if (options.symbol) {
+      where.push("symbol=?");
+      values.push(options.symbol.toUpperCase());
+    }
+    if (options.level) {
+      where.push("level=?");
+      values.push(options.level);
+    }
+    if (options.from) {
+      where.push("occurred_at>=?");
+      values.push(options.from);
+    }
+    if (options.to) {
+      where.push("occurred_at<=?");
+      values.push(options.to);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const events = db
+      .prepare(`
+        SELECT * FROM market_alert_events ${whereSql}
+        ORDER BY occurred_at DESC, created_at DESC LIMIT ? OFFSET ?
+      `)
+      .all(...values, limit, (page - 1) * limit)
+      .map((row) => rowToEvent(row as DbRow));
+    const total = numberValue(
+      (db.prepare(`SELECT COUNT(*) AS value FROM market_alert_events ${whereSql}`).get(
+        ...values,
+      ) as DbRow).value,
+    );
+    const volatilityActive = db
+      .prepare("SELECT * FROM market_volatility_state WHERE level>0 ORDER BY last_seen_at DESC")
+      .all()
+      .map((row) => ({
+        kind: "volatility" as const,
+        key: stringValue((row as DbRow).key),
+        symbol: stringValue((row as DbRow).key).split(":").at(-1) ?? "",
+        side: stringValue((row as DbRow).key).startsWith("SHORT:") ? "SHORT" : "LONG",
+        level: numberValue((row as DbRow).level),
+        strength: numberValue((row as DbRow).strength),
+        updatedAt: new Date(numberValue((row as DbRow).last_seen_at)).toISOString(),
+      }));
+    const squeezeActive = db
+      .prepare("SELECT * FROM market_squeeze_active WHERE level>0 ORDER BY last_alert_at DESC")
+      .all()
+      .map((row) => ({
+        kind: "short_squeeze" as const,
+        key: `SQUEEZE:${stringValue((row as DbRow).symbol)}`,
+        symbol: stringValue((row as DbRow).symbol),
+        side: "LONG",
+        level: numberValue((row as DbRow).level),
+        score: numberValue((row as DbRow).last_score),
+        updatedAt: stringValue((row as DbRow).updated_at),
+      }));
+    const heartbeatRows = db.prepare("SELECT * FROM market_alert_heartbeat").all() as DbRow[];
+    const heartbeatByWorker = new Map(
+      heartbeatRows.map((row) => [stringValue(row.worker), rowToHeartbeat(row)]),
+    );
+    const rankingSince = new Date(
+      Date.parse(options.now ?? nowIso()) - 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const rankingEvents = db
+      .prepare(`
+        SELECT type, symbol, side, occurred_at FROM market_alert_events
+        WHERE occurred_at>=? ORDER BY occurred_at DESC
+      `)
+      .all(rankingSince)
+      .map((row) => ({
+        type: stringValue((row as DbRow).type) as MarketAlertType,
+        symbol: stringValue((row as DbRow).symbol),
+        side: (stringValue((row as DbRow).side) || null) as VolatilitySide | null,
+        occurredAt: stringValue((row as DbRow).occurred_at),
+      }));
+    const tickers = db
+      .prepare("SELECT * FROM market_alert_tickers")
+      .all()
+      .map((row) => ({
+        symbol: stringValue((row as DbRow).symbol),
+        price: numberValue((row as DbRow).price),
+        pct24h: numberValue((row as DbRow).pct_24h),
+        quoteVolume: numberValue((row as DbRow).quote_volume),
+        updatedAt: stringValue((row as DbRow).updated_at),
+      }));
+    const latestUpdatedAt = stringValue(
+      (db.prepare(`
+        SELECT MAX(value) AS value FROM (
+          SELECT MAX(created_at) AS value FROM market_alert_events
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
+        )
+      `).get() as DbRow).value,
+    );
+    return {
+      generatedAt: options.now ?? nowIso(),
+      latestUpdatedAt,
+      events,
+      total,
+      page,
+      limit,
+      activeSignals: [...volatilityActive, ...squeezeActive],
+      marketRanking: rankTriggeredMarkets({
+        events: rankingEvents,
+        tickers,
+        since: rankingSince,
+        now: options.now ?? nowIso(),
+        maxTickerAgeMs: options.tickerMaxAgeMs ?? 15 * 60 * 1000,
+        limit: 20,
+      }),
+      health: {
+        volatilityWs: heartbeatByWorker.get("volatility-ws") ?? null,
+        volatilityRest: heartbeatByWorker.get("volatility-rest") ?? null,
+        squeeze: heartbeatByWorker.get("squeeze") ?? null,
+      },
+    };
+  }
+
+  function getMarketAlertsLatestUpdatedAt() {
+    return stringValue(
+      (db.prepare(`
+        SELECT MAX(value) AS value FROM (
+          SELECT MAX(created_at) AS value FROM market_alert_events
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
+        )
+      `).get() as DbRow).value,
+    );
+  }
+
+  return {
+    reserveVolatilityAlert,
+    commitVolatilityAlert,
+    commitVolatilityAlertUncertain,
+    releaseVolatilityAlert,
+    recoverVolatilityAlert,
+    resetVolatilityRecovery,
+    beginSqueezeDelivery,
+    markSqueezeDeliveryUncertain,
+    commitSqueezeDeliveryUncertain,
+    commitSqueezeDeliverySuccess,
+    releaseSqueezeDelivery,
+    clearSqueezeState,
+    updateSqueezeRecovery,
+    getTrackedSqueezeSignals,
+    insertMarketAlertEvent,
+    updateMarketAlertDelivery,
+    setMarketAlertsHeartbeat,
+    upsertMarketTickers,
+    getRecentlyTriggeredSymbols,
+    getMarketAlertsSnapshot,
+    getMarketAlertsLatestUpdatedAt,
+    close() {
+      db.close();
+    },
+  };
+}
+
+export function getMarketAlertsSnapshot(
+  options?: Parameters<ReturnType<typeof openMarketAlertsStore>["getMarketAlertsSnapshot"]>[0],
+) {
+  const store = openMarketAlertsStore();
+  try {
+    return store.getMarketAlertsSnapshot(options);
+  } finally {
+    store.close();
+  }
+}
+
+export function getMarketAlertsLatestUpdatedAt() {
+  const store = openMarketAlertsStore();
+  try {
+    return store.getMarketAlertsLatestUpdatedAt();
+  } finally {
+    store.close();
+  }
+}

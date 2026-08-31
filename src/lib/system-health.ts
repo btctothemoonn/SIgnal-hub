@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { getMarketAlertsSnapshot } from "./market-alerts-store.ts";
+import {
+  getMarketAlertWorkerView,
+  type MarketAlertHeartbeat,
+} from "./market-alerts-health.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 import {
   getTelegramPipelineLatestUpdatedAt,
@@ -74,6 +79,7 @@ const DEFAULT_STALE_MS = {
   stocksCatalysts: 45 * 60 * 1000,
   summary: 2 * 60 * 60 * 1000,
   tiger: 5 * 60 * 1000,
+  marketAlerts: 3 * 60 * 1000,
 };
 
 function errorMessage(error: unknown) {
@@ -197,6 +203,59 @@ export function summarizeServiceState(state: SystemdServiceState): SystemHealthI
     updatedAt: null,
     stale: false,
     meta: { service: state.name, activeState },
+  };
+}
+
+export function summarizeMarketAlertsHeartbeat({
+  id,
+  label,
+  heartbeat,
+  now = new Date(),
+  staleMs = DEFAULT_STALE_MS.marketAlerts,
+}: {
+  id: string;
+  label: string;
+  heartbeat: MarketAlertHeartbeat | null;
+  now?: Date;
+  staleMs?: number;
+}): SystemHealthItem {
+  if (!heartbeat) {
+    return {
+      id,
+      label,
+      status: "warning",
+      detail: "worker heartbeat missing",
+      updatedAt: null,
+      stale: true,
+    };
+  }
+
+  const view = getMarketAlertWorkerView(
+    heartbeat,
+    now.getTime(),
+  );
+  const fallbackStale = isStale(heartbeat.updatedAt, now, staleMs);
+  const stale = view.stale || fallbackStale;
+  const status: SystemHealthStatus =
+    view.tone === "danger" ? "error" : view.online && !stale ? "ok" : "warning";
+  return {
+    id,
+    label,
+    status,
+    detail: [
+      view.detail || heartbeat.status,
+      ageLabel(heartbeat.updatedAt, now),
+      stale ? "stale" : "",
+      view.lastError ? `last error: ${view.lastError}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    updatedAt: heartbeat.updatedAt,
+    stale,
+    meta: {
+      worker: heartbeat.worker,
+      workerStatus: heartbeat.status,
+    },
   };
 }
 
@@ -491,6 +550,35 @@ export async function getSystemHealthSnapshot({
   serviceStates?: SystemdServiceState[];
 } = {}): Promise<SystemHealthSnapshot> {
   const stocksItems = await stocksHealthItems(env, now);
+  let marketAlertItems: SystemHealthItem[];
+  try {
+    const marketAlerts = getMarketAlertsSnapshot({
+      limit: 1,
+      now: now.toISOString(),
+    });
+    marketAlertItems = [
+      summarizeMarketAlertsHeartbeat({
+        id: "market-volatility-ws",
+        label: "暴涨暴跌实时流",
+        heartbeat: marketAlerts.health.volatilityWs,
+        now,
+      }),
+      summarizeMarketAlertsHeartbeat({
+        id: "market-volatility-rest",
+        label: "暴涨暴跌 REST",
+        heartbeat: marketAlerts.health.volatilityRest,
+        now,
+      }),
+      summarizeMarketAlertsHeartbeat({
+        id: "market-squeeze",
+        label: "轧空监控",
+        heartbeat: marketAlerts.health.squeeze,
+        now,
+      }),
+    ];
+  } catch (error) {
+    marketAlertItems = [healthErrorItem("market-alerts", "异动监控", error)];
+  }
   const items: SystemHealthItem[] = [
     telegramHealthItem(now),
     xHealthItem(now),
@@ -498,6 +586,7 @@ export async function getSystemHealthSnapshot({
     summaryHealthItem({ audience: "signals", label: "AI 总结(信号)", env, now }),
     summaryHealthItem({ audience: "stocks", label: "AI 总结(Stocks)", env, now }),
     tigerHealthItem(env, now),
+    ...marketAlertItems,
     ...serviceStates.map(summarizeServiceState),
   ];
 
