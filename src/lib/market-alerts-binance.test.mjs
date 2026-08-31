@@ -383,6 +383,12 @@ class FakeWebSocket {
   }
 }
 
+class ReasonlessCloseWebSocket extends FakeWebSocket {
+  close(code = 1000) {
+    this.emit("close", { code, reason: "" });
+  }
+}
+
 function websocketClient() {
   return {
     getExchangeInfo: async () => exchangeInfo,
@@ -405,7 +411,7 @@ try {
       wsRankRefreshMs: 10,
     },
     createWebSocket: () =>
-      new FakeWebSocket(
+      new ReasonlessCloseWebSocket(
         JSON.stringify({
           stream: "btcusdt@ticker",
           data: { s: "BTCUSDT", c: "107", P: "12", q: "7000" },

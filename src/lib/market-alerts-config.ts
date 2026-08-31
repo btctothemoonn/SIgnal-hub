@@ -14,14 +14,18 @@ function positiveInteger(value: string | undefined, fallback: number) {
   return Math.max(1, Math.floor(positiveNumber(value, fallback)));
 }
 
+function marketWebSocketBaseUrl(value: string | undefined) {
+  const baseUrl = value?.trim().replace(/\/$/, "") || "wss://fstream.binance.com/market";
+  return baseUrl === "wss://fstream.binance.com" ? `${baseUrl}/market` : baseUrl;
+}
+
 export function getMarketAlertsConfig(env: EnvLike = process.env) {
   const restTopN = positiveInteger(env.MARKET_ALERTS_REST_TOP_N, 200);
   return {
     enabled: booleanValue(env.MARKET_ALERTS_ENABLED, true),
     restBaseUrl:
       env.MARKET_ALERTS_BINANCE_REST_BASE_URL?.trim() || "https://fapi.binance.com",
-    wsBaseUrl:
-      env.MARKET_ALERTS_BINANCE_WS_BASE_URL?.trim() || "wss://fstream.binance.com",
+    wsBaseUrl: marketWebSocketBaseUrl(env.MARKET_ALERTS_BINANCE_WS_BASE_URL),
     wsTopN: positiveInteger(env.MARKET_ALERTS_WS_TOP_N, 200),
     wsRankRefreshMs: positiveInteger(
       env.MARKET_ALERTS_WS_RANK_REFRESH_MS,

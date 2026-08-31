@@ -13,6 +13,8 @@ const packageJson = JSON.parse(
 assert.match(source, /set -euo pipefail/);
 assert.match(source, /require\("node:sqlite"\)/);
 assert.match(source, /git pull --ff-only origin/);
+assert.match(source, /SIGNAL_HUB_DEPLOY_REEXEC/);
+assert.match(source, /exec env SIGNAL_HUB_DEPLOY_REEXEC=1 bash/);
 assert.match(source, /node_modules\/next\/dist\/bin\/next build/);
 const installCommand = '"$PNPM_BIN" install --frozen-lockfile --ignore-scripts';
 const installIndex = source.indexOf(installCommand);

@@ -11,6 +11,9 @@ cd "$APP_DIR"
 "$NODE_BIN" -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 5)) { throw new Error("Signal Hub requires Node.js >=22.5.0 for node:sqlite"); } require("node:sqlite");'
 
 git pull --ff-only origin "$BRANCH"
+if [[ "${SIGNAL_HUB_DEPLOY_REEXEC:-0}" != "1" ]]; then
+  exec env SIGNAL_HUB_DEPLOY_REEXEC=1 bash "$APP_DIR/scripts/deploy-vps.sh"
+fi
 CI=true "$PNPM_BIN" install --frozen-lockfile --ignore-scripts
 "$NODE_BIN" scripts/run-tests.mjs
 "$NODE_BIN" node_modules/eslint/bin/eslint.js .

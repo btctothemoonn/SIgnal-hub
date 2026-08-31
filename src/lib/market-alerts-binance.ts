@@ -1158,6 +1158,7 @@ export async function startVolatilityWebSocketWorker(input: {
         if (input.signal?.aborted) resolve();
         else if (event.reason === "refresh-universe") resolve();
         else if (event.reason === "probe-complete") resolve();
+        else if (event.code === 1000 && receivedFirstMessage) resolve();
         else if (event.reason === "first-message-timeout" || event.code === 4000) {
           reject(new Error("Binance WebSocket did not deliver the first market message in time"));
         }

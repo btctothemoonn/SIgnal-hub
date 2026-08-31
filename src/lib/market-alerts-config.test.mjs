@@ -9,6 +9,7 @@ assert.equal(defaults.restCoreN, 50);
 assert.equal(defaults.squeezeTopN, 120);
 assert.equal(defaults.minFdvUsd, 10_000_000);
 assert.equal(defaults.wsFirstMessageTimeoutMs, 20_000);
+assert.equal(defaults.wsBaseUrl, "wss://fstream.binance.com/market");
 
 const configured = getMarketAlertsConfig({
   MARKET_ALERTS_ENABLED: "false",
@@ -24,5 +25,12 @@ assert.equal(configured.restCoreN, 80);
 assert.equal(configured.squeezeTopN, 60);
 assert.equal(configured.telegramEnabled, true);
 assert.equal(configured.wsFirstMessageTimeoutMs, 9000);
+
+assert.equal(
+  getMarketAlertsConfig({
+    MARKET_ALERTS_BINANCE_WS_BASE_URL: "wss://fstream.binance.com/",
+  }).wsBaseUrl,
+  "wss://fstream.binance.com/market",
+);
 
 console.log("ok - market alerts config");
