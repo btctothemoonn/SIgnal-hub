@@ -108,6 +108,29 @@ assert.equal(replyUpdate?.feedItem.quotedTweet?.username, "GoldenCicada");
 assert.equal(replyUpdate?.feedItem.quotedTweet?.text, "这个人貌似很猛\n$ASTEROID");
 assert.equal(replyUpdate?.feedItem.quotedTweet?.translation, null);
 
+const mediaUpdate = normalizeMonitor985Event({
+  eventType: "NEW_TWEET",
+  twAccount: "winter4soldier",
+  content: {
+    id: "2094647419489472771",
+    text: "media preview test",
+    createdAt: "2026-09-01T04:43:56.000Z",
+    userScreenName: "winter4soldier",
+    userName: "winter4soldier",
+    media: [
+      {
+        type: "photo",
+        url: "https://x.com/winter4soldier/status/2094647419489472771/photo/1",
+        thumbUrl: "https://pbs.twimg.com/media/HRGucPVakAAp3ao.jpg",
+      },
+    ],
+  },
+});
+assert.equal(
+  mediaUpdate?.feedItem.media[0]?.previewUrl,
+  "https://pbs.twimg.com/media/HRGucPVakAAp3ao.jpg",
+);
+
 const truthUpdate = normalizeMonitor985Event({
   key: "truth::realDonaldTrump::38158",
   source: "truth",

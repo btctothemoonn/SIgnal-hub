@@ -125,13 +125,35 @@ function tweetUrlFor(username: string, id: string): string {
   return username && id ? `https://x.com/${username}/status/${id}` : "#";
 }
 
+function pickMediaPreviewUrl(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    const url = value.trim();
+    const isXMediaPage =
+      /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[^/]+\/status(?:es)?\/\d+\/(?:photo|video)\/\d+(?:[?#].*)?$/i.test(
+        url,
+      );
+    if (!isXMediaPage) return url;
+  }
+  return "";
+}
+
 function normalizeMedia(raw: unknown): TwitterMediaItem[] {
   if (!Array.isArray(raw)) return [];
   const result: TwitterMediaItem[] = [];
   for (const item of raw) {
     if (!isRecord(item)) continue;
     const type = pickString(item.type, item.kind).toLowerCase();
-    const url = pickString(item.url, item.previewUrl, item.mediaUrlHttps);
+    const url = pickMediaPreviewUrl(
+      item.mediaUrlHttps,
+      item.media_url_https,
+      item.previewUrl,
+      item.thumbUrl,
+      item.thumb_url,
+      item.thumbnailUrl,
+      item.thumbnail_url,
+      item.url,
+    );
     if (!url) continue;
     const kind =
       type === "video" ? "video" : type === "gif" || type === "animated_gif" ? "gif" : "image";
