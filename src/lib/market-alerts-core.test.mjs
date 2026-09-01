@@ -230,8 +230,22 @@ const triggeredRanking = rankTriggeredMarkets({
     },
   ],
   tickers: [
-    { symbol: "ZORAUSDT", price: 0.2, pct24h: 56.55, quoteVolume: 215_000_000 },
-    { symbol: "SKRUSDT", price: 1.5, pct24h: -73.11, quoteVolume: 858_000_000 },
+    {
+      symbol: "ZORAUSDT",
+      price: 0.2,
+      pct24h: 56.55,
+      quoteVolume: 215_000_000,
+      marketCapUsd: 90_000_000,
+      fdvUsd: 140_000_000,
+    },
+    {
+      symbol: "SKRUSDT",
+      price: 1.5,
+      pct24h: -73.11,
+      quoteVolume: 858_000_000,
+      marketCapUsd: null,
+      fdvUsd: 220_000_000,
+    },
     { symbol: "SOLUSDT", price: 200, pct24h: 99, quoteVolume: 1_000_000_000 },
     { symbol: "OLDUSDT", price: 1, pct24h: 100, quoteVolume: 1_000_000 },
   ],
@@ -253,6 +267,10 @@ assert.deepEqual(triggeredRanking[1].counts, {
   squeeze: 0,
   total: 2,
 });
+assert.equal(triggeredRanking[0].marketCapUsd, null);
+assert.equal(triggeredRanking[0].fdvUsd, 220_000_000);
+assert.equal(triggeredRanking[1].marketCapUsd, 90_000_000);
+assert.equal(triggeredRanking[1].fdvUsd, 140_000_000);
 
 assert.deepEqual(
   rankTriggeredMarkets({

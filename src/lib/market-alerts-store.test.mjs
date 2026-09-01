@@ -278,6 +278,37 @@ try {
       updatedAt: "2026-08-31T00:00:02.000Z",
     },
   ]);
+  assert.deepEqual(
+    a.getMarketValuationRefreshCandidates({
+      triggeredSince: "2026-08-30T00:00:00.000Z",
+      staleBefore: "2026-08-30T23:00:04.000Z",
+      limit: 50,
+    }),
+    [{ symbol: "BTCUSDT", price: 100 }],
+  );
+  a.upsertMarketValuations(
+    [{
+      symbol: "BTCUSDT",
+      marketCapUsd: 120_000_000,
+      fdvUsd: 140_000_000,
+    }],
+    "2026-08-31T00:00:04.000Z",
+  );
+  a.upsertMarketTickers([{
+    symbol: "BTCUSDT",
+    price: 101,
+    pct24h: 12.2,
+    quoteVolume: 2_100_000_000,
+    updatedAt: "2026-08-31T00:00:05.000Z",
+  }]);
+  assert.deepEqual(
+    a.getMarketValuationRefreshCandidates({
+      triggeredSince: "2026-08-30T00:00:00.000Z",
+      staleBefore: "2026-08-30T23:00:04.000Z",
+      limit: 50,
+    }),
+    [],
+  );
   const revisionBeforeChart = b.getMarketAlertsRevision();
   assert.equal(a.upsertMarketAlertChart({
     symbol: "BTCUSDT",
@@ -359,6 +390,8 @@ try {
   assert.equal(snapshot.health.squeeze?.lastErrorAt, "2026-08-31T00:00:01.000Z");
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
   assert.equal(snapshot.marketRanking[0].counts.pump, 2);
+  assert.equal(snapshot.marketRanking[0].marketCapUsd, 120_000_000);
+  assert.equal(snapshot.marketRanking[0].fdvUsd, 140_000_000);
   assert.equal(snapshot.latestUpdatedAt, "2026-08-31T00:05:00.000Z");
   assert.deepEqual(
     b.getRecentlyTriggeredSymbols("2026-08-30T00:00:00.000Z"),

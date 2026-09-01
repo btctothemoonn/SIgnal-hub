@@ -47,6 +47,12 @@ export type MarketTickerInput = {
   updatedAt?: string;
 };
 
+export type MarketValuationInput = {
+  symbol: string;
+  marketCapUsd: number | null;
+  fdvUsd: number | null;
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -218,6 +224,9 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       price REAL NOT NULL,
       pct_24h REAL NOT NULL,
       quote_volume REAL NOT NULL,
+      market_cap_usd REAL,
+      fdv_usd REAL,
+      valuation_updated_at TEXT,
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_market_alert_tickers_updated
@@ -251,6 +260,20 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   );
   if (!chartColumns.has("source_key")) {
     db.exec("ALTER TABLE market_alert_charts ADD COLUMN source_key TEXT NOT NULL DEFAULT '';");
+  }
+  const tickerColumns = new Set(
+    (db.prepare("PRAGMA table_info(market_alert_tickers)").all() as DbRow[]).map(
+      (row) => stringValue(row.name),
+    ),
+  );
+  if (!tickerColumns.has("market_cap_usd")) {
+    db.exec("ALTER TABLE market_alert_tickers ADD COLUMN market_cap_usd REAL;");
+  }
+  if (!tickerColumns.has("fdv_usd")) {
+    db.exec("ALTER TABLE market_alert_tickers ADD COLUMN fdv_usd REAL;");
+  }
+  if (!tickerColumns.has("valuation_updated_at")) {
+    db.exec("ALTER TABLE market_alert_tickers ADD COLUMN valuation_updated_at TEXT;");
   }
 
   db.exec(`
@@ -452,6 +475,11 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       pct_24h=excluded.pct_24h,
       quote_volume=excluded.quote_volume,
       updated_at=excluded.updated_at
+  `);
+  const marketValuationUpdate = db.prepare(`
+    UPDATE market_alert_tickers
+    SET market_cap_usd=?, fdv_usd=?, valuation_updated_at=?
+    WHERE symbol=?
   `);
   const chartUpsert = db.prepare(`
     INSERT INTO market_alert_charts (symbol, event_id, interval, updated_at, source_key)
@@ -808,6 +836,54 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     });
   }
 
+  function getMarketValuationRefreshCandidates(input: {
+    triggeredSince: string;
+    staleBefore: string;
+    limit?: number;
+  }) {
+    const limit = Math.max(1, Math.min(50, Math.floor(input.limit ?? 50)));
+    return (
+      db
+        .prepare(`
+          SELECT ticker.symbol, ticker.price
+          FROM market_alert_tickers ticker
+          WHERE EXISTS (
+            SELECT 1 FROM market_alert_events event
+            WHERE event.symbol=ticker.symbol
+              AND event.occurred_at>=?
+              AND event.type IN ('volatility','short_squeeze')
+          )
+            AND (
+              ticker.valuation_updated_at IS NULL
+              OR ticker.valuation_updated_at<?
+            )
+          ORDER BY COALESCE(ticker.valuation_updated_at, '') ASC, ticker.symbol ASC
+          LIMIT ?
+        `)
+        .all(input.triggeredSince, input.staleBefore, limit) as DbRow[]
+    ).map((row) => ({
+      symbol: stringValue(row.symbol),
+      price: numberValue(row.price),
+    }));
+  }
+
+  function upsertMarketValuations(
+    valuations: MarketValuationInput[],
+    updatedAt = nowIso(),
+  ) {
+    transaction(() => {
+      for (const valuation of valuations) {
+        run(
+          marketValuationUpdate,
+          valuation.marketCapUsd,
+          valuation.fdvUsd,
+          updatedAt,
+          valuation.symbol,
+        );
+      }
+    });
+  }
+
   function upsertMarketAlertChart(input: {
     symbol: string;
     eventId: string;
@@ -968,6 +1044,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         price: numberValue((row as DbRow).price),
         pct24h: numberValue((row as DbRow).pct_24h),
         quoteVolume: numberValue((row as DbRow).quote_volume),
+        marketCapUsd: nullableNumber((row as DbRow).market_cap_usd),
+        fdvUsd: nullableNumber((row as DbRow).fdv_usd),
         updatedAt: stringValue((row as DbRow).updated_at),
       }));
     const latestUpdatedAt = stringValue(
@@ -1043,6 +1121,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     updateMarketAlertDelivery,
     setMarketAlertsHeartbeat,
     upsertMarketTickers,
+    getMarketValuationRefreshCandidates,
+    upsertMarketValuations,
     upsertMarketAlertChart,
     getMarketAlertChart,
     getRecentlyTriggeredSymbols,

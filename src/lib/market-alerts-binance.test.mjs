@@ -6,6 +6,7 @@ import { join } from "node:path";
 const {
   buildVolatilityInputFromKlines,
   includeTrackedMarkets,
+  refreshTriggeredMarketValuations,
   runSqueezeScan,
   runVolatilityRestScan,
   selectFuturesUniverse,
@@ -79,6 +80,40 @@ assert.deepEqual(
     .map((item) => item.symbol),
   ["AAPLUSDT", "SOLUSDT"],
 );
+
+{
+  const received = [];
+  const stored = [];
+  const refreshed = await refreshTriggeredMarketValuations({
+    client: {
+      getMarketValuations: async (markets) => {
+        received.push(...markets);
+        return [{
+          symbol: "BTCUSDT",
+          marketCapUsd: 120_000_000,
+          fdvUsd: 140_000_000,
+        }];
+      },
+    },
+    store: {
+      getMarketValuationRefreshCandidates: () => [
+        { symbol: "BTCUSDT", price: 68_000 },
+      ],
+      upsertMarketValuations: (values, updatedAt) => stored.push({ values, updatedAt }),
+    },
+    nowMs: Date.parse("2026-08-31T04:00:00.000Z"),
+  });
+  assert.equal(refreshed, 1);
+  assert.deepEqual(received, [{ symbol: "BTCUSDT", price: 68_000 }]);
+  assert.deepEqual(stored, [{
+    values: [{
+      symbol: "BTCUSDT",
+      marketCapUsd: 120_000_000,
+      fdvUsd: 140_000_000,
+    }],
+    updatedAt: "2026-08-31T04:00:00.000Z",
+  }]);
+}
 
 function kline(index, open, close, volume = 10, intervalMs = 300_000) {
   const openTime = 1_700_000_000_000 + index * intervalMs;

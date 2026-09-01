@@ -53,8 +53,9 @@ function signedPercent(value: unknown, digits = 2) {
 }
 
 function compactMoney(value: unknown) {
+  if (value === null || value === undefined || value === "") return "n/a";
   const number = Number(value);
-  if (!Number.isFinite(number)) return "n/a";
+  if (!Number.isFinite(number) || number <= 0) return "n/a";
   return new Intl.NumberFormat("zh-CN", {
     style: "currency",
     currency: "USD",
@@ -132,7 +133,6 @@ function Ranking({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-0.5 text-[10px] text-muted">{compactMoney(item.quoteVolume)}</div>
                 </div>
 
                 <div className="grid grid-cols-[minmax(3rem,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(4rem,1fr)_auto] sm:gap-3">
@@ -164,6 +164,12 @@ function Ranking({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
                     </span>
                   ) : null}
                   <span className="text-muted">共 {item.counts.total}</span>
+                </div>
+
+                <div className="col-span-full flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted">
+                  <span>流通市值 {compactMoney(item.marketCapUsd)}</span>
+                  <span aria-hidden>·</span>
+                  <span>FDV {compactMoney(item.fdvUsd)}</span>
                 </div>
               </div>
             );

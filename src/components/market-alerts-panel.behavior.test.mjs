@@ -104,6 +104,8 @@ export function getMarketAlertWorkerView() {
         price: 68000,
         pct24h: 10.2,
         quoteVolume: 2_000_000_000,
+        marketCapUsd: 120_000_000,
+        fdvUsd: 140_000_000,
         updatedAt: "2026-08-31T00:10:00.000Z",
         counts: { pump: 1, crash: 0, squeeze: 0, total: 1 },
         lastTriggeredAt: "2026-08-31T00:10:00.000Z",
@@ -114,6 +116,8 @@ export function getMarketAlertWorkerView() {
         price: 0,
         pct24h: -8.5,
         quoteVolume: 12_000_000,
+        marketCapUsd: null,
+        fdvUsd: 450_000_000,
         updatedAt: "2026-08-31T00:10:00.000Z",
         counts: { pump: 0, crash: 1, squeeze: 0, total: 1 },
         lastTriggeredAt: "2026-08-31T00:10:00.000Z",
@@ -156,11 +160,16 @@ export function getMarketAlertWorkerView() {
   const rankingRow = renderer.root.findByProps({
     "data-market-ranking-symbol": "BTCUSDT",
   });
-  assert.match(renderedText(rankingRow).replaceAll(/\s/g, ""), /BTC\$68,000/);
+  const rankingText = renderedText(rankingRow).replaceAll(/\s/g, "");
+  assert.match(rankingText, /BTC\$68,000/);
+  assert.match(rankingText, /流通市值US\$1\.2亿·FDVUS\$1\.4亿/);
+  assert.doesNotMatch(rankingText, /US\$20亿/);
   const zeroPriceRow = renderer.root.findByProps({
     "data-market-ranking-symbol": "ZEROTESTUSDT",
   });
-  assert.match(renderedText(zeroPriceRow).replaceAll(/\s/g, ""), /ZEROTESTn\/a/);
+  const zeroPriceText = renderedText(zeroPriceRow).replaceAll(/\s/g, "");
+  assert.match(zeroPriceText, /ZEROTESTn\/a/);
+  assert.match(zeroPriceText, /流通市值n\/a·FDVUS\$4\.5亿/);
   const open = renderer.root.findByProps({
     "aria-label": "放大 BTCUSDT K线图",
   });

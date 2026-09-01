@@ -18,11 +18,23 @@ type Store = ReturnType<typeof openMarketAlertsStore>;
 type JsonRecord = Record<string, unknown>;
 type KlineRow = unknown[];
 
+export type MarketValuation = {
+  symbol: string;
+  marketCapUsd: number | null;
+  fdvUsd: number | null;
+};
+
+type MarketValuationRequest = {
+  symbol: string;
+  price: number;
+};
+
 export interface BinanceMarketClient {
   getExchangeInfo(): Promise<{ symbols?: JsonRecord[] }>;
   getTickers24h(): Promise<JsonRecord[]>;
   getKlines(symbol: string, interval: "1m" | "5m", limit: number): Promise<KlineRow[]>;
   getFullyDilutedValuation?(symbol: string, price: number): Promise<number | null>;
+  getMarketValuations?(markets: MarketValuationRequest[]): Promise<MarketValuation[]>;
   getPremiumIndex?(): Promise<JsonRecord[]>;
   getOpenInterestHistory?(symbol: string): Promise<JsonRecord[]>;
   getGlobalLongShortRatio?(symbol: string): Promise<number | null>;
@@ -143,11 +155,57 @@ export function createBinanceFuturesClient(
     throw new Error(`Binance request failed: ${safeError(lastError)}`);
   }
 
+  async function getMarketValuations(
+    markets: MarketValuationRequest[],
+  ): Promise<MarketValuation[]> {
+    const requested = markets
+      .slice(0, 50)
+      .map((market) => ({
+        ...market,
+        base: market.symbol.replace(/USDT$/i, "").toLowerCase(),
+      }));
+    if (!requested.length) return [];
+    try {
+      const url = new URL("https://api.coingecko.com/api/v3/coins/markets");
+      url.searchParams.set("vs_currency", "usd");
+      url.searchParams.set("symbols", [...new Set(requested.map((item) => item.base))].join(","));
+      url.searchParams.set("per_page", "50");
+      url.searchParams.set("sparkline", "false");
+      const response = await fetch(url, {
+        headers: { "user-agent": "SignalHubMarketAlerts/1.0" },
+        signal: AbortSignal.timeout(config.requestTimeoutMs),
+      });
+      if (!response.ok) throw new Error(`CoinGecko HTTP ${response.status}`);
+      const rows = (await response.json()) as JsonRecord[];
+      return requested.map((market) => {
+        const coin = Array.isArray(rows)
+          ? rows.find((row) => stringValue(row.symbol).toLowerCase() === market.base)
+          : undefined;
+        const marketCapUsd = nullableNumber(coin?.market_cap);
+        const directFdv = nullableNumber(coin?.fully_diluted_valuation);
+        const supply = nullableNumber(coin?.total_supply) ?? nullableNumber(coin?.max_supply);
+        const fallbackFdv = supply && supply > 0 ? supply * market.price : null;
+        return {
+          symbol: market.symbol,
+          marketCapUsd: marketCapUsd && marketCapUsd > 0 ? marketCapUsd : null,
+          fdvUsd: directFdv && directFdv > 0 ? directFdv : fallbackFdv,
+        };
+      });
+    } catch {
+      return requested.map((market) => ({
+        symbol: market.symbol,
+        marketCapUsd: null,
+        fdvUsd: null,
+      }));
+    }
+  }
+
   return {
     getExchangeInfo: () => requestJson("/fapi/v1/exchangeInfo") as Promise<{ symbols?: JsonRecord[] }>,
     getTickers24h: () => requestJson("/fapi/v1/ticker/24hr") as Promise<JsonRecord[]>,
     getKlines: (symbol, interval, limit) =>
       requestJson("/fapi/v1/klines", { symbol, interval, limit }) as Promise<KlineRow[]>,
+    getMarketValuations,
     getPremiumIndex: () => requestJson("/fapi/v1/premiumIndex") as Promise<JsonRecord[]>,
     getOpenInterestHistory: (symbol) =>
       requestJson("/futures/data/openInterestHist", {
@@ -180,31 +238,41 @@ export function createBinanceFuturesClient(
       return nullableNumber(rows.at(-1)?.buySellRatio);
     },
     async getFullyDilutedValuation(symbol, price) {
-      const base = symbol.replace(/USDT$/i, "").toLowerCase();
-      try {
-        const url = new URL("https://api.coingecko.com/api/v3/coins/markets");
-        url.searchParams.set("vs_currency", "usd");
-        url.searchParams.set("symbols", base);
-        url.searchParams.set("per_page", "50");
-        url.searchParams.set("sparkline", "false");
-        const response = await fetch(url, {
-          headers: { "user-agent": "SignalHubMarketAlerts/1.0" },
-          signal: AbortSignal.timeout(config.requestTimeoutMs),
-        });
-        if (!response.ok) return null;
-        const rows = (await response.json()) as JsonRecord[];
-        const coin = Array.isArray(rows)
-          ? rows.find((row) => stringValue(row.symbol).toLowerCase() === base)
-          : undefined;
-        const direct = nullableNumber(coin?.fully_diluted_valuation);
-        if (direct && direct > 0) return direct;
-        const supply = nullableNumber(coin?.total_supply) ?? nullableNumber(coin?.max_supply);
-        return supply && supply > 0 ? supply * price : null;
-      } catch {
-        return null;
-      }
+      const [valuation] = await getMarketValuations([{ symbol, price }]);
+      return valuation?.fdvUsd ?? null;
     },
   };
+}
+
+export async function refreshTriggeredMarketValuations(input: {
+  client: Pick<BinanceMarketClient, "getMarketValuations">;
+  store: Pick<
+    Store,
+    "getMarketValuationRefreshCandidates" | "upsertMarketValuations"
+  >;
+  nowMs?: number;
+  refreshIntervalMs?: number;
+}) {
+  if (!input.client.getMarketValuations) return 0;
+  const nowMs = input.nowMs ?? Date.now();
+  const now = new Date(nowMs).toISOString();
+  const candidates = input.store.getMarketValuationRefreshCandidates({
+    triggeredSince: new Date(nowMs - 24 * 60 * 60 * 1000).toISOString(),
+    staleBefore: new Date(nowMs - (input.refreshIntervalMs ?? 60 * 60 * 1000)).toISOString(),
+    limit: 50,
+  });
+  if (!candidates.length) return 0;
+  const received = await input.client.getMarketValuations(candidates);
+  const bySymbol = new Map(received.map((valuation) => [valuation.symbol, valuation]));
+  input.store.upsertMarketValuations(
+    candidates.map((candidate) => bySymbol.get(candidate.symbol) ?? {
+      symbol: candidate.symbol,
+      marketCapUsd: null,
+      fdvUsd: null,
+    }),
+    now,
+  );
+  return candidates.length;
 }
 
 export type SelectedMarket = {
@@ -625,6 +693,11 @@ export async function runVolatilityRestScan(input: {
       trackedSymbols,
     );
     store.upsertMarketTickers(tickerInputs(markets, scanIso));
+    const valuationRefreshes = await refreshTriggeredMarketValuations({
+      client,
+      store,
+      nowMs,
+    });
     const selected = restScanSymbols(
       markets,
       config,
@@ -688,6 +761,7 @@ export async function runVolatilityRestScan(input: {
         universe: markets.length,
         scanned: selected.length,
         alerts,
+        valuationRefreshes,
       },
       lastError: latestError,
       now: new Date().toISOString(),

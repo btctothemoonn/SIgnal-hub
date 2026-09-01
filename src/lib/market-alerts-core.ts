@@ -441,6 +441,8 @@ interface RankingTicker {
   price: number;
   pct24h: number;
   quoteVolume: number;
+  marketCapUsd?: number | null;
+  fdvUsd?: number | null;
   updatedAt?: string;
 }
 
