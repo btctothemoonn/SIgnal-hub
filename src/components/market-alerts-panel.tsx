@@ -348,11 +348,13 @@ function WorkerHealth({
               </div>
               <p className="mt-1 line-clamp-2 leading-5 text-muted">{view.detail}</p>
               {view.lastError && heartbeat?.status !== "error" ? (
-                <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-danger">
-                  最近错误：{view.lastError}
+                <p className={`mt-1 line-clamp-2 text-[10px] leading-4 ${view.lastErrorRecovered ? "text-warning" : "text-danger"}`}>
+                  {view.lastErrorRecovered ? "已恢复的错误" : "最近错误"}
+                  {view.lastErrorAt ? `（${formatTime(view.lastErrorAt, true)}）` : ""}
+                  ：{view.lastError}
                 </p>
               ) : null}
-              {heartbeat?.updatedAt ? <div className="mt-1 text-[10px] text-muted">{formatTime(heartbeat.updatedAt, true)}</div> : null}
+              {heartbeat?.updatedAt ? <div className="mt-1 text-[10px] text-muted">心跳 {formatTime(heartbeat.updatedAt, true)}</div> : null}
             </div>
           );
         })}

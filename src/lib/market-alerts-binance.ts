@@ -122,8 +122,45 @@ function mergeConfig(overrides: Partial<MarketAlertsConfig> = {}): MarketAlertsC
 
 export function createBinanceFuturesClient(
   configOverrides: Partial<MarketAlertsConfig> = {},
+  runtime: {
+    fetch?: typeof fetch;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
 ): BinanceMarketClient {
   const config = mergeConfig(configOverrides);
+  const fetchImpl = runtime.fetch ?? fetch;
+  const sleepImpl = runtime.sleep ?? sleep;
+  const now = runtime.now ?? Date.now;
+  let requestGate = Promise.resolve();
+  let nextRequestAt = 0;
+  let blockedUntil = 0;
+
+  async function reserveRequestSlot() {
+    let release = () => {};
+    const previous = requestGate;
+    requestGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      const waitMs = Math.max(0, nextRequestAt - now(), blockedUntil - now());
+      if (waitMs > 0) await sleepImpl(waitMs);
+      nextRequestAt = now() + config.requestSpacingMs;
+    } finally {
+      release();
+    }
+  }
+
+  function rateLimitDelay(response: Response, attempt: number) {
+    const value = response.headers.get("retry-after")?.trim() ?? "";
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+    const retryAt = Date.parse(value);
+    if (Number.isFinite(retryAt)) return Math.max(0, retryAt - now());
+    return config.requestRetryBaseMs * 2 ** attempt;
+  }
+
   async function requestJson(path: string, params?: Record<string, string | number>) {
     const url = new URL(path, config.restBaseUrl);
     for (const [key, value] of Object.entries(params ?? {})) {
@@ -132,11 +169,24 @@ export function createBinanceFuturesClient(
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const response = await fetch(url, {
+        await reserveRequestSlot();
+        const response = await fetchImpl(url, {
           headers: { "user-agent": "SignalHubMarketAlerts/1.0" },
           signal: AbortSignal.timeout(config.requestTimeoutMs),
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        if (!response.ok) {
+          const error = new Error(`HTTP ${response.status} ${response.statusText}`) as Error & {
+            rateLimited?: boolean;
+          };
+          if (response.status === 429 || response.status === 418) {
+            error.rateLimited = true;
+            blockedUntil = Math.max(
+              blockedUntil,
+              now() + rateLimitDelay(response, attempt),
+            );
+          }
+          throw error;
+        }
         const body = await response.json();
         if (
           body &&
@@ -149,7 +199,9 @@ export function createBinanceFuturesClient(
         return body;
       } catch (error) {
         lastError = error;
-        if (attempt < 2) await sleep(400 * 2 ** attempt);
+        if (attempt < 2 && !(error as { rateLimited?: boolean })?.rateLimited) {
+          await sleepImpl(config.requestRetryBaseMs * 2 ** attempt);
+        }
       }
     }
     throw new Error(`Binance request failed: ${safeError(lastError)}`);
@@ -704,6 +756,15 @@ export async function runVolatilityRestScan(input: {
       nowMs,
       activeVolatilitySymbols,
     );
+    const chartBackfills = input.writeChart
+      ? store.getMarketAlertChartBackfillEvents({
+          since: new Date(
+            nowMs - config.chartBackfillHours * 60 * 60 * 1_000,
+          ).toISOString(),
+          symbols: markets.map((market) => market.symbol),
+          limit: config.chartBackfillPerScan,
+        })
+      : [];
     let latestError: string | null = null;
     const results = await mapLimit(selected, 12, async (market) => {
       try {
@@ -750,6 +811,7 @@ export async function runVolatilityRestScan(input: {
         return false;
       }
     });
+    for (const event of chartBackfills) chartQueue.enqueue(event);
     const alerts = results.filter(Boolean).length;
     store.setMarketAlertsHeartbeat({
       worker: "volatility-rest",
@@ -762,6 +824,7 @@ export async function runVolatilityRestScan(input: {
         scanned: selected.length,
         alerts,
         valuationRefreshes,
+        chartBackfills: chartBackfills.length,
       },
       lastError: latestError,
       now: new Date().toISOString(),

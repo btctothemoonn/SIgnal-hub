@@ -80,6 +80,14 @@ function normalizeChartSourceKey(value: string) {
   return sourceKey;
 }
 
+function normalizeChartSymbol(value: string) {
+  const symbol = value.trim().toUpperCase();
+  if (!/^[\p{L}\p{N}]{2,30}$/u.test(symbol)) {
+    throw new Error("Invalid market alert chart symbol");
+  }
+  return symbol;
+}
+
 function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string" || !value) return fallback;
   try {
@@ -891,10 +899,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     updatedAt?: string;
     sourceKey: string;
   }) {
-    const symbol = input.symbol.trim().toUpperCase();
-    if (!/^[A-Z0-9]{2,30}$/.test(symbol)) {
-      throw new Error("Invalid market alert chart symbol");
-    }
+    const symbol = normalizeChartSymbol(input.symbol);
     const updatedAt = input.updatedAt ?? nowIso();
     const sourceKey = normalizeChartSourceKey(input.sourceKey);
     return transaction(() => {
@@ -929,8 +934,12 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   }
 
   function getMarketAlertChart(symbolInput: string) {
-    const symbol = symbolInput.trim().toUpperCase();
-    if (!/^[A-Z0-9]{2,30}$/.test(symbol)) return null;
+    let symbol: string;
+    try {
+      symbol = normalizeChartSymbol(symbolInput);
+    } catch {
+      return null;
+    }
     const row = chartGet.get(symbol) as DbRow | undefined;
     if (!row) return null;
     return {
@@ -940,6 +949,41 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       updatedAt: stringValue(row.updated_at),
       sourceKey: stringValue(row.source_key),
     };
+  }
+
+  function getMarketAlertChartBackfillEvents(input: {
+    since: string;
+    symbols: string[];
+    limit?: number;
+  }) {
+    const symbols = [...new Set(input.symbols.flatMap((value) => {
+      try {
+        return [normalizeChartSymbol(value)];
+      } catch {
+        return [];
+      }
+    }))];
+    const limit = Math.min(50, Math.max(0, Math.floor(input.limit ?? 4)));
+    if (!symbols.length || !limit) return [];
+    const placeholders = symbols.map(() => "?").join(",");
+    return (
+      db.prepare(`
+        SELECT ranked.*
+        FROM (
+          SELECT e.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY e.symbol
+              ORDER BY e.occurred_at DESC, e.created_at DESC, e.id DESC
+            ) AS chart_rank
+          FROM market_alert_events e
+          WHERE e.occurred_at>=? AND e.symbol IN (${placeholders})
+        ) ranked
+        LEFT JOIN market_alert_charts c ON c.symbol=ranked.symbol
+        WHERE ranked.chart_rank=1 AND c.symbol IS NULL
+        ORDER BY ranked.occurred_at DESC, ranked.created_at DESC
+        LIMIT ?
+      `).all(input.since, ...symbols, limit) as DbRow[]
+    ).map((row) => rowToEvent(row));
   }
 
   function getMarketAlertsSnapshot(options: {
@@ -982,7 +1026,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       .prepare(`
         SELECT e.*, c.updated_at AS chart_updated_at, c.source_key AS chart_source_key
         FROM market_alert_events e
-        LEFT JOIN market_alert_charts c ON c.event_id=e.id
+        LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
         ${whereSql}
         ORDER BY e.occurred_at DESC, e.created_at DESC LIMIT ? OFFSET ?
       `)
@@ -1125,6 +1169,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     upsertMarketValuations,
     upsertMarketAlertChart,
     getMarketAlertChart,
+    getMarketAlertChartBackfillEvents,
     getRecentlyTriggeredSymbols,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,

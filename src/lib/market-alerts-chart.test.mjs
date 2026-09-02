@@ -97,6 +97,25 @@ try {
     [`BTCUSDT.${second.sourceKey}.svg`],
   );
 
+  const unicode = await writeMarketAlertKlineChart({
+    symbol: "牛来USDT",
+    interval: "5m",
+    klines,
+    generatedAt: "2026-08-31T00:30:00.000Z",
+    sourceKey: "1788135000000_1788135000000_cccccccccccc",
+    runtimeRoot: directory,
+  });
+  const unicodeFile = await readMarketAlertKlineChart("牛来USDT", {
+    runtimeRoot: directory,
+    sourceKey: unicode.sourceKey,
+  });
+  assert.ok(unicodeFile);
+  assert.match(unicodeFile.toString("utf8"), /牛来USDT · 5m/);
+  assert.ok(
+    readdirSync(join(directory, "market-alerts", "charts")).some((name) =>
+      /^symbol-[a-f0-9]{24}\.1788135000000_1788135000000_cccccccccccc\.svg$/.test(name)),
+  );
+
   assert.equal(
     await readMarketAlertKlineChart("../BTCUSDT", { runtimeRoot: directory }),
     null,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getRuntimeStorageRoot } from "./runtime-storage.ts";
@@ -35,10 +35,16 @@ type Candle = {
 
 function normalizeSymbol(value: string) {
   const symbol = value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{2,30}$/.test(symbol)) {
+  if (!/^[\p{L}\p{N}]{2,30}$/u.test(symbol)) {
     throw new Error("Invalid market alert chart symbol");
   }
   return symbol;
+}
+
+function chartFileStem(symbol: string) {
+  return /^[A-Z0-9]{2,30}$/.test(symbol)
+    ? symbol
+    : `symbol-${createHash("sha256").update(symbol).digest("hex").slice(0, 24)}`;
 }
 
 function normalizeSourceKey(value: string) {
@@ -212,10 +218,11 @@ export async function writeMarketAlertKlineChart(
   const sourceKey = normalizeSourceKey(input.sourceKey);
   const interval = input.interval?.trim() || "5m";
   const directory = chartDirectory(input.runtimeRoot);
-  const target = join(directory, `${symbol}.${sourceKey}.svg`);
+  const fileStem = chartFileStem(symbol);
+  const target = join(directory, `${fileStem}.${sourceKey}.svg`);
   const temporary = join(
     directory,
-    `${symbol}.${sourceKey}.${process.pid}.${randomUUID()}.tmp`,
+    `${fileStem}.${sourceKey}.${process.pid}.${randomUUID()}.tmp`,
   );
   await mkdir(directory, { recursive: true });
   try {
@@ -254,7 +261,10 @@ export async function readMarketAlertKlineChart(
   }
   try {
     return await readFile(
-      join(chartDirectory(options.runtimeRoot), `${symbol}.${sourceKey}.svg`),
+      join(
+        chartDirectory(options.runtimeRoot),
+        `${chartFileStem(symbol)}.${sourceKey}.svg`,
+      ),
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -270,7 +280,10 @@ export async function removeMarketAlertKlineChart(
   const symbol = normalizeSymbol(symbolInput);
   const sourceKey = normalizeSourceKey(sourceKeyInput);
   await rm(
-    join(chartDirectory(options.runtimeRoot), `${symbol}.${sourceKey}.svg`),
+    join(
+      chartDirectory(options.runtimeRoot),
+      `${chartFileStem(symbol)}.${sourceKey}.svg`,
+    ),
     { force: true },
   );
 }
@@ -290,7 +303,7 @@ export async function pruneMarketAlertKlineCharts(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  const prefix = `${symbol}.`;
+  const prefix = `${chartFileStem(symbol)}.`;
   await Promise.all(
     names
       .filter((name) => name.startsWith(prefix) && name.endsWith(".svg"))

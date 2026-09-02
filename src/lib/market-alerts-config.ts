@@ -14,6 +14,14 @@ function positiveInteger(value: string | undefined, fallback: number) {
   return Math.max(1, Math.floor(positiveNumber(value, fallback)));
 }
 
+function nonNegativeInteger(value: string | undefined, fallback: number) {
+  if (value === undefined || value.trim() === "") return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0
+    ? Math.floor(number)
+    : fallback;
+}
+
 function marketWebSocketBaseUrl(value: string | undefined) {
   const baseUrl = value?.trim().replace(/\/$/, "") || "wss://fstream.binance.com/market";
   return baseUrl === "wss://fstream.binance.com" ? `${baseUrl}/market` : baseUrl;
@@ -57,6 +65,22 @@ export function getMarketAlertsConfig(env: EnvLike = process.env) {
       2_000_000,
     ),
     requestTimeoutMs: positiveInteger(env.MARKET_ALERTS_REQUEST_TIMEOUT_MS, 15_000),
+    requestSpacingMs: nonNegativeInteger(
+      env.MARKET_ALERTS_BINANCE_REQUEST_SPACING_MS,
+      100,
+    ),
+    requestRetryBaseMs: positiveInteger(
+      env.MARKET_ALERTS_BINANCE_RETRY_BASE_MS,
+      1_000,
+    ),
+    chartBackfillPerScan: nonNegativeInteger(
+      env.MARKET_ALERTS_CHART_BACKFILL_PER_SCAN,
+      4,
+    ),
+    chartBackfillHours: positiveInteger(
+      env.MARKET_ALERTS_CHART_BACKFILL_HOURS,
+      168,
+    ),
     eventPollMs: positiveInteger(env.MARKET_ALERTS_EVENT_POLL_MS, 3_000),
     telegramEnabled: booleanValue(env.MARKET_ALERTS_TELEGRAM_ENABLED, false),
   };

@@ -382,7 +382,10 @@ try {
   );
   assert.equal(snapshot.events[0].chartUpdatedAt, "2026-08-31T00:01:01.000Z");
   assert.equal(snapshot.events[1].id, event.id);
-  assert.equal(snapshot.events[1].chartUrl, null);
+  assert.equal(
+    snapshot.events[1].chartUrl,
+    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb",
+  );
   assert.equal(snapshot.health.volatilityRest?.status, "live");
   assert.equal(snapshot.health.volatilityRest?.lastError, "Telegram delivery failed");
   assert.equal(snapshot.health.squeeze?.status, "live");
@@ -397,6 +400,41 @@ try {
     b.getRecentlyTriggeredSymbols("2026-08-30T00:00:00.000Z"),
     ["BTCUSDT"],
   );
+
+  const unicodeEvent = a.insertMarketAlertEvent({
+    id: "volatility:SHORT:牛来USDT:fixture",
+    type: "volatility",
+    symbol: "牛来USDT",
+    side: "SHORT",
+    level: 1,
+    stage: "暴跌预警",
+    trigger: "B加速·实时",
+    source: "rest",
+    price: 0.08,
+    changePct: -6.39,
+    volumeRatio: 4.89,
+    score: null,
+    metrics: {},
+    reasons: ["近25m下跌6.39%"],
+    occurredAt: "2026-08-31T00:03:00.000Z",
+    createdAt: "2026-08-31T00:03:00.000Z",
+  });
+  assert.deepEqual(
+    a.getMarketAlertChartBackfillEvents({
+      since: "2026-08-31T00:00:00.000Z",
+      symbols: ["BTCUSDT", "牛来USDT"],
+      limit: 4,
+    }).map((item) => item.id),
+    [unicodeEvent.id],
+  );
+  assert.equal(a.upsertMarketAlertChart({
+    symbol: "牛来USDT",
+    eventId: unicodeEvent.id,
+    interval: "5m",
+    updatedAt: "2026-08-31T00:03:01.000Z",
+    sourceKey: "1788134580000_1788134580000_cccccccccccc",
+  }).accepted, true);
+  assert.equal(a.getMarketAlertChart("牛来USDT")?.eventId, unicodeEvent.id);
 } finally {
   a?.close();
   b?.close();

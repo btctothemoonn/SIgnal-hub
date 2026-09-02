@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const {
   buildVolatilityInputFromKlines,
+  createBinanceFuturesClient,
   includeTrackedMarkets,
   refreshTriggeredMarketValuations,
   runSqueezeScan,
@@ -130,6 +131,62 @@ function kline(index, open, close, volume = 10, intervalMs = 300_000) {
 }
 
 const TEST_NOW_MS = 1_700_011_000_000;
+
+{
+  let nowMs = 0;
+  let calls = 0;
+  const waits = [];
+  const client = createBinanceFuturesClient(
+    {
+      requestSpacingMs: 75,
+      requestRetryBaseMs: 100,
+      requestTimeoutMs: 1_000,
+    },
+    {
+      now: () => nowMs,
+      sleep: async (ms) => {
+        waits.push(ms);
+        nowMs += ms;
+      },
+      fetch: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return new Response("rate limited", {
+            status: 429,
+            headers: { "retry-after": "2" },
+          });
+        }
+        return Response.json([]);
+      },
+    },
+  );
+  assert.deepEqual(await client.getTickers24h(), []);
+  assert.equal(calls, 2);
+  assert.ok(waits.includes(2_000), "429 retries must honor Retry-After");
+}
+
+{
+  let nowMs = 0;
+  const starts = [];
+  const waits = [];
+  const client = createBinanceFuturesClient(
+    { requestSpacingMs: 75, requestTimeoutMs: 1_000 },
+    {
+      now: () => nowMs,
+      sleep: async (ms) => {
+        waits.push(ms);
+        nowMs += ms;
+      },
+      fetch: async () => {
+        starts.push(nowMs);
+        return Response.json([]);
+      },
+    },
+  );
+  await Promise.all([client.getTickers24h(), client.getPremiumIndex()]);
+  assert.equal(starts.length, 2);
+  assert.deepEqual(waits, [75]);
+}
 
 function pumpKlines5m() {
   const rows = Array.from({ length: 31 }, (_, index) => kline(index, 100, 100, 10));
@@ -280,7 +337,8 @@ try {
   chartFailureStore = openMarketAlertsStore(join(chartFailureDirectory, "alerts.sqlite"));
   let deliveries = 0;
   console.error = () => {};
-  const result = await runVolatilityRestScan({
+  let chartAttempts = 0;
+  const scanInput = {
     client: {
       getExchangeInfo: async () => exchangeInfo,
       getTickers24h: async () => tickers.filter((ticker) => ticker.symbol === "BTCUSDT"),
@@ -291,19 +349,31 @@ try {
     store: chartFailureStore,
     nowMs: TEST_NOW_MS,
     config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000 },
-    writeChart: async () => {
-      throw new Error("chart disk unavailable");
+    writeChart: async (input) => {
+      chartAttempts += 1;
+      if (chartAttempts === 1) throw new Error("chart disk unavailable");
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+      };
     },
     deliverAlert: async () => {
       deliveries += 1;
       return { status: "sent", messageId: 42 };
     },
-  });
+  };
+  const result = await runVolatilityRestScan(scanInput);
   const snapshot = chartFailureStore.getMarketAlertsSnapshot({ limit: 10 });
   assert.equal(result.alerts, 1);
   assert.equal(deliveries, 1);
   assert.equal(snapshot.events[0].deliveryStatus, "sent");
   assert.equal(snapshot.events[0].chartUrl, null);
+  await runVolatilityRestScan({ ...scanInput, nowMs: TEST_NOW_MS + 60_000 });
+  const repaired = chartFailureStore.getMarketAlertsSnapshot({ limit: 10 });
+  assert.equal(chartAttempts, 2);
+  assert.match(repaired.events[0].chartUrl ?? "", /\/api\/market-alerts\/charts\/BTCUSDT/);
 } finally {
   console.error = originalConsoleError;
   chartFailureStore?.close();

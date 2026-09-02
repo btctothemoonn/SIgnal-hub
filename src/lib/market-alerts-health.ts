@@ -13,6 +13,7 @@ const WORKER_STALE_AFTER_MS: Record<string, number> = {
   "volatility-rest": 3 * 60_000,
   squeeze: 3 * 60_000,
 };
+const RECOVERED_ERROR_VISIBLE_MS = 24 * 60 * 60 * 1000;
 
 export function getMarketAlertWorkerView(
   heartbeat: MarketAlertHeartbeat,
@@ -27,6 +28,7 @@ export function getMarketAlertWorkerView(
       detail: "尚未收到心跳",
       lastError: null,
       lastErrorAt: null,
+      lastErrorRecovered: false,
     };
   }
 
@@ -46,8 +48,23 @@ export function getMarketAlertWorkerView(
       detail: heartbeat.detail,
       lastError: heartbeat.lastError ?? heartbeat.detail,
       lastErrorAt: heartbeat.lastErrorAt ?? heartbeat.updatedAt,
+      lastErrorRecovered: false,
     };
   }
+
+  const lastErrorAtMs = Date.parse(heartbeat.lastErrorAt ?? "");
+  const showLastError = Boolean(
+    heartbeat.lastError &&
+      Number.isFinite(lastErrorAtMs) &&
+      nowMs - lastErrorAtMs <= RECOVERED_ERROR_VISIBLE_MS,
+  );
+  const lastError = showLastError ? heartbeat.lastError ?? null : null;
+  const lastErrorAt = showLastError ? heartbeat.lastErrorAt ?? null : null;
+  const lastErrorRecovered = Boolean(
+    lastError &&
+      Number.isFinite(updatedAtMs) &&
+      updatedAtMs > lastErrorAtMs,
+  );
   if (stale) {
     return {
       online: false,
@@ -55,8 +72,9 @@ export function getMarketAlertWorkerView(
       tone: "warning" as const,
       stale: true,
       detail: heartbeat.detail,
-      lastError: heartbeat.lastError ?? null,
-      lastErrorAt: heartbeat.lastErrorAt ?? null,
+      lastError,
+      lastErrorAt,
+      lastErrorRecovered,
     };
   }
 
@@ -67,7 +85,8 @@ export function getMarketAlertWorkerView(
     tone: online ? ("success" as const) : ("warning" as const),
     stale: false,
     detail: heartbeat.detail,
-    lastError: heartbeat.lastError ?? null,
-    lastErrorAt: heartbeat.lastErrorAt ?? null,
+    lastError,
+    lastErrorAt,
+    lastErrorRecovered,
   };
 }
