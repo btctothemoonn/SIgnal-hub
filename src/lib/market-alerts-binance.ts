@@ -126,17 +126,37 @@ export function createBinanceFuturesClient(
     fetch?: typeof fetch;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
+    rateLimitStore?: Pick<
+      Store,
+      "reserveBinanceRequestSlot" | "deferBinanceRequests" | "getBinanceRequestDelay"
+    >;
   } = {},
 ): BinanceMarketClient {
   const config = mergeConfig(configOverrides);
   const fetchImpl = runtime.fetch ?? fetch;
   const sleepImpl = runtime.sleep ?? sleep;
   const now = runtime.now ?? Date.now;
+  const rateLimitStore = runtime.rateLimitStore;
   let requestGate = Promise.resolve();
   let nextRequestAt = 0;
   let blockedUntil = 0;
 
   async function reserveRequestSlot() {
+    if (rateLimitStore) {
+      while (true) {
+        const waitMs = rateLimitStore.reserveBinanceRequestSlot({
+          nowMs: now(),
+          spacingMs: config.requestSpacingMs,
+        });
+        if (waitMs > 0) await sleepImpl(waitMs);
+        const cooldownMs = Math.max(
+          rateLimitStore.getBinanceRequestDelay(now()),
+          blockedUntil - now(),
+        );
+        if (cooldownMs <= 0) return;
+        await sleepImpl(cooldownMs);
+      }
+    }
     let release = () => {};
     const previous = requestGate;
     requestGate = new Promise<void>((resolve) => {
@@ -144,8 +164,11 @@ export function createBinanceFuturesClient(
     });
     await previous;
     try {
-      const waitMs = Math.max(0, nextRequestAt - now(), blockedUntil - now());
-      if (waitMs > 0) await sleepImpl(waitMs);
+      let waitMs = Math.max(0, nextRequestAt - now(), blockedUntil - now());
+      while (waitMs > 0) {
+        await sleepImpl(waitMs);
+        waitMs = Math.max(0, nextRequestAt - now(), blockedUntil - now());
+      }
       nextRequestAt = now() + config.requestSpacingMs;
     } finally {
       release();
@@ -180,10 +203,12 @@ export function createBinanceFuturesClient(
           };
           if (response.status === 429 || response.status === 418) {
             error.rateLimited = true;
+            const retryAt = now() + rateLimitDelay(response, attempt);
             blockedUntil = Math.max(
               blockedUntil,
-              now() + rateLimitDelay(response, attempt),
+              retryAt,
             );
+            rateLimitStore?.deferBinanceRequests(retryAt);
           }
           throw error;
         }
@@ -506,6 +531,7 @@ async function persistMarketAlertChart(input: {
   client: BinanceMarketClient;
   store: Store;
   writeChart?: MarketAlertChartWriter;
+  nowMs?: number;
 }) {
   if (!input.writeChart) return;
   try {
@@ -543,7 +569,9 @@ async function persistMarketAlertChart(input: {
     } else if (registration.replacedSourceKey) {
       await result.removeSource?.(registration.replacedSourceKey);
     }
+    input.store.clearMarketAlertChartRetry(input.event.symbol);
   } catch (error) {
+    input.store.markMarketAlertChartRetry(input.event.symbol, input.nowMs ?? Date.now());
     console.error(`[MARKET-ALERT-CHART] ${input.event.symbol}: ${safeError(error)}`);
   }
 }
@@ -552,11 +580,18 @@ function createMarketAlertChartQueue(input: {
   client: BinanceMarketClient;
   store: Store;
   writeChart?: MarketAlertChartWriter;
+  now?: () => number;
 }) {
   const pending = new Set<Promise<void>>();
+  const scheduledSymbols = new Set<string>();
   const enqueue = (event: ReturnType<Store["insertMarketAlertEvent"]>) => {
-    if (!input.writeChart) return;
-    const task = persistMarketAlertChart({ ...input, event });
+    if (!input.writeChart || scheduledSymbols.has(event.symbol)) return;
+    scheduledSymbols.add(event.symbol);
+    const task = persistMarketAlertChart({
+      ...input,
+      event,
+      nowMs: input.now?.() ?? Date.now(),
+    });
     pending.add(task);
     void task.then(
       () => pending.delete(task),
@@ -701,8 +736,8 @@ export async function runVolatilityRestScan(input: {
   writeChart?: MarketAlertChartWriter;
 } = {}) {
   const config = mergeConfig(input.config);
-  const client = input.client ?? createBinanceFuturesClient(config);
   const store = input.store ?? openMarketAlertsStore();
+  const client = input.client ?? createBinanceFuturesClient(config, { rateLimitStore: store });
   const ownsStore = !input.store;
   const nowMs = input.nowMs ?? Date.now();
   const scanIso = new Date(nowMs).toISOString();
@@ -710,6 +745,7 @@ export async function runVolatilityRestScan(input: {
     client,
     store,
     writeChart: input.writeChart,
+    now: () => nowMs,
   });
   try {
     store.setMarketAlertsHeartbeat({
@@ -761,8 +797,9 @@ export async function runVolatilityRestScan(input: {
           since: new Date(
             nowMs - config.chartBackfillHours * 60 * 60 * 1_000,
           ).toISOString(),
-          symbols: markets.map((market) => market.symbol),
+          symbols: allMarkets.map((market) => market.symbol),
           limit: config.chartBackfillPerScan,
+          nowMs,
         })
       : [];
     let latestError: string | null = null;
@@ -908,8 +945,8 @@ export async function runSqueezeScan(input: {
   writeChart?: MarketAlertChartWriter;
 } = {}) {
   const config = mergeConfig(input.config);
-  const client = input.client ?? createBinanceFuturesClient(config);
   const store = input.store ?? openMarketAlertsStore();
+  const client = input.client ?? createBinanceFuturesClient(config, { rateLimitStore: store });
   const ownsStore = !input.store;
   const nowMs = input.nowMs ?? Date.now();
   const scanIso = new Date(nowMs).toISOString();
@@ -917,6 +954,7 @@ export async function runSqueezeScan(input: {
     client,
     store,
     writeChart: input.writeChart,
+    now: () => nowMs,
   });
   try {
     if (!client.getPremiumIndex || !client.getOpenInterestHistory) {
@@ -1180,8 +1218,8 @@ export async function startVolatilityWebSocketWorker(input: {
   signal?: AbortSignal;
 } = {}) {
   const config = mergeConfig(input.config);
-  const client = input.client ?? createBinanceFuturesClient(config);
   const store = input.store ?? openMarketAlertsStore();
+  const client = input.client ?? createBinanceFuturesClient(config, { rateLimitStore: store });
   const ownsStore = !input.store;
   const chartQueue = createMarketAlertChartQueue({
     client,
@@ -1216,14 +1254,10 @@ export async function startVolatilityWebSocketWorker(input: {
       string,
       { one: KlineRow[]; five: KlineRow[]; ticker: JsonRecord; market: SelectedMarket }
     >();
-    await mapLimit(subscribedMarkets, 10, async (market) => {
-      const [one, five] = await Promise.all([
-        client.getKlines(market.symbol, "1m", 40),
-        client.getKlines(market.symbol, "5m", 36),
-      ]);
+    for (const market of subscribedMarkets) {
       cache.set(market.symbol, {
-        one,
-        five,
+        one: [],
+        five: [],
         ticker: {
           symbol: market.symbol,
           lastPrice: market.price,
@@ -1232,7 +1266,7 @@ export async function startVolatilityWebSocketWorker(input: {
         },
         market,
       });
-    });
+    }
 
     store.setMarketAlertsHeartbeat({
       worker: "volatility-ws",
@@ -1247,6 +1281,7 @@ export async function startVolatilityWebSocketWorker(input: {
       subscribedMarkets.map((market) => market.symbol),
     );
     const pendingAlerts = new Map<string, Promise<unknown>>();
+    let cacheHydration: Promise<void> = Promise.resolve();
     const fdvCache = new Map<string, { eligible: boolean; expiresAt: number }>();
     const cachedFdvEligibility = async (market: SelectedMarket) => {
       const nowMs = Date.now();
@@ -1274,6 +1309,8 @@ export async function startVolatilityWebSocketWorker(input: {
       let lastHeartbeatAt = 0;
       let lastTickerPersistAt = Date.now();
       let receivedFirstMessage = false;
+      let cacheReady = false;
+      const bufferedKlines = new Map<string, unknown>();
       let firstMessageTimer: ReturnType<typeof setTimeout> | null = null;
       const refreshTimer = setTimeout(() => socket.close(1000, "refresh-universe"), config.wsRankRefreshMs);
       const onAbort = () => socket.close(1000, "shutdown");
@@ -1290,9 +1327,9 @@ export async function startVolatilityWebSocketWorker(input: {
           config.wsFirstMessageTimeoutMs,
         );
       });
-      socket.addEventListener("message", (event) => {
+      const handleMessage = (rawData: unknown) => {
         try {
-          const envelope = JSON.parse(String(event.data)) as JsonRecord;
+          const envelope = JSON.parse(String(rawData)) as JsonRecord;
           const stream = stringValue(envelope.stream);
           const payload = (envelope.data ?? {}) as JsonRecord;
           if (!receivedFirstMessage) {
@@ -1337,6 +1374,10 @@ export async function startVolatilityWebSocketWorker(input: {
                 ),
               );
             }
+            return;
+          }
+          if (!cacheReady) {
+            bufferedKlines.set(stream, rawData);
             return;
           }
           const kline = payload.k as JsonRecord | undefined;
@@ -1410,6 +1451,9 @@ export async function startVolatilityWebSocketWorker(input: {
         } catch (error) {
           console.error(`[VOLATILITY-WS-MESSAGE] ${safeError(error)}`);
         }
+      };
+      socket.addEventListener("message", (event) => {
+        handleMessage(event.data);
       });
       socket.addEventListener("error", () => {
         clearTimeout(refreshTimer);
@@ -1429,8 +1473,27 @@ export async function startVolatilityWebSocketWorker(input: {
         }
         else reject(new Error(`Binance WebSocket closed: ${event.code} ${event.reason}`));
       });
+      cacheHydration = mapLimit(subscribedMarkets, 10, async (market) => {
+        try {
+          const [one, five] = await Promise.all([
+            client.getKlines(market.symbol, "1m", 40),
+            client.getKlines(market.symbol, "5m", 36),
+          ]);
+          const item = cache.get(market.symbol);
+          if (!item) return;
+          item.one = one.slice(-40);
+          item.five = five.slice(-36);
+        } catch (error) {
+          console.error(`[VOLATILITY-WS-CACHE] ${market.symbol}: ${safeError(error)}`);
+        }
+      }).then(() => {
+        cacheReady = true;
+        for (const rawData of bufferedKlines.values()) handleMessage(rawData);
+        bufferedKlines.clear();
+      });
       });
     } finally {
+      await cacheHydration;
       await Promise.allSettled([...pendingAlerts.values()]);
     }
     return { universe: markets.length, probe: Boolean(input.once) };

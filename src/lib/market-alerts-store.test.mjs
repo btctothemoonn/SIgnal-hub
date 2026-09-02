@@ -435,6 +435,42 @@ try {
     sourceKey: "1788134580000_1788134580000_cccccccccccc",
   }).accepted, true);
   assert.equal(a.getMarketAlertChart("牛来USDT")?.eventId, unicodeEvent.id);
+  assert.equal(a.deleteMarketAlertChart("牛来USDT", "1788134580000_1788134580000_cccccccccccc"), true);
+  assert.equal(a.getMarketAlertChart("牛来USDT"), null);
+
+  const solEvent = a.insertMarketAlertEvent({
+    ...unicodeEvent,
+    id: "volatility:SHORT:SOLUSDT:chart-backfill",
+    symbol: "SOLUSDT",
+    occurredAt: "2026-08-31T00:02:30.000Z",
+    createdAt: "2026-08-31T00:02:30.000Z",
+  });
+  a.markMarketAlertChartRetry("牛来USDT", Date.parse("2026-08-31T00:04:00.000Z"));
+  assert.deepEqual(
+    a.getMarketAlertChartBackfillEvents({
+      since: "2026-08-31T00:00:00.000Z",
+      symbols: ["SOLUSDT", "牛来USDT"],
+      limit: 1,
+      nowMs: Date.parse("2026-08-31T00:04:30.000Z"),
+    }).map((item) => item.id),
+    [solEvent.id],
+  );
+  assert.deepEqual(
+    a.getMarketAlertChartBackfillEvents({
+      since: "2026-08-31T00:00:00.000Z",
+      symbols: ["SOLUSDT", "牛来USDT"],
+      limit: 2,
+      nowMs: Date.parse("2026-08-31T00:05:00.000Z"),
+    }).map((item) => item.id),
+    [solEvent.id, unicodeEvent.id],
+  );
+  a.clearMarketAlertChartRetry("牛来USDT");
+
+  assert.equal(a.reserveBinanceRequestSlot({ nowMs: 1_000, spacingMs: 100 }), 0);
+  assert.equal(b.reserveBinanceRequestSlot({ nowMs: 1_000, spacingMs: 100 }), 100);
+  a.deferBinanceRequests(1_500);
+  assert.equal(b.getBinanceRequestDelay(1_100), 400);
+  assert.equal(b.reserveBinanceRequestSlot({ nowMs: 1_100, spacingMs: 100 }), 400);
 } finally {
   a?.close();
   b?.close();

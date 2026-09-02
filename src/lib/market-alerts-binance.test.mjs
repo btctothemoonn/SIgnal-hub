@@ -639,6 +639,53 @@ function websocketClient() {
   };
 }
 
+{
+  let releaseHydration;
+  let markSocketCreated;
+  const hydrationGate = new Promise((resolve) => {
+    releaseHydration = resolve;
+  });
+  const socketCreated = new Promise((resolve) => {
+    markSocketCreated = resolve;
+  });
+  const earlySocketDirectory = mkdtempSync(join(tmpdir(), "market-alerts-ws-early-"));
+  const earlySocketStore = openMarketAlertsStore(join(earlySocketDirectory, "alerts.sqlite"));
+  try {
+    const worker = startVolatilityWebSocketWorker({
+      client: {
+        ...websocketClient(),
+        getKlines: async (_symbol, interval) => {
+          await hydrationGate;
+          return flatKlines(
+            interval === "5m" ? 300_000 : 60_000,
+            interval === "5m" ? 36 : 40,
+          );
+        },
+      },
+      store: earlySocketStore,
+      once: true,
+      config: { wsTopN: 1, wsFirstMessageTimeoutMs: 100, wsRankRefreshMs: 1_000 },
+      createWebSocket: () => {
+        markSocketCreated();
+        return new FakeWebSocket(JSON.stringify({
+          stream: "btcusdt@ticker",
+          data: { s: "BTCUSDT", c: "107", P: "12", q: "7000" },
+        }));
+      },
+    });
+    const connectedBeforeHydration = await Promise.race([
+      socketCreated.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    assert.equal(connectedBeforeHydration, true);
+    releaseHydration();
+    await worker;
+  } finally {
+    earlySocketStore.close();
+    rmSync(earlySocketDirectory, { recursive: true, force: true });
+  }
+}
+
 const wsDirectory = mkdtempSync(join(tmpdir(), "market-alerts-ws-"));
 let wsStore;
 try {

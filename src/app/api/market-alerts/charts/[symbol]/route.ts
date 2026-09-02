@@ -32,7 +32,15 @@ export async function GET(
   const chart = await readMarketAlertKlineChart(symbol, {
     sourceKey: metadata.sourceKey,
   });
-  if (!chart) return notFound();
+  if (!chart) {
+    const cleanupStore = openMarketAlertsStore();
+    try {
+      cleanupStore.deleteMarketAlertChart(symbol, metadata.sourceKey);
+    } finally {
+      cleanupStore.close();
+    }
+    return notFound();
+  }
   return new Response(new Uint8Array(chart), {
     headers: {
       "Cache-Control": NO_STORE,

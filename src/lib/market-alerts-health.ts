@@ -62,6 +62,7 @@ export function getMarketAlertWorkerView(
   const lastErrorAt = showLastError ? heartbeat.lastErrorAt ?? null : null;
   const lastErrorRecovered = Boolean(
     lastError &&
+      heartbeat.status === "live" &&
       Number.isFinite(updatedAtMs) &&
       updatedAtMs > lastErrorAtMs,
   );

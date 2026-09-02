@@ -248,6 +248,21 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     );
     CREATE INDEX IF NOT EXISTS idx_market_alert_charts_updated
       ON market_alert_charts (updated_at DESC);
+    CREATE TABLE IF NOT EXISTS market_alert_chart_retry (
+      symbol TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_alert_binance_rate_limit (
+      id INTEGER PRIMARY KEY CHECK (id=1),
+      next_request_at INTEGER NOT NULL DEFAULT 0,
+      blocked_until INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    INSERT OR IGNORE INTO market_alert_binance_rate_limit
+      (id, next_request_at, blocked_until, updated_at)
+      VALUES (1, 0, 0, '1970-01-01T00:00:00.000Z');
   `);
 
   const heartbeatColumns = new Set(
@@ -502,6 +517,31 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   const chartGet = db.prepare(`
     SELECT symbol, event_id, interval, updated_at, source_key
     FROM market_alert_charts WHERE symbol=?
+  `);
+  const chartDelete = db.prepare(`
+    DELETE FROM market_alert_charts WHERE symbol=? AND source_key=?
+  `);
+  const chartRetryGet = db.prepare(`
+    SELECT attempts FROM market_alert_chart_retry WHERE symbol=?
+  `);
+  const chartRetryUpsert = db.prepare(`
+    INSERT INTO market_alert_chart_retry (symbol, attempts, next_attempt_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(symbol) DO UPDATE SET
+      attempts=excluded.attempts,
+      next_attempt_at=excluded.next_attempt_at,
+      updated_at=excluded.updated_at
+  `);
+  const chartRetryDelete = db.prepare(`
+    DELETE FROM market_alert_chart_retry WHERE symbol=?
+  `);
+  const binanceRateLimitGet = db.prepare(`
+    SELECT next_request_at, blocked_until
+    FROM market_alert_binance_rate_limit WHERE id=1
+  `);
+  const binanceRateLimitUpdate = db.prepare(`
+    UPDATE market_alert_binance_rate_limit
+    SET next_request_at=?, blocked_until=?, updated_at=? WHERE id=1
   `);
 
   function reserveVolatilityAlert(input: {
@@ -951,10 +991,45 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     };
   }
 
+  function deleteMarketAlertChart(symbolInput: string, sourceKeyInput: string) {
+    let symbol: string;
+    let sourceKey: string;
+    try {
+      symbol = normalizeChartSymbol(symbolInput);
+      sourceKey = normalizeChartSourceKey(sourceKeyInput);
+    } catch {
+      return false;
+    }
+    return transaction(() => Number(run(chartDelete, symbol, sourceKey).changes) > 0);
+  }
+
+  function markMarketAlertChartRetry(symbolInput: string, nowMs = Date.now()) {
+    const symbol = normalizeChartSymbol(symbolInput);
+    return transaction(() => {
+      const previous = chartRetryGet.get(symbol) as DbRow | undefined;
+      const attempts = Math.min(16, numberValue(previous?.attempts) + 1);
+      const retryMs = Math.min(6 * 60 * 60 * 1_000, 60_000 * 2 ** (attempts - 1));
+      run(
+        chartRetryUpsert,
+        symbol,
+        attempts,
+        nowMs + retryMs,
+        new Date(nowMs).toISOString(),
+      );
+      return { attempts, nextAttemptAt: nowMs + retryMs };
+    });
+  }
+
+  function clearMarketAlertChartRetry(symbolInput: string) {
+    const symbol = normalizeChartSymbol(symbolInput);
+    return transaction(() => Number(run(chartRetryDelete, symbol).changes) > 0);
+  }
+
   function getMarketAlertChartBackfillEvents(input: {
     since: string;
     symbols: string[];
     limit?: number;
+    nowMs?: number;
   }) {
     const symbols = [...new Set(input.symbols.flatMap((value) => {
       try {
@@ -979,11 +1054,53 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
           WHERE e.occurred_at>=? AND e.symbol IN (${placeholders})
         ) ranked
         LEFT JOIN market_alert_charts c ON c.symbol=ranked.symbol
-        WHERE ranked.chart_rank=1 AND c.symbol IS NULL
-        ORDER BY ranked.occurred_at DESC, ranked.created_at DESC
+        LEFT JOIN market_alert_chart_retry retry ON retry.symbol=ranked.symbol
+        WHERE ranked.chart_rank=1
+          AND c.symbol IS NULL
+          AND COALESCE(retry.next_attempt_at, 0)<=?
+        ORDER BY COALESCE(retry.updated_at, '') ASC,
+          ranked.occurred_at DESC, ranked.created_at DESC
         LIMIT ?
-      `).all(input.since, ...symbols, limit) as DbRow[]
+      `).all(input.since, ...symbols, input.nowMs ?? Date.now(), limit) as DbRow[]
     ).map((row) => rowToEvent(row));
+  }
+
+  function reserveBinanceRequestSlot(input: {
+    nowMs: number;
+    spacingMs: number;
+  }) {
+    return transaction(() => {
+      const row = binanceRateLimitGet.get() as DbRow | undefined;
+      const readyAt = Math.max(
+        input.nowMs,
+        numberValue(row?.next_request_at),
+        numberValue(row?.blocked_until),
+      );
+      run(
+        binanceRateLimitUpdate,
+        readyAt + Math.max(0, Math.floor(input.spacingMs)),
+        numberValue(row?.blocked_until),
+        new Date(input.nowMs).toISOString(),
+      );
+      return readyAt - input.nowMs;
+    });
+  }
+
+  function deferBinanceRequests(untilMs: number) {
+    return transaction(() => {
+      const row = binanceRateLimitGet.get() as DbRow | undefined;
+      run(
+        binanceRateLimitUpdate,
+        numberValue(row?.next_request_at),
+        Math.max(numberValue(row?.blocked_until), untilMs),
+        new Date().toISOString(),
+      );
+    });
+  }
+
+  function getBinanceRequestDelay(nowMs: number) {
+    const row = binanceRateLimitGet.get() as DbRow | undefined;
+    return Math.max(0, numberValue(row?.blocked_until) - nowMs);
   }
 
   function getMarketAlertsSnapshot(options: {
@@ -1169,7 +1286,13 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     upsertMarketValuations,
     upsertMarketAlertChart,
     getMarketAlertChart,
+    deleteMarketAlertChart,
+    markMarketAlertChartRetry,
+    clearMarketAlertChartRetry,
     getMarketAlertChartBackfillEvents,
+    reserveBinanceRequestSlot,
+    deferBinanceRequests,
+    getBinanceRequestDelay,
     getRecentlyTriggeredSymbols,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,

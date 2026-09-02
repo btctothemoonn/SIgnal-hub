@@ -51,6 +51,20 @@ assert.equal(recovered.lastError, "HTTP 429 Too Many Requests");
 assert.equal(recovered.lastErrorAt, "2026-08-31T03:55:00.000Z");
 assert.equal(recovered.lastErrorRecovered, true);
 
+const restarting = getMarketAlertWorkerView(
+  {
+    worker: "squeeze",
+    status: "starting",
+    detail: "loading markets",
+    meta: {},
+    updatedAt: "2026-08-31T03:59:30.000Z",
+    lastError: "HTTP 429 Too Many Requests",
+    lastErrorAt: "2026-08-31T03:55:00.000Z",
+  },
+  now,
+);
+assert.equal(restarting.lastErrorRecovered, false);
+
 const oldRecovered = getMarketAlertWorkerView(
   {
     worker: "volatility-ws",

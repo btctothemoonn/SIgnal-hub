@@ -77,6 +77,20 @@ try {
     { params: Promise.resolve({ symbol: "../BTCUSDT" }) },
   );
   assert.equal(invalid.status, 404);
+
+  store.upsertMarketAlertChart({
+    symbol: "ETHUSDT",
+    eventId: "volatility:LONG:ETHUSDT:missing-file",
+    interval: "5m",
+    updatedAt: "2026-08-31T00:11:00.000Z",
+    sourceKey: "1788135060000_1788135060000_bbbbbbbbbbbb",
+  });
+  const orphaned = await GET(
+    new Request("http://localhost/api/market-alerts/charts/ETHUSDT"),
+    { params: Promise.resolve({ symbol: "ETHUSDT" }) },
+  );
+  assert.equal(orphaned.status, 404);
+  assert.equal(store.getMarketAlertChart("ETHUSDT"), null);
 } finally {
   store?.close();
   if (previousRuntimeRoot === undefined) delete process.env.SIGNAL_HUB_RUNTIME_DIR;
