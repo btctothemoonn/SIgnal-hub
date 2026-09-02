@@ -1,5 +1,9 @@
 import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import {
+  normalizeHynixPremiumAlertSettings,
+  type HynixPremiumAlertSettings,
+} from "./hynix-premium-alert.ts";
 
 const CONFIG_PATH = resolve(process.cwd(), ".signal-hub", "runtime-config.json");
 
@@ -10,6 +14,7 @@ export type RuntimeConfig = {
   twitterAccounts: RuntimeWatchItem[];
   douyinCreators: RuntimeWatchItem[];
   douyinEnabled: boolean;
+  hynixPremiumAlert: HynixPremiumAlertSettings;
 };
 
 type RawItem = string | { ref?: unknown; tags?: unknown } | null | undefined;
@@ -18,6 +23,7 @@ type RawRuntimeConfig = {
   twitterAccounts?: unknown;
   douyinCreators?: unknown;
   douyinEnabled?: unknown;
+  hynixPremiumAlert?: unknown;
 };
 
 const emptyConfig: RuntimeConfig = {
@@ -25,6 +31,7 @@ const emptyConfig: RuntimeConfig = {
   twitterAccounts: [],
   douyinCreators: [],
   douyinEnabled: true,
+  hynixPremiumAlert: normalizeHynixPremiumAlertSettings(undefined),
 };
 
 let cache: RuntimeConfig | null = null;
@@ -81,6 +88,9 @@ function normalize(raw: RawRuntimeConfig | null | undefined): RuntimeConfig {
     twitterAccounts: sanitizeWatchList(raw.twitterAccounts),
     douyinCreators: sanitizeWatchList(raw.douyinCreators),
     douyinEnabled: raw.douyinEnabled !== false,
+    hynixPremiumAlert: normalizeHynixPremiumAlertSettings(
+      raw.hynixPremiumAlert,
+    ),
   };
 }
 
@@ -328,5 +338,14 @@ export async function setDouyinEnabled(enabled: boolean): Promise<RuntimeConfig>
   return mutate((current) => ({
     ...current,
     douyinEnabled: enabled,
+  }));
+}
+
+export async function setHynixPremiumAlert(
+  settings: HynixPremiumAlertSettings,
+): Promise<RuntimeConfig> {
+  return mutate((current) => ({
+    ...current,
+    hynixPremiumAlert: normalizeHynixPremiumAlertSettings(settings),
   }));
 }

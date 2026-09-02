@@ -12,10 +12,12 @@ import {
   removeTwitterAccount,
   setDouyinCreatorTags,
   setDouyinEnabled,
+  setHynixPremiumAlert,
   setTelegramChannelTags,
   setTwitterAccountTags,
   type RuntimeConfig,
 } from "@/lib/runtime-config";
+import { isValidHynixPremiumAlertThresholdPct } from "@/lib/hynix-premium-alert";
 import { reloadTelegramChannels } from "@/lib/telegram-channels";
 import {
   add6551TwitterWatch,
@@ -50,7 +52,12 @@ type ActionBody =
   | { action: "douyin.remove"; ref: string }
   | { action: "douyin.batchAdd"; refs: string[] }
   | { action: "douyin.setTags"; ref: string; tags: string[] }
-  | { action: "douyin.setEnabled"; enabled: boolean };
+  | { action: "douyin.setEnabled"; enabled: boolean }
+  | {
+      action: "hynixPremiumAlert.set";
+      enabled: boolean;
+      thresholdPct: number;
+    };
 
 type TwitterSyncResult = { username: string; warning: string | null };
 
@@ -366,6 +373,25 @@ export async function POST(request: Request) {
           );
         }
         config = await setDouyinEnabled(body.enabled);
+        break;
+      }
+      case "hynixPremiumAlert.set": {
+        if (typeof body.enabled !== "boolean") {
+          return NextResponse.json(
+            { success: false, error: "海力士溢价预警开关必须是布尔值。" },
+            { status: 400 },
+          );
+        }
+        if (!isValidHynixPremiumAlertThresholdPct(body.thresholdPct)) {
+          return NextResponse.json(
+            { success: false, error: "海力士溢价预警阈值必须在 0% 到 300% 之间。" },
+            { status: 400 },
+          );
+        }
+        config = await setHynixPremiumAlert({
+          enabled: body.enabled,
+          thresholdPct: body.thresholdPct,
+        });
         break;
       }
       default: {

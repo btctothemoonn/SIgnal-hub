@@ -31,6 +31,10 @@ try {
   );
   assert.deepEqual(first.douyinCreators, []);
   assert.equal(first.douyinEnabled, true);
+  assert.deepEqual(first.hynixPremiumAlert, {
+    enabled: true,
+    thresholdPct: 30,
+  });
 
   const withDouyin = await runtimeConfig.addDouyinCreator(
     "https://www.douyin.com/user/MS4wLjABAAAAcreator",
@@ -43,6 +47,15 @@ try {
   assert.equal(disabledDouyin.douyinEnabled, false);
   assert.equal(disabledDouyin.douyinCreators.length, 1);
 
+  const customPremiumAlert = await runtimeConfig.setHynixPremiumAlert({
+    enabled: false,
+    thresholdPct: 42.5,
+  });
+  assert.deepEqual(customPremiumAlert.hynixPremiumAlert, {
+    enabled: false,
+    thresholdPct: 42.5,
+  });
+
   await new Promise((resolve) => setTimeout(resolve, 20));
   await writeFile(
     configPath,
@@ -51,6 +64,7 @@ try {
       twitterAccounts: [{ ref: "new_x", tags: ["watch"] }],
       douyinCreators: [{ ref: "douyin_author", tags: ["stocks"] }],
       douyinEnabled: false,
+      hynixPremiumAlert: { enabled: true, thresholdPct: 301 },
     }),
     "utf8",
   );
@@ -64,6 +78,10 @@ try {
     { ref: "douyin_author", tags: ["stocks"] },
   ]);
   assert.equal(second.douyinEnabled, false);
+  assert.deepEqual(second.hynixPremiumAlert, {
+    enabled: true,
+    thresholdPct: 30,
+  });
   assert.deepEqual(runtimeConfig.getCachedRuntimeConfig(), second);
 } finally {
   process.chdir(originalCwd);

@@ -25,4 +25,27 @@ assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2), true);
 assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, false), false);
 assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, true), true);
 
+let customCycle = nextHynixPremiumAlertCycle(undefined, 34.9, 35);
+assert.equal(
+  shouldShowHynixPremiumAlert(customCycle, 34.9, true, 35),
+  false,
+);
+customCycle = nextHynixPremiumAlertCycle(customCycle, 35, 35);
+assert.equal(
+  shouldShowHynixPremiumAlert(customCycle, 35, true, 35),
+  true,
+);
+customCycle = dismissHynixPremiumAlertCycle(customCycle);
+customCycle = nextHynixPremiumAlertCycle(customCycle, 36, 35);
+assert.equal(
+  shouldShowHynixPremiumAlert(customCycle, 36, true, 35),
+  false,
+);
+customCycle = nextHynixPremiumAlertCycle(customCycle, 34.8, 35);
+customCycle = nextHynixPremiumAlertCycle(customCycle, 35.2, 35);
+assert.equal(
+  shouldShowHynixPremiumAlert(customCycle, 35.2, true, 35),
+  true,
+);
+
 console.log("ok - hynix premium alert cycle");

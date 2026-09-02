@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Save } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
@@ -33,19 +33,21 @@ import {
   type BinanceKlinePoint,
 } from "@/lib/binance-hynix-premium";
 import {
-  HYNIX_PREMIUM_ALERT_THRESHOLD_PCT,
+  HYNIX_PREMIUM_ALERT_DEFAULT_SETTINGS,
   dismissHynixPremiumAlertCycle,
+  isValidHynixPremiumAlertThresholdPct,
   nextHynixPremiumAlertCycle,
+  normalizeHynixPremiumAlertSettings,
   shouldShowHynixPremiumAlert,
   type HynixPremiumAlertCycle,
+  type HynixPremiumAlertSettings,
 } from "@/lib/hynix-premium-alert";
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
   "signal-hub:stocks:hynix-premium:v4";
 const STOCKS_HYNIX_FUNDING_CACHE_KEY =
   "signal-hub:stocks:hynix-funding:v1";
-const STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY =
-  "signal-hub:stocks:hynix-premium:alert-enabled:v1";
+const PREMIUM_ALERT_SETTINGS_POLL_MS = 60 * 1000;
 const PREMIUM_CHART_HEIGHT = 360;
 const PREMIUM_KLINE_PAGE_LIMIT = 1500;
 const PREMIUM_MAX_POINTS = 20000;
@@ -67,6 +69,18 @@ function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(2)}%`;
 }
+
+function formatAlertThreshold(value: number) {
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+}
+
+type SettingsApiResponse = {
+  success: boolean;
+  config?: {
+    hynixPremiumAlert?: unknown;
+  };
+  error?: string;
+};
 
 function formatPrice(value: number) {
   return value.toLocaleString("en-US", {
@@ -143,7 +157,22 @@ export function StocksHynixPremiumCurve({
       isOverThreshold: false,
       dismissed: false,
     });
+  const [premiumAlertSettings, setPremiumAlertSettings] =
+    useState<HynixPremiumAlertSettings>(() => ({
+      ...HYNIX_PREMIUM_ALERT_DEFAULT_SETTINGS,
+    }));
+  const [premiumAlertThresholdDraft, setPremiumAlertThresholdDraft] =
+    useState(() =>
+      formatAlertThreshold(
+        HYNIX_PREMIUM_ALERT_DEFAULT_SETTINGS.thresholdPct,
+      ),
+    );
+  const [premiumAlertSettingsBusy, setPremiumAlertSettingsBusy] =
+    useState(false);
+  const [premiumAlertSettingsError, setPremiumAlertSettingsError] =
+    useState<string | null>(null);
   const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
+  const thresholdInputFocusedRef = useRef(false);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -161,11 +190,8 @@ export function StocksHynixPremiumCurve({
     useBrowserJsonCache<BinanceHynixFundingSnapshot>(
       STOCKS_HYNIX_FUNDING_CACHE_KEY,
     );
-  const [cachedPremiumAlertEnabled, writeCachedAlertEnabled] =
-    useBrowserJsonCache<boolean>(
-      STOCKS_HYNIX_PREMIUM_ALERT_ENABLED_CACHE_KEY,
-    );
-  const premiumAlertEnabled = cachedPremiumAlertEnabled ?? true;
+  const premiumAlertEnabled = premiumAlertSettings.enabled;
+  const premiumAlertThresholdPct = premiumAlertSettings.thresholdPct;
   const snapshot =
     liveSnapshot?.interval === selectedInterval
       ? liveSnapshot
@@ -183,6 +209,7 @@ export function StocksHynixPremiumCurve({
       premiumAlertCycle,
       latest.premiumPct,
       premiumAlertEnabled,
+      premiumAlertThresholdPct,
     );
   const shownPoints = points.slice(-PREMIUM_MAX_POINTS);
   const candleData = useMemo(
@@ -198,6 +225,113 @@ export function StocksHynixPremiumCurve({
   useEffect(() => {
     snapshotRef.current = snapshot;
   }, [snapshot]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPremiumAlertSettings() {
+      try {
+        const response = await fetch("/api/settings", {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as SettingsApiResponse;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || `settings HTTP ${response.status}`);
+        }
+        const nextSettings = normalizeHynixPremiumAlertSettings(
+          payload.config?.hynixPremiumAlert,
+        );
+        if (!cancelled) {
+          setPremiumAlertSettings(nextSettings);
+          if (!thresholdInputFocusedRef.current) {
+            setPremiumAlertThresholdDraft(
+              formatAlertThreshold(nextSettings.thresholdPct),
+            );
+          }
+          setPremiumAlertSettingsError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPremiumAlertSettingsError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    }
+
+    void loadPremiumAlertSettings();
+    const timer = window.setInterval(
+      loadPremiumAlertSettings,
+      PREMIUM_ALERT_SETTINGS_POLL_MS,
+    );
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const currentSnapshot = snapshotRef.current;
+    const currentPremium =
+      currentSnapshot?.latest?.premiumPct ??
+      currentSnapshot?.points.at(-1)?.premiumPct ??
+      null;
+    setPremiumAlertCycle(
+      nextHynixPremiumAlertCycle(
+        undefined,
+        currentPremium,
+        premiumAlertThresholdPct,
+      ),
+    );
+  }, [premiumAlertThresholdPct]);
+
+  async function persistPremiumAlertSettings(
+    nextSettings: HynixPremiumAlertSettings,
+  ) {
+    setPremiumAlertSettingsBusy(true);
+    setPremiumAlertSettingsError(null);
+    try {
+      const response = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "hynixPremiumAlert.set",
+          enabled: nextSettings.enabled,
+          thresholdPct: nextSettings.thresholdPct,
+        }),
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as SettingsApiResponse;
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || `settings HTTP ${response.status}`);
+      }
+      const savedSettings = normalizeHynixPremiumAlertSettings(
+        payload.config?.hynixPremiumAlert,
+      );
+      setPremiumAlertSettings(savedSettings);
+      setPremiumAlertThresholdDraft(
+        formatAlertThreshold(savedSettings.thresholdPct),
+      );
+    } catch (error) {
+      setPremiumAlertSettingsError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setPremiumAlertSettingsBusy(false);
+    }
+  }
+
+  function savePremiumAlertThreshold() {
+    const thresholdPct = Number(premiumAlertThresholdDraft);
+    if (!isValidHynixPremiumAlertThresholdPct(thresholdPct)) {
+      setPremiumAlertSettingsError("预警阈值必须在 0% 到 300% 之间。");
+      return;
+    }
+    void persistPremiumAlertSettings({
+      enabled: premiumAlertEnabled,
+      thresholdPct,
+    });
+  }
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -350,7 +484,11 @@ export function StocksHynixPremiumCurve({
         if (!cancelled) {
           setLiveSnapshot(snapshot);
           setPremiumAlertCycle((current) =>
-            nextHynixPremiumAlertCycle(current, snapshot.latest?.premiumPct),
+            nextHynixPremiumAlertCycle(
+              current,
+              snapshot.latest?.premiumPct,
+              premiumAlertThresholdPct,
+            ),
           );
           if (snapshot.points.length > 0) writeCachedSnapshot(snapshot);
           setError(snapshot.errors[0] ?? null);
@@ -368,7 +506,7 @@ export function StocksHynixPremiumCurve({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [selectedInterval, writeCachedSnapshot]);
+  }, [premiumAlertThresholdPct, selectedInterval, writeCachedSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -418,7 +556,11 @@ export function StocksHynixPremiumCurve({
     const applyPremiumPoint = (point: BinanceHynixPremiumPoint | null) => {
       if (!point) return;
       setPremiumAlertCycle((current) =>
-        nextHynixPremiumAlertCycle(current, point.premiumPct),
+        nextHynixPremiumAlertCycle(
+          current,
+          point.premiumPct,
+          premiumAlertThresholdPct,
+        ),
       );
       setLiveSnapshot((current) => {
         const baseSnapshot = current ?? snapshotRef.current;
@@ -522,6 +664,7 @@ export function StocksHynixPremiumCurve({
     snapshot?.symbols.base,
     snapshot?.symbols.benchmark,
     snapshot?.websocket?.url,
+    premiumAlertThresholdPct,
     selectedInterval,
     writeCachedSnapshot,
   ]);
@@ -543,19 +686,24 @@ export function StocksHynixPremiumCurve({
               id="hynix-premium-alert-title"
               className="text-sm font-semibold text-danger"
             >
-              海力士溢价超过 {HYNIX_PREMIUM_ALERT_THRESHOLD_PCT}%
+              海力士溢价超过 {formatAlertThreshold(premiumAlertThresholdPct)}%
             </p>
             <p className="mt-2 text-xs leading-5 text-foreground">
               当前溢价 {formatSignedPercent(latest.premiumPct)}，组合为
               SKHYUSDT * 10 / SKHYNIXUSDT。
             </p>
             <p className="mt-1 text-[11px] text-muted">
-              本轮溢价回落到 {HYNIX_PREMIUM_ALERT_THRESHOLD_PCT}% 以下后，再次上穿会重新提醒。
+              本轮溢价回落到 {formatAlertThreshold(premiumAlertThresholdPct)}% 以下后，再次上穿会重新提醒。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => writeCachedAlertEnabled(false)}
+                onClick={() =>
+                  void persistPremiumAlertSettings({
+                    ...premiumAlertSettings,
+                    enabled: false,
+                  })
+                }
                 className="rounded-md border border-line/70 px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-foreground"
               >
                 关闭提醒
@@ -603,24 +751,86 @@ export function StocksHynixPremiumCurve({
             </div>
           ) : null}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={premiumAlertEnabled}
-              onClick={() => writeCachedAlertEnabled(!premiumAlertEnabled)}
-              className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                premiumAlertEnabled
-                  ? "border-success/45 bg-success/10 text-success"
-                  : "border-line/70 bg-background/45 text-muted hover:text-foreground"
-              }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  premiumAlertEnabled ? "bg-success" : "bg-muted"
+            <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-line/70 bg-workspace-canvas p-1">
+              <button
+                type="button"
+                role="switch"
+                aria-label="海力士溢价预警"
+                aria-checked={premiumAlertEnabled}
+                disabled={premiumAlertSettingsBusy}
+                onClick={() =>
+                  void persistPremiumAlertSettings({
+                    ...premiumAlertSettings,
+                    enabled: !premiumAlertEnabled,
+                  })
+                }
+                className={`inline-flex h-7 items-center gap-2 rounded-md border px-2.5 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
+                  premiumAlertEnabled
+                    ? "border-success/45 bg-success/10 text-success"
+                    : "border-line/70 bg-background/45 text-muted hover:text-foreground"
                 }`}
-              />
-              30% 溢价提醒 {premiumAlertEnabled ? "开" : "关"}
-            </button>
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    premiumAlertEnabled ? "bg-success" : "bg-muted"
+                  }`}
+                />
+                预警 {premiumAlertEnabled ? "开" : "关"}
+              </button>
+              <form
+                className="flex items-center gap-1.5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  savePremiumAlertThreshold();
+                }}
+              >
+                <label
+                  htmlFor="hynix-premium-alert-threshold"
+                  className="pl-1 text-[11px] font-semibold text-muted"
+                >
+                  预警阈值
+                </label>
+                <div className="relative">
+                  <input
+                    id="hynix-premium-alert-threshold"
+                    type="number"
+                    min="0"
+                    max="300"
+                    step="0.1"
+                    inputMode="decimal"
+                    value={premiumAlertThresholdDraft}
+                    disabled={premiumAlertSettingsBusy}
+                    onFocus={() => {
+                      thresholdInputFocusedRef.current = true;
+                    }}
+                    onBlur={() => {
+                      thresholdInputFocusedRef.current = false;
+                    }}
+                    onChange={(event) =>
+                      setPremiumAlertThresholdDraft(event.target.value)
+                    }
+                    className="h-7 w-[5.25rem] rounded-md border border-line/70 bg-background/55 px-2 pr-6 font-mono text-xs font-semibold text-foreground outline-none transition focus:border-accent/60 disabled:opacity-60"
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[11px] text-muted">
+                    %
+                  </span>
+                </div>
+                <button
+                  type="submit"
+                  disabled={premiumAlertSettingsBusy}
+                  title="保存海力士溢价预警阈值"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-accent/35 bg-accent-soft px-2 text-xs font-semibold text-accent transition hover:border-accent/55 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Save aria-hidden className="h-3.5 w-3.5" />
+                  {premiumAlertSettingsBusy ? "保存中" : "保存"}
+                </button>
+              </form>
+            </div>
+            {premiumAlertSettingsError ? (
+              <span role="status" className="text-[11px] text-danger">
+                {premiumAlertSettingsError}
+              </span>
+            ) : null}
             <button
               type="button"
               aria-expanded={expanded}
