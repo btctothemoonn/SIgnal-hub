@@ -49,6 +49,15 @@ assert.match(source, /type="number"/);
 assert.match(source, /step="0\.1"/);
 assert.match(source, /hynixPremiumAlert\.set/);
 assert.match(source, /premiumAlertThresholdPct/);
+assert.match(source, /premiumAlertThresholdRef/);
+assert.doesNotMatch(
+  source,
+  /\[premiumAlertThresholdPct, selectedInterval, writeCachedSnapshot\]/,
+);
+assert.doesNotMatch(
+  source,
+  /snapshot\?\.websocket\?\.url,\s*premiumAlertThresholdPct,\s*selectedInterval/,
+);
 assert.match(source, /role="alertdialog"/);
 assert.match(source, /aria-modal="true"/);
 assert.match(source, /shouldShowHynixPremiumAlert/);

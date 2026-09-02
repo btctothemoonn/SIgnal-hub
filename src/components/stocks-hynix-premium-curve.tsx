@@ -172,6 +172,9 @@ export function StocksHynixPremiumCurve({
   const [premiumAlertSettingsError, setPremiumAlertSettingsError] =
     useState<string | null>(null);
   const snapshotRef = useRef<BinanceHynixPremiumSnapshot | null>(null);
+  const premiumAlertThresholdRef = useRef(
+    HYNIX_PREMIUM_ALERT_DEFAULT_SETTINGS.thresholdPct,
+  );
   const thresholdInputFocusedRef = useRef(false);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -271,6 +274,7 @@ export function StocksHynixPremiumCurve({
   }, []);
 
   useEffect(() => {
+    premiumAlertThresholdRef.current = premiumAlertThresholdPct;
     const currentSnapshot = snapshotRef.current;
     const currentPremium =
       currentSnapshot?.latest?.premiumPct ??
@@ -487,7 +491,7 @@ export function StocksHynixPremiumCurve({
             nextHynixPremiumAlertCycle(
               current,
               snapshot.latest?.premiumPct,
-              premiumAlertThresholdPct,
+              premiumAlertThresholdRef.current,
             ),
           );
           if (snapshot.points.length > 0) writeCachedSnapshot(snapshot);
@@ -506,7 +510,7 @@ export function StocksHynixPremiumCurve({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [premiumAlertThresholdPct, selectedInterval, writeCachedSnapshot]);
+  }, [selectedInterval, writeCachedSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -559,7 +563,7 @@ export function StocksHynixPremiumCurve({
         nextHynixPremiumAlertCycle(
           current,
           point.premiumPct,
-          premiumAlertThresholdPct,
+          premiumAlertThresholdRef.current,
         ),
       );
       setLiveSnapshot((current) => {
@@ -664,7 +668,6 @@ export function StocksHynixPremiumCurve({
     snapshot?.symbols.base,
     snapshot?.symbols.benchmark,
     snapshot?.websocket?.url,
-    premiumAlertThresholdPct,
     selectedInterval,
     writeCachedSnapshot,
   ]);
