@@ -61,6 +61,23 @@ assert.equal(wsPump?.side, "LONG");
 assert.match(wsPump?.trigger ?? "", /A趋势/);
 assert.match(wsPump?.trigger ?? "", /B加速/);
 assert.equal(wsPump?.level, 1);
+assert.equal(wsPump?.chartInterval, "5m");
+
+const wsAcceleration = evaluateWsVolatilitySignal({
+  symbol: "BULLAUSDT",
+  price: 100,
+  pct1m: 5.4,
+  pct5m: 2.4,
+  pct24h: 3,
+  streakGreen: 1,
+  streakRed: 0,
+  volRatio1m: 3,
+  volRatio5m: 1,
+  k1Closed: false,
+  k5Closed: false,
+});
+assert.match(wsAcceleration?.trigger ?? "", /B加速/);
+assert.equal(wsAcceleration?.chartInterval, "1m");
 
 const wsCounterTrendCrash = evaluateWsVolatilitySignal({
   symbol: "ETHUSDT",
@@ -94,6 +111,7 @@ const restEarlyPump = evaluateRestVolatilitySignal({
 });
 assert.equal(restEarlyPump?.side, "LONG");
 assert.match(restEarlyPump?.trigger ?? "", /D先行/);
+assert.equal(restEarlyPump?.chartInterval, "1m");
 
 const restFiveMinutePump = evaluateRestVolatilitySignal({
   symbol: "AVAXUSDT",
@@ -112,6 +130,7 @@ const restFiveMinutePump = evaluateRestVolatilitySignal({
 });
 assert.equal(restFiveMinutePump?.volumeRatio, 3.2);
 assert.match(restFiveMinutePump?.statusText ?? "", /5m已收盘/);
+assert.equal(restFiveMinutePump?.chartInterval, "5m");
 
 const firstVolatility = transitionVolatilityState(null, {
   triggered: true,

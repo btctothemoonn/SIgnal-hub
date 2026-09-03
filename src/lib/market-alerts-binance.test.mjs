@@ -255,12 +255,14 @@ try {
   store = openMarketAlertsStore(join(directory, "alerts.sqlite"));
   const chartWrites = [];
   const chartPrunes = [];
+  let chartRefetches = 0;
   const client = {
     getExchangeInfo: async () => exchangeInfo,
     getTickers24h: async () => tickers.filter((ticker) => ticker.symbol !== "AAPLUSDT"),
     getKlines: async (symbol, interval, limit) => {
       if (symbol === "BTCUSDT") {
         if (interval === "5m" && limit === 120) {
+          chartRefetches += 1;
           return flatKlines(300_000, 120);
         }
         return interval === "5m" ? pumpKlines5m() : pump1m;
@@ -303,7 +305,9 @@ try {
   assert.equal(chartWrites.length, 1);
   assert.equal(chartWrites[0].symbol, "BTCUSDT");
   assert.equal(chartWrites[0].interval, "5m");
-  assert.equal(chartWrites[0].klines.length, 120);
+  assert.equal(chartWrites[0].klines.length, 36);
+  assert.deepEqual(chartWrites[0].klines.at(-1), pumpKlines5m().at(-1));
+  assert.equal(chartRefetches, 0);
   assert.match(chartWrites[0].sourceKey, /^\d{13}_\d{13}_[a-f0-9]{12}$/);
   assert.deepEqual(chartPrunes, [chartWrites[0].sourceKey]);
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
@@ -664,6 +668,32 @@ class ReasonlessCloseWebSocket extends FakeWebSocket {
   }
 }
 
+class TimedMessagesWebSocket {
+  listeners = new Map();
+  closed = false;
+  constructor(messages) {
+    queueMicrotask(() => this.emit("open", {}));
+    messages.forEach((data, index) => {
+      setTimeout(() => this.emit("message", { data }), 20 + index * 50);
+    });
+    setTimeout(() => this.close(1000, "complete"), 40 + messages.length * 50);
+  }
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  close(code = 1000, reason = "") {
+    if (this.closed) return;
+    this.closed = true;
+    this.emit("close", { code, reason });
+  }
+  emit(type, event) {
+    if (this.closed && type !== "close") return;
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
 function websocketClient() {
   return {
     getExchangeInfo: async () => exchangeInfo,
@@ -775,6 +805,8 @@ try {
   });
   let fdvCalls = 0;
   let burstSocket;
+  const burstChartWrites = [];
+  const burstBaseClient = websocketClient();
   const fiveMinuteOpenTime = 1_700_000_000_000 + 35 * 300_000;
   const oneMinuteOpenTime = 1_700_000_000_000 + 39 * 60_000;
   const burstMessages = [
@@ -813,7 +845,11 @@ try {
   ];
   const burstWorker = startVolatilityWebSocketWorker({
     client: {
-      ...websocketClient(),
+      ...burstBaseClient,
+      getKlines: async (symbol, interval, limit) => {
+        if (limit === 120) throw new Error("chart must not refetch live klines");
+        return burstBaseClient.getKlines(symbol, interval, limit);
+      },
       getFullyDilutedValuation: async () => {
         fdvCalls += 1;
         notifyFdvStarted();
@@ -827,6 +863,15 @@ try {
       wsFirstMessageTimeoutMs: 100,
       wsRankRefreshMs: 1_000,
       minFdvUsd: 10_000_000,
+    },
+    writeChart: async (input) => {
+      burstChartWrites.push(input);
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+      };
     },
     createWebSocket: () => {
       burstSocket = new FakeWebSocket(burstMessages);
@@ -849,6 +894,10 @@ try {
   releaseFdv();
   await burstWorker;
   assert.equal(fdvCalls, 1);
+  assert.equal(burstChartWrites.length, 1);
+  assert.equal(burstChartWrites[0].interval, "1m");
+  assert.equal(burstChartWrites[0].klines.length, 40);
+  assert.equal(burstChartWrites[0].klines.at(-1)[4], "106");
   assert.equal(
     wsStore.getMarketAlertsSnapshot({ limit: 10 }).events.some(
       (event) => event.symbol === "BTCUSDT" && event.type === "volatility",
@@ -873,6 +922,77 @@ try {
 } finally {
   wsStore?.close();
   rmSync(wsDirectory, { recursive: true, force: true });
+}
+
+const wsUpgradeDirectory = mkdtempSync(join(tmpdir(), "market-alerts-ws-upgrade-"));
+const wsUpgradeStore = openMarketAlertsStore(join(wsUpgradeDirectory, "alerts.sqlite"));
+try {
+  const chartWrites = [];
+  const oneMinuteOpenTime = 1_700_000_000_000 + 39 * 60_000;
+  const fiveMinuteOpenTime = 1_700_000_000_000 + 35 * 300_000;
+  const trendMessage = JSON.stringify({
+    stream: "btcusdt@kline_5m",
+    data: {
+      s: "BTCUSDT",
+      k: {
+        t: fiveMinuteOpenTime,
+        o: "100",
+        h: "103",
+        l: "99",
+        c: "102",
+        v: "10",
+        T: fiveMinuteOpenTime + 299_999,
+        q: "1020",
+      },
+    },
+  });
+  const accelerationMessage = (close, volume) => JSON.stringify({
+    stream: "btcusdt@kline_1m",
+    data: {
+      s: "BTCUSDT",
+      k: {
+        t: oneMinuteOpenTime,
+        o: "100",
+        h: String(close + 1),
+        l: "99",
+        c: String(close),
+        v: String(volume),
+        T: oneMinuteOpenTime + 59_999,
+        q: String(close * volume),
+      },
+    },
+  });
+  await startVolatilityWebSocketWorker({
+    client: websocketClient(),
+    store: wsUpgradeStore,
+    config: {
+      wsTopN: 1,
+      wsFirstMessageTimeoutMs: 200,
+      wsRankRefreshMs: 1_000,
+    },
+    writeChart: async (input) => {
+      chartWrites.push(input);
+      if (chartWrites.length === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      return {
+        symbol: input.symbol,
+        interval: input.interval,
+        updatedAt: input.generatedAt,
+        sourceKey: input.sourceKey,
+      };
+    },
+    createWebSocket: () => new TimedMessagesWebSocket([
+      trendMessage,
+      accelerationMessage(106, 50),
+      accelerationMessage(113, 100),
+    ]),
+  });
+  assert.equal(chartWrites.length, 2);
+  assert.deepEqual(chartWrites.map((write) => write.klines.at(-1)[4]), ["106", "113"]);
+} finally {
+  wsUpgradeStore.close();
+  rmSync(wsUpgradeDirectory, { recursive: true, force: true });
 }
 
 console.log("ok - Binance market alert workers and fixtures");

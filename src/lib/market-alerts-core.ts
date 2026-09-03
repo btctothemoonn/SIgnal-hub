@@ -99,6 +99,7 @@ export interface VolatilitySignal {
   strengthPct: number;
   pct24h: number;
   volumeRatio: number;
+  chartInterval: "1m" | "5m";
   occurredAtMs?: number;
 }
 
@@ -187,6 +188,13 @@ function buildVolatilitySignal(
       : flags.d
         ? input.volRatio1m
         : input.volRatio5m,
+    chartInterval: flags.a || flags.c
+      ? "5m"
+      : flags.b
+        ? bWindow
+        : flags.d
+          ? "1m"
+          : "5m",
     occurredAtMs: input.kTime,
   };
 }
