@@ -447,6 +447,15 @@ function average(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
+function volumeBaseline(rows: KlineRow[]) {
+  const volumes = rows
+    .slice(-30)
+    .map(klineVolume)
+    .sort((left, right) => left - right);
+  const trimCount = Math.floor(volumes.length * 0.1);
+  return average(trimCount > 0 ? volumes.slice(0, -trimCount) : volumes);
+}
+
 function candleStreak(rows: KlineRow[], direction: "green" | "red") {
   let count = 0;
   for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -465,7 +474,7 @@ export function buildVolatilityInputFromKlines(input: {
   ticker: JsonRecord | undefined;
   nowMs?: number;
 }) {
-  if (input.fiveMinuteKlines.length < 5 || input.oneMinuteKlines.length < 2) {
+  if (input.fiveMinuteKlines.length < 31 || input.oneMinuteKlines.length < 31) {
     throw new Error(`Kline data not enough for ${input.symbol}`);
   }
   const nowMs = input.nowMs ?? Date.now();
@@ -474,10 +483,8 @@ export function buildVolatilityInputFromKlines(input: {
   const latest5m = five.at(-1)!;
   const latest1m = one.at(-1)!;
   const rollingStart = five[Math.max(0, five.length - 5)];
-  const prior5mVolumes = five.slice(Math.max(0, five.length - 31), -1).map(klineVolume);
-  const prior1mVolumes = one.slice(Math.max(0, one.length - 21), -1).map(klineVolume);
-  const average5m = average(prior5mVolumes);
-  const average1m = average(prior1mVolumes);
+  const average5m = volumeBaseline(five.slice(-31, -1));
+  const average1m = volumeBaseline(one.slice(-31, -1));
   const pct25m = percentChange(klineClose(latest5m), klineOpen(rollingStart));
   return {
     symbol: input.symbol,

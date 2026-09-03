@@ -215,6 +215,40 @@ assert.equal(Math.round(built.pct25m), 7);
 assert.equal(built.streakGreen, 5);
 assert.ok(built.volRatio5m >= 2.9);
 
+{
+  const baselineVolumes = [
+    ...Array.from({ length: 27 }, () => 10),
+    100,
+    200,
+    300,
+  ];
+  const fiveMinuteKlines = baselineVolumes.map((volume, index) =>
+    kline(index, 100, 100, volume, 300_000));
+  const oneMinuteKlines = baselineVolumes.map((volume, index) =>
+    kline(index, 100, 100, volume, 60_000));
+  fiveMinuteKlines.push(kline(30, 100, 100, 270, 300_000));
+  oneMinuteKlines.push(kline(30, 100, 100, 270, 60_000));
+
+  const metrics = buildVolatilityInputFromKlines({
+    symbol: "TRIMUSDT",
+    fiveMinuteKlines,
+    oneMinuteKlines,
+    ticker: undefined,
+    nowMs: TEST_NOW_MS,
+  });
+
+  assert.equal(metrics.volRatio1m, 27);
+  assert.equal(metrics.volRatio5m, 27);
+
+  assert.throws(() => buildVolatilityInputFromKlines({
+    symbol: "SHORTUSDT",
+    fiveMinuteKlines: fiveMinuteKlines.slice(0, 30),
+    oneMinuteKlines: oneMinuteKlines.slice(0, 30),
+    ticker: undefined,
+    nowMs: TEST_NOW_MS,
+  }), /Kline data not enough/);
+}
+
 const directory = mkdtempSync(join(tmpdir(), "market-alerts-binance-"));
 let store;
 try {
