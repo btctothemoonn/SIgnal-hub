@@ -71,6 +71,25 @@ try {
   assert.equal(cachedResponse.status, 200);
   assert.equal(requests.length, requestCountAfterFirstLoad);
 
+  const requestCountBeforeFiveMinuteLoad = requests.length;
+  const fiveMinuteResponse = await GET(
+    new Request(
+      "http://signal-hub.test/api/stocks-hynix-premium?interval=5m&startTime=1783958400000",
+    ),
+  );
+  assert.equal(fiveMinuteResponse.status, 200);
+  const fiveMinuteKlineRequests = requests
+    .slice(requestCountBeforeFiveMinuteLoad)
+    .filter((url) => url.includes("/fapi/v1/klines"));
+  assert.ok(fiveMinuteKlineRequests.length > 0);
+  assert.ok(
+    fiveMinuteKlineRequests.every(
+      (url) =>
+        Number(new URL(url).searchParams.get("startTime")) >=
+        requestStartedAt - 5 * 24 * 60 * 60 * 1000,
+    ),
+  );
+
   const hourlyUrl =
     "http://signal-hub.test/api/stocks-hynix-premium?interval=1h&startTime=1783958400000";
   const hourlyResponse = await GET(new Request(hourlyUrl));

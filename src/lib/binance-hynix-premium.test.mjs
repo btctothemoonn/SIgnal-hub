@@ -44,7 +44,7 @@ assert.equal(
     "5m",
     Date.parse("2026-07-31T00:00:00.000Z"),
   ),
-  BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
+  Date.parse("2026-07-26T00:00:00.000Z"),
 );
 assert.equal(
   formatShanghaiChartTime(Date.parse("2026-07-14T01:05:00.000Z") / 1000, "5m"),

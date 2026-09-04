@@ -148,6 +148,8 @@ export const BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS = Date.parse(
   "2026-07-13T16:00:00.000Z",
 );
 export const BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
+export const BINANCE_HYNIX_PREMIUM_FIVE_MINUTE_LOOKBACK_MS =
+  5 * 24 * 60 * 60 * 1000;
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
 const DEFAULT_INTERVAL = "1m" satisfies BinanceHynixPremiumInterval;
 const INTERVAL_MS: Record<BinanceKlineInterval, number> = {
@@ -161,12 +163,17 @@ export function getBinanceHynixPremiumStartTimeMs(
   interval: BinanceHynixPremiumInterval,
   referenceTimeMs = Date.now(),
 ) {
-  return interval === "1m"
-    ? Math.max(
+  const lookbackMs = interval === "1m"
+    ? BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS
+    : interval === "5m"
+      ? BINANCE_HYNIX_PREMIUM_FIVE_MINUTE_LOOKBACK_MS
+      : null;
+  return lookbackMs === null
+    ? BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS
+    : Math.max(
         BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
-        referenceTimeMs - BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS,
-      )
-    : BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS;
+        referenceTimeMs - lookbackMs,
+      );
 }
 const DEFAULT_KLINE_PAGE_LIMIT = 1500;
 const MAX_KLINE_PAGE_LIMIT = 1500;

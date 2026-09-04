@@ -93,13 +93,10 @@ export async function GET(request: Request) {
       "startTime",
       BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
     ) ?? BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS;
-  const startTime =
-    interval === "1m"
-      ? Math.max(
-          requestedStartTime,
-          getBinanceHynixPremiumStartTimeMs(interval, endTime ?? Date.now()),
-        )
-      : requestedStartTime;
+  const startTime = Math.max(
+    requestedStartTime,
+    getBinanceHynixPremiumStartTimeMs(interval, endTime ?? Date.now()),
+  );
   const cache = getPremiumSnapshotCache(
     snapshotCacheKey({ interval, startTime, endTime, limit }),
     interval,
