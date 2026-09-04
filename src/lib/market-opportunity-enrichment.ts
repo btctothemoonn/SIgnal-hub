@@ -111,7 +111,6 @@ export function deriveOpportunityMetrics(input: {
   stale?: boolean;
 }): MarketOpportunityMetrics {
   const latestPrice = close(input.futures5m.at(-1)) ?? input.seed.price;
-  const recent20 = input.futures5m.slice(-20);
   const prior20 = input.futures5m.slice(-21, -1);
   const recentHigh = extreme(input.futures5m, high, "max");
   const recentLow = extreme(input.futures5m, low, "min");
