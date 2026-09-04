@@ -141,30 +141,56 @@ try {
 
   const first = decision("AAAUSDT", 1);
   const second = decision("BBBUSDT", 2);
+  const third = decision("CCCUSDT", 3);
+  const fourth = decision("DDDUSDT", 4);
+  const fifth = decision("EEEUSDT", 5);
+  const topFive = [first, second, third, fourth, fifth];
   await act(async () => {
     renderer.update(
       React.createElement(MarketOpportunityPanel, {
-        opportunities: [first, second],
+        opportunities: topFive,
         meta: healthyMeta,
         heartbeat: healthyHeartbeat,
         nowMs: Date.parse("2026-09-04T01:03:00.000Z"),
       }),
     );
   });
-  assert.match(renderedText(renderer.toJSON()), /2 个候选/);
-  assert.match(renderedText(renderer.toJSON()), /1 \/ 2/);
+  assert.match(renderedText(renderer.toJSON()), /5 个候选/);
+  assert.match(renderedText(renderer.toJSON()), /1 \/ 5/);
+  const desktopStrip = renderer.root.findByProps({
+    "data-opportunity-strip": true,
+  });
+  assert.equal(
+    desktopStrip.findAll((node) => node.props["data-opportunity-selector"]).length,
+    5,
+  );
   assert.equal(
     renderer.root.findAllByProps({ "data-opportunity-card": true }).length,
-    2,
+    5,
   );
   const mobilePager = renderer.root.find(
     (node) => typeof node.props.className === "string" &&
       node.props.className.includes("snap-x snap-mandatory"),
   );
+  assert.equal(mobilePager.props.role, "region");
+  assert.equal(mobilePager.props.tabIndex, 0);
   await act(async () => {
     mobilePager.props.onScroll({ currentTarget: { clientWidth: 390, scrollLeft: 390 } });
   });
-  assert.match(renderedText(renderer.toJSON()), /2 \/ 2/);
+  assert.match(renderedText(renderer.toJSON()), /2 \/ 5/);
+
+  const firstDesktopDetail = renderedText(renderer.root.findByProps({
+    "data-opportunity-detail": "AAAUSDT",
+  }));
+  assert.match(firstDesktopDetail, /覆盖 86%/);
+  assert.match(firstDesktopDetail, /观察成交量能否维持/);
+  assert.match(firstDesktopDetail, /跌破启动结构后失效/);
+  assert.match(firstDesktopDetail, /急涨后的回撤风险/);
+  const fullDesktopDetail = renderedText(renderer.root.findByProps({
+    "data-opportunity-full-detail": "AAAUSDT",
+  }));
+  assert.match(fullDesktopDetail, /AAAUSDT 量价与持仓量同步增强/);
+  assert.match(fullDesktopDetail, /现货与永续方向一致/);
 
   const secondSelector = renderer.root.findByProps({
     "data-opportunity-selector": "BBBUSDT",

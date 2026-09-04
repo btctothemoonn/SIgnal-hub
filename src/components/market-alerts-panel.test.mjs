@@ -15,8 +15,14 @@ assert.match(source, /推送待确认/);
 assert.match(source, /推送失败/);
 assert.match(source, /<MarketOpportunityPanel/);
 assert.ok(
-  source.indexOf("<MarketOpportunityPanel") < source.indexOf("<Ranking"),
-  "market opportunity panel should render above the 24h ranking",
+  source.indexOf("data-market-alert-feed") < source.indexOf("<Ranking"),
+  "market ranking should render after the realtime feed in the workspace sidebar",
 );
+assert.match(source, /data-market-alert-workspace/);
+assert.match(source, /data-market-alert-sidebar/);
+assert.match(source, /expandedEventId/);
+assert.match(source, /memo\(function EventCard/);
+assert.match(source, /\[content-visibility:auto\]/);
+assert.match(source, /xl:max-h-\[calc\(100vh-6\.5rem\)\]/);
 
 console.log("ok - market alerts panel renders filters and live state");
