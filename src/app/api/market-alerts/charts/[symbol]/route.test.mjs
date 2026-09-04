@@ -42,6 +42,24 @@ try {
     runtimeRoot: directory,
   });
   store = openMarketAlertsStore();
+  store.insertMarketAlertEvent({
+    id: "volatility:LONG:BTCUSDT:fixture",
+    type: "volatility",
+    symbol: "BTCUSDT",
+    side: "LONG",
+    level: 2,
+    stage: "暴涨预警",
+    trigger: "route integration fixture",
+    source: "rest",
+    price: 102,
+    changePct: 5.2,
+    volumeRatio: 2.1,
+    score: null,
+    metrics: {},
+    reasons: ["fixture"],
+    occurredAt: "2026-08-31T00:10:00.000Z",
+    createdAt: "2026-08-31T00:10:00.000Z",
+  });
   store.upsertMarketAlertChart({
     symbol: "BTCUSDT",
     eventId: "volatility:LONG:BTCUSDT:fixture",
@@ -49,6 +67,48 @@ try {
     updatedAt: "2026-08-31T00:10:00.000Z",
     sourceKey: written.sourceKey,
   });
+
+  const initialSnapshot = store.getMarketAlertsSnapshot({
+    limit: 10,
+    now: "2026-08-31T00:12:00.000Z",
+  });
+  const initialChartUrl = initialSnapshot.events[0]?.chartUrl;
+  assert.ok(initialChartUrl);
+  const snapshotResponse = await GET(
+    new Request(new URL(initialChartUrl, "http://localhost")),
+    { params: Promise.resolve({ symbol: "BTCUSDT" }) },
+  );
+  assert.equal(snapshotResponse.status, 200);
+  assert.match(await snapshotResponse.text(), /BTCUSDT · 5m/);
+
+  await writeMarketAlertKlineChart({
+    symbol: "BTCUSDT",
+    interval: "15m",
+    klines: [kline(0, 100, 103), kline(1, 103, 104)],
+    generatedAt: "2026-08-31T00:11:00.000Z",
+    sourceKey: written.sourceKey,
+    runtimeRoot: directory,
+  });
+  store.upsertMarketAlertChart({
+    symbol: "BTCUSDT",
+    eventId: "volatility:LONG:BTCUSDT:fixture",
+    interval: "15m",
+    updatedAt: "2026-08-31T00:11:00.000Z",
+    sourceKey: written.sourceKey,
+  });
+  const upgradedSnapshot = store.getMarketAlertsSnapshot({
+    limit: 10,
+    now: "2026-08-31T00:12:00.000Z",
+  });
+  const upgradedChartUrl = upgradedSnapshot.events[0]?.chartUrl;
+  assert.ok(upgradedChartUrl);
+  assert.notEqual(upgradedChartUrl, initialChartUrl);
+  const upgradedResponse = await GET(
+    new Request(new URL(upgradedChartUrl, "http://localhost")),
+    { params: Promise.resolve({ symbol: "BTCUSDT" }) },
+  );
+  assert.equal(upgradedResponse.status, 200);
+  assert.match(await upgradedResponse.text(), /BTCUSDT · 15m/);
 
   const response = await GET(
     new Request("http://localhost/api/market-alerts/charts/BTCUSDT"),
@@ -58,7 +118,7 @@ try {
   assert.equal(response.headers.get("content-type"), "image/svg+xml; charset=utf-8");
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
-  assert.match(await response.text(), /BTCUSDT · 5m/);
+  assert.match(await response.text(), /BTCUSDT · 15m/);
 
   const stale = await GET(
     new Request("http://localhost/api/market-alerts/charts/BTCUSDT?v=stale-version"),

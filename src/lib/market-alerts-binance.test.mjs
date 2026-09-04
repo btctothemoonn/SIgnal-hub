@@ -261,9 +261,9 @@ try {
     getTickers24h: async () => tickers.filter((ticker) => ticker.symbol !== "AAPLUSDT"),
     getKlines: async (symbol, interval, limit) => {
       if (symbol === "BTCUSDT") {
-        if (interval === "5m" && limit === 120) {
+        if (interval === "15m" && limit === 120) {
           chartRefetches += 1;
-          return flatKlines(300_000, 120);
+          return flatKlines(900_000, 120);
         }
         return interval === "5m" ? pumpKlines5m() : pump1m;
       }
@@ -295,7 +295,7 @@ try {
   assert.equal(snapshot.events[0].symbol, "BTCUSDT");
   assert.equal(
     snapshot.events[0].chartUrl,
-    `/api/market-alerts/charts/BTCUSDT?v=${chartWrites[0].sourceKey}`,
+    `/api/market-alerts/charts/BTCUSDT?v=${encodeURIComponent(chartWrites[0].sourceKey)}&i=${encodeURIComponent(chartWrites[0].interval)}&u=${encodeURIComponent(chartWrites[0].generatedAt)}`,
   );
   assert.ok(
     Date.parse(snapshot.events[0].chartUpdatedAt) >=
@@ -304,10 +304,9 @@ try {
   );
   assert.equal(chartWrites.length, 1);
   assert.equal(chartWrites[0].symbol, "BTCUSDT");
-  assert.equal(chartWrites[0].interval, "5m");
-  assert.equal(chartWrites[0].klines.length, 36);
-  assert.deepEqual(chartWrites[0].klines.at(-1), pumpKlines5m().at(-1));
-  assert.equal(chartRefetches, 0);
+  assert.equal(chartWrites[0].interval, "15m");
+  assert.equal(chartWrites[0].klines.length, 120);
+  assert.equal(chartRefetches, 1);
   assert.match(chartWrites[0].sourceKey, /^\d{13}_\d{13}_[a-f0-9]{12}$/);
   assert.deepEqual(chartPrunes, [chartWrites[0].sourceKey]);
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
@@ -471,7 +470,7 @@ try {
   assert.equal(snapshot.events[0].level, 3);
   assert.equal(
     snapshot.events[0].chartUrl,
-    `/api/market-alerts/charts/BTCUSDT?v=${squeezeChartWrites[0].sourceKey}`,
+    `/api/market-alerts/charts/BTCUSDT?v=${encodeURIComponent(squeezeChartWrites[0].sourceKey)}&i=${encodeURIComponent(squeezeChartWrites[0].interval)}&u=${encodeURIComponent(squeezeChartWrites[0].generatedAt)}`,
   );
   assert.equal(squeezeChartWrites.length, 1);
   assert.equal(squeezeChartWrites[0].klines.length, 120);
@@ -847,7 +846,9 @@ try {
     client: {
       ...burstBaseClient,
       getKlines: async (symbol, interval, limit) => {
-        if (limit === 120) throw new Error("chart must not refetch live klines");
+        if (interval === "15m" && limit === 120) {
+          return flatKlines(900_000, 120);
+        }
         return burstBaseClient.getKlines(symbol, interval, limit);
       },
       getFullyDilutedValuation: async () => {
@@ -895,9 +896,8 @@ try {
   await burstWorker;
   assert.equal(fdvCalls, 1);
   assert.equal(burstChartWrites.length, 1);
-  assert.equal(burstChartWrites[0].interval, "1m");
-  assert.equal(burstChartWrites[0].klines.length, 40);
-  assert.equal(burstChartWrites[0].klines.at(-1)[4], "106");
+  assert.equal(burstChartWrites[0].interval, "15m");
+  assert.equal(burstChartWrites[0].klines.length, 120);
   assert.equal(
     wsStore.getMarketAlertsSnapshot({ limit: 10 }).events.some(
       (event) => event.symbol === "BTCUSDT" && event.type === "volatility",
@@ -989,7 +989,8 @@ try {
     ]),
   });
   assert.equal(chartWrites.length, 2);
-  assert.deepEqual(chartWrites.map((write) => write.klines.at(-1)[4]), ["106", "113"]);
+  assert.deepEqual(chartWrites.map((write) => write.interval), ["15m", "15m"]);
+  assert.equal(new Set(chartWrites.map((write) => write.sourceKey)).size, 2);
 } finally {
   wsUpgradeStore.close();
   rmSync(wsUpgradeDirectory, { recursive: true, force: true });

@@ -32,7 +32,7 @@ type MarketValuationRequest = {
 export interface BinanceMarketClient {
   getExchangeInfo(): Promise<{ symbols?: JsonRecord[] }>;
   getTickers24h(): Promise<JsonRecord[]>;
-  getKlines(symbol: string, interval: "1m" | "5m", limit: number): Promise<KlineRow[]>;
+  getKlines(symbol: string, interval: "1m" | "5m" | "15m", limit: number): Promise<KlineRow[]>;
   getFullyDilutedValuation?(symbol: string, price: number): Promise<number | null>;
   getMarketValuations?(markets: MarketValuationRequest[]): Promise<MarketValuation[]>;
   getPremiumIndex?(): Promise<JsonRecord[]>;
@@ -52,7 +52,7 @@ type DeliverAlert = (
 
 export type MarketAlertChartWriter = (input: {
   symbol: string;
-  interval: "1m" | "5m";
+  interval: "1m" | "5m" | "15m";
   klines: KlineRow[];
   generatedAt: string;
   sourceKey: string;
@@ -65,10 +65,7 @@ export type MarketAlertChartWriter = (input: {
   pruneOlder?: (sourceKey: string) => Promise<void>;
 }>;
 
-type MarketAlertChartSnapshot = {
-  interval: "1m" | "5m";
-  klines: KlineRow[];
-};
+const MARKET_ALERT_CHART_INTERVAL = "15m" as const;
 
 function numberValue(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -571,14 +568,12 @@ async function persistMarketAlertChart(input: {
   client: BinanceMarketClient;
   store: Store;
   writeChart?: MarketAlertChartWriter;
-  snapshot?: MarketAlertChartSnapshot;
   nowMs?: number;
 }) {
   if (!input.writeChart) return;
   try {
-    const interval = input.snapshot?.interval ?? "5m";
-    const klines = input.snapshot?.klines
-      ?? await input.client.getKlines(input.event.symbol, interval, 120);
+    const interval = MARKET_ALERT_CHART_INTERVAL;
+    const klines = await input.client.getKlines(input.event.symbol, interval, 120);
     const occurredAtMs = Date.parse(input.event.occurredAt);
     const createdAtMs = Date.parse(input.event.createdAt);
     const sourceKey = [
@@ -626,15 +621,11 @@ function createMarketAlertChartQueue(input: {
   now?: () => number;
 }) {
   const pending = new Set<Promise<void>>();
-  const enqueue = (
-    event: ReturnType<Store["insertMarketAlertEvent"]>,
-    snapshot?: MarketAlertChartSnapshot,
-  ) => {
+  const enqueue = (event: ReturnType<Store["insertMarketAlertEvent"]>) => {
     if (!input.writeChart) return;
     const task = persistMarketAlertChart({
       ...input,
       event,
-      snapshot,
       nowMs: input.now?.() ?? Date.now(),
     });
     pending.add(task);
@@ -654,20 +645,6 @@ function createMarketAlertChartQueue(input: {
   return { enqueue, drain };
 }
 
-function createVolatilityChartSnapshot(input: {
-  signal: VolatilitySignal;
-  fiveMinuteKlines: KlineRow[];
-  oneMinuteKlines: KlineRow[];
-}): MarketAlertChartSnapshot {
-  const source = input.signal.chartInterval === "1m"
-    ? input.oneMinuteKlines
-    : input.fiveMinuteKlines;
-  return {
-    interval: input.signal.chartInterval,
-    klines: source.map((row) => [...row]),
-  };
-}
-
 async function persistVolatilitySignal(input: {
   signal: VolatilitySignal;
   market: SelectedMarket;
@@ -675,11 +652,7 @@ async function persistVolatilitySignal(input: {
   owner: string;
   nowMs: number;
   deliverAlert?: DeliverAlert;
-  chartSnapshot?: MarketAlertChartSnapshot;
-  scheduleChart?: (
-    event: ReturnType<Store["insertMarketAlertEvent"]>,
-    snapshot?: MarketAlertChartSnapshot,
-  ) => void;
+  scheduleChart?: (event: ReturnType<Store["insertMarketAlertEvent"]>) => void;
   onDeliveryError?: (error: unknown) => void;
   isEligible?: () => Promise<boolean>;
 }) {
@@ -696,7 +669,7 @@ async function persistVolatilitySignal(input: {
   const scheduleChart = () => {
     if (!event || chartScheduled) return;
     chartScheduled = true;
-    input.scheduleChart?.(event, input.chartSnapshot);
+    input.scheduleChart?.(event);
   };
   try {
     if (input.isEligible && !(await input.isEligible())) {
@@ -902,11 +875,6 @@ export async function runVolatilityRestScan(input: {
           owner: `rest:${process.pid}:${market.symbol}:${nowMs}`,
           nowMs,
           deliverAlert: input.deliverAlert,
-          chartSnapshot: createVolatilityChartSnapshot({
-            signal,
-            fiveMinuteKlines,
-            oneMinuteKlines,
-          }),
           scheduleChart: chartQueue.enqueue,
           onDeliveryError: (error) => {
             latestError = safeError(error);
@@ -1487,11 +1455,6 @@ export async function startVolatilityWebSocketWorker(input: {
                 owner: `ws:${process.pid}:${symbol}:${nowMs}`,
                 nowMs,
                 deliverAlert: input.deliverAlert,
-                chartSnapshot: createVolatilityChartSnapshot({
-                  signal,
-                  fiveMinuteKlines: item.five,
-                  oneMinuteKlines: item.one,
-                }),
                 scheduleChart: chartQueue.enqueue,
                 onDeliveryError: recordWsError,
                 isEligible: () => cachedFdvEligibility(item.market),

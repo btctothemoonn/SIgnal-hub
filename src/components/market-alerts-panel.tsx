@@ -25,6 +25,7 @@ type Filter = "all" | "volatility" | "short_squeeze";
 type SelectedChart = {
   symbol: string;
   url: string;
+  interval: string;
   updatedAt: string | null;
 };
 
@@ -84,6 +85,12 @@ function metricNumber(event: MarketAlertEvent, key: string) {
 
 function tokenSymbol(symbol: string) {
   return symbol.replace(/USDT$/i, "") || symbol;
+}
+
+function klineIntervalLabel(interval: string | null | undefined) {
+  const normalized = interval?.trim() || "15m";
+  const minuteMatch = /^(\d+)m$/i.exec(normalized);
+  return minuteMatch ? `${minuteMatch[1]} 分钟` : normalized;
 }
 
 function workerTone(tone: "success" | "warning" | "danger") {
@@ -210,6 +217,7 @@ const EventCard = memo(function EventCard({
   const oiGrowth = metricNumber(event, "oiGrowth15m");
   const funding = metricNumber(event, "funding");
   const chartUrl = event.chartUrl;
+  const chartInterval = event.chartInterval || "15m";
   const shortLabel = squeeze ? "OI 15m" : "近25m";
   const shortValue = squeeze
     ? signedPercent(oiGrowth)
@@ -229,7 +237,7 @@ const EventCard = memo(function EventCard({
         aria-controls={detailId}
         aria-label={`${expanded ? "收起" : "展开"} ${event.symbol} 预警详情，${kindLabel}，24 小时 ${signedPercent(pct24h)}，${shortLabel} ${shortValue}`}
         onClick={() => onToggle(event.id)}
-        className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_2.25rem] items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-workspace-surface-raised sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] sm:px-3 md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]"
+        className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_2.25rem] items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-workspace-surface-raised sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] sm:px-3 md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(6.5rem,1fr)_minmax(5.5rem,0.85fr)_4.25rem_3.75rem_2.25rem] xl:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]"
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${squeeze ? "bg-warning-soft text-warning" : rising ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
@@ -254,12 +262,12 @@ const EventCard = memo(function EventCard({
           <span className="block text-[9px] font-normal text-muted sm:hidden">24h</span>
         </span>
 
-        <span className={`hidden text-right font-mono text-xs font-semibold md:block ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>
+        <span className={`hidden text-right font-mono text-xs font-semibold md:block lg:hidden xl:block ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>
           {shortValue}
           <span className="block text-[9px] font-normal text-muted">{shortLabel}</span>
         </span>
 
-        <span className="hidden text-right font-mono text-xs font-semibold text-foreground lg:block">
+        <span className="hidden text-right font-mono text-xs font-semibold text-foreground xl:block">
           {priceText(event.price)}
         </span>
 
@@ -274,7 +282,7 @@ const EventCard = memo(function EventCard({
         <div
           id={detailId}
           data-market-alert-detail={event.symbol}
-          className="grid gap-3 border-t border-line bg-workspace-surface-raised p-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.65fr)]"
+          className="grid gap-3 border-t border-line bg-workspace-surface-raised p-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.65fr)]"
         >
           <div className="min-w-0">
             {chartUrl ? (
@@ -284,6 +292,7 @@ const EventCard = memo(function EventCard({
                 onClick={() => onOpenChart({
                   symbol: event.symbol,
                   url: chartUrl,
+                  interval: chartInterval,
                   updatedAt: event.chartUpdatedAt,
                 })}
                 className="group relative block w-full overflow-hidden rounded-md border border-line bg-[#10161d] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
@@ -291,7 +300,7 @@ const EventCard = memo(function EventCard({
                 <Image
                   unoptimized
                   src={chartUrl}
-                  alt={`${event.symbol} 最新 5 分钟 K 线图`}
+                  alt={`${event.symbol} 最新 ${klineIntervalLabel(chartInterval)} K 线图`}
                   width={1200}
                   height={630}
                   loading="eager"
@@ -302,7 +311,7 @@ const EventCard = memo(function EventCard({
                   <Maximize2 aria-hidden className="h-4 w-4" />
                 </span>
                 <span className="absolute bottom-2 left-2 rounded-sm bg-black/65 px-2 py-1 text-[10px] font-medium text-white/80">
-                  5m · 更新 {formatTime(event.chartUpdatedAt)}
+                  {chartInterval} · 更新 {formatTime(event.chartUpdatedAt)}
                 </span>
               </button>
             ) : (
@@ -542,29 +551,37 @@ export function MarketAlertsPanel({
         </div>
       </div>
 
-      <MarketOpportunityPanel
-        opportunities={snapshot.opportunities}
-        meta={snapshot.opportunityMeta}
-        heartbeat={snapshot.health.opportunity}
-        nowMs={nowMs}
-      />
-
       <div
         data-market-alert-workspace={true}
-        className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.85fr)_minmax(18rem,0.62fr)] xl:items-start"
+        className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.85fr)_minmax(16rem,0.62fr)] lg:grid-rows-[auto_1fr] lg:items-start xl:grid-cols-[minmax(0,1.85fr)_minmax(19rem,0.62fr)]"
       >
-        <section data-market-alert-feed={true} className="min-w-0">
+        <div
+          data-market-alert-right-rail={true}
+          className="order-1 min-w-0 lg:order-2 lg:col-start-2 lg:row-start-1"
+        >
+          <MarketOpportunityPanel
+            opportunities={snapshot.opportunities}
+            meta={snapshot.opportunityMeta}
+            heartbeat={snapshot.health.opportunity}
+            nowMs={nowMs}
+          />
+        </div>
+
+        <section
+          data-market-alert-feed={true}
+          className="order-2 min-w-0 lg:order-1 lg:col-start-1 lg:row-span-2 lg:row-start-1"
+        >
           <header className="mb-2 flex items-center justify-between px-1.5">
             <h2 className="text-sm font-semibold text-foreground">实时预警</h2>
             <span className="text-xs text-muted">{filteredEvents.length} 条</span>
           </header>
           <div className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
-            <div className="hidden min-h-8 items-center gap-2 border-b border-line bg-workspace-surface-raised px-3 text-[10px] font-medium text-muted sm:grid sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]">
+            <div className="hidden min-h-8 items-center gap-2 border-b border-line bg-workspace-surface-raised px-3 text-[10px] font-medium text-muted sm:grid sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(6.5rem,1fr)_minmax(5.5rem,0.85fr)_4.25rem_3.75rem_2.25rem] xl:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]">
               <span>币种</span>
               <span>类型</span>
               <span className="text-right">24h</span>
-              <span className="hidden text-right md:block">短周期</span>
-              <span className="hidden text-right lg:block">价格</span>
+              <span className="hidden text-right md:block lg:hidden xl:block">短周期</span>
+              <span className="hidden text-right xl:block">价格</span>
               <span className="text-right">时间</span>
               <span />
             </div>
@@ -592,7 +609,7 @@ export function MarketAlertsPanel({
           role="region"
           aria-label="24 小时异动排行、活跃信号和服务状态"
           tabIndex={0}
-          className="grid gap-3 xl:sticky xl:top-[5.75rem] xl:max-h-[calc(100vh-6.5rem)] xl:overflow-y-auto xl:overscroll-contain xl:pr-1"
+          className="order-3 grid gap-3 lg:col-start-2 lg:row-start-2 lg:sticky lg:top-[5.75rem] lg:max-h-[calc(100vh-6.5rem)] lg:overflow-y-auto lg:overscroll-contain lg:pr-1"
         >
           <Ranking snapshot={snapshot} />
           <ActiveSignals snapshot={snapshot} />
@@ -617,7 +634,7 @@ export function MarketAlertsPanel({
             <header className="flex min-h-12 items-center justify-between gap-3 border-b border-white/10 px-3 sm:px-4">
               <div className="min-w-0">
                 <h2 className="truncate font-mono text-sm font-bold text-white">
-                  {selectedChart.symbol} · 5m
+                  {selectedChart.symbol} · {selectedChart.interval}
                 </h2>
                 <p className="mt-0.5 text-[10px] text-white/55">
                   更新 {formatTime(selectedChart.updatedAt, true)}

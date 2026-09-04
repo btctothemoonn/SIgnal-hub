@@ -167,6 +167,12 @@ function rowToVolatilityState(row: DbRow | undefined): VolatilitySignalState | n
 function rowToEvent(row: DbRow) {
   const chartUpdatedAt = stringValue(row.chart_updated_at) || null;
   const chartSourceKey = stringValue(row.chart_source_key) || null;
+  const chartInterval = stringValue(row.chart_interval) || null;
+  const chartQuery = chartUpdatedAt && chartSourceKey
+    ? `v=${encodeURIComponent(chartSourceKey)}` +
+      `&i=${encodeURIComponent(chartInterval || "unknown")}` +
+      `&u=${encodeURIComponent(chartUpdatedAt)}`
+    : null;
   return {
     id: stringValue(row.id),
     type: stringValue(row.type) as MarketAlertType,
@@ -185,9 +191,10 @@ function rowToEvent(row: DbRow) {
     deliveryStatus: stringValue(row.delivery_status),
     telegramMessageId: nullableNumber(row.telegram_message_id),
     chartUrl:
-      chartUpdatedAt && chartSourceKey
-        ? `/api/market-alerts/charts/${encodeURIComponent(stringValue(row.symbol))}?v=${encodeURIComponent(chartSourceKey)}`
+      chartQuery
+        ? `/api/market-alerts/charts/${encodeURIComponent(stringValue(row.symbol))}?${chartQuery}`
         : null,
+    chartInterval,
     chartUpdatedAt,
     occurredAt: stringValue(row.occurred_at),
     createdAt: stringValue(row.created_at),
@@ -643,6 +650,12 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       updated_at=excluded.updated_at,
       source_key=excluded.source_key
     WHERE excluded.source_key > market_alert_charts.source_key
+      OR (
+        excluded.source_key = market_alert_charts.source_key
+        AND excluded.event_id = market_alert_charts.event_id
+        AND excluded.interval = '15m'
+        AND market_alert_charts.interval <> '15m'
+      )
   `);
   const chartGet = db.prepare(`
     SELECT symbol, event_id, interval, updated_at, source_key
@@ -1154,7 +1167,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       const accepted =
         Number(result.changes) > 0 ||
         (stringValue(current?.event_id) === input.eventId &&
-          stringValue(current?.source_key) === sourceKey);
+          stringValue(current?.source_key) === sourceKey &&
+          stringValue(current?.interval) === input.interval);
       const previousSourceKey = stringValue(previous?.source_key) || null;
       return {
         symbol,
@@ -1254,7 +1268,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         LEFT JOIN market_alert_charts c ON c.symbol=ranked.symbol
         LEFT JOIN market_alert_chart_retry retry ON retry.symbol=ranked.symbol
         WHERE ranked.chart_rank=1
-          AND c.symbol IS NULL
+          AND (c.symbol IS NULL OR c.interval<>'15m')
           AND COALESCE(retry.next_attempt_at, 0)<=?
         ORDER BY COALESCE(retry.updated_at, '') ASC,
           ranked.occurred_at DESC, ranked.created_at DESC
@@ -1634,7 +1648,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const events = db
       .prepare(`
-        SELECT e.*, c.updated_at AS chart_updated_at, c.source_key AS chart_source_key
+        SELECT e.*, c.interval AS chart_interval,
+          c.updated_at AS chart_updated_at, c.source_key AS chart_source_key
         FROM market_alert_events e
         LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
         ${whereSql}

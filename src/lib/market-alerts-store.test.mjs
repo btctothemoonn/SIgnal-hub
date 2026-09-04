@@ -438,13 +438,15 @@ try {
   assert.equal(snapshot.events[0].id, newerEvent.id);
   assert.equal(
     snapshot.events[0].chartUrl,
-    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb",
+    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb&i=5m&u=2026-08-31T00%3A01%3A01.000Z",
   );
   assert.equal(snapshot.events[0].chartUpdatedAt, "2026-08-31T00:01:01.000Z");
+  assert.equal(snapshot.events[0].chartInterval, "5m");
+  const preUpgradeChartUrl = snapshot.events[0].chartUrl;
   assert.equal(snapshot.events[1].id, event.id);
   assert.equal(
     snapshot.events[1].chartUrl,
-    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb",
+    "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb&i=5m&u=2026-08-31T00%3A01%3A01.000Z",
   );
   assert.equal(snapshot.health.volatilityRest?.status, "live");
   assert.equal(snapshot.health.volatilityRest?.lastError, "Telegram delivery failed");
@@ -485,7 +487,37 @@ try {
       symbols: ["BTCUSDT", "牛来USDT"],
       limit: 4,
     }).map((item) => item.id),
-    [unicodeEvent.id],
+    [unicodeEvent.id, newerEvent.id],
+  );
+  const upgradedChart = a.upsertMarketAlertChart({
+    symbol: "BTCUSDT",
+    eventId: newerEvent.id,
+    interval: "15m",
+    updatedAt: "2026-08-31T00:03:00.000Z",
+    sourceKey: "1788134460000_1788134460000_bbbbbbbbbbbb",
+  });
+  assert.equal(upgradedChart.accepted, true);
+  assert.equal(a.getMarketAlertChart("BTCUSDT")?.interval, "15m");
+  const upgradedSnapshot = b.getMarketAlertsSnapshot({
+    limit: 10,
+    now: "2026-08-31T00:05:00.000Z",
+  });
+  const upgradedSnapshotEvent = upgradedSnapshot.events.find(
+    (item) => item.id === newerEvent.id,
+  );
+  assert.equal(upgradedSnapshotEvent?.chartInterval, "15m");
+  assert.notEqual(
+    upgradedSnapshotEvent?.chartUrl,
+    preUpgradeChartUrl,
+    "upgrading a chart in place must change its browser cache key",
+  );
+  assert.deepEqual(
+    a.getMarketAlertChartBackfillEvents({
+      since: "2026-08-31T00:00:00.000Z",
+      symbols: ["BTCUSDT"],
+      limit: 4,
+    }),
+    [],
   );
   assert.equal(a.upsertMarketAlertChart({
     symbol: "牛来USDT",

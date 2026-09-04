@@ -112,6 +112,9 @@ try {
   assert.match(source, /做单决策/);
   assert.match(source, /snap-x snap-mandatory/);
   assert.match(source, /AI 解释暂不可用/);
+  assert.match(source, /data-opportunity-rail/);
+  assert.match(source, /hidden lg:block/);
+  assert.match(source, /lg:hidden/);
 
   const output = ts.transpileModule(source, {
     compilerOptions: {
@@ -160,6 +163,10 @@ try {
   const desktopStrip = renderer.root.findByProps({
     "data-opportunity-strip": true,
   });
+  const desktopRail = renderer.root.findByProps({
+    "data-opportunity-rail": true,
+  });
+  assert.match(desktopRail.props.className, /grid-cols-1/);
   assert.equal(
     desktopStrip.findAll((node) => node.props["data-opportunity-selector"]).length,
     5,

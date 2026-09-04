@@ -96,6 +96,7 @@ export function MarketOpportunityPanel() {
         deliveryStatus: "site",
         telegramMessageId: null,
         chartUrl: "/api/market-alerts/charts/BTCUSDT?v=1788135000000",
+        chartInterval: "15m",
         chartUpdatedAt: "2026-08-31T00:10:00.000Z",
         occurredAt: "2026-08-31T00:10:00.000Z",
         createdAt: "2026-08-31T00:10:00.000Z",
@@ -185,6 +186,8 @@ export function MarketOpportunityPanel() {
     "data-market-alert-workspace": true,
   });
   assert.ok(workspace.findByProps({ "data-market-alert-feed": true }));
+  assert.ok(workspace.findByProps({ "data-opportunity-panel": true }));
+  assert.ok(workspace.findByProps({ "data-market-alert-right-rail": true }));
   const sidebar = workspace.findByProps({ "data-market-alert-sidebar": true });
   assert.equal(sidebar.props.role, "region");
   assert.equal(sidebar.props.tabIndex, 0);
@@ -199,7 +202,7 @@ export function MarketOpportunityPanel() {
   assert.doesNotMatch(xrpRowText, /\+0\.00%/);
 
   assert.equal(
-    renderer.root.findAllByProps({ alt: "BTCUSDT 最新 5 分钟 K 线图" }).length,
+    renderer.root.findAllByProps({ alt: "BTCUSDT 最新 15 分钟 K 线图" }).length,
     0,
     "collapsed alerts should not load chart images",
   );
@@ -211,12 +214,12 @@ export function MarketOpportunityPanel() {
     expandBtc.props.onClick();
   });
   const preview = renderer.root.findByProps({
-    alt: "BTCUSDT 最新 5 分钟 K 线图",
+    alt: "BTCUSDT 最新 15 分钟 K 线图",
   });
   assert.equal(preview.props.src, btcEvent.chartUrl);
   assert.equal(preview.props.loading, "eager");
   assert.equal(renderer.root.findAllByProps({
-    alt: "ETHUSDT 最新 5 分钟 K 线图",
+    alt: "ETHUSDT 最新 15 分钟 K 线图",
   }).length, 0);
   const rankingRow = renderer.root.findByProps({
     "data-market-ranking-symbol": "BTCUSDT",
@@ -254,10 +257,10 @@ export function MarketOpportunityPanel() {
     }).props.onClick();
   });
   assert.equal(renderer.root.findAllByProps({
-    alt: "BTCUSDT 最新 5 分钟 K 线图",
+    alt: "BTCUSDT 最新 15 分钟 K 线图",
   }).length, 0);
   assert.equal(renderer.root.findByProps({
-    alt: "ETHUSDT 最新 5 分钟 K 线图",
+    alt: "ETHUSDT 最新 15 分钟 K 线图",
   }).props.loading, "eager");
 
   await act(async () => {
