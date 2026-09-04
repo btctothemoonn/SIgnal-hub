@@ -17,6 +17,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useBrowserJsonCache } from "@/components/use-browser-json-cache";
+import { removeBrowserStorage } from "@/lib/browser-storage-store";
 import {
   BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
   binanceHynixPremiumIntervalMs,
@@ -66,11 +67,16 @@ const CHART_ACCENT = "#d6a85b";
 const PREMIUM_UP_COLOR = "#49c68d";
 const PREMIUM_DOWN_COLOR = "#ef6b73";
 const PREMIUM_INTERVAL_OPTIONS = [
-  { value: "1m", label: "1分钟" },
   { value: "5m", label: "5分钟" },
   { value: "1h", label: "1小时" },
   { value: "1d", label: "1天" },
 ] satisfies Array<{ value: BinanceHynixPremiumInterval; label: string }>;
+
+function isSelectablePremiumInterval(
+  value: unknown,
+): value is BinanceHynixPremiumInterval {
+  return PREMIUM_INTERVAL_OPTIONS.some((option) => option.value === value);
+}
 
 function formatSignedPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
@@ -152,7 +158,7 @@ export function StocksHynixPremiumCurve({
 }: StocksHynixPremiumCurveProps = {}) {
   const [expanded, setExpanded] = useState(!compactByDefault);
   const [selectedInterval, setSelectedInterval] =
-    useState<BinanceHynixPremiumInterval>("1m");
+    useState<BinanceHynixPremiumInterval>("5m");
   const [liveSnapshot, setLiveSnapshot] =
     useState<BinanceHynixPremiumSnapshot | null>(null);
   const [liveFundingSnapshot, setLiveFundingSnapshot] =
@@ -253,8 +259,16 @@ export function StocksHynixPremiumCurve({
   useEffect(() => {
     if (restoredSelectedIntervalRef.current || !cachedSelectedInterval) return;
     restoredSelectedIntervalRef.current = true;
-    setSelectedInterval(cachedSelectedInterval);
-  }, [cachedSelectedInterval]);
+    const nextInterval = isSelectablePremiumInterval(cachedSelectedInterval)
+      ? cachedSelectedInterval
+      : "5m";
+    setSelectedInterval(nextInterval);
+    writeCachedSelectedInterval(nextInterval);
+  }, [cachedSelectedInterval, writeCachedSelectedInterval]);
+
+  useEffect(() => {
+    removeBrowserStorage(`${STOCKS_HYNIX_PREMIUM_CACHE_KEY}:1m`);
+  }, []);
 
   useEffect(() => {
     if (
@@ -777,9 +791,7 @@ export function StocksHynixPremiumCurve({
           </h2>
           <p className="mt-0.5 text-[11px] text-muted">
             SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
-            {selectedInterval === "1m"
-              ? "最近3天"
-              : selectedInterval === "5m" ? "最近5天" : "2026-07-14 起"}
+            {selectedInterval === "5m" ? "最近5天" : "2026-07-14 起"}
           </p>
           {expanded ? (
             <div className="mt-2 inline-flex rounded-lg border border-line/70 bg-workspace-canvas p-1">

@@ -38,6 +38,19 @@ export function writeBrowserStorage(key: string, value: string): void {
   window.dispatchEvent(new CustomEvent(BROWSER_STORAGE_EVENT, { detail: key }));
 }
 
+export function removeBrowserStorage(key: string): void {
+  if (typeof window === "undefined") return;
+
+  browserStorageFallbacks.delete(key);
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage may be unavailable in private browsing.
+  }
+
+  window.dispatchEvent(new CustomEvent(BROWSER_STORAGE_EVENT, { detail: key }));
+}
+
 export function subscribeBrowserStorage(
   key: string,
   listener: () => void,

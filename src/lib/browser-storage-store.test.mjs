@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   readBrowserStorage,
+  removeBrowserStorage,
   parseBrowserJson,
   subscribeBrowserStorage,
   writeBrowserStorage,
@@ -20,6 +21,9 @@ try {
       setItem(key, value) {
         values.set(key, value);
       },
+      removeItem(key) {
+        values.delete(key);
+      },
     },
   });
   globalThis.window = browserWindow;
@@ -27,6 +31,9 @@ try {
   assert.equal(readBrowserStorage("missing"), null);
   writeBrowserStorage("favorites", "[\"x:known\"]");
   assert.equal(readBrowserStorage("favorites"), "[\"x:known\"]");
+  writeBrowserStorage("obsolete", "large-cache");
+  removeBrowserStorage("obsolete");
+  assert.equal(readBrowserStorage("obsolete"), null);
 
   let notifications = 0;
   const unsubscribe = subscribeBrowserStorage("favorites", () => {
