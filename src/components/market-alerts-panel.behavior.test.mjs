@@ -39,6 +39,9 @@ export default function Image(props) {
 export function getMarketAlertWorkerView() {
   return { label: "离线", detail: "尚未启动", tone: "warning", lastError: null };
 }
+export function MarketOpportunityPanel() {
+  return React.createElement("section", { "data-opportunity-panel": true });
+}
 `,
     "utf8",
   );
@@ -51,7 +54,8 @@ export function getMarketAlertWorkerView() {
     fileName: componentPath,
   }).outputText
     .replace('from "next/image"', `from "${stubsImport}"`)
-    .replace('from "@/lib/market-alerts-health"', `from "${stubsImport}"`);
+    .replace('from "@/lib/market-alerts-health"', `from "${stubsImport}"`)
+    .replace('from "./market-opportunity-panel"', `from "${stubsImport}"`);
   writeFileSync(runtimePath, output, "utf8");
 
   globalThis.window = {
@@ -98,6 +102,16 @@ export function getMarketAlertWorkerView() {
       },
     ],
     activeSignals: [],
+    opportunities: [],
+    opportunityMeta: {
+      fingerprint: null,
+      lastScanAt: null,
+      lastSuccessAt: null,
+      stale: false,
+      aiProvider: null,
+      aiGeneratedAt: null,
+      aiError: null,
+    },
     marketRanking: [
       {
         symbol: "BTCUSDT",
@@ -124,7 +138,7 @@ export function getMarketAlertWorkerView() {
         dualSignal: false,
       },
     ],
-    health: { volatilityWs: null, volatilityRest: null, squeeze: null },
+    health: { volatilityWs: null, volatilityRest: null, squeeze: null, opportunity: null },
   };
   initialSnapshot.events.push({
     ...initialSnapshot.events[0],

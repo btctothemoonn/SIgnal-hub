@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getMarketAlertWorkerView } from "@/lib/market-alerts-health";
 import type { getMarketAlertsSnapshot } from "@/lib/market-alerts-store";
+import { MarketOpportunityPanel } from "./market-opportunity-panel";
 
 type MarketAlertsSnapshot = ReturnType<typeof getMarketAlertsSnapshot>;
 type MarketAlertEvent = MarketAlertsSnapshot["events"][number];
@@ -469,6 +470,13 @@ export function MarketAlertsPanel({
           </button>
         </div>
       </div>
+
+      <MarketOpportunityPanel
+        opportunities={snapshot.opportunities}
+        meta={snapshot.opportunityMeta}
+        heartbeat={snapshot.health.opportunity}
+        nowMs={nowMs}
+      />
 
       <Ranking snapshot={snapshot} />
 

@@ -13,5 +13,10 @@ assert.match(source, /worker/i);
 assert.match(source, /EventSource/);
 assert.match(source, /推送待确认/);
 assert.match(source, /推送失败/);
+assert.match(source, /<MarketOpportunityPanel/);
+assert.ok(
+  source.indexOf("<MarketOpportunityPanel") < source.indexOf("<Ranking"),
+  "market opportunity panel should render above the 24h ranking",
+);
 
 console.log("ok - market alerts panel renders filters and live state");
