@@ -29,6 +29,7 @@ assert.match(source, /SKHYNIXUSDT/);
 assert.match(source, /SKHYUSDT \* 10 \/ SKHYNIXUSDT/);
 assert.match(source, /selectedInterval\} K 线/);
 assert.match(source, /5分钟/);
+assert.match(source, /selectedInterval === "5m" \? "最近5天"/);
 assert.match(source, /1小时/);
 assert.match(source, /1天/);
 assert.match(source, /\/api\/stocks-hynix-premium/);
@@ -70,6 +71,10 @@ assert.match(source, /signal-hub:stocks:hynix-premium:v4/);
 assert.match(source, /useBrowserJsonCache<BinanceHynixPremiumSnapshot>/);
 assert.match(source, /useBrowserJsonCache<BinanceHynixFundingSnapshot>/);
 assert.match(source, /window\.setInterval\(loadPremiumData,\s*60 \* 1000\)/);
+assert.match(
+  source,
+  /if \(snapshot\.points\.length > 1\) \{\s*setLiveSnapshot\(snapshot\)/,
+);
 assert.match(source, /premiumPct/);
 assert.match(source, /basePrice/);
 assert.match(source, /benchmarkPrice/);

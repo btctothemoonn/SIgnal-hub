@@ -647,9 +647,39 @@ export function upsertBinanceHynixPremiumPoint(
   point: BinanceHynixPremiumPoint,
   limit = 288,
 ): BinanceHynixPremiumSnapshot {
+  const existing = snapshot.points.find(
+    (candidate) => candidate.openTime === point.openTime,
+  );
+  const nextPoint = existing
+    ? {
+        ...point,
+        baseOpenPrice: existing.baseOpenPrice,
+        baseHighPrice: Math.max(existing.baseHighPrice, point.baseHighPrice),
+        baseLowPrice: Math.min(existing.baseLowPrice, point.baseLowPrice),
+        benchmarkOpenPrice: existing.benchmarkOpenPrice,
+        benchmarkHighPrice: Math.max(
+          existing.benchmarkHighPrice,
+          point.benchmarkHighPrice,
+        ),
+        benchmarkLowPrice: Math.min(
+          existing.benchmarkLowPrice,
+          point.benchmarkLowPrice,
+        ),
+        premiumOpenPct: existing.premiumOpenPct,
+        premiumHighPct: Math.max(
+          existing.premiumHighPct,
+          point.premiumHighPct,
+        ),
+        premiumLowPct: Math.min(
+          existing.premiumLowPct,
+          point.premiumLowPct,
+        ),
+        volume: Math.max(existing.volume, point.volume),
+      }
+    : point;
   const points = [
     ...snapshot.points.filter((candidate) => candidate.openTime !== point.openTime),
-    point,
+    nextPoint,
   ]
     .sort((left, right) => left.openTime - right.openTime)
     .slice(-Math.max(2, limit));

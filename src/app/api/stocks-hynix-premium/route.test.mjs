@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 
 const previousFetch = globalThis.fetch;
 const previousRestBaseUrl = process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL;
+const previousDateNow = Date.now;
 const requests = [];
-const requestStartedAt = Date.now();
+const requestStartedAt = previousDateNow();
+let currentTimeMs = requestStartedAt;
+let failKlineRequests = false;
 
 process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL = "https://fapi.binance.test";
+Date.now = () => currentTimeMs;
 globalThis.fetch = async (url) => {
   requests.push(String(url));
   const parsedUrl = new URL(String(url));
@@ -19,6 +23,13 @@ globalThis.fetch = async (url) => {
       indexPrice: symbol === "SKHYUSDT" ? "1.1" : "10",
       time: startTime + 60_000,
     });
+  }
+
+  if (failKlineRequests) {
+    return Response.json(
+      { code: -1003, msg: "Too many requests" },
+      { status: 429 },
+    );
   }
 
   return Response.json([
@@ -71,6 +82,23 @@ try {
   assert.equal(cachedResponse.status, 200);
   assert.equal(requests.length, requestCountAfterFirstLoad);
 
+  failKlineRequests = true;
+  currentTimeMs += 5 * 60 * 1000;
+  const degradedResponse = await GET(
+    new Request(
+      "http://signal-hub.test/api/stocks-hynix-premium?startTime=1783958400000",
+    ),
+  );
+  assert.equal(degradedResponse.status, 200);
+  const degradedPayload = await degradedResponse.json();
+  assert.equal(
+    degradedPayload.points.length,
+    payload.points.length,
+    "a transient Binance failure must retain the last healthy chart",
+  );
+  assert.ok(degradedPayload.errors.some((message) => message.includes("HTTP 429")));
+  failKlineRequests = false;
+
   const requestCountBeforeFiveMinuteLoad = requests.length;
   const fiveMinuteResponse = await GET(
     new Request(
@@ -113,6 +141,7 @@ try {
     "rolling 1m cache entries must not evict the 1h history cache",
   );
 } finally {
+  Date.now = previousDateNow;
   globalThis.fetch = previousFetch;
   if (previousRestBaseUrl === undefined) {
     delete process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL;

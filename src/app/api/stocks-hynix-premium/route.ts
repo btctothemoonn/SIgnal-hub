@@ -20,6 +20,21 @@ const premiumSnapshotCaches = new Map<
   string,
   SnapshotCache<BinanceHynixPremiumSnapshot>
 >();
+const lastHealthyPremiumSnapshots = new Map<
+  BinanceHynixPremiumInterval,
+  BinanceHynixPremiumSnapshot
+>();
+
+function retainHealthyPremiumSnapshot(snapshot: BinanceHynixPremiumSnapshot) {
+  if (snapshot.points.length > 1) {
+    lastHealthyPremiumSnapshots.set(snapshot.interval, snapshot);
+    return snapshot;
+  }
+  const lastHealthy = lastHealthyPremiumSnapshots.get(snapshot.interval);
+  return snapshot.errors.length > 0 && lastHealthy
+    ? { ...lastHealthy, errors: snapshot.errors }
+    : snapshot;
+}
 
 function snapshotCacheKey({
   interval,
@@ -100,13 +115,13 @@ export async function GET(request: Request) {
   const cache = getPremiumSnapshotCache(
     snapshotCacheKey({ interval, startTime, endTime, limit }),
     interval,
-    () =>
-      fetchBinanceHynixPremiumSnapshot({
+    async () =>
+      retainHealthyPremiumSnapshot(await fetchBinanceHynixPremiumSnapshot({
         interval,
         startTime,
         endTime,
         limit,
-      }),
+      })),
   );
   const snapshot = await cache.get();
   return NextResponse.json(snapshot);

@@ -486,15 +486,17 @@ export function StocksHynixPremiumCurve({
         }
         const snapshot = (await response.json()) as BinanceHynixPremiumSnapshot;
         if (!cancelled) {
-          setLiveSnapshot(snapshot);
-          setPremiumAlertCycle((current) =>
-            nextHynixPremiumAlertCycle(
-              current,
-              snapshot.latest?.premiumPct,
-              premiumAlertThresholdRef.current,
-            ),
-          );
-          if (snapshot.points.length > 0) writeCachedSnapshot(snapshot);
+          if (snapshot.points.length > 1) {
+            setLiveSnapshot(snapshot);
+            setPremiumAlertCycle((current) =>
+              nextHynixPremiumAlertCycle(
+                current,
+                snapshot.latest?.premiumPct,
+                premiumAlertThresholdRef.current,
+              ),
+            );
+            writeCachedSnapshot(snapshot);
+          }
           setError(snapshot.errors[0] ?? null);
         }
       } catch (error) {
@@ -733,7 +735,9 @@ export function StocksHynixPremiumCurve({
           </h2>
           <p className="mt-0.5 text-[11px] text-muted">
             SKHYUSDT * 10 / SKHYNIXUSDT · {selectedInterval} K 线 · UTC+8 ·
-            {selectedInterval === "1m" ? "最近3天" : "2026-07-14 起"}
+            {selectedInterval === "1m"
+              ? "最近3天"
+              : selectedInterval === "5m" ? "最近5天" : "2026-07-14 起"}
           </p>
           {expanded ? (
             <div className="mt-2 inline-flex rounded-lg border border-line/70 bg-workspace-canvas p-1">

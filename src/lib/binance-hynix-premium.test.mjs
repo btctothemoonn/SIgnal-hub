@@ -10,6 +10,7 @@ import {
   getBinanceHynixPremiumStartTimeMs,
   parseBinanceFuturesWebSocketMessage,
   parseBinanceKlinePayload,
+  upsertBinanceHynixPremiumPoint,
 } from "./binance-hynix-premium.ts";
 
 const skhyKlines = parseBinanceKlinePayload(
@@ -295,6 +296,25 @@ const oneMinuteSnapshot = buildBinanceHynixPremiumSnapshot({
 assert.equal(oneMinuteSnapshot.interval, "1m");
 assert.equal(oneMinuteSnapshot.points.length, 2);
 assert.equal(oneMinuteSnapshot.points[1].premiumClosePct, 10);
+
+const mergedMarkSnapshot = upsertBinanceHynixPremiumPoint(
+  oneMinuteSnapshot,
+  buildBinanceHynixPremiumPoint({
+    openTime: alignedMinuteStart + 60 * 1000,
+    closeTime: alignedMinuteStart + 2 * 60 * 1000 - 1,
+    capturedAt: "2026-07-28T00:01:30.000Z",
+    baseSymbol: "SKHYUSDT",
+    benchmarkSymbol: "SKHYNIXUSDT",
+    basePrice: 1.15,
+    benchmarkPrice: 10,
+  }),
+);
+assert.equal(mergedMarkSnapshot.points.length, 2);
+assert.equal(mergedMarkSnapshot.latest?.premiumOpenPct, 0);
+assert.equal(mergedMarkSnapshot.latest?.premiumHighPct, 15);
+assert.equal(mergedMarkSnapshot.latest?.premiumLowPct, 0);
+assert.equal(mergedMarkSnapshot.latest?.premiumClosePct, 15);
+assert.equal(mergedMarkSnapshot.latest?.volume, 1);
 assert.equal(
   binanceHynixPremiumWebSocketUrl({
     baseSymbol: "SKHYUSDT",
