@@ -92,6 +92,31 @@ try {
   }
 
   const fetchedSymbols = new Set();
+  let aiCalls = 0;
+  const aiProviders = [{
+    id: "minimax",
+    baseUrl: "https://api.minimaxi.com/v1",
+    apiKey: "fixture-key",
+    model: "MiniMax-M2.7-worker-test",
+  }];
+  const aiFetch = async () => {
+    aiCalls += 1;
+    return Response.json({
+      choices: [{ message: { content: JSON.stringify({
+        items: ["T00USDT", "T01USDT", "T02USDT", "T03USDT", "T04USDT"].map(
+          (symbol) => ({
+            symbol,
+            summary: "规则确认后关注。",
+            rationale: "价格、成交和 OI 同向。",
+            confirmation: "等待回踩不破。",
+            invalidation: "跌破启动结构。",
+            risk: "短线波动风险。",
+            validFor: "2 小时内复核。",
+          }),
+        ),
+      }) } }],
+    });
+  };
   const client = {
     getKlines: async (symbol, interval) => {
       fetchedSymbols.add(symbol);
@@ -113,7 +138,13 @@ try {
     getSpotContext: async () => ({ ticker: null, klines5m: strongKlines("5m") }),
   };
 
-  const first = await runMarketOpportunityScan({ store, client, nowMs });
+  const first = await runMarketOpportunityScan({
+    store,
+    client,
+    nowMs,
+    aiProviders,
+    fetchImpl: aiFetch,
+  });
   assert.equal(first.seedCount, 12);
   assert.equal(first.enrichedCount, 12);
   assert.equal(first.selectedCount, 0, "first qualifying scan only primes entry counters");
@@ -123,6 +154,8 @@ try {
     store,
     client,
     nowMs: nowMs + 60_000,
+    aiProviders,
+    fetchImpl: aiFetch,
   });
   assert.equal(second.selectedCount, 5);
   assert.equal(store.getMarketAlertsSnapshot({ limit: 5 }).opportunities.length, 5);
@@ -132,6 +165,20 @@ try {
   );
   assert.equal(store.getMarketAlertsSnapshot({ limit: 5 }).health.opportunity?.status, "live");
   assert.match(store.getMarketAlertsSnapshot({ limit: 5 }).health.opportunity?.detail ?? "", /selected=5/);
+  assert.equal(aiCalls, 1, "the whole Top 5 must be explained in one AI batch");
+  assert.equal(
+    store.getMarketAlertsSnapshot({ limit: 5 }).opportunities[0].ai?.summary,
+    "规则确认后关注。",
+  );
+
+  await runMarketOpportunityScan({
+    store,
+    client,
+    nowMs: nowMs + 2 * 60_000,
+    aiProviders,
+    fetchImpl: aiFetch,
+  });
+  assert.equal(aiCalls, 1, "an unchanged decision fingerprint must reuse the AI cache");
 
   const priorDiagnostics = store.pruneOpportunityDiagnostics("2026-09-04T03:59:30.000Z");
   assert.ok(priorDiagnostics >= 0);

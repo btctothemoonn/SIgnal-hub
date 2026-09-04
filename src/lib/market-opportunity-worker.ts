@@ -1,5 +1,7 @@
 import { createBinanceFuturesClient } from "./market-alerts-binance.ts";
 import type { BinanceMarketClient } from "./market-alerts-binance.ts";
+import type { AiProviderConfig } from "./ai-provider-fallback.ts";
+import { explainMarketOpportunities } from "./market-opportunity-ai.ts";
 import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
 import {
   chooseMarketOpportunityDecision,
@@ -92,6 +94,9 @@ export async function runMarketOpportunityScan(input: {
   store?: Store;
   client?: BinanceMarketClient;
   nowMs?: number;
+  aiProviders?: AiProviderConfig[];
+  fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
+  env?: Record<string, string | undefined>;
 } = {}) {
   const nowMs = input.nowMs ?? Date.now();
   const now = new Date(nowMs).toISOString();
@@ -154,6 +159,40 @@ export async function runMarketOpportunityScan(input: {
       scannedAt: now,
       successful: true,
     });
+    let aiStatus: "generated" | "failed" | "skipped" = "skipped";
+    if (transitioned.selected.length > 0) {
+      const policy = store.getOpportunityAiPolicy({ fingerprint, nowMs });
+      if (policy.allowed) {
+        store.recordOpportunityAiAttempt({ fingerprint, createdAt: now });
+      }
+      const aiResult = await explainMarketOpportunities({
+        decisions: transitioned.selected,
+        fingerprint,
+        policy,
+        providers: input.aiProviders,
+        fetchImpl: input.fetchImpl,
+        env: input.env,
+        now: new Date(nowMs),
+      });
+      aiStatus = aiResult.status;
+      if (aiResult.status === "generated") {
+        store.saveOpportunityAiResult({
+          fingerprint,
+          items: aiResult.items,
+          provider: aiResult.provider,
+          generatedAt: aiResult.generatedAt ?? now,
+          error: null,
+        });
+      } else if (aiResult.status === "failed") {
+        store.saveOpportunityAiResult({
+          fingerprint,
+          items: null,
+          provider: aiResult.provider,
+          generatedAt: aiResult.generatedAt ?? now,
+          error: aiResult.error ?? "AI 解释暂不可用",
+        });
+      }
+    }
     for (const decision of decisions) {
       store.recordOpportunityDiagnostic({
         symbol: decision.symbol,
@@ -178,6 +217,7 @@ export async function runMarketOpportunityScan(input: {
         enrichedCount: enrichment.length,
         selectedCount: transitioned.selected.length,
         staleCount: enrichment.filter((item) => item.stale).length,
+        aiStatus,
       },
       now,
     });
@@ -186,6 +226,7 @@ export async function runMarketOpportunityScan(input: {
       enrichedCount: enrichment.length,
       selectedCount: transitioned.selected.length,
       fingerprint,
+      aiStatus,
     };
   } catch (error) {
     const message = safeError(error);
