@@ -40,11 +40,37 @@ function providerError(payload: Record<string, unknown>, status: number) {
   return `Market opportunity AI HTTP ${status}`;
 }
 
+function findJsonObjectEnd(content: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const character = content[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}" && --depth === 0) return index + 1;
+  }
+  return -1;
+}
+
 function cleanJson(content: string) {
-  return content
+  const cleaned = content
     .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  const itemsKey = cleaned.search(/"items"\s*:/);
+  const start = itemsKey >= 0 ? cleaned.lastIndexOf("{", itemsKey) : cleaned.indexOf("{");
+  if (start < 0) return cleaned;
+  const end = findJsonObjectEnd(cleaned, start);
+  return end > start ? cleaned.slice(start, end) : cleaned;
 }
 
 function cleanField(value: unknown) {

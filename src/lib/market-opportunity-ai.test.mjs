@@ -103,6 +103,24 @@ assert.equal(calls, 2);
 assert.match(receivedPrompt, /AAAUSDT/);
 assert.match(receivedPrompt, /BBBUSDT/);
 
+const thinkingWrapped = await explainMarketOpportunities({
+  decisions: topFive,
+  fingerprint: "thinking-wrapped-fingerprint",
+  policy: { allowed: true, reason: "allowed", retryAt: null },
+  providers: [{ ...providers[0], model: "MiniMax-M2.7-thinking" }],
+  fetchImpl: async () => Response.json({
+    choices: [{ message: { content: [
+      "<think>先核对规则，不改变原始方向。</think>",
+      "```json",
+      JSON.stringify({ items: validItems() }),
+      "```",
+      "以上为结构化解释。",
+    ].join("\n") } }],
+  }),
+});
+assert.equal(thinkingWrapped.status, "generated");
+assert.equal(thinkingWrapped.items?.length, 2);
+
 let skippedCalls = 0;
 const skipped = await explainMarketOpportunities({
   decisions: topFive,
