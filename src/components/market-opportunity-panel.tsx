@@ -140,7 +140,7 @@ function OpportunityDetail({
   return (
     <article
       data-opportunity-detail={!mobile ? item.symbol : undefined}
-      className={`${mobile ? "min-h-[32rem]" : "min-h-[25rem]"} rounded-md border ${tone.border} bg-workspace-surface-raised p-3 sm:p-4`}
+      className={`${mobile ? "min-h-[31rem]" : ""} rounded-md border ${tone.border} bg-workspace-surface-raised p-3 sm:p-4`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -174,41 +174,176 @@ function OpportunityDetail({
         ))}
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <BulletList title="规则依据" items={item.evidence} tone="success" />
-        <BulletList title="等待确认" items={item.confirmations} />
-        <BulletList title="失效条件" items={item.invalidations} tone="danger" />
-        <BulletList title="主要风险" items={item.risks} tone="danger" />
-      </div>
-
-      <div className="mt-4 border-t border-line pt-3">
-        <div className="flex items-center gap-2">
-          <BrainCircuit aria-hidden className="h-4 w-4 text-accent" />
-          <h4 className="text-xs font-semibold text-foreground">AI 解释</h4>
-          {item.ai ? (
-            <span className="text-[10px] text-muted">缓存结果</span>
-          ) : null}
+      <div className={`mt-4 grid gap-4 ${mobile ? "sm:grid-cols-2" : "lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(15rem,1.2fr)]"}`}>
+        <div className="space-y-4">
+          <BulletList title="规则依据" items={item.evidence} tone="success" />
+          <BulletList title="等待确认" items={item.confirmations} />
         </div>
-        {item.ai ? (
-          <div className="mt-2 space-y-2 text-xs leading-5">
-            <p className="font-medium text-foreground">{item.ai.summary}</p>
-            <p className="text-muted">{item.ai.rationale}</p>
-            <div className="grid gap-1 text-[11px] text-muted sm:grid-cols-2">
-              <span><strong className="text-foreground/80">确认：</strong>{item.ai.confirmation}</span>
-              <span><strong className="text-foreground/80">失效：</strong>{item.ai.invalidation}</span>
-              <span><strong className="text-foreground/80">风险：</strong>{item.ai.risk}</span>
-              <span><strong className="text-foreground/80">有效期：</strong>{item.ai.validFor}</span>
+        <div className="space-y-4">
+          <BulletList title="失效条件" items={item.invalidations} tone="danger" />
+          <BulletList title="主要风险" items={item.risks} tone="danger" />
+        </div>
+
+        <div className={`${mobile ? "border-t pt-3 sm:col-span-2" : "border-t pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0"} border-line`}>
+          <div className="flex items-center gap-2">
+            <BrainCircuit aria-hidden className="h-4 w-4 text-accent" />
+            <h4 className="text-xs font-semibold text-foreground">AI 解释</h4>
+            {item.ai ? (
+              <span className="text-[10px] text-muted">缓存结果</span>
+            ) : null}
+          </div>
+          {item.ai ? (
+            <div className="mt-2 space-y-2 text-xs leading-5">
+              <p className="font-medium text-foreground">{item.ai.summary}</p>
+              <p className="text-muted">{item.ai.rationale}</p>
+              <div className="grid gap-1 text-[11px] text-muted">
+                <span><strong className="text-foreground/80">确认：</strong>{item.ai.confirmation}</span>
+                <span><strong className="text-foreground/80">失效：</strong>{item.ai.invalidation}</span>
+                <span><strong className="text-foreground/80">风险：</strong>{item.ai.risk}</span>
+                <span><strong className="text-foreground/80">有效期：</strong>{item.ai.validFor}</span>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="mt-2 rounded-md border border-dashed border-line bg-workspace-surface px-3 py-2.5 text-xs text-muted">
-            <strong className="text-foreground/80">AI 解释暂不可用</strong>
-            {aiError ? "，当前仍按规则结果展示。" : "，正在等待缓存生成。"}
-          </div>
-        )}
+          ) : (
+            <div className="mt-2 rounded-md border border-dashed border-line bg-workspace-surface px-3 py-2.5 text-xs text-muted">
+              <strong className="text-foreground/80">AI 解释暂不可用</strong>
+              {aiError ? "，当前仍按规则结果展示。" : "，正在等待缓存生成。"}
+            </div>
+          )}
+        </div>
       </div>
 
       <footer className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-[10px] text-muted">
+        <span>观测 {formatTime(item.observedAt)}</span>
+        <span>有效至 {formatTime(item.expiresAt)}</span>
+      </footer>
+    </article>
+  );
+}
+
+function CompactItems({
+  title,
+  items,
+  tone = "default",
+}: {
+  title: string;
+  items: string[];
+  tone?: "default" | "success" | "danger";
+}) {
+  const titleTone = tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : "text-muted";
+  return (
+    <div className="min-w-0">
+      <h4 className={`text-[10px] font-semibold ${titleTone}`}>{title}</h4>
+      <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-foreground/85">
+        {items.length ? items.slice(0, 4).join("；") : "暂无"}
+      </p>
+    </div>
+  );
+}
+
+function OpportunityDesktopDetail({
+  item,
+  aiError,
+}: {
+  item: MarketOpportunity;
+  aiError: string | null;
+}) {
+  const tone = directionTone(item);
+  const metrics = leadingMetrics(item);
+  return (
+    <article
+      data-opportunity-detail={item.symbol}
+      className={`rounded-md border ${tone.border} bg-workspace-surface-raised px-3 py-2.5`}
+    >
+      <div className="grid items-center gap-3 xl:grid-cols-[minmax(10rem,0.7fr)_minmax(0,1.3fr)]">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <strong className="truncate font-mono text-base text-foreground">{item.symbol}</strong>
+              <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold ${tone.soft}`}>{item.stage}</span>
+            </div>
+            <div className={`mt-1 flex items-center gap-1.5 text-xs font-semibold ${tone.text}`}>
+              {item.direction === "SHORT" ? <TrendingDown aria-hidden className="h-3.5 w-3.5" /> : <TrendingUp aria-hidden className="h-3.5 w-3.5" />}
+              {item.decision}
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <strong className="block font-mono text-xl text-foreground">{item.score}</strong>
+            <span className="text-[9px] text-muted">置信 {item.confidence}% · 覆盖 {item.dataCoverage}%</span>
+          </div>
+        </div>
+
+        <dl className="grid grid-cols-4 gap-px overflow-hidden rounded-md border border-line bg-line">
+          {metrics.map(([label, value]) => (
+            <div key={label} className="min-w-0 bg-workspace-surface px-2 py-1.5">
+              <dt className="truncate text-[9px] text-muted">{label}</dt>
+              <dd className="mt-0.5 truncate font-mono text-[11px] font-semibold text-foreground">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      <div className="mt-2.5 grid gap-3 border-t border-line pt-2.5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(15rem,1.2fr)]">
+        <div className="grid content-start gap-2.5">
+          <CompactItems title="规则依据" items={item.evidence} tone="success" />
+          <CompactItems title="等待确认" items={item.confirmations} />
+        </div>
+        <div className="grid content-start gap-2.5">
+          <CompactItems title="失效条件" items={item.invalidations} tone="danger" />
+          <CompactItems title="主要风险" items={item.risks} tone="danger" />
+        </div>
+        <div className="min-w-0 border-l border-line pl-3">
+          <div className="flex items-center gap-2">
+            <BrainCircuit aria-hidden className="h-3.5 w-3.5 text-accent" />
+            <h4 className="text-[10px] font-semibold text-foreground">AI 解释</h4>
+            {item.ai ? <span className="text-[9px] text-muted">缓存结果</span> : null}
+          </div>
+          {item.ai ? (
+            <div className="mt-1.5 text-[11px] leading-5">
+              <p className="line-clamp-2 font-medium text-foreground">{item.ai.summary}</p>
+              <p className="mt-1 line-clamp-2 text-muted">{item.ai.rationale}</p>
+              <p className="mt-1 truncate text-[10px] text-muted">有效期：{item.ai.validFor}</p>
+            </div>
+          ) : (
+            <p className="mt-1.5 text-[11px] leading-5 text-muted">
+              <strong className="text-foreground/80">AI 解释暂不可用</strong>
+              {aiError ? "，按规则结果展示。" : "，等待缓存生成。"}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <details data-opportunity-full-detail={item.symbol} className="mt-2 border-t border-line pt-2 text-xs">
+        <summary className="cursor-pointer select-none font-medium text-muted hover:text-foreground">
+          展开完整判断依据
+        </summary>
+        <div className="mt-3 grid gap-4 lg:grid-cols-3">
+          <div className="space-y-4">
+            <BulletList title="规则依据" items={item.evidence} tone="success" />
+            <BulletList title="等待确认" items={item.confirmations} />
+          </div>
+          <div className="space-y-4">
+            <BulletList title="失效条件" items={item.invalidations} tone="danger" />
+            <BulletList title="主要风险" items={item.risks} tone="danger" />
+          </div>
+          <div className="border-l border-line pl-4">
+            <h4 className="font-semibold text-foreground">AI 完整解释</h4>
+            {item.ai ? (
+              <div className="mt-2 grid gap-1.5 leading-5 text-muted">
+                <p className="font-medium text-foreground">{item.ai.summary}</p>
+                <p>{item.ai.rationale}</p>
+                <span><strong className="text-foreground/80">确认：</strong>{item.ai.confirmation}</span>
+                <span><strong className="text-foreground/80">失效：</strong>{item.ai.invalidation}</span>
+                <span><strong className="text-foreground/80">风险：</strong>{item.ai.risk}</span>
+                <span><strong className="text-foreground/80">有效期：</strong>{item.ai.validFor}</span>
+              </div>
+            ) : (
+              <p className="mt-2 text-muted">暂无 AI 完整解释，当前按规则结果展示。</p>
+            )}
+          </div>
+        </div>
+      </details>
+
+      <footer className="mt-2 flex items-center justify-between gap-3 border-t border-line pt-1.5 text-[9px] text-muted">
         <span>观测 {formatTime(item.observedAt)}</span>
         <span>有效至 {formatTime(item.expiresAt)}</span>
       </footer>
@@ -251,7 +386,7 @@ export function MarketOpportunityPanel({
 
   return (
     <section className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-2.5 sm:px-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent-soft text-accent">
             <Crosshair aria-hidden className="h-5 w-5" />
@@ -266,7 +401,7 @@ export function MarketOpportunityPanel({
                 </span>
               ) : null}
             </div>
-            <p className="mt-0.5 text-xs text-muted">持仓周期 &lt; 12h · 规则筛选，AI 仅解释</p>
+            <p className="mt-0.5 text-xs text-muted">12h 内 · 规则确认优先</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
@@ -289,8 +424,8 @@ export function MarketOpportunityPanel({
         </div>
       ) : (
         <>
-          <div className="hidden min-h-[27rem] grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.6fr)] gap-3 p-3 lg:grid">
-            <div className="space-y-1.5">
+          <div className="hidden p-3 lg:block">
+            <div data-opportunity-strip={true} className="grid grid-cols-5 gap-2">
               {opportunities.map((item, index) => {
                 const active = item.symbol === selected?.symbol;
                 const tone = directionTone(item);
@@ -302,32 +437,36 @@ export function MarketOpportunityPanel({
                     data-opportunity-selector={item.symbol}
                     aria-pressed={active}
                     onClick={() => setSelectedSymbol(item.symbol)}
-                    className={`grid min-h-[4.6rem] w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${active ? `${tone.border} bg-workspace-surface-raised` : "border-line bg-workspace-canvas hover:border-workspace-line-strong hover:bg-workspace-surface-raised"}`}
+                    className={`min-h-[5.5rem] min-w-0 rounded-md border px-2.5 py-2 text-left transition-colors ${active ? `${tone.border} bg-workspace-surface-raised shadow-sm` : "border-line bg-workspace-canvas hover:border-workspace-line-strong hover:bg-workspace-surface-raised"}`}
                   >
-                    <span className="font-mono text-xs font-semibold text-muted">#{index + 1}</span>
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1.5">
-                        <strong className="truncate font-mono text-sm text-foreground">{tokenSymbol(item.symbol)}</strong>
-                        <span className={`shrink-0 text-[10px] font-semibold ${tone.text}`}>{item.direction}</span>
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block font-mono text-[10px] font-semibold text-muted">#{index + 1}</span>
+                        <strong className="mt-0.5 block truncate font-mono text-sm text-foreground">{tokenSymbol(item.symbol)}</strong>
                       </span>
-                      <span className="mt-1 block truncate text-[11px] text-muted">{item.stage} · {item.decision}</span>
+                      <strong className="shrink-0 font-mono text-xl text-foreground">{item.score}</strong>
                     </span>
-                    <span className="shrink-0 text-right">
-                      <strong className="block font-mono text-base text-foreground">{item.score}</strong>
-                      <span className="block font-mono text-[10px] text-muted">{firstMetric[1]}</span>
+                    <span className={`mt-1.5 block truncate text-xs font-semibold ${tone.text}`}>
+                      {item.decision}
                     </span>
+                    <span className="mt-1 block truncate font-mono text-[10px] text-muted">{firstMetric[0]} {firstMetric[1]} · {item.confidence}%</span>
                   </button>
                 );
               })}
             </div>
             {selected ? (
-              <OpportunityDetail item={selected} aiError={meta.aiError} />
+              <div className="mt-2">
+                <OpportunityDesktopDetail item={selected} aiError={meta.aiError} />
+              </div>
             ) : null}
           </div>
 
           <div className="lg:hidden">
             <div
               onScroll={handleMobileScroll}
+              role="region"
+              aria-label="做单决策 Top 5，可左右滑动切换"
+              tabIndex={0}
               className="flex snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-smooth"
             >
               {opportunities.map((item) => (

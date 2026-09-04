@@ -147,13 +147,33 @@ export function MarketOpportunityPanel() {
     side: "SHORT",
     chartUrl: "/api/market-alerts/charts/ETHUSDT?v=1788135000001",
   });
+  initialSnapshot.events.push({
+    ...initialSnapshot.events[0],
+    id: "short_squeeze:LONG:SQUEEZEUSDT:fixture",
+    type: "short_squeeze",
+    symbol: "SQUEEZEUSDT",
+    stage: "轧空启动",
+    trigger: "价格与持仓量同步增强",
+    changePct: 4.2,
+    metrics: { pct24h: null, oiGrowth15m: 7.5, funding: 0.0002 },
+    chartUrl: null,
+    chartUpdatedAt: null,
+  });
   initialSnapshot.events.unshift({
     ...initialSnapshot.events[0],
     id: "volatility:LONG:XRPUSDT:fixture",
     symbol: "XRPUSDT",
+    metrics: {},
     chartUrl: null,
     chartUpdatedAt: null,
   });
+  initialSnapshot.events.push(...Array.from({ length: 96 }, (_, index) => ({
+    ...initialSnapshot.events[0],
+    id: `volatility:LONG:TEST${index}USDT:fixture`,
+    symbol: `TEST${index}USDT`,
+    chartUrl: null,
+    chartUpdatedAt: null,
+  })));
 
   await act(async () => {
     renderer = TestRenderer.create(
@@ -161,16 +181,43 @@ export function MarketOpportunityPanel() {
     );
   });
 
+  const workspace = renderer.root.findByProps({
+    "data-market-alert-workspace": true,
+  });
+  assert.ok(workspace.findByProps({ "data-market-alert-feed": true }));
+  const sidebar = workspace.findByProps({ "data-market-alert-sidebar": true });
+  assert.equal(sidebar.props.role, "region");
+  assert.equal(sidebar.props.tabIndex, 0);
+  assert.ok(sidebar.findByProps({
+    "data-market-ranking-symbol": "BTCUSDT",
+  }));
+  assert.equal(renderer.root.findAll((node) => node.props["data-market-alert-row"]).length, 100);
+  const xrpRowText = renderedText(renderer.root.findByProps({
+    "data-market-alert-row": "XRPUSDT",
+  }));
+  assert.match(xrpRowText, /n\/a/);
+  assert.doesNotMatch(xrpRowText, /\+0\.00%/);
+
+  assert.equal(
+    renderer.root.findAllByProps({ alt: "BTCUSDT 最新 5 分钟 K 线图" }).length,
+    0,
+    "collapsed alerts should not load chart images",
+  );
+  const btcEvent = initialSnapshot.events.find((event) => event.symbol === "BTCUSDT");
+  const expandBtc = renderer.root.findByProps({
+    "data-market-alert-toggle": "volatility:LONG:BTCUSDT:fixture",
+  });
+  await act(async () => {
+    expandBtc.props.onClick();
+  });
   const preview = renderer.root.findByProps({
     alt: "BTCUSDT 最新 5 分钟 K 线图",
   });
-  const btcEvent = initialSnapshot.events.find((event) => event.symbol === "BTCUSDT");
   assert.equal(preview.props.src, btcEvent.chartUrl);
   assert.equal(preview.props.loading, "eager");
-  assert.equal(
-    renderer.root.findByProps({ alt: "ETHUSDT 最新 5 分钟 K 线图" }).props.loading,
-    "lazy",
-  );
+  assert.equal(renderer.root.findAllByProps({
+    alt: "ETHUSDT 最新 5 分钟 K 线图",
+  }).length, 0);
   const rankingRow = renderer.root.findByProps({
     "data-market-ranking-symbol": "BTCUSDT",
   });
@@ -201,7 +248,34 @@ export function MarketOpportunityPanel() {
   });
   assert.equal(renderer.root.findAllByProps({ role: "dialog" }).length, 0);
 
-  console.log("ok - market alert chart preview opens and closes the full image");
+  await act(async () => {
+    renderer.root.findByProps({
+      "data-market-alert-toggle": "volatility:SHORT:ETHUSDT:fixture",
+    }).props.onClick();
+  });
+  assert.equal(renderer.root.findAllByProps({
+    alt: "BTCUSDT 最新 5 分钟 K 线图",
+  }).length, 0);
+  assert.equal(renderer.root.findByProps({
+    alt: "ETHUSDT 最新 5 分钟 K 线图",
+  }).props.loading, "eager");
+
+  await act(async () => {
+    renderer.root.findByProps({
+      "data-market-alert-toggle": "short_squeeze:LONG:SQUEEZEUSDT:fixture",
+    }).props.onClick();
+  });
+  const squeezeDetail = renderedText(renderer.root.findByProps({
+    "data-market-alert-detail": "SQUEEZEUSDT",
+  })).replaceAll(/\s/g, "");
+  assert.match(squeezeDetail, /15m\+4\.20%/);
+  assert.match(squeezeDetail, /OI15m\+7\.50%/);
+  assert.match(squeezeDetail, /24hn\/a/);
+  assert.doesNotMatch(squeezeDetail, /24h\+0\.00%/);
+  assert.match(squeezeDetail, /价格\$68,000/);
+  assert.match(squeezeDetail, /触发08\/31/);
+
+  console.log("ok - market alert workspace lazily expands one chart at a time");
 } finally {
   if (renderer) {
     await act(async () => renderer.unmount());
