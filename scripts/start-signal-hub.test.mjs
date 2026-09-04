@@ -17,6 +17,16 @@ assert.match(
 );
 assert.match(
   launcher,
+  /if \(-not \$WithWorkers\) \{[\s\S]*signal-hub-market-opportunity[\s\S]*\} else \{/,
+  "the opportunity worker must be stopped when local workers are disabled",
+);
+assert.match(
+  launcher,
+  /Start-ManagedNodeProcess[\s\S]*signal-hub-market-opportunity[\s\S]*market-opportunity-worker\.mjs/,
+  "the opportunity worker must start only with the explicit worker switch",
+);
+assert.match(
+  launcher,
   /function Stop-ManagedNodeProcess/,
   "local launcher must stop stale worker processes by default",
 );

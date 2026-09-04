@@ -42,7 +42,9 @@
     "market:volatility:ws": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-ws-worker.mjs",
     "market:volatility:ws:once": "node --experimental-strip-types --experimental-transform-types scripts/market-volatility-ws-worker.mjs --once",
     "market:squeeze": "node --experimental-strip-types --experimental-transform-types scripts/market-squeeze-worker.mjs",
-    "market:squeeze:once": "node --experimental-strip-types --experimental-transform-types scripts/market-squeeze-worker.mjs --once"
+    "market:squeeze:once": "node --experimental-strip-types --experimental-transform-types scripts/market-squeeze-worker.mjs --once",
+    "market:opportunity": "node --experimental-strip-types --experimental-transform-types scripts/market-opportunity-worker.mjs",
+    "market:opportunity:once": "node --experimental-strip-types --experimental-transform-types scripts/market-opportunity-worker.mjs --once"
   },
   "dependencies": {
     "@tigeropenapi/tigeropen": "^0.4.0",

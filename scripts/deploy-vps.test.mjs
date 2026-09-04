@@ -36,7 +36,10 @@ assert.match(source, /signal-hub-douyin/);
 assert.match(source, /daily-brief-worker\.mjs/);
 assert.match(source, /Environment=SIGNAL_HUB_RUNTIME_DIR=\$APP_DIR\/\.signal-hub/);
 assert.match(packageJson.engines.node, />=22\.5\.0/);
-assert.doesNotMatch(serviceRegistry, /signal-hub-opportunity|机会雷达/);
-assert.doesNotMatch(source, /signal-hub-opportunity|opportunity-worker/);
+assert.match(serviceRegistry, /signal-hub-market-opportunity/);
+assert.match(source, /signal-hub-market-opportunity/);
+assert.match(source, /market-opportunity-worker\.mjs/);
+assert.equal(packageJson.scripts["market:opportunity"].includes("market-opportunity-worker.mjs"), true);
+assert.equal(packageJson.scripts["market:opportunity:once"].includes("--once"), true);
 
 console.log("ok - vps deploy script contract");

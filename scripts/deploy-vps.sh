@@ -105,6 +105,10 @@ install_market_worker_service \
   signal-hub-market-squeeze \
   "Signal Hub short squeeze worker" \
   scripts/market-squeeze-worker.mjs
+install_market_worker_service \
+  signal-hub-market-opportunity \
+  "Signal Hub market opportunity worker" \
+  scripts/market-opportunity-worker.mjs
 
 sudo systemctl daemon-reload
 sudo systemctl restart \
@@ -119,6 +123,7 @@ sudo systemctl restart \
   signal-hub-douyin \
   signal-hub-market-volatility-rest \
   signal-hub-market-volatility-ws \
-  signal-hub-market-squeeze
+  signal-hub-market-squeeze \
+  signal-hub-market-opportunity
 
 systemctl --no-pager --plain --type=service --state=running | grep signal-hub || true

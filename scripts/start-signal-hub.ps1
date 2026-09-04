@@ -202,6 +202,7 @@ try {
     Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-rest"
     Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-ws"
     Stop-ManagedNodeProcess -Name "signal-hub-market-squeeze"
+    Stop-ManagedNodeProcess -Name "signal-hub-market-opportunity"
     Write-Host "Local background workers are disabled. Use -WithWorkers only for deliberate local worker testing."
   } else {
     Start-ManagedNodeProcess `
@@ -283,6 +284,11 @@ try {
       Start-ManagedNodeProcess `
         -Name "signal-hub-market-squeeze" `
         -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\market-squeeze-worker.mjs") `
+        -RestartExisting
+
+      Start-ManagedNodeProcess `
+        -Name "signal-hub-market-opportunity" `
+        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\market-opportunity-worker.mjs") `
         -RestartExisting
     } else {
       Write-Host "market alert workers disabled (MARKET_ALERTS_ENABLED=false)"
