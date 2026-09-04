@@ -14,6 +14,12 @@ import type {
   VolatilitySide,
   VolatilitySignalState,
 } from "./market-alerts-core.ts";
+import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
+import type {
+  MarketOpportunityDecision,
+  MarketOpportunityMetrics,
+} from "./market-opportunity-core.ts";
+import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
 
 type DbValue = string | number | null;
 type DbRow = Record<string, unknown>;
@@ -51,6 +57,53 @@ export type MarketValuationInput = {
   symbol: string;
   marketCapUsd: number | null;
   fdvUsd: number | null;
+};
+
+export type MarketOpportunitySeed = {
+  symbol: string;
+  price: number;
+  pct24h: number | null;
+  quoteVolume: number | null;
+  marketCapUsd: number | null;
+  fdvUsd: number | null;
+  latestEventAt: string;
+  maxLevel: number;
+  maxAbsChangePct: number;
+  maxVolumeRatio: number;
+  active: boolean;
+  alertCounts: {
+    pump: number;
+    crash: number;
+    squeeze: number;
+    total: number;
+  };
+  squeezeMetrics: Record<string, unknown> | null;
+  preliminaryScore: number;
+};
+
+export type StoredOpportunityEnrichment = {
+  symbol: string;
+  metrics: MarketOpportunityMetrics;
+  fetchedAt: string;
+  stale: boolean;
+  error: string | null;
+  updatedAt: string;
+};
+
+export type MarketOpportunityAiItem = {
+  symbol: string;
+  summary: string;
+  rationale: string;
+  confirmation: string;
+  invalidation: string;
+  risk: string;
+  validFor: string;
+};
+
+export type OpportunityAiPolicy = {
+  allowed: boolean;
+  reason: "allowed" | "unchanged" | "cooldown" | "hourly-cap";
+  retryAt: string | null;
 };
 
 function nowIso() {
@@ -152,6 +205,26 @@ function rowToHeartbeat(row: DbRow | undefined) {
     lastError: stringValue(row.last_error) || null,
     lastErrorAt: stringValue(row.last_error_at) || null,
   };
+}
+
+function rowToOpportunityEnrichment(
+  row: DbRow | undefined,
+): StoredOpportunityEnrichment | null {
+  if (!row) return null;
+  const metrics = parseJson<MarketOpportunityMetrics | null>(row.metrics_json, null);
+  if (!metrics) return null;
+  return {
+    symbol: stringValue(row.symbol),
+    metrics,
+    fetchedAt: stringValue(row.fetched_at),
+    stale: numberValue(row.stale) === 1,
+    error: stringValue(row.error) || null,
+    updatedAt: stringValue(row.updated_at),
+  };
+}
+
+function rowToOpportunityCandidate(row: DbRow) {
+  return parseJson<MarketOpportunityCandidateState | null>(row.state_json, null);
 }
 
 function defaultDbPath() {
@@ -263,6 +336,57 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     INSERT OR IGNORE INTO market_alert_binance_rate_limit
       (id, next_request_at, blocked_until, updated_at)
       VALUES (1, 0, 0, '1970-01-01T00:00:00.000Z');
+    CREATE TABLE IF NOT EXISTS market_opportunity_candidates (
+      symbol TEXT PRIMARY KEY,
+      state_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_opportunity_enrichment (
+      symbol TEXT PRIMARY KEY,
+      metrics_json TEXT NOT NULL,
+      fetched_at TEXT NOT NULL,
+      stale INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_opportunity_selection (
+      rank INTEGER PRIMARY KEY CHECK(rank BETWEEN 1 AND 5),
+      symbol TEXT NOT NULL UNIQUE,
+      decision_json TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      selected_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS market_opportunity_meta (
+      id INTEGER PRIMARY KEY CHECK(id=1),
+      fingerprint TEXT,
+      last_scan_at TEXT,
+      last_success_at TEXT,
+      ai_fingerprint TEXT,
+      ai_json TEXT,
+      ai_provider TEXT,
+      ai_generated_at TEXT,
+      ai_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+    INSERT OR IGNORE INTO market_opportunity_meta (id, updated_at)
+      VALUES (1, '1970-01-01T00:00:00.000Z');
+    CREATE TABLE IF NOT EXISTS market_opportunity_ai_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_opportunity_ai_runs_time
+      ON market_opportunity_ai_runs (created_at DESC);
+    CREATE TABLE IF NOT EXISTS market_opportunity_diagnostics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT,
+      detail_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_opportunity_diagnostics_time
+      ON market_opportunity_diagnostics (created_at DESC);
   `);
 
   const heartbeatColumns = new Set(
@@ -313,6 +437,12 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     "market_alert_heartbeat",
     "market_alert_tickers",
     "market_alert_charts",
+    "market_opportunity_candidates",
+    "market_opportunity_enrichment",
+    "market_opportunity_selection",
+    "market_opportunity_meta",
+    "market_opportunity_ai_runs",
+    "market_opportunity_diagnostics",
   ];
   for (const table of revisionTables) {
     for (const operation of ["INSERT", "UPDATE", "DELETE"]) {
@@ -542,6 +672,74 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   const binanceRateLimitUpdate = db.prepare(`
     UPDATE market_alert_binance_rate_limit
     SET next_request_at=?, blocked_until=?, updated_at=? WHERE id=1
+  `);
+  const opportunityEnrichmentGet = db.prepare(`
+    SELECT * FROM market_opportunity_enrichment WHERE symbol=?
+  `);
+  const opportunityEnrichmentUpsert = db.prepare(`
+    INSERT INTO market_opportunity_enrichment (
+      symbol, metrics_json, fetched_at, stale, error, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(symbol) DO UPDATE SET
+      metrics_json=excluded.metrics_json,
+      fetched_at=excluded.fetched_at,
+      stale=excluded.stale,
+      error=excluded.error,
+      updated_at=excluded.updated_at
+  `);
+  const opportunityCandidateDeleteAll = db.prepare(
+    "DELETE FROM market_opportunity_candidates",
+  );
+  const opportunityCandidateInsert = db.prepare(`
+    INSERT INTO market_opportunity_candidates (symbol, state_json, updated_at)
+    VALUES (?, ?, ?)
+  `);
+  const opportunitySelectionDeleteAll = db.prepare(
+    "DELETE FROM market_opportunity_selection",
+  );
+  const opportunitySelectionInsert = db.prepare(`
+    INSERT INTO market_opportunity_selection (
+      rank, symbol, decision_json, fingerprint, selected_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const opportunitySelectionUpdate = db.prepare(`
+    UPDATE market_opportunity_selection
+    SET decision_json=?, fingerprint=?, updated_at=?
+    WHERE rank=? AND symbol=?
+  `);
+  const opportunityMetaGet = db.prepare(
+    "SELECT * FROM market_opportunity_meta WHERE id=1",
+  );
+  const opportunityMetaSelectionUpdate = db.prepare(`
+    UPDATE market_opportunity_meta SET
+      fingerprint=?,
+      last_scan_at=?,
+      last_success_at=CASE WHEN ?=1 THEN ? ELSE last_success_at END,
+      updated_at=?
+    WHERE id=1
+  `);
+  const opportunityAiAttemptInsert = db.prepare(`
+    INSERT INTO market_opportunity_ai_runs (fingerprint, status, created_at)
+    VALUES (?, 'attempted', ?)
+  `);
+  const opportunityAiRunsCount = db.prepare(`
+    SELECT COUNT(*) AS value FROM market_opportunity_ai_runs WHERE created_at>=?
+  `);
+  const opportunityAiLatestRun = db.prepare(`
+    SELECT created_at FROM market_opportunity_ai_runs
+    ORDER BY created_at DESC LIMIT 1
+  `);
+  const opportunityAiResultUpdate = db.prepare(`
+    UPDATE market_opportunity_meta SET
+      ai_fingerprint=?, ai_json=?, ai_provider=?, ai_generated_at=?, ai_error=?, updated_at=?
+    WHERE id=1 AND fingerprint=?
+  `);
+  const opportunityDiagnosticInsert = db.prepare(`
+    INSERT INTO market_opportunity_diagnostics (symbol, detail_json, created_at)
+    VALUES (?, ?, ?)
+  `);
+  const opportunityDiagnosticPrune = db.prepare(`
+    DELETE FROM market_opportunity_diagnostics WHERE created_at<?
   `);
 
   function reserveVolatilityAlert(input: {
@@ -1103,6 +1301,301 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     return Math.max(0, numberValue(row?.blocked_until) - nowMs);
   }
 
+  function getOpportunitySeedData(input: {
+    since: string;
+    limit?: number;
+  }): MarketOpportunitySeed[] {
+    const rows = db.prepare(`
+      SELECT
+        e.type, e.symbol, e.side, e.level, e.price, e.change_pct,
+        e.volume_ratio, e.metrics_json, e.occurred_at,
+        t.price AS ticker_price, t.pct_24h, t.quote_volume,
+        t.market_cap_usd, t.fdv_usd
+      FROM market_alert_events e
+      LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
+      WHERE e.occurred_at>=?
+        AND e.type IN ('volatility','short_squeeze')
+      ORDER BY e.occurred_at DESC
+      LIMIT 2000
+    `).all(input.since) as DbRow[];
+    const activeSymbols = new Set<string>();
+    for (const row of db.prepare(
+      "SELECT key FROM market_volatility_state WHERE level>0",
+    ).all() as DbRow[]) {
+      activeSymbols.add(stringValue(row.key).split(":").at(-1) ?? "");
+    }
+    for (const row of db.prepare(
+      "SELECT symbol FROM market_squeeze_active WHERE level>0",
+    ).all() as DbRow[]) {
+      activeSymbols.add(stringValue(row.symbol));
+    }
+
+    const grouped = new Map<string, MarketOpportunitySeed>();
+    for (const row of rows) {
+      const symbol = stringValue(row.symbol).toUpperCase();
+      if (!symbol) continue;
+      const current = grouped.get(symbol) ?? {
+        symbol,
+        price: nullableNumber(row.ticker_price) ?? numberValue(row.price),
+        pct24h: nullableNumber(row.pct_24h),
+        quoteVolume: nullableNumber(row.quote_volume),
+        marketCapUsd: nullableNumber(row.market_cap_usd),
+        fdvUsd: nullableNumber(row.fdv_usd),
+        latestEventAt: stringValue(row.occurred_at),
+        maxLevel: 0,
+        maxAbsChangePct: 0,
+        maxVolumeRatio: 0,
+        active: activeSymbols.has(symbol),
+        alertCounts: { pump: 0, crash: 0, squeeze: 0, total: 0 },
+        squeezeMetrics: null,
+        preliminaryScore: 0,
+      };
+      const type = stringValue(row.type);
+      if (type === "short_squeeze") {
+        current.alertCounts.squeeze += 1;
+        if (!current.squeezeMetrics) {
+          current.squeezeMetrics = parseJson<Record<string, unknown>>(
+            row.metrics_json,
+            {},
+          );
+        }
+      } else if (stringValue(row.side) === "SHORT") {
+        current.alertCounts.crash += 1;
+      } else {
+        current.alertCounts.pump += 1;
+      }
+      current.alertCounts.total += 1;
+      current.maxLevel = Math.max(current.maxLevel, numberValue(row.level));
+      current.maxAbsChangePct = Math.max(
+        current.maxAbsChangePct,
+        Math.abs(numberValue(row.change_pct)),
+      );
+      current.maxVolumeRatio = Math.max(
+        current.maxVolumeRatio,
+        numberValue(row.volume_ratio),
+      );
+      grouped.set(symbol, current);
+    }
+
+    return [...grouped.values()]
+      .map((seed) => ({
+        ...seed,
+        preliminaryScore:
+          seed.maxLevel * 10 +
+          seed.alertCounts.total * 5 +
+          seed.alertCounts.squeeze * 10 +
+          Math.min(25, seed.maxAbsChangePct) +
+          Math.min(15, seed.maxVolumeRatio * 2) +
+          (seed.active ? 8 : 0),
+      }))
+      .sort(
+        (left, right) =>
+          right.preliminaryScore - left.preliminaryScore ||
+          right.latestEventAt.localeCompare(left.latestEventAt) ||
+          left.symbol.localeCompare(right.symbol),
+      )
+      .slice(
+        0,
+        Math.min(
+          MARKET_OPPORTUNITY_RULES.enrichmentLimit,
+          Math.max(1, input.limit ?? MARKET_OPPORTUNITY_RULES.enrichmentLimit),
+        ),
+      );
+  }
+
+  function getOpportunityEnrichment(symbolInput: string) {
+    const symbol = symbolInput.trim().toUpperCase();
+    return rowToOpportunityEnrichment(
+      opportunityEnrichmentGet.get(symbol) as DbRow | undefined,
+    );
+  }
+
+  function upsertOpportunityEnrichment(input: {
+    symbol: string;
+    metrics: MarketOpportunityMetrics;
+    fetchedAt: string;
+    stale: boolean;
+    error: string | null;
+  }) {
+    const symbol = input.symbol.trim().toUpperCase();
+    run(
+      opportunityEnrichmentUpsert,
+      symbol,
+      JSON.stringify(input.metrics),
+      input.fetchedAt,
+      input.stale ? 1 : 0,
+      input.error,
+      input.fetchedAt,
+    );
+    return getOpportunityEnrichment(symbol);
+  }
+
+  function getOpportunityCandidateStates() {
+    return (db.prepare(`
+      SELECT state_json FROM market_opportunity_candidates ORDER BY symbol
+    `).all() as DbRow[])
+      .map(rowToOpportunityCandidate)
+      .filter((state): state is MarketOpportunityCandidateState => state !== null);
+  }
+
+  function replaceOpportunityCandidateStates(
+    states: MarketOpportunityCandidateState[],
+  ) {
+    return transaction(() => {
+      run(opportunityCandidateDeleteAll);
+      for (const state of states) {
+        run(
+          opportunityCandidateInsert,
+          state.symbol.trim().toUpperCase(),
+          JSON.stringify(state),
+          state.updatedAt,
+        );
+      }
+      return states.length;
+    });
+  }
+
+  function saveOpportunitySelection(input: {
+    selected: MarketOpportunityDecision[];
+    fingerprint: string;
+    scannedAt: string;
+    successful: boolean;
+  }) {
+    const selected = input.selected.slice(0, MARKET_OPPORTUNITY_RULES.outputLimit);
+    return transaction(() => {
+      const meta = opportunityMetaGet.get() as DbRow | undefined;
+      const currentRows = db.prepare(`
+        SELECT rank, symbol, selected_at FROM market_opportunity_selection ORDER BY rank
+      `).all() as DbRow[];
+      const sameMembers =
+        currentRows.length === selected.length &&
+        currentRows.every(
+          (row, index) =>
+            numberValue(row.rank) === index + 1 &&
+            stringValue(row.symbol) === selected[index]?.symbol.toUpperCase(),
+        );
+      const changed =
+        stringValue(meta?.fingerprint) !== input.fingerprint || !sameMembers;
+
+      if (changed) {
+        run(opportunitySelectionDeleteAll);
+        selected.forEach((decision, index) => {
+          run(
+            opportunitySelectionInsert,
+            index + 1,
+            decision.symbol.toUpperCase(),
+            JSON.stringify(decision),
+            input.fingerprint,
+            input.scannedAt,
+            input.scannedAt,
+          );
+        });
+      } else {
+        selected.forEach((decision, index) => {
+          run(
+            opportunitySelectionUpdate,
+            JSON.stringify(decision),
+            input.fingerprint,
+            input.scannedAt,
+            index + 1,
+            decision.symbol.toUpperCase(),
+          );
+        });
+      }
+      run(
+        opportunityMetaSelectionUpdate,
+        input.fingerprint,
+        input.scannedAt,
+        input.successful ? 1 : 0,
+        input.scannedAt,
+        input.scannedAt,
+      );
+      return { changed, count: selected.length };
+    });
+  }
+
+  function getOpportunityAiPolicy(input: {
+    fingerprint: string;
+    nowMs?: number;
+  }): OpportunityAiPolicy {
+    const nowMs = input.nowMs ?? Date.now();
+    const meta = opportunityMetaGet.get() as DbRow | undefined;
+    if (
+      stringValue(meta?.ai_fingerprint) === input.fingerprint &&
+      stringValue(meta?.ai_json)
+    ) {
+      return { allowed: false, reason: "unchanged", retryAt: null };
+    }
+    const hourStart = new Date(nowMs - 60 * 60_000).toISOString();
+    const hourlyCount = numberValue(
+      (opportunityAiRunsCount.get(hourStart) as DbRow | undefined)?.value,
+    );
+    if (hourlyCount >= MARKET_OPPORTUNITY_RULES.aiHourlyLimit) {
+      const retryAt = new Date(nowMs + 10 * 60_000).toISOString();
+      return { allowed: false, reason: "hourly-cap", retryAt };
+    }
+    const latestRun = opportunityAiLatestRun.get() as DbRow | undefined;
+    const latestRunMs = Date.parse(stringValue(latestRun?.created_at));
+    if (
+      Number.isFinite(latestRunMs) &&
+      nowMs - latestRunMs < MARKET_OPPORTUNITY_RULES.aiCooldownMs
+    ) {
+      return {
+        allowed: false,
+        reason: "cooldown",
+        retryAt: new Date(
+          latestRunMs + MARKET_OPPORTUNITY_RULES.aiCooldownMs,
+        ).toISOString(),
+      };
+    }
+    return { allowed: true, reason: "allowed", retryAt: null };
+  }
+
+  function recordOpportunityAiAttempt(input: {
+    fingerprint: string;
+    createdAt?: string;
+  }) {
+    const createdAt = input.createdAt ?? nowIso();
+    return run(opportunityAiAttemptInsert, input.fingerprint, createdAt).changes > 0;
+  }
+
+  function saveOpportunityAiResult(input: {
+    fingerprint: string;
+    items: MarketOpportunityAiItem[] | null;
+    provider: string | null;
+    generatedAt: string;
+    error: string | null;
+  }) {
+    return run(
+      opportunityAiResultUpdate,
+      input.fingerprint,
+      input.items ? JSON.stringify(input.items) : null,
+      input.provider,
+      input.generatedAt,
+      input.error,
+      input.generatedAt,
+      input.fingerprint,
+    ).changes > 0;
+  }
+
+  function recordOpportunityDiagnostic(input: {
+    symbol?: string | null;
+    detail: Record<string, unknown>;
+    createdAt?: string;
+  }) {
+    const createdAt = input.createdAt ?? nowIso();
+    return run(
+      opportunityDiagnosticInsert,
+      input.symbol?.trim().toUpperCase() || null,
+      JSON.stringify(input.detail),
+      createdAt,
+    ).changes > 0;
+  }
+
+  function pruneOpportunityDiagnostics(before: string) {
+    return Number(run(opportunityDiagnosticPrune, before).changes);
+  }
+
   function getMarketAlertsSnapshot(options: {
     limit?: number;
     page?: number;
@@ -1209,6 +1702,44 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         fdvUsd: nullableNumber((row as DbRow).fdv_usd),
         updatedAt: stringValue((row as DbRow).updated_at),
       }));
+    const opportunityMetaRow = opportunityMetaGet.get() as DbRow | undefined;
+    const opportunityFingerprint = stringValue(opportunityMetaRow?.fingerprint) || null;
+    const opportunityAiFingerprint =
+      stringValue(opportunityMetaRow?.ai_fingerprint) || null;
+    const opportunityAiItems =
+      opportunityFingerprint && opportunityAiFingerprint === opportunityFingerprint
+        ? parseJson<MarketOpportunityAiItem[]>(opportunityMetaRow?.ai_json, [])
+        : [];
+    const aiBySymbol = new Map(
+      opportunityAiItems.map((item) => [item.symbol.toUpperCase(), item]),
+    );
+    const opportunities = (db.prepare(`
+      SELECT * FROM market_opportunity_selection ORDER BY rank
+    `).all() as DbRow[])
+      .map((row) => {
+        const decision = parseJson<MarketOpportunityDecision | null>(
+          row.decision_json,
+          null,
+        );
+        if (!decision) return null;
+        return {
+          ...decision,
+          rank: numberValue(row.rank),
+          selectedAt: stringValue(row.selected_at),
+          updatedAt: stringValue(row.updated_at),
+          ai: aiBySymbol.get(decision.symbol.toUpperCase()) ?? null,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+    const opportunityLastSuccessAt =
+      stringValue(opportunityMetaRow?.last_success_at) || null;
+    const opportunityLastSuccessMs = Date.parse(opportunityLastSuccessAt ?? "");
+    const snapshotNowMs = Date.parse(options.now ?? nowIso());
+    const opportunityStale =
+      opportunities.length > 0 &&
+      (!Number.isFinite(opportunityLastSuccessMs) ||
+        !Number.isFinite(snapshotNowMs) ||
+        snapshotNowMs - opportunityLastSuccessMs > 3 * 60_000);
     const latestUpdatedAt = stringValue(
       (db.prepare(`
         SELECT MAX(value) AS value FROM (
@@ -1216,6 +1747,9 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_charts
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_enrichment
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_selection
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_meta
         )
       `).get() as DbRow).value,
     );
@@ -1227,6 +1761,16 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       page,
       limit,
       activeSignals: [...volatilityActive, ...squeezeActive],
+      opportunities,
+      opportunityMeta: {
+        fingerprint: opportunityFingerprint,
+        lastScanAt: stringValue(opportunityMetaRow?.last_scan_at) || null,
+        lastSuccessAt: opportunityLastSuccessAt,
+        stale: opportunityStale,
+        aiProvider: stringValue(opportunityMetaRow?.ai_provider) || null,
+        aiGeneratedAt: stringValue(opportunityMetaRow?.ai_generated_at) || null,
+        aiError: stringValue(opportunityMetaRow?.ai_error) || null,
+      },
       marketRanking: rankTriggeredMarkets({
         events: rankingEvents,
         tickers,
@@ -1239,6 +1783,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         volatilityWs: heartbeatByWorker.get("volatility-ws") ?? null,
         volatilityRest: heartbeatByWorker.get("volatility-rest") ?? null,
         squeeze: heartbeatByWorker.get("squeeze") ?? null,
+        opportunity: heartbeatByWorker.get("opportunity") ?? null,
       },
     };
   }
@@ -1251,6 +1796,9 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_heartbeat
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_tickers
           UNION ALL SELECT MAX(updated_at) AS value FROM market_alert_charts
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_enrichment
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_selection
+          UNION ALL SELECT MAX(updated_at) AS value FROM market_opportunity_meta
         )
       `).get() as DbRow).value,
     );
@@ -1294,6 +1842,17 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     deferBinanceRequests,
     getBinanceRequestDelay,
     getRecentlyTriggeredSymbols,
+    getOpportunitySeedData,
+    getOpportunityEnrichment,
+    upsertOpportunityEnrichment,
+    getOpportunityCandidateStates,
+    replaceOpportunityCandidateStates,
+    saveOpportunitySelection,
+    getOpportunityAiPolicy,
+    recordOpportunityAiAttempt,
+    saveOpportunityAiResult,
+    recordOpportunityDiagnostic,
+    pruneOpportunityDiagnostics,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,

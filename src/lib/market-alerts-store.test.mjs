@@ -9,6 +9,66 @@ const dir = mkdtempSync(join(tmpdir(), "market-alerts-store-"));
 const dbPath = join(dir, "alerts.sqlite");
 let a;
 let b;
+let c;
+
+function opportunityMetrics(symbol = "BTCUSDT") {
+  return {
+    symbol,
+    observedAt: "2026-09-04T01:00:00.000Z",
+    stale: false,
+    pct1m: 1.2,
+    pct5m: 3.2,
+    pct15m: 6.4,
+    pct1h: 11.5,
+    pct24h: 18,
+    volumeRatio1m: 2.2,
+    volumeRatio5m: 2.8,
+    oiGrowth15m: 8.2,
+    oiNotional: 8_000_000,
+    funding: 0.0001,
+    basis: -0.0002,
+    globalLongShortRatio: 1.02,
+    topTraderLongShortRatio: 1.04,
+    takerBuySellRatio: 1.34,
+    spotAvailable: true,
+    spotChange15m: 5.8,
+    spotVolumeRatio5m: 2.1,
+    perpSpotDivergencePct: 0.6,
+    distanceFromHighPct: -1.2,
+    distanceFromLowPct: 16,
+    priorRunUpPct: 24,
+    supportBreak: false,
+    lowerStructure: false,
+    breakout20: true,
+    quoteVolume: 80_000_000,
+    marketCapUsd: 120_000_000,
+    fdvUsd: 140_000_000,
+    alertCounts: { pump: 3, crash: 0, squeeze: 0, total: 3 },
+  };
+}
+
+function opportunityDecision(symbol = "BTCUSDT") {
+  const metrics = opportunityMetrics(symbol);
+  return {
+    symbol,
+    model: "capital_long",
+    direction: "LONG",
+    stage: "拉盘做多确认",
+    decision: "关注做多",
+    score: 88,
+    confidence: 88,
+    evidence: ["OI 随价格扩张"],
+    confirmations: ["等待回踩不破"],
+    invalidations: ["跌破启动结构"],
+    risks: [],
+    mandatoryComplete: true,
+    hardInvalidated: false,
+    dataCoverage: 100,
+    metrics,
+    observedAt: metrics.observedAt,
+    expiresAt: "2026-09-04T13:00:00.000Z",
+  };
+}
 
 try {
   a = openMarketAlertsStore(dbPath);
@@ -471,9 +531,168 @@ try {
   a.deferBinanceRequests(1_500);
   assert.equal(b.getBinanceRequestDelay(1_100), 400);
   assert.equal(b.reserveBinanceRequestSlot({ nowMs: 1_100, spacingMs: 100 }), 400);
+
+  const seeds = a.getOpportunitySeedData({
+    since: "2026-08-30T00:00:00.000Z",
+    limit: 12,
+  });
+  const btcSeed = seeds.find((item) => item.symbol === "BTCUSDT");
+  assert.ok(btcSeed, "recent alert events must seed opportunity enrichment");
+  assert.equal(btcSeed.alertCounts.pump, 2);
+  assert.equal(btcSeed.price, 101);
+  assert.equal(btcSeed.marketCapUsd, 120_000_000);
+
+  const metrics = opportunityMetrics();
+  a.upsertOpportunityEnrichment({
+    symbol: "BTCUSDT",
+    metrics,
+    fetchedAt: "2026-09-04T01:00:00.000Z",
+    stale: false,
+    error: null,
+  });
+  assert.deepEqual(b.getOpportunityEnrichment("btcusdt"), {
+    symbol: "BTCUSDT",
+    metrics,
+    fetchedAt: "2026-09-04T01:00:00.000Z",
+    stale: false,
+    error: null,
+    updatedAt: "2026-09-04T01:00:00.000Z",
+  });
+
+  const decision = opportunityDecision();
+  const candidateState = {
+    symbol: "BTCUSDT",
+    decision,
+    entryStreak: 2,
+    exitStreak: 0,
+    enteredAt: "2026-09-04T00:59:00.000Z",
+    lastQualifiedAt: "2026-09-04T01:01:00.000Z",
+    lastConfirmedAt: "2026-09-04T01:01:00.000Z",
+    selected: true,
+    rank: 1,
+    updatedAt: "2026-09-04T01:01:00.000Z",
+  };
+  a.replaceOpportunityCandidateStates([candidateState]);
+  const revisionBeforeSelection = b.getMarketAlertsRevision();
+  assert.equal(a.saveOpportunitySelection({
+    selected: [decision],
+    fingerprint: "fingerprint-one",
+    scannedAt: "2026-09-04T01:01:00.000Z",
+    successful: true,
+  }).changed, true);
+  assert.ok(b.getMarketAlertsRevision() > revisionBeforeSelection);
+  a.setMarketAlertsHeartbeat({
+    worker: "opportunity",
+    status: "live",
+    detail: "selected=1",
+    now: "2026-09-04T01:01:01.000Z",
+  });
+
+  const firstOpportunitySnapshot = b.getMarketAlertsSnapshot({
+    limit: 5,
+    now: "2026-09-04T01:02:00.000Z",
+  });
+  assert.equal(firstOpportunitySnapshot.opportunities.length, 1);
+  assert.equal(firstOpportunitySnapshot.opportunities[0].symbol, "BTCUSDT");
+  assert.equal(firstOpportunitySnapshot.opportunities[0].rank, 1);
+  assert.equal(firstOpportunitySnapshot.opportunities[0].ai, null);
+  assert.equal(firstOpportunitySnapshot.opportunityMeta.fingerprint, "fingerprint-one");
+  assert.equal(firstOpportunitySnapshot.health.opportunity?.status, "live");
+
+  const selectedAt = firstOpportunitySnapshot.opportunities[0].selectedAt;
+  assert.equal(a.saveOpportunitySelection({
+    selected: [{ ...decision, score: 89 }],
+    fingerprint: "fingerprint-one",
+    scannedAt: "2026-09-04T01:02:00.000Z",
+    successful: true,
+  }).changed, false);
+  assert.equal(
+    b.getMarketAlertsSnapshot({ limit: 5 }).opportunities[0].selectedAt,
+    selectedAt,
+    "an unchanged fingerprint must not reset candidate age",
+  );
+
+  assert.equal(
+    a.getOpportunityAiPolicy({
+      fingerprint: "fingerprint-one",
+      nowMs: Date.parse("2026-09-04T01:02:00.000Z"),
+    }).reason,
+    "allowed",
+  );
+  a.recordOpportunityAiAttempt({
+    fingerprint: "fingerprint-one",
+    createdAt: "2026-09-04T01:02:00.000Z",
+  });
+  a.saveOpportunityAiResult({
+    fingerprint: "fingerprint-one",
+    items: [{
+      symbol: "BTCUSDT",
+      summary: "动量与 OI 同步。",
+      rationale: "价格、成交和 OI 同向。",
+      confirmation: "回踩不破。",
+      invalidation: "跌破启动区间。",
+      risk: "短线涨幅较大。",
+      validFor: "2 小时内。",
+    }],
+    provider: "minimax",
+    generatedAt: "2026-09-04T01:02:01.000Z",
+    error: null,
+  });
+  assert.equal(
+    a.getOpportunityAiPolicy({
+      fingerprint: "fingerprint-one",
+      nowMs: Date.parse("2026-09-04T01:03:00.000Z"),
+    }).reason,
+    "unchanged",
+  );
+  assert.equal(
+    a.getOpportunityAiPolicy({
+      fingerprint: "fingerprint-two",
+      nowMs: Date.parse("2026-09-04T01:03:00.000Z"),
+    }).reason,
+    "cooldown",
+  );
+  for (let index = 1; index < 6; index += 1) {
+    a.recordOpportunityAiAttempt({
+      fingerprint: `attempt-${index}`,
+      createdAt: new Date(Date.parse("2026-09-04T01:02:00.000Z") + index * 60_000).toISOString(),
+    });
+  }
+  assert.equal(
+    a.getOpportunityAiPolicy({
+      fingerprint: "fingerprint-three",
+      nowMs: Date.parse("2026-09-04T01:20:00.000Z"),
+    }).reason,
+    "hourly-cap",
+  );
+
+  const aiSnapshot = b.getMarketAlertsSnapshot({ limit: 5 });
+  assert.equal(aiSnapshot.opportunities[0].ai?.summary, "动量与 OI 同步。");
+  assert.equal(aiSnapshot.opportunityMeta.aiProvider, "minimax");
+  assert.equal(aiSnapshot.opportunityMeta.aiError, null);
+
+  const eventTotalBeforePrune = aiSnapshot.total;
+  a.recordOpportunityDiagnostic({
+    symbol: "OLDUSDT",
+    detail: { score: 71 },
+    createdAt: "2026-08-20T00:00:00.000Z",
+  });
+  a.recordOpportunityDiagnostic({
+    symbol: "NEWUSDT",
+    detail: { score: 75 },
+    createdAt: "2026-09-04T00:00:00.000Z",
+  });
+  assert.equal(a.pruneOpportunityDiagnostics("2026-08-28T00:00:00.000Z"), 1);
+  assert.equal(b.getMarketAlertsSnapshot({ limit: 5 }).total, eventTotalBeforePrune);
+
+  c = openMarketAlertsStore(dbPath);
+  assert.equal(c.getOpportunityCandidateStates()[0].symbol, "BTCUSDT");
+  assert.equal(c.getOpportunityEnrichment("BTCUSDT")?.metrics.oiGrowth15m, 8.2);
+  assert.equal(c.getMarketAlertsSnapshot({ limit: 5 }).opportunities[0].symbol, "BTCUSDT");
 } finally {
   a?.close();
   b?.close();
+  c?.close();
   rmSync(dir, { recursive: true, force: true });
 }
 
