@@ -70,6 +70,29 @@ try {
   );
   assert.equal(cachedResponse.status, 200);
   assert.equal(requests.length, requestCountAfterFirstLoad);
+
+  const hourlyUrl =
+    "http://signal-hub.test/api/stocks-hynix-premium?interval=1h&startTime=1783958400000";
+  const hourlyResponse = await GET(new Request(hourlyUrl));
+  assert.equal(hourlyResponse.status, 200);
+
+  for (let index = 1; index <= 5; index += 1) {
+    const rollingResponse = await GET(
+      new Request(
+        `http://signal-hub.test/api/stocks-hynix-premium?interval=1m&startTime=1783958400000&endTime=${1783958400000 + index * 60_000}`,
+      ),
+    );
+    assert.equal(rollingResponse.status, 200);
+  }
+
+  const requestCountBeforeHourlyReload = requests.length;
+  const cachedHourlyResponse = await GET(new Request(hourlyUrl));
+  assert.equal(cachedHourlyResponse.status, 200);
+  assert.equal(
+    requests.length,
+    requestCountBeforeHourlyReload,
+    "rolling 1m cache entries must not evict the 1h history cache",
+  );
 } finally {
   globalThis.fetch = previousFetch;
   if (previousRestBaseUrl === undefined) {

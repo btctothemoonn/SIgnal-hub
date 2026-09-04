@@ -150,7 +150,6 @@ export const BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS = Date.parse(
 export const BINANCE_HYNIX_PREMIUM_ONE_MINUTE_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
 const HYNIX_PREMIUM_BASE_MULTIPLIER = 10;
 const DEFAULT_INTERVAL = "1m" satisfies BinanceHynixPremiumInterval;
-const SOURCE_KLINE_INTERVAL = "1m" satisfies BinanceKlineInterval;
 const INTERVAL_MS: Record<BinanceKlineInterval, number> = {
   "1m": 60 * 1000,
   "5m": 5 * 60 * 1000,
@@ -1155,7 +1154,7 @@ export async function fetchBinanceHynixPremiumSnapshot({
     {
       symbol: baseSymbol,
       baseUrl: restBaseUrl,
-      interval: SOURCE_KLINE_INTERVAL,
+      interval: normalizedInterval,
       startTime: normalizedStartTime,
       endTime: normalizedEndTime,
       limit: normalizedLimit,
@@ -1163,7 +1162,7 @@ export async function fetchBinanceHynixPremiumSnapshot({
     {
       symbol: benchmarkSymbol,
       baseUrl: restBaseUrl,
-      interval: SOURCE_KLINE_INTERVAL,
+      interval: normalizedInterval,
       startTime: normalizedStartTime,
       endTime: normalizedEndTime,
       limit: normalizedLimit,

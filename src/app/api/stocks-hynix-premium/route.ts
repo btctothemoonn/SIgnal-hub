@@ -40,10 +40,17 @@ function snapshotCacheKey({
 
 function getPremiumSnapshotCache(
   key: string,
+  interval: BinanceHynixPremiumInterval,
   fetcher: () => Promise<BinanceHynixPremiumSnapshot>,
 ) {
   const existing = premiumSnapshotCaches.get(key);
   if (existing) return existing;
+
+  for (const candidateKey of premiumSnapshotCaches.keys()) {
+    if (candidateKey.startsWith(`${interval}:`)) {
+      premiumSnapshotCaches.delete(candidateKey);
+    }
+  }
 
   while (premiumSnapshotCaches.size >= MAX_PREMIUM_SNAPSHOT_CACHES) {
     const oldestKey = premiumSnapshotCaches.keys().next().value;
@@ -95,6 +102,7 @@ export async function GET(request: Request) {
       : requestedStartTime;
   const cache = getPremiumSnapshotCache(
     snapshotCacheKey({ interval, startTime, endTime, limit }),
+    interval,
     () =>
       fetchBinanceHynixPremiumSnapshot({
         interval,

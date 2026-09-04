@@ -357,7 +357,7 @@ assert.equal(
 assert.ok(
   requestedUrls
     .filter((url) => url.includes("/fapi/v1/klines"))
-    .every((url) => url.includes("interval=1m")),
+    .every((url) => url.includes("interval=1h")),
 );
 assert.ok(
   requestedUrls
@@ -395,6 +395,11 @@ await fetchBinanceHynixPremiumSnapshot({
 });
 assert.ok(
   pagedUrls.filter((url) => url.includes("/fapi/v1/klines")).length > 2,
+);
+assert.ok(
+  pagedUrls
+    .filter((url) => url.includes("/fapi/v1/klines"))
+    .every((url) => url.includes("interval=5m")),
 );
 
 const parsedKlineMessage = parseBinanceFuturesWebSocketMessage({
