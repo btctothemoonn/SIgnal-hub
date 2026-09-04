@@ -16,14 +16,14 @@ export default function AlertsPage() {
   return (
     <AppShell
       activeNav="alerts"
-      subtitle="异动监控 · 暴涨暴跌 · 轧空预警"
+      subtitle="异动监控 · 做单决策 · 暴涨暴跌 · 轧空预警"
       mainClassName="mx-auto min-h-0 w-full max-w-[1680px] px-3 py-3 sm:px-5 lg:py-4"
       statusPills={[
         {
           label: "异动",
           children: `${snapshot.activeSignals.length} 活跃 · ${snapshot.total} 记录`,
-          status: `${liveWorkers}/3 在线`,
-          tone: liveWorkers === 3 ? "text-success" : "text-warning",
+          status: `${liveWorkers}/4 在线`,
+          tone: liveWorkers === 4 ? "text-success" : "text-warning",
         },
       ]}
     >

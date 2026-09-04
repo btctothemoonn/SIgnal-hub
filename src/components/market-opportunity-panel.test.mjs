@@ -157,6 +157,14 @@ try {
     renderer.root.findAllByProps({ "data-opportunity-card": true }).length,
     2,
   );
+  const mobilePager = renderer.root.find(
+    (node) => typeof node.props.className === "string" &&
+      node.props.className.includes("snap-x snap-mandatory"),
+  );
+  await act(async () => {
+    mobilePager.props.onScroll({ currentTarget: { clientWidth: 390, scrollLeft: 390 } });
+  });
+  assert.match(renderedText(renderer.toJSON()), /2 \/ 2/);
 
   const secondSelector = renderer.root.findByProps({
     "data-opportunity-selector": "BBBUSDT",
