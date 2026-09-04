@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Save } from "lucide-react";
 import {
   CandlestickSeries,
@@ -33,6 +33,11 @@ import {
   type BinanceKlinePoint,
 } from "@/lib/binance-hynix-premium";
 import {
+  compactBinanceHynixPremiumSnapshot,
+  restoreBinanceHynixPremiumSnapshot,
+  type BinanceHynixPremiumBrowserCache,
+} from "@/lib/binance-hynix-premium-browser-cache";
+import {
   HYNIX_PREMIUM_ALERT_DEFAULT_SETTINGS,
   dismissHynixPremiumAlertCycle,
   isValidHynixPremiumAlertThresholdPct,
@@ -45,6 +50,8 @@ import {
 
 const STOCKS_HYNIX_PREMIUM_CACHE_KEY =
   "signal-hub:stocks:hynix-premium:v4";
+const STOCKS_HYNIX_PREMIUM_INTERVAL_CACHE_KEY =
+  "signal-hub:stocks:hynix-premium:selected-interval:v1";
 const STOCKS_HYNIX_FUNDING_CACHE_KEY =
   "signal-hub:stocks:hynix-funding:v1";
 const PREMIUM_ALERT_SETTINGS_POLL_MS = 60 * 1000;
@@ -185,10 +192,28 @@ export function StocksHynixPremiumCurve({
   const websocketMarkPricesRef = useRef<
     Record<string, { markPrice: number; eventTime: number }>
   >({});
-  const [cachedSnapshot, writeCachedSnapshot] =
-    useBrowserJsonCache<BinanceHynixPremiumSnapshot>(
+  const restoredSelectedIntervalRef = useRef(false);
+  const [cachedSelectedInterval, writeCachedSelectedInterval] =
+    useBrowserJsonCache<BinanceHynixPremiumInterval>(
+      STOCKS_HYNIX_PREMIUM_INTERVAL_CACHE_KEY,
+    );
+  const [cachedSnapshotValue, writeCachedSnapshotValue] =
+    useBrowserJsonCache<
+      BinanceHynixPremiumBrowserCache | BinanceHynixPremiumSnapshot
+    >(
       `${STOCKS_HYNIX_PREMIUM_CACHE_KEY}:${selectedInterval}`,
     );
+  const cachedSnapshot = useMemo(
+    () => restoreBinanceHynixPremiumSnapshot(cachedSnapshotValue),
+    [cachedSnapshotValue],
+  );
+  const writeCachedSnapshot = useCallback(
+    (nextSnapshot: BinanceHynixPremiumSnapshot) =>
+      writeCachedSnapshotValue(
+        compactBinanceHynixPremiumSnapshot(nextSnapshot),
+      ),
+    [writeCachedSnapshotValue],
+  );
   const [cachedFundingSnapshot, writeCachedFundingSnapshot] =
     useBrowserJsonCache<BinanceHynixFundingSnapshot>(
       STOCKS_HYNIX_FUNDING_CACHE_KEY,
@@ -224,6 +249,22 @@ export function StocksHynixPremiumCurve({
     [shownPoints],
   );
   const firstPoint = shownPoints[0] ?? null;
+
+  useEffect(() => {
+    if (restoredSelectedIntervalRef.current || !cachedSelectedInterval) return;
+    restoredSelectedIntervalRef.current = true;
+    setSelectedInterval(cachedSelectedInterval);
+  }, [cachedSelectedInterval]);
+
+  useEffect(() => {
+    if (
+      cachedSnapshotValue &&
+      !("v" in cachedSnapshotValue) &&
+      cachedSnapshot
+    ) {
+      writeCachedSnapshot(cachedSnapshot);
+    }
+  }, [cachedSnapshot, cachedSnapshotValue, writeCachedSnapshot]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -496,6 +537,7 @@ export function StocksHynixPremiumCurve({
               ),
             );
             writeCachedSnapshot(snapshot);
+            writeCachedSelectedInterval(selectedInterval);
           }
           setError(snapshot.errors[0] ?? null);
         }
@@ -512,7 +554,7 @@ export function StocksHynixPremiumCurve({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [selectedInterval, writeCachedSnapshot]);
+  }, [selectedInterval, writeCachedSelectedInterval, writeCachedSnapshot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -745,7 +787,11 @@ export function StocksHynixPremiumCurve({
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setSelectedInterval(option.value)}
+                  onClick={() => {
+                    restoredSelectedIntervalRef.current = true;
+                    setSelectedInterval(option.value);
+                    writeCachedSelectedInterval(option.value);
+                  }}
                   className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
                     selectedInterval === option.value
                       ? "border-accent/40 bg-accent-soft text-foreground shadow-sm"
