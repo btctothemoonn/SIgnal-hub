@@ -33,6 +33,8 @@ export function getMarketAlertsConfig(env: EnvLike = process.env) {
     enabled: booleanValue(env.MARKET_ALERTS_ENABLED, true),
     restBaseUrl:
       env.MARKET_ALERTS_BINANCE_REST_BASE_URL?.trim() || "https://fapi.binance.com",
+    spotBaseUrl:
+      env.MARKET_ALERTS_BINANCE_SPOT_BASE_URL?.trim() || "https://api.binance.com",
     wsBaseUrl: marketWebSocketBaseUrl(env.MARKET_ALERTS_BINANCE_WS_BASE_URL),
     wsTopN: positiveInteger(env.MARKET_ALERTS_WS_TOP_N, 200),
     wsRankRefreshMs: positiveInteger(

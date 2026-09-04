@@ -40,6 +40,10 @@ export interface BinanceMarketClient {
   getGlobalLongShortRatio?(symbol: string): Promise<number | null>;
   getTopTraderPositionRatio?(symbol: string): Promise<number | null>;
   getTakerBuySellRatio?(symbol: string): Promise<number | null>;
+  getSpotContext?(symbol: string): Promise<{
+    ticker: JsonRecord | null;
+    klines5m: KlineRow[];
+  } | null>;
 }
 
 type DeliverAlert = (
@@ -189,8 +193,12 @@ export function createBinanceFuturesClient(
     return config.requestRetryBaseMs * 2 ** attempt;
   }
 
-  async function requestJson(path: string, params?: Record<string, string | number>) {
-    const url = new URL(path, config.restBaseUrl);
+  async function requestJson(
+    path: string,
+    params?: Record<string, string | number>,
+    baseUrl = config.restBaseUrl,
+  ) {
+    const url = new URL(path, baseUrl);
     for (const [key, value] of Object.entries(params ?? {})) {
       url.searchParams.set(key, String(value));
     }
@@ -318,6 +326,26 @@ export function createBinanceFuturesClient(
         limit: 2,
       })) as JsonRecord[];
       return nullableNumber(rows.at(-1)?.buySellRatio);
+    },
+    async getSpotContext(symbol) {
+      try {
+        const [ticker, klines5m] = await Promise.all([
+          requestJson("/api/v3/ticker/24hr", { symbol }, config.spotBaseUrl),
+          requestJson(
+            "/api/v3/klines",
+            { symbol, interval: "5m", limit: 288 },
+            config.spotBaseUrl,
+          ),
+        ]);
+        return {
+          ticker: ticker && typeof ticker === "object" && !Array.isArray(ticker)
+            ? ticker as JsonRecord
+            : null,
+          klines5m: Array.isArray(klines5m) ? klines5m as KlineRow[] : [],
+        };
+      } catch {
+        return null;
+      }
     },
     async getFullyDilutedValuation(symbol, price) {
       const [valuation] = await getMarketValuations([{ symbol, price }]);
