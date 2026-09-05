@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createMonitor985WatchConfigCache } from "../src/lib/monitor985-watch-config-cache.ts";
 import {
   get6551TwitterTweetById,
   get6551TwitterUserTweets,
@@ -229,6 +230,7 @@ async function fetchMonitor985Json(path) {
     {
       cache: "no-store",
       headers: buildMonitor985RequestHeaders(),
+      signal: AbortSignal.timeout(15_000),
     },
   );
   if (!response.ok) {
@@ -237,25 +239,20 @@ async function fetchMonitor985Json(path) {
   return response.json();
 }
 
+const remoteWatchConfigCache = createMonitor985WatchConfigCache({
+  load: async () => toMonitor985XPipelineAccounts(
+    parseMonitor985WatchConfig(await fetchMonitor985Json("/api/watch-config")),
+  ),
+  onError: (error) => log("x_hybrid_watch_config_sync_failed", { error: String(error), fallback: "cached-or-local" }),
+});
+let ignoredRemoteFingerprint = "";
+
 async function syncConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
   const localAccounts = getXPipelineConfiguredAccounts(runtimeConfig);
   const truthAccounts = getXPipelineConfiguredTruthAccounts();
-  let remoteAccounts = [];
-
-  if (describeMonitor985AuthMode() !== "public") {
-    try {
-      const payload = await fetchMonitor985Json("/api/watch-config");
-      remoteAccounts = toMonitor985XPipelineAccounts(
-        parseMonitor985WatchConfig(payload),
-      );
-    } catch (error) {
-      log("x_hybrid_watch_config_sync_failed", {
-        error: String(error),
-        fallback: "local",
-      });
-    }
-  }
+  const remoteAccounts = describeMonitor985AuthMode() !== "public"
+    ? (await remoteWatchConfigCache.get()) ?? [] : [];
 
   const { accounts, allowedAccountKeys, ignoredRemoteAccounts } =
     resolveMonitor985AcceptedAccounts({
@@ -268,12 +265,14 @@ async function syncConfiguredAccounts() {
     upsertXPipelineAccount(account);
   }
   disableXPipelineAccountsExcept(accounts.map((account) => account.username));
-  if (ignoredRemoteAccounts.length > 0) {
+  const ignoredFingerprint = ignoredRemoteAccounts.map((account) => account.username).sort().join(",");
+  if (ignoredRemoteAccounts.length > 0 && ignoredFingerprint !== ignoredRemoteFingerprint) {
     log("x_hybrid_remote_accounts_ignored", {
       count: ignoredRemoteAccounts.length,
       sample: ignoredRemoteAccounts.slice(0, 5).map((account) => account.username),
     });
   }
+  ignoredRemoteFingerprint = ignoredFingerprint;
   return {
     accounts,
     source: "local-site",

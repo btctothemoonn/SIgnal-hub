@@ -42,7 +42,7 @@ import {
   getSignalFeedRangeLimit,
   type SignalFeedRange,
 } from "@/lib/signal-feed-range";
-import { shouldRefreshSignalSnapshotsOnEffect } from "@/lib/signal-snapshot-refresh";
+import { shouldRefreshSignalSnapshotsOnEffect, shouldReconcileSignalSnapshots } from "@/lib/signal-snapshot-refresh";
 import {
   calculateSignalFeedScrollDelta,
   parseSignalFeedReadingAnchor,
@@ -68,7 +68,7 @@ import {
 const MAX_ALL_NEWS_ITEMS = 200;
 const MAX_TELEGRAM_NEWS_ITEMS = 300;
 const MAX_X_NEWS_ITEMS = 200;
-const SNAPSHOT_REFRESH_MS = 30000;
+const SNAPSHOT_REFRESH_MS = 30_000;
 const SIGNAL_FEED_AUTHOR_FAVORITES_KEY =
   "signal-hub:signal-feed-author-favorites";
 const SIGNAL_FEED_READING_ANCHOR_KEY =
@@ -1308,11 +1308,14 @@ export function UnifiedNewsPanel({
     };
 
     const cleanups: Array<() => void> = [];
+    let telegramStreamConnected = false;
+    let xStreamConnected = initialXSnapshot.status === "paused";
 
     const connectWithRetry = (
       url: string,
       setup: (source: EventSource) => void,
       onError: () => void,
+      onOpen: () => void,
     ): (() => void) => {
       let source: EventSource | null = null;
       let retryTimer: number | null = null;
@@ -1326,6 +1329,7 @@ export function UnifiedNewsPanel({
         setup(es);
         es.onopen = () => {
           retryCount = 0;
+          onOpen();
         };
         es.onerror = () => {
           onError();
@@ -1376,6 +1380,7 @@ export function UnifiedNewsPanel({
             source.addEventListener("x-snapshot", handleXSnapshot);
           },
           () => {
+            xStreamConnected = false;
             startTransition(() => {
               setXSnapshot((current) => ({
                 ...current,
@@ -1389,6 +1394,7 @@ export function UnifiedNewsPanel({
               }));
             });
           },
+          () => { xStreamConnected = true; },
         ),
       );
     }
@@ -1418,6 +1424,7 @@ export function UnifiedNewsPanel({
           source.addEventListener("telegram-snapshot", handleTelegramSnapshot);
         },
         () => {
+          telegramStreamConnected = false;
           startTransition(() => {
             setTelegramSnapshot((current) => ({
               ...current,
@@ -1426,11 +1433,15 @@ export function UnifiedNewsPanel({
             }));
           });
         },
+        () => { telegramStreamConnected = true; },
       ),
     );
 
     const refreshTimer = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") {
+      if (document.visibilityState !== "hidden" && shouldReconcileSignalSnapshots({
+        streamsConnected: telegramStreamConnected && xStreamConnected,
+        elapsedMs: Date.now() - lastRefreshAtRef.current,
+      })) {
         void refreshSources();
       }
     }, SNAPSHOT_REFRESH_MS);

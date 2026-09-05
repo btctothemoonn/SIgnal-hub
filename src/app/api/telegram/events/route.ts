@@ -1,61 +1,26 @@
 import { prepareTelegramSnapshotForClient } from "@/lib/telegram-client-snapshot";
-import {
-  getTelegramPipelineLatestUpdatedAt,
-  getTelegramPipelineSnapshot,
-} from "@/lib/telegram-pipeline-store";
+import { getTelegramPipelineLatestUpdatedAt, getTelegramPipelineSnapshot } from "@/lib/telegram-pipeline-store";
+import { createSnapshotEventStream } from "@/lib/snapshot-event-stream";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function encodeEvent(event: string, data: unknown) {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
-
-export async function GET() {
-  const encoder = new TextEncoder();
-  let lastUpdatedAt: string | null = null;
-  let timer: ReturnType<typeof setInterval> | null = null;
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const sendSnapshotIfChanged = () => {
-        const updatedAt = getTelegramPipelineLatestUpdatedAt();
-        if (updatedAt && updatedAt !== lastUpdatedAt) {
-          lastUpdatedAt = updatedAt;
-          controller.enqueue(
-            encoder.encode(
-              encodeEvent(
-                "telegram-snapshot",
-                prepareTelegramSnapshotForClient(getTelegramPipelineSnapshot()),
-              ),
-            ),
-          );
-          return;
-        }
-
-        controller.enqueue(
-          encoder.encode(
-            encodeEvent("heartbeat", { servedAt: new Date().toISOString() }),
-          ),
-        );
-      };
-
-      sendSnapshotIfChanged();
-      timer = setInterval(sendSnapshotIfChanged, 3000);
-    },
-    cancel() {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
-    },
+export async function GET(request: Request) {
+  const stream = createSnapshotEventStream({
+    event: "telegram-snapshot",
+    pollMs: 3000,
+    signal: request.signal,
+    getRevision: getTelegramPipelineLatestUpdatedAt,
+    getSnapshot: (updatedSince) => prepareTelegramSnapshotForClient(
+      getTelegramPipelineSnapshot(updatedSince ? 10_000 : undefined, undefined, { updatedSince }),
+    ),
   });
-
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

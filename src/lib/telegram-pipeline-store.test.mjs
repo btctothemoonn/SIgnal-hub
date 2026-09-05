@@ -298,3 +298,7 @@ assert.equal(staleSnapshot.status, "error");
 assert.equal(staleSnapshot.isConnected, false);
 assert.match(staleSnapshot.errors[0] ?? "", /heartbeat/i);
 console.log("ok - telegram pipeline store builds dashboard snapshots");
+db.prepare("update telegram_messages set updated_at = ?").run("2026-09-05T00:00:00.000Z");
+db.prepare("update telegram_messages set updated_at = ? where id = ?").run("2026-09-05T01:00:00.000Z", "2955560057:123");
+assert.deepEqual(getTelegramPipelineSnapshot(100, db, { updatedSince: "2026-09-05T00:30:00.000Z" }).feed.map((item) => item.id), ["2955560057:123"],
+  "incremental snapshots include late edits without resending unchanged Telegram messages");

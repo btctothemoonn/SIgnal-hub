@@ -624,6 +624,8 @@ export function initXPipelineDb(db: DatabaseSync) {
 
     create index if not exists x_feed_created_at_idx
       on x_feed(created_at desc);
+    create index if not exists x_feed_updated_at_idx
+      on x_feed(updated_at);
     create index if not exists x_feed_account_idx
       on x_feed(account_username_key, created_at desc);
   `);
@@ -1314,6 +1316,7 @@ export function getXPipelineSnapshot(
   db = getXPipelineDb(),
   options: {
     since?: string | null;
+    updatedSince?: string | null;
   } = {},
 ): TwitterDashboardSnapshot {
   const requestedLimit = normalizeSnapshotFeedLimit(limit);
@@ -1324,6 +1327,7 @@ export function getXPipelineSnapshot(
     .map(toWatchAccount);
 
   const since = nullableString(options.since);
+  const updatedSince = nullableString(options.updatedSince);
   const feedSql = `
     select f.*, a.avatar as account_avatar
     from x_feed f
@@ -1334,6 +1338,7 @@ export function getXPipelineSnapshot(
           ? "and f.created_at >= ? and f.created_at glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'"
           : ""
       }
+      ${updatedSince ? "and f.updated_at >= ?" : ""}
     order by f.created_at desc, f.updated_at desc
     limit ?
   `;
@@ -1341,7 +1346,7 @@ export function getXPipelineSnapshot(
     feedFetchLimit > 0
       ? (db
           .prepare(feedSql)
-          .all(...(since ? [since, feedFetchLimit] : [feedFetchLimit])) as DbRow[])
+          .all(...(since ? [since] : []), ...(updatedSince ? [updatedSince] : []), feedFetchLimit) as DbRow[])
       : [];
   const feed = collapseEditedTweetRevisionRows(
     feedRows.sort(compareFeedRowsByTime),
@@ -1378,13 +1383,13 @@ export function getXPipelineLatestUpdatedAt(db = getXPipelineDb()) {
     .prepare(
       `
       select max(updated_at) as updated_at from (
-        select updated_at from x_feed
+        select max(updated_at) as updated_at from x_feed
         union all
-        select updated_at from x_accounts
+        select max(updated_at) from x_accounts
         union all
-        select updated_at from x_health
+        select max(updated_at) from x_health
         union all
-        select updated_at from x_api_usage_daily
+        select max(updated_at) from x_api_usage_daily
       )
     `,
     )

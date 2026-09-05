@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server.js";
+import { compactBinanceHynixPremiumSnapshot } from "../../../lib/binance-hynix-premium-browser-cache.ts";
 import {
   BINANCE_HYNIX_PREMIUM_DEFAULT_START_TIME_MS,
   fetchBinanceHynixPremiumSnapshot,
@@ -89,7 +90,7 @@ function requestedInterval(url: URL): BinanceHynixPremiumInterval {
     interval === "1h" ||
     interval === "1d"
     ? interval
-    : "1m";
+    : "5m";
 }
 
 function requestedTimestamp(url: URL, key: string, fallback?: number) {
@@ -124,5 +125,6 @@ export async function GET(request: Request) {
       })),
   );
   const snapshot = await cache.get();
-  return NextResponse.json(snapshot);
+  return NextResponse.json(url.searchParams.get("compact") === "1"
+    ? compactBinanceHynixPremiumSnapshot(snapshot) : snapshot);
 }

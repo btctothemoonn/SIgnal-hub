@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/.signal-hub-deploy.lock
 
 # local Codex tooling/state
 /.codex-tools/

@@ -16,6 +16,8 @@ import {
   getXPipelineSnapshot,
 } from "./x-pipeline-store.ts";
 import { getSignalHubSystemdServiceLabel } from "./signal-hub-services.ts";
+import { getAlphaSummaryPeriod } from "./alpha-summary.ts";
+import { getStocksPrewarmIntervalMs } from "./stocks-prewarm.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type StocksSnapshotKind = "market" | "financial" | "catalysts";
@@ -338,6 +340,12 @@ function xHealthItem(now: Date): SystemHealthItem {
   }
 }
 
+export function stocksHealthStaleMs(kind: StocksSnapshotKind, env: EnvLike) {
+  const baseline = kind === "market" ? DEFAULT_STALE_MS.stocksMarket
+    : kind === "financial" ? DEFAULT_STALE_MS.stocksFinancial : DEFAULT_STALE_MS.stocksCatalysts;
+  return Math.max(baseline, getStocksPrewarmIntervalMs(kind, env) * 1.25);
+}
+
 async function stocksHealthItems(env: EnvLike, now: Date) {
   const market = readStocksCacheSnapshot("market", env);
   const financial = readStocksCacheSnapshot("financial", env);
@@ -350,7 +358,7 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
       kind: "market",
       snapshot: market,
       now,
-      staleMs: DEFAULT_STALE_MS.stocksMarket,
+      staleMs: stocksHealthStaleMs("market", env),
     }),
     summarizeCachedStocksSnapshot({
       id: "stocks-financial",
@@ -358,7 +366,7 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
       kind: "financial",
       snapshot: financial,
       now,
-      staleMs: DEFAULT_STALE_MS.stocksFinancial,
+      staleMs: stocksHealthStaleMs("financial", env),
     }),
     summarizeCachedStocksSnapshot({
       id: "stocks-catalysts",
@@ -366,28 +374,25 @@ async function stocksHealthItems(env: EnvLike, now: Date) {
       kind: "catalysts",
       snapshot: catalysts,
       now,
-      staleMs: DEFAULT_STALE_MS.stocksCatalysts,
+      staleMs: stocksHealthStaleMs("catalysts", env),
     }),
   ];
 }
 
-function latestSummaryRow(dbPath: string) {
-  if (!existsSync(dbPath)) return null;
+function currentSummaryRows(dbPath: string, keys: string[]) {
+  if (!existsSync(dbPath)) return [];
   let db: DatabaseSync | null = null;
   try {
-    db = new DatabaseSync(dbPath);
+    db = new DatabaseSync(dbPath, { readOnly: true });
     return db
       .prepare(
         `
         select period_key, model, item_count, status, error, generated_at, updated_at
         from alpha_summary_cache
-        order by updated_at desc
-        limit 1
+        where period_key in (${keys.map(() => "?").join(",")})
       `,
       )
-      .get() as Record<string, unknown> | undefined;
-  } catch {
-    return null;
+      .all(...keys) as Record<string, unknown>[];
   } finally {
     db?.close();
   }
@@ -415,7 +420,7 @@ function alphaSummaryDbPath(env: EnvLike, audience: AlphaSummaryAudience) {
   );
 }
 
-function summaryHealthItem({
+export function summaryHealthItem({
   audience,
   label,
   env,
@@ -426,42 +431,39 @@ function summaryHealthItem({
   env: EnvLike;
   now: Date;
 }): SystemHealthItem {
-  const row = latestSummaryRow(alphaSummaryDbPath(env, audience));
-  if (!row) {
-    return {
-      id: `summary-${audience}`,
-      label,
-      status: "warning",
-      detail: "summary cache missing",
-      updatedAt: null,
-      stale: true,
-      meta: { audience },
-    };
+  const scopes = ["12h", "today", "3d", "7d"] as const;
+  const periods = scopes.map((scope) => getAlphaSummaryPeriod({ scope, audience, now, env }));
+  let rows: Record<string, unknown>[];
+  try {
+    rows = currentSummaryRows(alphaSummaryDbPath(env, audience), periods.map((period) => period.key));
+  } catch (error) {
+    return healthErrorItem(`summary-${audience}`, label, error);
   }
-
-  const updatedAt = stringValue(row.updated_at) || stringValue(row.generated_at) || null;
-  const stale = isStale(updatedAt, now, DEFAULT_STALE_MS.summary);
-  const rowStatus = stringValue(row.status);
-  const status: SystemHealthStatus =
-    rowStatus === "error" ? "error" : stale ? "warning" : "ok";
+  const checks = periods.map((period) => {
+    const row = rows.find((entry) => entry.period_key === period.key);
+    const updatedAt = stringValue(row?.updated_at) || stringValue(row?.generated_at) || null;
+    const stale = isStale(updatedAt, now, DEFAULT_STALE_MS.summary);
+    const rowStatus = stringValue(row?.status) || "missing";
+    const status: SystemHealthStatus = rowStatus === "error" ? "error"
+      : !row || stale || !["generated", "empty"].includes(rowStatus) ? "warning" : "ok";
+    return { row, updatedAt, stale, status, detail: [period.scope, rowStatus,
+      ageLabel(updatedAt, now), stale ? "stale" : "", stringValue(row?.error)].filter(Boolean).join(": ") };
+  });
+  const worst = checks.reduce((current, check) =>
+    systemHealthStatusRank(check.status) > systemHealthStatusRank(current.status) ? check : current);
   return {
     id: `summary-${audience}`,
     label,
-    status,
-    detail: [
-      rowStatus || "cached",
-      stringValue(row.period_key),
-      ageLabel(updatedAt, now),
-      stringValue(row.error),
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    updatedAt,
-    stale,
+    status: worst.status,
+    detail: checks.map((check) => check.detail).join(" · "),
+    updatedAt: worst.updatedAt,
+    stale: checks.some((check) => check.stale),
     meta: {
       audience,
-      model: stringValue(row.model),
-      itemCount: numberValue(row.item_count),
+      model: stringValue(worst.row?.model),
+      itemCount: checks.reduce((sum, check) => sum + numberValue(check.row?.item_count), 0),
+      healthyScopes: checks.filter((check) => check.status === "ok").length,
+      requiredScopes: scopes.length,
     },
   };
 }

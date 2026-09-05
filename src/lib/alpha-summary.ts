@@ -1220,7 +1220,7 @@ export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
   return normalized;
 }
 
-async function requestAiSummary({
+export async function requestAiSummary({
   prompt,
   env,
 }: {
@@ -1231,6 +1231,11 @@ async function requestAiSummary({
     providers: getAlphaSummaryProviderCandidates(env),
     cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
     request: async (provider) => {
+      const messages = [
+        { role: "system", content: "You produce concise Chinese market intelligence summaries from supplied messages only. Return valid JSON only." },
+        { role: "user", content: prompt },
+      ];
+      for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -1239,17 +1244,7 @@ async function requestAiSummary({
         },
         body: JSON.stringify({
           model: provider.model,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You produce concise Chinese market intelligence summaries from supplied messages only.",
-            },
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
+          messages,
           temperature: 0.2,
           ...(isMiniMaxBaseUrl(provider.baseUrl)
             ? {}
@@ -1274,10 +1269,18 @@ async function requestAiSummary({
       const first = choices[0] as Record<string, unknown> | undefined;
       const message = first?.message as Record<string, unknown> | undefined;
       const content = typeof message?.content === "string" ? message.content : "";
-      if (!content) {
-        throw new Error("AI summary returned empty content");
+      try {
+        if (!content) throw new Error("AI summary returned empty content");
+        return parseAlphaSummaryContent(content);
+      } catch (error) {
+        if (attempt === 1) throw error;
+        messages.push(
+          { role: "assistant", content: content.slice(0, 32_000) },
+          { role: "user", content: "The response could not be parsed. Return the complete corrected JSON object using the requested schema, including authors. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts." },
+        );
       }
-      return parseAlphaSummaryContent(content);
+      }
+      throw new Error("AI summary JSON retry exhausted");
     },
   });
   return {

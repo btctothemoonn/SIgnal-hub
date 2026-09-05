@@ -13,10 +13,6 @@ const workspace = readFileSync(
 );
 
 assert.equal(pkg.pnpm, undefined);
-assert.match(
-  workspace,
-  /(?:^|\n)overrides:\r?\n  postcss: 8\.5\.16\r?\n  ip-address: 10\.2\.0\r?\n  "minimatch@3\.1\.5>brace-expansion": 1\.1\.13\r?\n  js-yaml: 4\.3\.0(?:\r?\n|$)/,
-);
 assert.doesNotMatch(workspace, /^  brace-expansion:/m);
 
 const pnpmModulesDir = fileURLToPath(
@@ -27,6 +23,13 @@ const minimatch10Dir = readdirSync(pnpmModulesDir).find((entry) =>
 );
 assert.ok(minimatch10Dir, "minimatch 10 should be installed");
 const require = createRequire(import.meta.url);
+const yamlDir = readdirSync(pnpmModulesDir).find((entry) => entry.startsWith("js-yaml@4.3.0"));
+const { load } = require(join(pnpmModulesDir, yamlDir, "node_modules/js-yaml"));
+assert.deepEqual(load(workspace).overrides, {
+  postcss: "8.5.23", "ip-address": "10.3.1", "nanoid@3": "3.3.18",
+  browserslist: "4.28.7", sharp: "0.35.0",
+  "minimatch@3.1.5>brace-expansion": "1.1.13", "js-yaml": "4.3.0",
+});
 const { minimatch } = require(
   join(pnpmModulesDir, minimatch10Dir, "node_modules/minimatch"),
 );

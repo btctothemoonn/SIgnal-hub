@@ -83,7 +83,7 @@ assert.match(
   /writeCachedSnapshot\(snapshot\);\s*writeCachedSelectedInterval\(selectedInterval\);/,
 );
 assert.match(source, /useBrowserJsonCache<BinanceHynixFundingSnapshot>/);
-assert.match(source, /window\.setInterval\(loadPremiumData,\s*60 \* 1000\)/);
+assert.match(source, /window\.setInterval\(loadPremiumData,\s*15 \* 60 \* 1000\)/);
 assert.match(
   source,
   /if \(snapshot\.points\.length > 1\) \{\s*setLiveSnapshot\(snapshot\)/,

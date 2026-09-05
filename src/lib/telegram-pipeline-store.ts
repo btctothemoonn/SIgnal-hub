@@ -291,6 +291,8 @@ export function initTelegramPipelineDb(db: DatabaseSync) {
 
     create index if not exists telegram_messages_created_at_idx
       on telegram_messages(created_at desc);
+    create index if not exists telegram_messages_updated_at_idx
+      on telegram_messages(updated_at);
     create index if not exists telegram_messages_channel_idx
       on telegram_messages(channel_id, message_id desc);
   `);
@@ -665,6 +667,7 @@ export function getTelegramPipelineSnapshot(
   db = getTelegramPipelineDb(),
   options: {
     since?: string | null;
+    updatedSince?: string | null;
   } = {},
 ): TelegramDashboardSnapshot {
   const requestedLimit = normalizeSnapshotFeedLimit(limit);
@@ -693,6 +696,10 @@ export function getTelegramPipelineSnapshot(
   if (since) {
     feedPredicates.push("telegram_messages.created_at >= ?");
     feedBindings.push(since);
+  }
+  if (options.updatedSince) {
+    feedPredicates.push("telegram_messages.updated_at >= ?");
+    feedBindings.push(options.updatedSince);
   }
   const feedWhere =
     feedPredicates.length > 0 ? `where ${feedPredicates.join(" and ")}` : "";
@@ -774,11 +781,11 @@ export function getTelegramPipelineLatestUpdatedAt(db = getTelegramPipelineDb())
     .prepare(
       `
       select max(updated_at) as updated_at from (
-        select updated_at from telegram_messages
+        select max(updated_at) as updated_at from telegram_messages
         union all
-        select updated_at from telegram_channels
+        select max(updated_at) from telegram_channels
         union all
-        select updated_at from telegram_health
+        select max(updated_at) from telegram_health
       )
     `,
     )

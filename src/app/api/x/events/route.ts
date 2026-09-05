@@ -1,56 +1,20 @@
 import { getXPipelineConfig } from "@/lib/x-pipeline-config";
-import {
-  getXPipelineLatestUpdatedAt,
-  getXPipelineSnapshot,
-} from "@/lib/x-pipeline-store";
+import { getXPipelineLatestUpdatedAt, getXPipelineSnapshot } from "@/lib/x-pipeline-store";
+import { createSnapshotEventStream } from "@/lib/snapshot-event-stream";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function encodeEvent(event: string, data: unknown) {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
-
-export async function GET() {
-  const encoder = new TextEncoder();
-  let lastUpdatedAt: string | null = null;
-  let sentInitial = false;
-  let timer: ReturnType<typeof setInterval> | null = null;
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const sendSnapshotIfChanged = () => {
-        const updatedAt = getXPipelineLatestUpdatedAt();
-        if (!sentInitial || (updatedAt && updatedAt !== lastUpdatedAt)) {
-          sentInitial = true;
-          lastUpdatedAt = updatedAt;
-          controller.enqueue(
-            encoder.encode(encodeEvent("x-snapshot", getXPipelineSnapshot())),
-          );
-          return;
-        }
-
-        controller.enqueue(
-          encoder.encode(
-            encodeEvent("heartbeat", { servedAt: new Date().toISOString() }),
-          ),
-        );
-      };
-
-      sendSnapshotIfChanged();
-      timer = setInterval(
-        sendSnapshotIfChanged,
-        getXPipelineConfig().eventPollMs,
-      );
-    },
-    cancel() {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
-    },
+export async function GET(request: Request) {
+  const stream = createSnapshotEventStream({
+    event: "x-snapshot",
+    pollMs: getXPipelineConfig().eventPollMs,
+    signal: request.signal,
+    getRevision: getXPipelineLatestUpdatedAt,
+    getSnapshot: (updatedSince) => getXPipelineSnapshot(
+      updatedSince ? 10_000 : undefined, undefined, { updatedSince },
+    ),
   });
-
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",

@@ -745,3 +745,8 @@ assert.deepEqual(
 );
 
 console.log("ok - x pipeline store builds local dashboard snapshots");
+
+editDb.prepare("update x_feed set updated_at = ?").run("2026-09-05T00:00:00.000Z");
+editDb.prepare("update x_feed set updated_at = ? where id = ?").run("2026-09-05T01:00:00.000Z", "separate");
+assert.deepEqual(getXPipelineSnapshot(100, editDb, { updatedSince: "2026-09-05T00:30:00.000Z" }).feed.map((item) => item.id), ["separate"],
+  "incremental snapshots include late edits without resending unchanged tweets");

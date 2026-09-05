@@ -531,7 +531,7 @@ export function StocksHynixPremiumCurve({
         setError(null);
         const startTime = getBinanceHynixPremiumStartTimeMs(selectedInterval);
         const response = await fetch(
-          `/api/stocks-hynix-premium?interval=${selectedInterval}&startTime=${startTime}&limit=${PREMIUM_KLINE_PAGE_LIMIT}`,
+          `/api/stocks-hynix-premium?interval=${selectedInterval}&startTime=${startTime}&limit=${PREMIUM_KLINE_PAGE_LIMIT}&compact=1`,
           {
             cache: "no-store",
           },
@@ -539,7 +539,8 @@ export function StocksHynixPremiumCurve({
         if (!response.ok) {
           throw new Error(`hynix premium HTTP ${response.status}`);
         }
-        const snapshot = (await response.json()) as BinanceHynixPremiumSnapshot;
+        const snapshot = restoreBinanceHynixPremiumSnapshot(await response.json());
+        if (!snapshot) throw new Error("Invalid Hynix premium response");
         if (!cancelled) {
           if (snapshot.points.length > 1) {
             setLiveSnapshot(snapshot);
@@ -563,7 +564,7 @@ export function StocksHynixPremiumCurve({
     }
 
     void loadPremiumData();
-    const timer = window.setInterval(loadPremiumData, 60 * 1000);
+    const timer = window.setInterval(loadPremiumData, 15 * 60 * 1000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

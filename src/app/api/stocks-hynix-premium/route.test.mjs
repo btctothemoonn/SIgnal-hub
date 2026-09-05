@@ -49,7 +49,7 @@ try {
   const { GET } = await import("./route.ts");
   const response = await GET(
     new Request(
-      "http://signal-hub.test/api/stocks-hynix-premium?startTime=1783958400000",
+      "http://signal-hub.test/api/stocks-hynix-premium?interval=1m&startTime=1783958400000",
     ),
   );
   assert.equal(response.status, 200);
@@ -76,7 +76,7 @@ try {
   const requestCountAfterFirstLoad = requests.length;
   const cachedResponse = await GET(
     new Request(
-      "http://signal-hub.test/api/stocks-hynix-premium?startTime=1783958400000",
+      "http://signal-hub.test/api/stocks-hynix-premium?interval=1m&startTime=1783958400000",
     ),
   );
   assert.equal(cachedResponse.status, 200);
@@ -86,7 +86,7 @@ try {
   currentTimeMs += 5 * 60 * 1000;
   const degradedResponse = await GET(
     new Request(
-      "http://signal-hub.test/api/stocks-hynix-premium?startTime=1783958400000",
+      "http://signal-hub.test/api/stocks-hynix-premium?interval=1m&startTime=1783958400000",
     ),
   );
   assert.equal(degradedResponse.status, 200);
@@ -106,6 +106,14 @@ try {
     ),
   );
   assert.equal(fiveMinuteResponse.status, 200);
+  const fiveMinutePayload = await fiveMinuteResponse.json();
+  const { restoreBinanceHynixPremiumSnapshot } = await import("../../../lib/binance-hynix-premium-browser-cache.ts");
+  const compactResponse = await GET(new Request("http://signal-hub.test/api/stocks-hynix-premium?compact=1"));
+  const compactPayload = await compactResponse.json();
+  assert.equal(compactPayload.interval, "5m", "the retired 1m option must not be the API default");
+  assert.equal(compactPayload.v, 1);
+  assert.deepEqual(restoreBinanceHynixPremiumSnapshot(compactPayload), fiveMinutePayload);
+  assert.ok(JSON.stringify(compactPayload).length < JSON.stringify(fiveMinutePayload).length);
   const fiveMinuteKlineRequests = requests
     .slice(requestCountBeforeFiveMinuteLoad)
     .filter((url) => url.includes("/fapi/v1/klines"));
@@ -150,4 +158,4 @@ try {
   }
 }
 
-console.log("ok - stocks hynix premium route defaults to 1m");
+console.log("ok - Hynix compact transport defaults to 5m and preserves legacy explicit intervals");

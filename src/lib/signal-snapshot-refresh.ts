@@ -12,3 +12,10 @@ export function shouldRefreshSignalSnapshotsOnEffect(
   }
   return previousRange !== currentRange;
 }
+
+export function shouldReconcileSignalSnapshots({ streamsConnected, elapsedMs }: {
+  streamsConnected: boolean;
+  elapsedMs: number;
+}) {
+  return elapsedMs >= (streamsConnected ? 5 * 60_000 : 30_000);
+}
