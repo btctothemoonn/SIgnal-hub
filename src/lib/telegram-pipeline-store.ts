@@ -751,7 +751,7 @@ export function getTelegramPipelineSnapshot(
   const snapshotStatus =
     status === "error" || healthStale
       ? "error"
-      : feed.length > 0
+      : feed.length > 0 || (Boolean(options.updatedSince) && status === "live")
         ? "live"
         : "limited";
 

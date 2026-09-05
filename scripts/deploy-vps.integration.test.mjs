@@ -35,6 +35,7 @@ for (const failure of ["none", "build", "readiness"]) {
 case "$*" in
   *"next build"*)
     [[ "$(readlink -f "$SIGNAL_HUB_CURRENT_LINK")" == "$TEST_OLD_RELEASE" ]]
+    [[ ! -L .signal-hub ]] || exit 32
     [[ "$TEST_FAILURE" != "build" ]] || exit 8
     mkdir -p .next
     ;;

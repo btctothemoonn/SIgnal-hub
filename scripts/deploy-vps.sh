@@ -22,9 +22,8 @@ flock -n 9 || { echo "Another deployment is in progress" >&2; exit 1; }
 [[ ! -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]] || { echo "Current release path must be a symlink" >&2; exit 1; }
 mkdir -p "$RELEASES_DIR" "$APP_DIR/.signal-hub"
 
-link_runtime() {
+link_env() {
   local target="$1"
-  ln -s "$APP_DIR/.signal-hub" "$target/.signal-hub"
   for env_file in .env .env.local .env.production .env.production.local; do
     if [[ -f "$APP_DIR/$env_file" ]]; then ln -s "$APP_DIR/$env_file" "$target/$env_file"; fi
   done
@@ -37,18 +36,24 @@ if [[ ! -L "$CURRENT_LINK" ]]; then
     previous_release="$(mktemp -d "$RELEASES_DIR/legacy-XXXXXXXX")"
     git archive "${SIGNAL_HUB_PREVIOUS_COMMIT:-HEAD}" | tar -x -C "$previous_release"
     cp -a "$APP_DIR/.next" "$APP_DIR/node_modules" "$previous_release/"
-    link_runtime "$previous_release"
+    ln -s "$APP_DIR/.signal-hub" "$previous_release/.signal-hub"
+    link_env "$previous_release"
   fi
 fi
 
 release="$(mktemp -d "$RELEASES_DIR/$(git rev-parse --short HEAD)-XXXXXXXX")"
 git archive HEAD | tar -x -C "$release"
-link_runtime "$release"
+link_env "$release"
 cd "$release"
 CI=true "$PNPM_BIN" install --frozen-lockfile --ignore-scripts
-"$NODE_BIN" scripts/run-tests.mjs
+SIGNAL_HUB_RUNTIME_DIR="$release/.build-runtime" "$NODE_BIN" scripts/run-tests.mjs
 "$NODE_BIN" node_modules/eslint/bin/eslint.js .
-"$NODE_BIN" node_modules/next/dist/bin/next build
+SIGNAL_HUB_RUNTIME_DIR="$release/.build-runtime" "$NODE_BIN" node_modules/next/dist/bin/next build
+# Turbopack cannot trace a data symlink outside the release while building.
+if [[ -d "$release/.signal-hub" ]]; then
+  mv "$release/.signal-hub" "$release/.build-runtime-default"
+fi
+ln -s "$APP_DIR/.signal-hub" "$release/.signal-hub"
 
 services=(
   signal-hub-web signal-hub-stocks-cache signal-hub-alpha-summary

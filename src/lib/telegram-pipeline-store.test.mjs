@@ -302,3 +302,6 @@ db.prepare("update telegram_messages set updated_at = ?").run("2026-09-05T00:00:
 db.prepare("update telegram_messages set updated_at = ? where id = ?").run("2026-09-05T01:00:00.000Z", "2955560057:123");
 assert.deepEqual(getTelegramPipelineSnapshot(100, db, { updatedSince: "2026-09-05T00:30:00.000Z" }).feed.map((item) => item.id), ["2955560057:123"],
   "incremental snapshots include late edits without resending unchanged Telegram messages");
+db.prepare("update telegram_health set updated_at = ?").run(new Date().toISOString());
+assert.equal(getTelegramPipelineSnapshot(100, db, { updatedSince: "2099-01-01T00:00:00.000Z" }).status, "live",
+  "an empty incremental batch must not downgrade a healthy collector");
