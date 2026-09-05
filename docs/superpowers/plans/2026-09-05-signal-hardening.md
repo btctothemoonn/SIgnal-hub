@@ -18,7 +18,7 @@
 - [x] Upgrade vulnerable runtime dependencies and verify the production audit.
 - [x] Build isolated VPS releases with shared runtime data, atomic activation and rollback on failed startup.
 - [x] Add and run authenticated browser smoke coverage, regression tests, lint, typecheck and build.
-- [ ] Commit, push, deploy and verify service/API behavior on the VPS.
+- [x] Commit, push, deploy and verify service/API behavior on the VPS.
 
 ## Validation Cases
 
@@ -29,3 +29,14 @@ Incremental feed queries must include a newly edited old message and exclude unc
 Hynix compact transport must round-trip all candle fields and reuse the same cache as full responses. Remote watch configuration must reuse successful data between refreshes and after a failed refresh.
 
 Deployment must complete install, tests, lint and build before changing the active release. Runtime databases and environment files stay in the stable application directory. Failed startup must restore the previous release and restart services there.
+
+## Verification Record
+
+- Local and VPS regression suite: 211 files passed. Browser smoke suite: 6 checks passed.
+- Production dependency audit: zero known vulnerabilities; Next.js 16.2.12.
+- VPS isolated deployment exercise: successful activation, build failure isolation and startup rollback passed.
+- Initial production release a292c1d: all 13 services active; public login and authenticated feed returned HTTP 200.
+- Hynix 5m snapshot: 1,440 points, 774,433 bytes full versus 256,937 bytes compact (66.8% smaller).
+- Idle X and Telegram SSE frames: 62-byte heartbeats. Isolated server with three open streams exited normally in 6,012 ms, without SIGKILL.
+- Summary freshness uses each scope's generation interval plus the worker interval, preserving daily 7d and four-hour 3d cache schedules.
+- Remaining provider issue observed: financial cache contains upstream errors; health reports these separately from cache freshness.

@@ -591,7 +591,7 @@ export function getAlphaSummaryDbPath(
   );
 }
 
-function getAlphaSummaryRefreshIntervalMs(
+export function getAlphaSummaryRefreshIntervalMs(
   env: EnvLike = process.env,
   scope: AlphaSummaryScope = "12h",
 ) {

@@ -144,6 +144,13 @@ try {
   assert.match(errored.detail, /12h.*invalid JSON/);
   summaryDb.exec("update alpha_summary_cache set status = 'generated', error = null");
   assert.equal(summaryHealthItem(input).status, "ok");
+  const weeklyKey = getAlphaSummaryPeriod({ now, audience: "stocks", scope: "7d" }).key;
+  summaryDb.prepare("update alpha_summary_cache set updated_at = ?, generated_at = ? where period_key = ?")
+    .run(new Date(now.getTime() - 14 * 60 * 60_000).toISOString(), new Date(now.getTime() - 14 * 60 * 60_000).toISOString(), weeklyKey);
+  assert.equal(summaryHealthItem(input).status, "ok", "a weekly summary refreshed daily must not use the 12h-scope freshness limit");
+  summaryDb.prepare("update alpha_summary_cache set updated_at = ?, generated_at = ? where period_key = ?")
+    .run(new Date(now.getTime() - 26 * 60 * 60_000).toISOString(), new Date(now.getTime() - 26 * 60 * 60_000).toISOString(), weeklyKey);
+  assert.equal(summaryHealthItem(input).status, "warning", "an overdue daily refresh must still be detected");
   summaryDb.prepare("delete from alpha_summary_cache where period_key = ?")
     .run(getAlphaSummaryPeriod({ now, audience: "stocks", scope: "7d" }).key);
   assert.equal(summaryHealthItem(input).status, "warning");

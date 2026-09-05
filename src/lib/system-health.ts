@@ -16,7 +16,8 @@ import {
   getXPipelineSnapshot,
 } from "./x-pipeline-store.ts";
 import { getSignalHubSystemdServiceLabel } from "./signal-hub-services.ts";
-import { getAlphaSummaryPeriod } from "./alpha-summary.ts";
+import { getAlphaSummaryPeriod, getAlphaSummaryRefreshIntervalMs } from "./alpha-summary.ts";
+import { getAlphaSummaryPrewarmIntervalMs } from "./alpha-summary-prewarm.ts";
 import { getStocksPrewarmIntervalMs } from "./stocks-prewarm.ts";
 
 type EnvLike = Record<string, string | undefined>;
@@ -442,7 +443,9 @@ export function summaryHealthItem({
   const checks = periods.map((period) => {
     const row = rows.find((entry) => entry.period_key === period.key);
     const updatedAt = stringValue(row?.updated_at) || stringValue(row?.generated_at) || null;
-    const stale = isStale(updatedAt, now, DEFAULT_STALE_MS.summary);
+    const staleMs = Math.max(DEFAULT_STALE_MS.summary,
+      getAlphaSummaryRefreshIntervalMs(env, period.scope) + getAlphaSummaryPrewarmIntervalMs(env));
+    const stale = isStale(updatedAt, now, staleMs);
     const rowStatus = stringValue(row?.status) || "missing";
     const status: SystemHealthStatus = rowStatus === "error" ? "error"
       : !row || stale || !["generated", "empty"].includes(rowStatus) ? "warning" : "ok";
