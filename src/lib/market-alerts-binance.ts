@@ -242,7 +242,7 @@ export function createBinanceFuturesClient(
     throw new Error(`Binance request failed: ${safeError(lastError)}`);
   }
 
-  async function getMarketValuations(
+  async function getCoinGeckoValuations(
     markets: MarketValuationRequest[],
   ): Promise<MarketValuation[]> {
     const requested = markets
@@ -285,6 +285,13 @@ export function createBinanceFuturesClient(
         fdvUsd: null,
       }));
     }
+  }
+
+  async function getMarketValuations(markets: MarketValuationRequest[]): Promise<MarketValuation[]> {
+    const requested = markets.slice(0, 50);
+    const values = await getCoinGeckoValuations(requested);
+    const { fillCmcValuations } = await import("./market-valuations-cmc.ts");
+    return fillCmcValuations(requested, values, { timeoutMs: config.requestTimeoutMs });
   }
 
   return {

@@ -35,7 +35,7 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "short_squeeze", label: "轧空" },
 ];
 
-const ALERT_ROW_COLUMNS = "grid-cols-[minmax(0,1fr)_4.5rem_5rem_1.5rem] @min-[34rem]:grid-cols-[minmax(0,1fr)_5rem_5rem_4.5rem_5rem_1.5rem] @min-[43rem]:grid-cols-[minmax(0,1fr)_5rem_5rem_4.5rem_5rem_4.5rem_1.5rem]";
+const ALERT_ROW_COLUMNS = "grid-cols-[minmax(0,1fr)_5.75rem_5rem_1.5rem] @min-[26rem]:grid-cols-[minmax(0,1fr)_5.75rem_4.5rem_5rem_1.5rem] @min-[40rem]:grid-cols-[minmax(0,1fr)_minmax(5.75rem,0.7fr)_4.5rem_4.5rem_4.5rem_5rem_1.5rem] @min-[50rem]:grid-cols-[minmax(0,1fr)_minmax(5.75rem,0.7fr)_4.5rem_4.5rem_4.5rem_5rem_4.5rem_1.5rem]";
 
 function formatTime(value: string | null | undefined, seconds = false) {
   if (!value) return "尚未更新";
@@ -253,10 +253,11 @@ const EventCard = memo(function EventCard({
           <strong className="min-w-0 break-all font-mono text-xs leading-4 text-foreground">{event.symbol}</strong>
         </span>
 
-        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[34rem]:block">{marketCap}</span>
-        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[34rem]:block">{fdv}</span>
+        <span data-market-alert-price title="触发时价格（美元）" className="break-all text-right font-mono text-xs tabular-nums text-foreground">{priceText(event.price)}</span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{marketCap}</span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{fdv}</span>
 
-        <span className={`text-right font-mono text-xs font-semibold ${pct24h === null ? "text-muted" : pct24h >= 0 ? "text-success" : "text-danger"}`}>
+        <span className={`hidden text-right font-mono text-xs font-semibold @min-[26rem]:block ${pct24h === null ? "text-muted" : pct24h >= 0 ? "text-success" : "text-danger"}`}>
           {signedPercent(pct24h)}
         </span>
 
@@ -265,12 +266,13 @@ const EventCard = memo(function EventCard({
           <span className="mt-0.5 block whitespace-nowrap text-[10px] font-normal text-muted">{shortLabel}</span>
         </span>
 
-        <span className="hidden text-right text-[10px] text-muted @min-[43rem]:block">{formatTime(event.occurredAt)}</span>
+        <span className="hidden text-right text-[10px] text-muted @min-[50rem]:block">{formatTime(event.occurredAt)}</span>
 
         <span className="flex h-8 w-6 items-center justify-center text-muted">
           <ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
         </span>
-        <span title={valuationTitle} className="col-span-full flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted @min-[34rem]:hidden">
+        <span title={valuationTitle} className="col-span-full flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted @min-[40rem]:hidden">
+          <span className="@min-[26rem]:hidden">24h <span className="font-mono text-foreground">{signedPercent(pct24h)}</span></span>
           <span>流通市值 <span className="font-mono text-foreground">{marketCap}</span></span>
           <span>FDV <span className="font-mono text-foreground">{fdv}</span></span>
         </span>
@@ -578,11 +580,12 @@ export function MarketAlertsPanel({
           <div className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
             <div className={`grid min-h-8 items-center gap-x-1.5 border-b border-l-2 border-l-transparent border-line bg-workspace-surface-raised px-2.5 text-[10px] font-medium text-muted ${ALERT_ROW_COLUMNS}`}>
               <span>币种</span>
-              <span className="hidden text-right @min-[34rem]:block">流通市值</span>
-              <span className="hidden text-right @min-[34rem]:block">FDV</span>
-              <span className="text-right">24h</span>
+              <span title="预警触发时价格（美元）" className="text-right">价格</span>
+              <span className="hidden text-right @min-[40rem]:block">流通市值</span>
+              <span className="hidden text-right @min-[40rem]:block">FDV</span>
+              <span className="hidden text-right @min-[26rem]:block">24h</span>
               <span className="text-right">触发变化</span>
-              <span className="hidden text-right @min-[43rem]:block">时间</span>
+              <span className="hidden text-right @min-[50rem]:block">时间</span>
               <span />
             </div>
             {filteredEvents.length ? (
