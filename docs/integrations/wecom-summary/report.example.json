@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "type": "report",
+  "report": {
+    "id": "wecom:fixture-device:00000000-0000-4000-8000-000000000001:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "revision": 1,
+    "cadence": "two_hour",
+    "windowStart": "2026-09-06T00:00:00.000Z",
+    "windowEnd": "2026-09-06T02:00:00.000Z",
+    "generatedAt": "2026-09-06T02:05:00.000Z",
+    "summary": "Synthetic summary for integration testing. Not a real group report.",
+    "model": "fixture-model",
+    "sourceCount": 3,
+    "sourceComplete": true,
+    "sourcesTruncated": true,
+    "topics": [
+      {
+        "title": "Synthetic topic",
+        "summary": "A fictional topic used only to verify the data contract.",
+        "sourceMessageIDs": []
+      }
+    ],
+    "findings": [
+      {
+        "category": "observation",
+        "text": "This is a synthetic observation, not investment advice.",
+        "epistemicStatus": "uncertain",
+        "sourceMessageIDs": []
+      }
+    ],
+    "caDiscussions": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "network": "unknown",
+        "groups": [],
+        "mentionCount": 3,
+        "uniqueStatementCount": 2,
+        "duplicateCount": 1,
+        "summary": "Synthetic address aggregate; not a monitored contract.",
+        "sourceMessageIDs": []
+      }
+    ],
+    "sources": []
+  }
+}

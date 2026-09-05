@@ -1,0 +1,10 @@
+{
+  "note": "PUBLIC synthetic test vector. Not a real credential. Fixed timestamp is only for offline tests.",
+  "secret": "TEST-ONLY-wecom-contract-secret-2026-NOT-FOR-PRODUCTION",
+  "device": "fixture-device",
+  "timestamp": "1788650400",
+  "nonce": "000102030405060708090a0b0c0d0e0f",
+  "body": "{\"schemaVersion\":1,\"type\":\"heartbeat\",\"status\":{\"listener\":\"unknown\",\"worker\":\"unknown\",\"pendingReports\":0,\"lastError\":null}}",
+  "bodySha256": "64bd7f749c7faf6bf4df3115e89fbea9e601d58c626320f9e61c14155c7df36b",
+  "signature": "b22e5385d7fa83ceada096d530d254dcedb7950b46449cb24e2685015241e604"
+}

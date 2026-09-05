@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "type": "heartbeat",
+  "status": {
+    "listener": "unknown",
+    "worker": "unknown",
+    "pendingReports": 0,
+    "lastError": null
+  }
+}
