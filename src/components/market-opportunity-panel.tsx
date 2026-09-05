@@ -252,13 +252,13 @@ function OpportunityDesktopDetail({
   return (
     <article
       data-opportunity-detail={item.symbol}
-      className="border-t border-line px-3 py-3"
+      className="border-b border-line px-3 py-3"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <strong className="truncate font-mono text-sm text-foreground">{item.symbol}</strong>
-            <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] font-bold ${tone.soft}`}>{item.stage}</span>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <strong className="break-all font-mono text-sm text-foreground">{item.symbol}</strong>
+            <span className={`rounded-sm px-1.5 py-0.5 text-[9px] font-bold ${tone.soft}`}>{item.stage}</span>
           </div>
           <div className={`mt-1 flex items-center gap-1 text-xs font-semibold ${tone.text}`}>
             {item.direction === "SHORT" ? <TrendingDown aria-hidden className="h-3.5 w-3.5" /> : <TrendingUp aria-hidden className="h-3.5 w-3.5" />}
@@ -271,7 +271,7 @@ function OpportunityDesktopDetail({
         </div>
       </div>
 
-      <dl className="mt-2.5 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line">
+      <dl className="mt-2.5 grid grid-cols-4 gap-px overflow-hidden rounded-md border border-line bg-line">
         {metrics.map(([label, value]) => (
           <div key={label} className="min-w-0 bg-workspace-surface-raised px-2 py-1.5">
             <dt className="truncate text-[9px] text-muted">{label}</dt>
@@ -411,6 +411,12 @@ export function MarketOpportunityPanel({
       ) : (
         <>
           <div className="hidden lg:block">
+            {selected ? (
+              <OpportunityDesktopDetail item={selected} aiError={meta.aiError} />
+            ) : null}
+            <div className="grid grid-cols-[1.25rem_minmax(0,1fr)_minmax(5rem,1fr)_2rem] gap-2 bg-workspace-surface-raised px-2.5 py-1.5 text-[10px] text-muted">
+              <span>#</span><span>币种</span><span className="text-right">决策</span><span className="text-right">评分</span>
+            </div>
             <div
               data-opportunity-rail={true}
               data-opportunity-strip={true}
@@ -419,7 +425,6 @@ export function MarketOpportunityPanel({
               {opportunities.map((item, index) => {
                 const active = item.symbol === selected?.symbol;
                 const tone = directionTone(item);
-                const firstMetric = leadingMetrics(item)[0];
                 return (
                   <button
                     key={item.symbol}
@@ -427,26 +432,16 @@ export function MarketOpportunityPanel({
                     data-opportunity-selector={item.symbol}
                     aria-pressed={active}
                     onClick={() => setSelectedSymbol(item.symbol)}
-                    className={`grid min-h-12 min-w-0 grid-cols-[1.6rem_minmax(0,1fr)_auto] items-center gap-2 border-l-2 px-2.5 py-2 text-left transition-colors ${active ? `${tone.border} bg-workspace-surface-raised` : "border-l-transparent bg-workspace-surface hover:bg-workspace-surface-raised"}`}
+                    className={`grid min-h-9 min-w-0 grid-cols-[1.25rem_minmax(0,1fr)_minmax(5rem,1fr)_2rem] items-center gap-2 border-l-2 px-2.5 py-1.5 text-left transition-colors ${active ? `${tone.border} bg-workspace-surface-raised` : "border-l-transparent bg-workspace-surface hover:bg-workspace-surface-raised"}`}
                   >
                     <span className="font-mono text-[10px] font-semibold text-muted">#{index + 1}</span>
-                    <span className="min-w-0">
-                      <strong className="block truncate font-mono text-xs text-foreground">{tokenSymbol(item.symbol)}</strong>
-                      <span className={`mt-0.5 block truncate text-[10px] font-semibold ${tone.text}`}>
-                        {item.decision}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right">
-                      <strong className="block font-mono text-base leading-none text-foreground">{item.score}</strong>
-                      <span className="mt-1 block font-mono text-[9px] text-muted">{firstMetric[0]} {firstMetric[1]}</span>
-                    </span>
+                    <strong className="min-w-0 break-all font-mono text-xs text-foreground">{tokenSymbol(item.symbol)}</strong>
+                    <span className={`text-right text-[11px] font-semibold ${tone.text}`}>{item.decision}</span>
+                    <strong className="text-right font-mono text-sm text-foreground">{item.score}</strong>
                   </button>
                 );
               })}
             </div>
-            {selected ? (
-              <OpportunityDesktopDetail item={selected} aiError={meta.aiError} />
-            ) : null}
           </div>
 
           <div className="lg:hidden">

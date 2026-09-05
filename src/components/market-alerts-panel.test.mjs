@@ -22,7 +22,7 @@ assert.ok(
   "the opportunity panel should be the first mobile item inside the alerts workspace",
 );
 assert.match(source, /data-market-alert-right-rail/);
-assert.match(source, /lg:grid-cols-\[minmax\(0,1\.85fr\)/);
+assert.match(source, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(19rem,2fr\)\]/);
 assert.ok(
   source.indexOf("data-market-alert-feed") < source.indexOf("<Ranking"),
   "market ranking should render after the realtime feed in the workspace sidebar",

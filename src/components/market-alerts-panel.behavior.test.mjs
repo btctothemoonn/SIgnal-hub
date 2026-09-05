@@ -88,6 +88,9 @@ export function MarketOpportunityPanel() {
         trigger: "A趋势·确认",
         source: "rest",
         price: 68000,
+        marketCapUsd: 120_000_000,
+        fdvUsd: 140_000_000,
+        valuationUpdatedAt: "2026-08-31T00:10:00.000Z",
         changePct: 7.2,
         volumeRatio: 2.4,
         score: null,
@@ -145,6 +148,8 @@ export function MarketOpportunityPanel() {
     ...initialSnapshot.events[0],
     id: "volatility:SHORT:ETHUSDT:fixture",
     symbol: "ETHUSDT",
+    marketCapUsd: 450_000_000,
+    fdvUsd: null,
     side: "SHORT",
     chartUrl: "/api/market-alerts/charts/ETHUSDT?v=1788135000001",
   });
@@ -164,6 +169,8 @@ export function MarketOpportunityPanel() {
     ...initialSnapshot.events[0],
     id: "volatility:LONG:XRPUSDT:fixture",
     symbol: "XRPUSDT",
+    marketCapUsd: null,
+    fdvUsd: null,
     metrics: {},
     chartUrl: null,
     chartUpdatedAt: null,
@@ -210,6 +217,18 @@ export function MarketOpportunityPanel() {
   const expandBtc = renderer.root.findByProps({
     "data-market-alert-toggle": "volatility:LONG:BTCUSDT:fixture",
   });
+  assert.match(renderedText(expandBtc), /\$120M/);
+  assert.match(renderedText(expandBtc), /\$140M/);
+  assert.match(renderedText(expandBtc), /25m 价格/);
+  assert.doesNotMatch(renderedText(expandBtc), /暴涨预警|A趋势|REST/);
+  const ethSummary = renderedText(renderer.root.findByProps({
+    "data-market-alert-toggle": "volatility:SHORT:ETHUSDT:fixture",
+  }));
+  assert.match(ethSummary, /\$450M/);
+  assert.match(ethSummary, /n\/a/);
+  assert.match(renderedText(renderer.root.findByProps({
+    "data-market-alert-toggle": "short_squeeze:LONG:SQUEEZEUSDT:fixture",
+  })), /\+7\.50%15m OI/);
   await act(async () => {
     expandBtc.props.onClick();
   });

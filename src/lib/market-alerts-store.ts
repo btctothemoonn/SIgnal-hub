@@ -183,6 +183,9 @@ function rowToEvent(row: DbRow) {
     trigger: stringValue(row.trigger),
     source: stringValue(row.source),
     price: numberValue(row.price),
+    marketCapUsd: nullableNumber(row.market_cap_usd),
+    fdvUsd: nullableNumber(row.fdv_usd),
+    valuationUpdatedAt: stringValue(row.valuation_updated_at) || null,
     changePct: nullableNumber(row.change_pct),
     volumeRatio: nullableNumber(row.volume_ratio),
     score: nullableNumber(row.score),
@@ -1649,9 +1652,11 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     const events = db
       .prepare(`
         SELECT e.*, c.interval AS chart_interval,
-          c.updated_at AS chart_updated_at, c.source_key AS chart_source_key
+          c.updated_at AS chart_updated_at, c.source_key AS chart_source_key,
+          t.market_cap_usd, t.fdv_usd, t.valuation_updated_at
         FROM market_alert_events e
         LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
+        LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
         ${whereSql}
         ORDER BY e.occurred_at DESC, e.created_at DESC LIMIT ? OFFSET ?
       `)

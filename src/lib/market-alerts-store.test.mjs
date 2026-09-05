@@ -436,6 +436,13 @@ try {
     now: "2026-08-31T00:05:00.000Z",
   });
   assert.equal(snapshot.events[0].id, newerEvent.id);
+  assert.equal(snapshot.events[0].marketCapUsd, 120_000_000);
+  assert.equal(snapshot.events[0].fdvUsd, 140_000_000);
+  assert.equal(snapshot.events[0].valuationUpdatedAt, "2026-08-31T00:00:04.000Z");
+  assert.equal(snapshot.events[1].marketCapUsd, 120_000_000);
+  const outsideRankingWindow = b.getMarketAlertsSnapshot({ now: "2026-09-03T00:05:00.000Z" });
+  assert.equal(outsideRankingWindow.marketRanking.length, 0);
+  assert.equal(outsideRankingWindow.events[0].fdvUsd, 140_000_000);
   assert.equal(
     snapshot.events[0].chartUrl,
     "/api/market-alerts/charts/BTCUSDT?v=1788134460000_1788134460000_bbbbbbbbbbbb&i=5m&u=2026-08-31T00%3A01%3A01.000Z",
@@ -481,6 +488,10 @@ try {
     occurredAt: "2026-08-31T00:03:00.000Z",
     createdAt: "2026-08-31T00:03:00.000Z",
   });
+  const withoutTicker = b.getMarketAlertsSnapshot({ symbol: "牛来USDT", limit: 1 }).events[0];
+  assert.equal(withoutTicker.marketCapUsd, null);
+  assert.equal(withoutTicker.fdvUsd, null);
+  assert.equal(withoutTicker.valuationUpdatedAt, null);
   assert.deepEqual(
     a.getMarketAlertChartBackfillEvents({
       since: "2026-08-31T00:00:00.000Z",

@@ -35,6 +35,8 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "short_squeeze", label: "轧空" },
 ];
 
+const ALERT_ROW_COLUMNS = "grid-cols-[minmax(0,1fr)_4.5rem_5rem_1.5rem] @min-[34rem]:grid-cols-[minmax(0,1fr)_5rem_5rem_4.5rem_5rem_1.5rem] @min-[43rem]:grid-cols-[minmax(0,1fr)_5rem_5rem_4.5rem_5rem_4.5rem_1.5rem]";
+
 function formatTime(value: string | null | undefined, seconds = false) {
   if (!value) return "尚未更新";
   const date = new Date(value);
@@ -56,11 +58,11 @@ function signedPercent(value: unknown, digits = 2) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}%`;
 }
 
-function compactMoney(value: unknown) {
+function compactMoney(value: unknown, locale = "zh-CN") {
   if (value === null || value === undefined || value === "") return "n/a";
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return "n/a";
-  return new Intl.NumberFormat("zh-CN", {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     notation: "compact",
@@ -218,17 +220,22 @@ const EventCard = memo(function EventCard({
   const funding = metricNumber(event, "funding");
   const chartUrl = event.chartUrl;
   const chartInterval = event.chartInterval || "15m";
-  const shortLabel = squeeze ? "OI 15m" : "近25m";
+  const shortLabel = squeeze ? "15m OI" : "25m 价格";
   const shortValue = squeeze
     ? signedPercent(oiGrowth)
     : signedPercent(event.changePct);
   const kindLabel = squeeze ? "轧空" : rising ? "暴涨" : "暴跌";
   const detailId = `market-alert-detail-${event.id}`;
+  const marketCap = compactMoney(event.marketCapUsd, "en-US");
+  const fdv = compactMoney(event.fdvUsd, "en-US");
+  const valuationTitle = event.valuationUpdatedAt
+    ? `市值更新 ${formatTime(event.valuationUpdatedAt)}`
+    : "暂无市值数据";
 
   return (
     <article
       data-market-alert-row={event.symbol}
-      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:56px] [content-visibility:auto] ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
+      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:52px] [content-visibility:auto] ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
     >
       <button
         type="button"
@@ -237,44 +244,35 @@ const EventCard = memo(function EventCard({
         aria-controls={detailId}
         aria-label={`${expanded ? "收起" : "展开"} ${event.symbol} 预警详情，${kindLabel}，24 小时 ${signedPercent(pct24h)}，${shortLabel} ${shortValue}`}
         onClick={() => onToggle(event.id)}
-        className="grid min-h-14 w-full grid-cols-[minmax(0,1fr)_auto_2.25rem] items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-workspace-surface-raised sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] sm:px-3 md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(6.5rem,1fr)_minmax(5.5rem,0.85fr)_4.25rem_3.75rem_2.25rem] xl:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]"
+        className={`grid min-h-[52px] w-full items-center gap-x-1.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors hover:bg-workspace-surface-raised ${ALERT_ROW_COLUMNS}`}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${squeeze ? "bg-warning-soft text-warning" : rising ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
+        <span className="flex min-w-0 items-center gap-1.5" title={`${event.symbol} · ${kindLabel}`}>
+          <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] ${squeeze ? "bg-warning-soft text-warning" : rising ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
             {squeeze ? <ChevronsUp aria-hidden className="h-3.5 w-3.5" /> : rising ? <ArrowUpRight aria-hidden className="h-3.5 w-3.5" /> : <ArrowDownRight aria-hidden className="h-3.5 w-3.5" />}
           </span>
-          <span className="min-w-0">
-            <strong className="block truncate font-mono text-xs text-foreground sm:text-sm">{event.symbol}</strong>
-            <span className="mt-0.5 block truncate text-[10px] text-muted">
-              {event.source.toUpperCase()} · {event.stage}
-              <span className="sm:hidden"> · {shortLabel} {shortValue}</span>
-            </span>
-          </span>
+          <strong className="min-w-0 break-all font-mono text-xs leading-4 text-foreground">{event.symbol}</strong>
         </span>
 
-        <span className="hidden min-w-0 sm:block">
-          <span className={`block truncate text-[11px] font-semibold ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>{kindLabel}</span>
-          <span className="mt-0.5 block truncate text-[10px] text-muted">{event.trigger}</span>
-        </span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[34rem]:block">{marketCap}</span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[34rem]:block">{fdv}</span>
 
         <span className={`text-right font-mono text-xs font-semibold ${pct24h === null ? "text-muted" : pct24h >= 0 ? "text-success" : "text-danger"}`}>
           {signedPercent(pct24h)}
-          <span className="block text-[9px] font-normal text-muted sm:hidden">24h</span>
         </span>
 
-        <span className={`hidden text-right font-mono text-xs font-semibold md:block lg:hidden xl:block ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>
+        <span className={`text-right font-mono text-xs font-semibold ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>
           {shortValue}
-          <span className="block text-[9px] font-normal text-muted">{shortLabel}</span>
+          <span className="mt-0.5 block whitespace-nowrap text-[10px] font-normal text-muted">{shortLabel}</span>
         </span>
 
-        <span className="hidden text-right font-mono text-xs font-semibold text-foreground xl:block">
-          {priceText(event.price)}
-        </span>
+        <span className="hidden text-right text-[10px] text-muted @min-[43rem]:block">{formatTime(event.occurredAt)}</span>
 
-        <span className="hidden text-right text-[10px] text-muted sm:block">{formatTime(event.occurredAt)}</span>
-
-        <span className="flex h-9 w-9 items-center justify-center text-muted">
+        <span className="flex h-8 w-6 items-center justify-center text-muted">
           <ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </span>
+        <span title={valuationTitle} className="col-span-full flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted @min-[34rem]:hidden">
+          <span>流通市值 <span className="font-mono text-foreground">{marketCap}</span></span>
+          <span>FDV <span className="font-mono text-foreground">{fdv}</span></span>
         </span>
       </button>
 
@@ -282,7 +280,7 @@ const EventCard = memo(function EventCard({
         <div
           id={detailId}
           data-market-alert-detail={event.symbol}
-          className="grid gap-3 border-t border-line bg-workspace-surface-raised p-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(15rem,0.65fr)]"
+          className="grid min-w-0 grid-cols-1 gap-3 border-t border-line bg-workspace-surface-raised p-2.5"
         >
           <div className="min-w-0">
             {chartUrl ? (
@@ -304,8 +302,8 @@ const EventCard = memo(function EventCard({
                   width={1200}
                   height={630}
                   loading="eager"
-                  sizes="(min-width: 1280px) 52vw, 100vw"
-                  className="aspect-[1200/630] max-h-[22rem] w-full object-contain"
+                  sizes="(min-width: 1024px) 60vw, 100vw"
+                  className="aspect-[1200/630] h-auto w-full object-contain"
                 />
                 <span className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/15 bg-black/60 text-white opacity-80 transition-opacity group-hover:opacity-100">
                   <Maximize2 aria-hidden className="h-4 w-4" />
@@ -329,7 +327,7 @@ const EventCard = memo(function EventCard({
             </div>
             <p className="mt-2 text-sm leading-5 text-foreground">{event.trigger}</p>
 
-            <dl className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line text-xs">
+            <dl className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line text-xs @min-[28rem]:grid-cols-4">
               <div className="bg-workspace-surface px-2.5 py-2"><dt className="text-[10px] text-muted">24h</dt><dd className={`mt-0.5 font-mono font-semibold ${pct24h === null ? "text-muted" : pct24h >= 0 ? "text-success" : "text-danger"}`}>{signedPercent(pct24h)}</dd></div>
               {squeeze ? (
                 <>
@@ -350,6 +348,8 @@ const EventCard = memo(function EventCard({
             <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-muted">
               <span>价格 <strong className="font-mono font-semibold text-foreground">{priceText(event.price)}</strong></span>
               <span>触发 {formatTime(event.occurredAt)}</span>
+              <span title={valuationTitle}>流通市值 <strong className="font-mono font-semibold text-foreground">{marketCap}</strong></span>
+              <span title={valuationTitle}>FDV <strong className="font-mono font-semibold text-foreground">{fdv}</strong></span>
             </div>
 
             {event.reasons.length ? <p className="mt-3 text-xs leading-5 text-muted">{event.reasons.join(" · ")}</p> : null}
@@ -553,7 +553,7 @@ export function MarketAlertsPanel({
 
       <div
         data-market-alert-workspace={true}
-        className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1.85fr)_minmax(16rem,0.62fr)] lg:grid-rows-[auto_1fr] lg:items-start xl:grid-cols-[minmax(0,1.85fr)_minmax(19rem,0.62fr)]"
+        className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(19rem,2fr)] lg:grid-rows-[auto_1fr] lg:items-start"
       >
         <div
           data-market-alert-right-rail={true}
@@ -569,20 +569,20 @@ export function MarketAlertsPanel({
 
         <section
           data-market-alert-feed={true}
-          className="order-2 min-w-0 lg:order-1 lg:col-start-1 lg:row-span-2 lg:row-start-1"
+          className="@container order-2 min-w-0 lg:order-1 lg:col-start-1 lg:row-span-2 lg:row-start-1"
         >
           <header className="mb-2 flex items-center justify-between px-1.5">
             <h2 className="text-sm font-semibold text-foreground">实时预警</h2>
             <span className="text-xs text-muted">{filteredEvents.length} 条</span>
           </header>
           <div className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
-            <div className="hidden min-h-8 items-center gap-2 border-b border-line bg-workspace-surface-raised px-3 text-[10px] font-medium text-muted sm:grid sm:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_4.25rem_2.25rem] md:grid-cols-[minmax(8rem,1.15fr)_minmax(7rem,1fr)_4.75rem_5rem_4.25rem_2.25rem] lg:grid-cols-[minmax(6.5rem,1fr)_minmax(5.5rem,0.85fr)_4.25rem_3.75rem_2.25rem] xl:grid-cols-[minmax(8.5rem,1.15fr)_minmax(8rem,1fr)_4.75rem_5rem_5.5rem_4.25rem_2.25rem]">
+            <div className={`grid min-h-8 items-center gap-x-1.5 border-b border-l-2 border-l-transparent border-line bg-workspace-surface-raised px-2.5 text-[10px] font-medium text-muted ${ALERT_ROW_COLUMNS}`}>
               <span>币种</span>
-              <span>类型</span>
+              <span className="hidden text-right @min-[34rem]:block">流通市值</span>
+              <span className="hidden text-right @min-[34rem]:block">FDV</span>
               <span className="text-right">24h</span>
-              <span className="hidden text-right md:block lg:hidden xl:block">短周期</span>
-              <span className="hidden text-right xl:block">价格</span>
-              <span className="text-right">时间</span>
+              <span className="text-right">触发变化</span>
+              <span className="hidden text-right @min-[43rem]:block">时间</span>
               <span />
             </div>
             {filteredEvents.length ? (
