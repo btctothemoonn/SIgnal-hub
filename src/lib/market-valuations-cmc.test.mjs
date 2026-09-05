@@ -9,7 +9,7 @@ const fetchImpl = async (url, options) => {
   calls++;
   assert.equal(new URL(url).searchParams.get("symbol"), "ABC");
   assert.equal(options.headers["X-CMC_PRO_API_KEY"], "test");
-  return Response.json({ data: [coin], status: { error_code: 0 } });
+  return Response.json({ data: [coin], status: { error_code: "0" } });
 };
 assert.deepEqual(await fillCmcValuations(markets, missing, { apiKey: "", fetchImpl }), missing);
 assert.equal(calls, 0);

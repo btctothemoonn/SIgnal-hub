@@ -26,7 +26,7 @@ export async function fillCmcValuations(
     });
     if (!response.ok) return values;
     const body = await response.json();
-    if (body.status?.error_code || !Array.isArray(body.data)) return values;
+    if (Number(body.status?.error_code ?? 0) !== 0 || !Array.isArray(body.data)) return values;
     return values.map((value) => {
       if (value.marketCapUsd !== null && value.fdvUsd !== null) return value;
       const base = value.symbol.replace(/USDT$/i, "").toUpperCase();
