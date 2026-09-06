@@ -45,6 +45,11 @@ assert.match(packageJson.engines.node, />=22\.5\.0/);
 assert.match(serviceRegistry, /signal-hub-market-opportunity/);
 assert.match(source, /signal-hub-market-opportunity/);
 assert.match(source, /market-opportunity-worker\.mjs/);
+assert.match(source, /signal-hub-wecom-receiver/);
+assert.match(source, /wecom-receiver\.mjs/);
+assert.match(source, /WECOM_SYNC_ENABLED/);
+assert.match(source, /MemoryMax=192M/);
+assert.match(source, /CPUQuota=25%/);
 assert.equal(packageJson.scripts["market:opportunity"].includes("market-opportunity-worker.mjs"), true);
 assert.equal(packageJson.scripts["market:opportunity:once"].includes("--once"), true);
 

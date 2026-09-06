@@ -9,7 +9,7 @@ if (process.platform !== "linux") {
   process.exit(0);
 }
 const source = readFileSync(new URL("./deploy-vps.sh", import.meta.url), "utf8");
-for (const failure of ["none", "build", "readiness"]) {
+for (const [failure, wecomEnabled] of [["none", "1"], ["none", "0"], ["build", "1"], ["readiness", "1"]]) {
   const root = mkdtempSync(join(tmpdir(), "signal-release-test-"));
   try {
     const app = join(root, "app");
@@ -29,10 +29,11 @@ for (const failure of ["none", "build", "readiness"]) {
     run("git", ["-c", "user.name=Release Test", "-c", "user.email=release@test.invalid", "commit", "-qm", "fixture"]);
     const executable = (name, body) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\nset -e\n${body}\n`, { mode: 0o755 });
     executable("pnpm", "exit 0");
-    executable("systemctl", "exit 0");
-    executable("sudo", 'if [[ "$1" == "tee" ]]; then cat >/dev/null; elif [[ "$1" == "systemctl" ]]; then shift; systemctl "$@"; fi');
+    executable("systemctl", 'printf "%s\\n" "$*" >> "$TEST_SERVICES_LOG"');
+    executable("sudo", 'if [[ "$1" == "tee" ]]; then cat >> "$TEST_UNITS_LOG"; elif [[ "$1" == "systemctl" ]]; then shift; systemctl "$@"; fi');
     executable("node", `
 case "$*" in
+  *"WECOM_SYNC_ENABLED"*) [[ "$TEST_WECOM_ENABLED" == "1" ]] || exit 1 ;;
   *"next build"*)
     [[ "$(readlink -f "$SIGNAL_HUB_CURRENT_LINK")" == "$TEST_OLD_RELEASE" ]]
     [[ ! -L .signal-hub ]] || exit 32
@@ -46,12 +47,23 @@ esac`);
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SIGNAL_HUB_APP_DIR: app,
         SIGNAL_HUB_RELEASES_DIR: join(root, "releases"), SIGNAL_HUB_CURRENT_LINK: current,
         SIGNAL_HUB_NODE_BIN: join(bin, "node"), SIGNAL_HUB_PNPM_BIN: join(bin, "pnpm"),
-        SIGNAL_HUB_DEPLOY_REEXEC: "1", TEST_FAILURE: failure, TEST_OLD_RELEASE: old },
+        SIGNAL_HUB_DEPLOY_REEXEC: "1", TEST_FAILURE: failure, TEST_OLD_RELEASE: old,
+        TEST_WECOM_ENABLED: wecomEnabled, TEST_SERVICES_LOG: join(root,"services.log"), TEST_UNITS_LOG: join(root,"units.log") },
     });
     assert.equal(result.status, failure === "none" ? 0 : failure === "build" ? 8 : 9, result.stdout + result.stderr);
     if (failure === "none") {
       assert.notEqual(realpathSync(current), old);
       assert.equal(realpathSync(join(current, ".signal-hub")), join(app, ".signal-hub"));
+      const services = readFileSync(join(root,"services.log"),"utf8");
+      const units = readFileSync(join(root,"units.log"),"utf8");
+      assert.equal(/^restart .*signal-hub-wecom-receiver/m.test(services), wecomEnabled === "1");
+      if (wecomEnabled === "1") {
+        assert.match(units, /MemoryMax=192M/);
+        assert.match(units, /CPUQuota=25%/);
+        assert.match(units, /ReadWritePaths=.*\.signal-hub/);
+      } else {
+        assert.match(services, /stop signal-hub-wecom-receiver/);
+      }
     } else {
       assert.equal(realpathSync(current), old, "a failed build or startup must keep/restore the old release");
     }

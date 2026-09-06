@@ -14,6 +14,7 @@ const env = {
 };
 process.env.ADMIN_PASSWORD = env.ADMIN_PASSWORD;
 process.env.ADMIN_SESSION_SECRET = env.ADMIN_SESSION_SECRET;
+delete process.env.WECOM_PUBLIC_READ;
 
 function request(path, token = null) {
   const headers = new Headers();
@@ -67,5 +68,20 @@ const token = createAdminSessionToken(env);
 const authenticatedResponse = proxy(request("/settings", token));
 assert.equal(authenticatedResponse.status, 200);
 assert.equal(authenticatedResponse.headers.get("x-middleware-next"), "1");
+
+process.env.WECOM_PUBLIC_READ = "true";
+for (const path of ["/wecom", "/api/wecom/reports", "/api/wecom/ca-alerts", "/api/wecom/status"]) {
+ for (const method of ["GET", "HEAD"]) {
+  assert.equal(proxy(new NextRequest(`https://hub.example${path}`, {method})).headers.get("x-middleware-next"), "1");
+ }
+ assert.notEqual(proxy(new NextRequest(`https://hub.example${path}`, {method:"POST"})).headers.get("x-middleware-next"), "1");
+}
+for (const path of ["/api/settings", "/api/holdings", "/api/wecom/ingest", "/api/wecom/reports/extra"]) {
+ assert.equal(proxy(request(path)).status, 401);
+}
+assert.equal(proxy(request("/settings")).status, 307);
+assert.equal(proxy(request("/wecom/extra")).status, 307);
+delete process.env.WECOM_PUBLIC_READ;
+assert.equal(proxy(request("/wecom")).status, 307);
 
 console.log("ok - admin proxy guard");

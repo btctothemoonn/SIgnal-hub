@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server.js";
 import { ADMIN_SESSION_COOKIE, verifyAdminSessionToken } from "./lib/admin-auth.ts";
+import { isPublicWecomRead } from "./lib/wecom-access.ts";
 
 const PUBLIC_PATHS = new Set([
   "/apple-touch-icon.png",
@@ -34,6 +35,13 @@ export function proxy(request: NextRequest) {
   // Only this machine POST bypasses the login redirect; the handler still requires HMAC.
   if (pathname === "/api/wecom/ingest" && request.method === "POST") {
     return NextResponse.next();
+  }
+
+  if (isPublicWecomRead(request)) {
+    const response = NextResponse.next();
+    response.headers.set("Cache-Control", "private, no-store");
+    response.headers.set("X-Robots-Tag", "noindex, noarchive");
+    return response;
   }
 
   if (isPublicPath(pathname)) {

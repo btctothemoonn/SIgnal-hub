@@ -69,6 +69,13 @@ scripts=(
   market-volatility-ws-worker.mjs market-squeeze-worker.mjs market-opportunity-worker.mjs
 )
 
+wecom_enabled=0
+if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(process.env.WECOM_SYNC_ENABLED === "true" ? 0 : 1)'; then
+  wecom_enabled=1
+  services+=(signal-hub-wecom-receiver)
+  scripts+=(wecom-receiver.mjs)
+fi
+
 activate() {
   local target="$1"
   local pending_link="${CURRENT_LINK}.pending-$$"
@@ -84,6 +91,9 @@ rollback() {
     activate "$previous_release"
     sudo systemctl daemon-reload
     sudo systemctl restart "${services[@]}" || true
+    if [[ ! -f "$previous_release/scripts/wecom-receiver.mjs" ]]; then
+      sudo systemctl stop signal-hub-wecom-receiver || true
+    fi
   fi
   exit "$result"
 }
@@ -122,12 +132,30 @@ EnvironmentFile=-$APP_DIR/.env.local
 ExecStart=
 ExecStart=$command
 EOF
+  if [[ "$service" == "signal-hub-wecom-receiver" ]]; then
+    sudo tee "/etc/systemd/system/$service.service.d/resources.conf" >/dev/null <<EOF
+[Service]
+MemoryMax=192M
+CPUQuota=25%
+TasksMax=32
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$APP_DIR/.signal-hub
+Restart=on-failure
+RestartSec=5
+EOF
+  fi
 done
 
 activate "$release"
 sudo systemctl daemon-reload
 sudo systemctl enable "${services[@]}" >/dev/null
 sudo systemctl restart "${services[@]}"
+if [[ "$wecom_enabled" == "0" ]] && systemctl cat signal-hub-wecom-receiver >/dev/null 2>&1; then
+  sudo systemctl stop signal-hub-wecom-receiver
+fi
 "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
 for service in "${services[@]}"; do systemctl is-active --quiet "$service"; done
 trap - ERR

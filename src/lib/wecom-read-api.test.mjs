@@ -15,6 +15,9 @@ try {
   const response=await handleWecomRead(request(kind),kind,{env});
   assert.equal(response.status,200); assert.equal(response.headers.get("cache-control"),"private, no-store");
   assert.equal(response.headers.get("vary"),"Cookie");
+  const publicResponse=await handleWecomRead(request(kind,"",{}),kind,{env:{...env,WECOM_PUBLIC_READ:"true",WECOM_OWNER_ADMIN_ONLY:"false"}});
+  assert.equal(publicResponse.status,200);
+  assert.equal(publicResponse.headers.get("cache-control"),"private, no-store");
  }
  for(const query of ["?limit=11","?limit=0","?limit=1.2","?limit=2&limit=3","?cadence=no","?ownerId=someone","?id=x&limit=1","?before=","?cadence=two_hour&cadence=daily"])
   assert.equal((await handleWecomRead(request("reports",query),"reports",{env})).status,400,query);
@@ -23,5 +26,6 @@ try {
  assert.equal((await handleWecomRead(request("status","?id=x"),"status",{env})).status,400);
  assert.equal((await handleWecomRead(request("reports","?deviceId=foreign&id=x"),"reports",{env})).status,403);
  assert.equal((await handleWecomRead(request("reports","?id=unknown"),"reports",{env})).status,404);
+ assert.equal((await handleWecomRead(request("reports","?deviceId=foreign",{}),"reports",{env:{...env,WECOM_PUBLIC_READ:"true"}})).status,403);
  console.log("ok - WeCom read APIs fail closed, private responses and strict query combinations");
 } finally {rmSync(dir,{recursive:true,force:true});}

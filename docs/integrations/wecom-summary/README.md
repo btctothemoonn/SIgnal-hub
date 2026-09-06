@@ -1,6 +1,6 @@
 # 企业微信群总结接入 SignalHub：对接规范 v2
 
-更新：2026-09-07。**Windows 网站接收端已实现，合成验收记录见 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)。未部署、未启用真实同步。**
+更新：2026-09-07。Windows 网站接收端已实现，原合成验收记录见 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)。**用户现已授权部署和真实同步，并明确要求企微总结免密码查看。** 本轮部署状态及 Mac 启用方式记录在 [上线交接](./PRODUCTION-ACTIVATION.md)，历史合成回执不代表当前上线状态。
 
 本轮实施依据 Mac [bcb544a 的接入交接](https://github.com/btctothemoonn/wecom-summary/blob/bcb544a746dac7f2b7c55476eb5ec66672d1113f/docs/integrations/signalhub-v2-connect-handoff.md)，对应已发布功能 `d9ddae971bf98d4340e4a67da3cda25513dcae99`。接受市场样例计数修正为 `uniqueStatementCount=2 / duplicateCount=0`；[8f6df4f 历史材料](./history/8f6df4f/manifest.json)保留原字节与哈希，不再用其旧 `1/1` 计数作为来源语义基准。
 
@@ -15,15 +15,15 @@
 - **不上传原始聊天、逐条内容、引用原文、附件、通讯录、成员列表、源库文件或平台事件 ID。** `sources` 必须是空数组；`sourceReferences` 没有 content/excerpt 等正文键。
 - 总结中保留既有结论和说话人归属，不把原文粘贴到 summary/note 绕过限制。只允许最终版总结，不输出模型思考过程。原 CA 字符串不是凭证，不能因长度或混合大小写被误删。
 - 不上传 MiniMax Key、LAN 密码、同步 secret、provider_request_id、token 用量或诊断对象。疑似凭证/核心正文超限时隔离整份结果并记固定错误码，不静默删结论或引用。
-- 此次没有授权历史回填、重新生成 AI 总结、开启发送、配置真实凭证或部署。原监听、群配置、relay 边界、2h/6h/24h 调度及源数据库保持不变。
+- 本轮已授权开启发送、配置专用凭证和部署；没有要求历史回填或重新生成 AI 总结。原监听、群配置、relay 边界、2h/6h/24h 调度及源数据库保持不变。
 
 ## 2. 授权边界
 
-所有页面、报告列表/详情、CA 历史/活跃列表、设备状态及以后添加的导出/推送读取都要先验证**登录会话和该设备数据的访问授权**。不能只隐藏菜单、只校验请求带有 deviceId，或把 HMAC 写入凭证当作读取凭证。
+默认模式下，所有页面、报告列表/详情、CA 历史/活跃列表和设备状态都先验证**登录会话和该设备数据的访问授权**。用户明确授权的公开模式使用 `WECOM_PUBLIC_READ=true`：仅精确 `/wecom`、`/api/wecom/reports`、`/api/wecom/ca-alerts`、`/api/wecom/status` 的 GET/HEAD 免登录，内容（含群名、昵称、CA、设备状态）可由知道地址的访客查看。其他页面、其他方法、子路径和未来新增接口不自动开放。HMAC 写入凭证不变，也不成为读取凭证。
 
 当前 Signal `src/lib/admin-auth.ts` 是单管理员会话，没有 userId/多账号 ACL。首版只能作为本人独占管理员空间：部署前必须确认该登录权限未共享给其他人；否则先补真实身份与设备归属授权再启用。未来多用户时，服务器须绑定 owner 与 device，并在查询前过滤，不能默认向其他已登录账号开放。客户端不能自报 owner 获得访问权。
 
-匿名 API 请求返回 401；登录但无该设备权限返回 403（资源 ID 不泄露是否存在）；页面未登录跳转登录页。页面/读 API 均做服务端授权，不依赖客户端检查或仅依赖全局代理。登录失效立即清空前端群数据，不将“网络故障保留缓存”用于绕过退出登录。
+默认私有模式下，匿名 API 返回 401；登录但无设备权限返回 403；页面未登录跳转登录页。公开模式不校验登录，但仍只读取服务器绑定的设备，伪造设备选择返回 403，不能跨设备。页面/读 API 均做服务端访问判定，不依赖客户端检查。公开开关关闭后重新恢复私有规则；401/403 仍清空前端数据。
 
 所有带内容或设备状态的响应使用 `Cache-Control: private, no-store`；不进公共 CDN、静态构建、公开日志或共享 Service Worker 缓存。服务器独立 SQLite 是私有持久缓存，断网仍可在登录授权后读取；浏览器只保留当前授权会话中的内存副本。
 
@@ -39,7 +39,7 @@
 | `GET /api/wecom/status` | 授权后，设备/通道状态；与列表中的 status 同结构 |
 | `GET http://127.0.0.1:3041/health` | 仅 VPS 内部最小存活检查，不返回设备状态、配置或数据，不反向代理到公网 |
 
-以上接口在实施分支提供，**线上未部署，不能向生产发送**。只有精确 POST 写入口可免除网页登录跳转，同时强制 HMAC；该路径的 GET/其他方法、子路径及所有读 API 不因写入口豁免而变公开。写凭证仅能向服务器绑定的设备写入，验证 body ID 的设备/store 前缀，不能冒充另一设备。
+只有精确 POST 写入口可免除网页登录跳转，同时强制 HMAC；该路径的 GET/其他方法、子路径不因写入口豁免而变公开。读取是否免登录由独立公开开关决定。写凭证仅能向服务器绑定的设备写入，验证 body ID 的设备/store 前缀，不能冒充另一设备。启用前核对 [上线交接](./PRODUCTION-ACTIVATION.md) 的实际部署状态。
 
 HTTP 正文为 UTF-8 JSON，无压缩，最多 **262144 字节**；不跟随重定向、不跳过 TLS、不允许 URL 中携带凭证。未知字段、未知类型、未知版本、无效 Unicode、控制字符（除 TAB/LF/CR）拒绝。JSON 对象不允许重复键；布尔不能替代整数，所有计数是 0 至 9007199254740991 的整数。
 
@@ -61,9 +61,9 @@ POST
 
 [signature.example.json](./signature.example.json) 含三种类型的公开离线向量，`body` 是确切签名字符串。固定时间和公开测试 key 只能用于离线测试，禁止作为生产配置。
 
-私密配置仍为 Mac `~/Library/Application Support/wxFomo LAN/signalhub-sync.json` 的 `url/deviceId/secret`；目录 0700、文件 0600，验证所有权，拒绝符号链接/硬链接。不修改原目录权限。VPS 使用非公开 `WECOM_SYNC_DEVICE_ID/WECOM_SYNC_SECRET`，可选 `WECOM_RECEIVER_PORT=3041`；禁止 `NEXT_PUBLIC_` 或将密钥写入 Git。本轮不创建真实配置。
+Mac 私密配置含 `url/deviceId/secret`，通过 `--config` 指定；当前已发布代码默认 `~/Library/Application Support/wxFomo LAN/signalhub-sync/config.json`。目录 0700、文件 0600，验证所有权，拒绝符号链接/硬链接。不修改原目录权限。VPS 使用非公开 `WECOM_SYNC_DEVICE_ID/WECOM_SYNC_SECRET`，可选 `WECOM_RECEIVER_PORT=3041`；禁止 `NEXT_PUBLIC_` 或将密钥写入 Git。
 
-网站实现增加两个**服务器开关，不是上传字段**：`WECOM_SYNC_ENABLED=true` 才允许接收；`WECOM_OWNER_ADMIN_ONLY=true` 表示管理员登录为本人独占，才允许读取。两者默认关闭。读取还要求合法现有管理员会话和已配置的设备；关闭写入后，原有数据仍可经授权读取。未确认本人独占前不要设置读取开关。
+三个**服务器开关，不是上传字段**均默认关闭：`WECOM_SYNC_ENABLED=true` 才接收；私有模式需要 `WECOM_OWNER_ADMIN_ONLY=true` 加合法管理员会话；用户授权公开时设置 `WECOM_PUBLIC_READ=true`，仅上述既定读取免登录。两种读取模式均绑定服务器设备。关闭写入不删除已收数据。公开读取也返回 `private, no-store` 和不索引提示，不把内容放进共享缓存。
 
 ## 4. report v2
 
@@ -208,9 +208,9 @@ Mac 使用只读源连接、独立同步库和双水位；payload+对应游标+�
 
 队列（含隔离）上限1000条或128MiB，滚动索引额外32MiB；达限暂停对应读取并报错，不删未确认事件。过期索引可清理，但其未确认payload不得删除。源库坏行可定位隔离，不静默越过；原库与relay不写。
 
-VPS 独立127.0.0.1:3041接收器、独立SQLite，建议192MiB内存/25%CPU、8并发/16连接、正文/转发3秒；数据库含WAL预算256MiB。达限503让Mac保留队列，不影响主信号流写锁。指标需实测，本轮不配置资源或声称零影响。
+VPS 独立127.0.0.1:3041接收器、独立SQLite，部署脚本设置192MiB内存/25%CPU、8并发/16连接、正文/转发3秒；数据库含WAL预算256MiB。达限503让Mac保留队列，不共用主信号流写锁。持续负载指标仍须实测，不声称零影响。
 
-首次启用须用户明确确认：记录结果和消息两个当前水位，只接续新数据；不扫启用前一小时、不自动补首屏旧报告、不重跑付费AI。暂停恢复使用原水位和队列。LaunchAgent不安装、不启用；本轮仅离线合成材料。
+用户现已明确确认首次启用：记录结果和消息两个当前水位，只接续新数据；不扫启用前一小时、不自动补首屏旧报告、不重跑付费AI。暂停恢复使用原水位和队列。Mac 按 [上线交接](./PRODUCTION-ACTIVATION.md) 安装并启用独立 LaunchAgent，不改既有监听和 AI 服务。
 
 ## 9. 合成材料与下一步
 
@@ -221,4 +221,4 @@ VPS 独立127.0.0.1:3041接收器、独立SQLite，建议192MiB内存/25%CPU、8
 - [三类签名向量](./signature.example.json)：公开测试key、固定时钟、固定字节，禁止生产使用。
 - 样例和验收源库全部合成；集成测试仅访问本机回环测试服务，不读取真实库/配置，不调用付费模型。来源正文只存在测试临时源库，不上传至网站。
 
-实现和验证证据集中于 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)。Windows 本机的 Mac 导出/检测/签名测试不替代 Mac 上 POSIX 队列、LaunchAgent、真实部署资源隔离与断网恢复验收。**合成测试通过不等于生产已上线或真实同步已启用。** 在两端回传证据、用户另行确认部署/凭证/启用前，不接收真实数据。
+原实现和合成证据见 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)，生产阶段见 [上线交接](./PRODUCTION-ACTIVATION.md)。用户已回传 Mac 47 项定向测试通过，并已批准启用。**合成测试、网站已上线、Mac 已启动、真实数据已抵达是不同状态**，最终以两端实际回执为准。
