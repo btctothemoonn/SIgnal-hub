@@ -31,6 +31,11 @@ function nextPath(request: NextRequest): string {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Only this machine POST bypasses the login redirect; the handler still requires HMAC.
+  if (pathname === "/api/wecom/ingest" && request.method === "POST") {
+    return NextResponse.next();
+  }
+
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
@@ -43,7 +48,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: "Unauthorized", success: false },
-      { status: 401 },
+      { status: 401, headers: pathname.startsWith("/api/wecom/") ? { "Cache-Control": "private, no-store" } : undefined },
     );
   }
 

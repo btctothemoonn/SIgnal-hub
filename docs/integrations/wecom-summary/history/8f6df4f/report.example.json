@@ -143,14 +143,14 @@
     "caDiscussions": [
       {
         "address": "0xAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAb",
-        "network": "base",
+      "network": "base",
         "groups": [
           "合成甲群",
           "合成乙群"
         ],
         "mentionCount": 2,
-        "uniqueStatementCount": 2,
-        "duplicateCount": 0,
+        "uniqueStatementCount": 1,
+        "duplicateCount": 1,
         "summary": "合成跨群转述聚合，不代表独立证实。",
         "sourceMessageIDs": [
           "M0001",

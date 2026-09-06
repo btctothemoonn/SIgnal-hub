@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "./admin-auth.ts";
+import { authorizeWecomRead, wecomPrivateJson } from "./wecom-access.ts";
+const env = { ADMIN_PASSWORD:"synthetic-owner", ADMIN_SESSION_SECRET:"test-admin-secret-".repeat(4), WECOM_SYNC_DEVICE_ID:"fixture-device", WECOM_OWNER_ADMIN_ONLY:"true" };
+const token = createAdminSessionToken(env);
+const req = (query="", cookie=`${ADMIN_SESSION_COOKIE}=${token}`) => new Request(`https://example.invalid/api/wecom/reports${query}`, {headers: {cookie}});
+assert.throws(() => authorizeWecomRead(req("", ""), env), e => e.status===401);
+assert.throws(() => authorizeWecomRead(req("",`${ADMIN_SESSION_COOKIE}=bad`), env), e => e.status===401);
+assert.throws(() => authorizeWecomRead(req(), {...env,WECOM_OWNER_ADMIN_ONLY:"false"}), e => e.status===403);
+assert.throws(() => authorizeWecomRead(req(), {...env,WECOM_SYNC_DEVICE_ID:undefined}), e => e.status===403);
+assert.throws(() => authorizeWecomRead(req("?deviceId=other"),env), e => e.status===403);
+assert.throws(() => authorizeWecomRead(req("",`${ADMIN_SESSION_COOKIE}=${token}; ${ADMIN_SESSION_COOKIE}=${token}`),env), e => e.status===401);
+assert.deepEqual(authorizeWecomRead(req(),env),{ownerId:"admin",deviceId:"fixture-device"});
+const result=wecomPrivateJson({ok:true});
+assert.equal(result.headers.get("cache-control"),"private, no-store");
+console.log("ok - WeCom explicit owner authorization and private reads");

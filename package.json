@@ -12,6 +12,8 @@
     "lint": "eslint",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
+    "test:wecom:e2e": "playwright test --config playwright.wecom.config.ts",
+    "wecom:receiver": "node --experimental-strip-types --experimental-transform-types scripts/wecom-receiver.mjs",
     "health:check": "node --experimental-strip-types --experimental-transform-types scripts/check-system-health.mjs",
     "telegram:setup": "node scripts/telegram-setup.mjs",
     "telegram:login": "node scripts/telegram-login.mjs",

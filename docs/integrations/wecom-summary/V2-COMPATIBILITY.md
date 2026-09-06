@@ -1,5 +1,7 @@
 # v2 对齐回执与不兼容项
 
+> 本文保留 2026-09-06 文档阶段的对齐记录。2026-09-07 网站实现与合成验收进展见 [Windows 接收端回执](./WINDOWS-RECEIVER-RECEIPT.md)；“尚未实现”等描述对应旧阶段，不表示实施分支仍缺接口。原市场样例的来源计数 `1/1` 已按 Mac bcb544a 修正为 `2/0`，旧字节保存在 history/8f6df4f，原清单未修改。
+
 对齐来源：Mac `dc259a93ab41a8b00f64a638a5a3ab0c762ffb95`，分支 `codex/wecom-notification-probe`。Signal 对照基线 `55dfa50`。本次只更新接入文档、合成样例及离线样例校验材料，未修改生产接口或部署。
 
 ## 已接受的 Mac v2 设计

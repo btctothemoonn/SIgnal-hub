@@ -1,0 +1,20 @@
+{
+  "syntheticOnly": true,
+  "macSourceCommit": "bcb544a746dac7f2b7c55476eb5ec66672d1113f",
+  "signalBranch": "codex/wecom-v2-receiver",
+  "test": "playwright.wecom.config.ts / e2e/wecom.spec.ts",
+  "result": "passed",
+  "browser": "Chrome headless",
+  "viewports": [1440, 390],
+  "insertedAtUnixSeconds": 1788712593.4857442,
+  "sourceCommittedAtUnixSeconds": 1788712593.4912517,
+  "detectedAtUnixSeconds": 1788712593.4998207,
+  "exportedAtUnixSeconds": 1788712593.500325,
+  "firstReceivedAt": "2026-09-06T16:36:33.548Z",
+  "visibleAt": "2026-09-06T16:36:48.618Z",
+  "sourceToVisibleMs": 15126.748291015625,
+  "outboxTested": false,
+  "schedulerWaitIncluded": false,
+  "productionDeployed": false,
+  "realSyncEnabled": false
+}

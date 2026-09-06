@@ -36,7 +36,8 @@ assert.match(
   source,
   /item\.key === "intel"[\s\S]*event\.preventDefault\(\)[\s\S]*window\.location\.assign\(item\.href\)/,
 );
-assert.match(source, /grid-cols-6/);
+assert.match(source, /grid-cols-7/);
+assert.match(source, /key: "wecom", label: "企业微信", mobileLabel: "企微", href: "\/wecom"/);
 assert.match(source, /mobileShellNavItems\.map/);
 assert.match(source, /item\.mobileLabel \?\? item\.label/);
 assert.doesNotMatch(source, /requestIdleCallback/);

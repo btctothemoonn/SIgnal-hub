@@ -53,6 +53,12 @@ assert.deepEqual(await apiResponse.json(), {
 
 const dailyBriefApiResponse = proxy(request("/api/daily-brief"));
 assert.equal(dailyBriefApiResponse.status, 401);
+for (const path of ["/api/wecom/reports", "/api/wecom/ca-alerts", "/api/wecom/status", "/api/wecom/ingest"]) {
+  assert.equal(proxy(request(path)).status, 401);
+}
+assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest", {method:"POST"})).headers.get("x-middleware-next"), "1");
+assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest/other", {method:"POST"})).status, 401);
+assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest", {method:"PUT"})).status, 401);
 
 const dottedApiResponse = proxy(request("/api/telegram/media/channel-1/file.jpg"));
 assert.equal(dottedApiResponse.status, 401);

@@ -1,6 +1,8 @@
 # 企业微信群总结接入 SignalHub：对接规范 v2
 
-日期：2026-09-06。**仅文档对齐，未实现接口、未部署、未接收真实数据。**
+更新：2026-09-07。**Windows 网站接收端已实现，合成验收记录见 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)。未部署、未启用真实同步。**
+
+本轮实施依据 Mac [bcb544a 的接入交接](https://github.com/btctothemoonn/wecom-summary/blob/bcb544a746dac7f2b7c55476eb5ec66672d1113f/docs/integrations/signalhub-v2-connect-handoff.md)，对应已发布功能 `d9ddae971bf98d4340e4a67da3cda25513dcae99`。接受市场样例计数修正为 `uniqueStatementCount=2 / duplicateCount=0`；[8f6df4f 历史材料](./history/8f6df4f/manifest.json)保留原字节与哈希，不再用其旧 `1/1` 计数作为来源语义基准。
 
 本规范对齐 Mac [dc259a93ab41a8b00f64a638a5a3ab0c762ffb95](https://github.com/btctothemoonn/wecom-summary/commit/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95) 的[设计](https://github.com/btctothemoonn/wecom-summary/blob/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95/docs/superpowers/specs/2026-09-06-signalhub-sync-design.md)与[实施计划](https://github.com/btctothemoonn/wecom-summary/blob/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95/docs/superpowers/plans/2026-09-06-signalhub-sync.md)。已完整阅读两份文件并核对该提交的 briefing 校验代码。该提交位于 `codex/wecom-notification-probe`，不是 Mac `main`，也不能据源码推断运行进程版本。
 
@@ -37,7 +39,7 @@
 | `GET /api/wecom/status` | 授权后，设备/通道状态；与列表中的 status 同结构 |
 | `GET http://127.0.0.1:3041/health` | 仅 VPS 内部最小存活检查，不返回设备状态、配置或数据，不反向代理到公网 |
 
-以上均为**待实现接口**，不能依据这份文档向线上发送。只有精确 POST 写入口可免除网页登录跳转，同时强制 HMAC；该路径的 GET/其他方法、子路径及所有读 API 不因写入口豁免而变公开。写凭证仅能向服务器绑定的设备写入，验证 body ID 的设备/store 前缀，不能冒充另一设备。
+以上接口在实施分支提供，**线上未部署，不能向生产发送**。只有精确 POST 写入口可免除网页登录跳转，同时强制 HMAC；该路径的 GET/其他方法、子路径及所有读 API 不因写入口豁免而变公开。写凭证仅能向服务器绑定的设备写入，验证 body ID 的设备/store 前缀，不能冒充另一设备。
 
 HTTP 正文为 UTF-8 JSON，无压缩，最多 **262144 字节**；不跟随重定向、不跳过 TLS、不允许 URL 中携带凭证。未知字段、未知类型、未知版本、无效 Unicode、控制字符（除 TAB/LF/CR）拒绝。JSON 对象不允许重复键；布尔不能替代整数，所有计数是 0 至 9007199254740991 的整数。
 
@@ -60,6 +62,8 @@ POST
 [signature.example.json](./signature.example.json) 含三种类型的公开离线向量，`body` 是确切签名字符串。固定时间和公开测试 key 只能用于离线测试，禁止作为生产配置。
 
 私密配置仍为 Mac `~/Library/Application Support/wxFomo LAN/signalhub-sync.json` 的 `url/deviceId/secret`；目录 0700、文件 0600，验证所有权，拒绝符号链接/硬链接。不修改原目录权限。VPS 使用非公开 `WECOM_SYNC_DEVICE_ID/WECOM_SYNC_SECRET`，可选 `WECOM_RECEIVER_PORT=3041`；禁止 `NEXT_PUBLIC_` 或将密钥写入 Git。本轮不创建真实配置。
+
+网站实现增加两个**服务器开关，不是上传字段**：`WECOM_SYNC_ENABLED=true` 才允许接收；`WECOM_OWNER_ADMIN_ONLY=true` 表示管理员登录为本人独占，才允许读取。两者默认关闭。读取还要求合法现有管理员会话和已配置的设备；关闭写入后，原有数据仍可经授权读取。未确认本人独占前不要设置读取开关。
 
 ## 4. report v2
 
@@ -215,6 +219,6 @@ VPS 独立127.0.0.1:3041接收器、独立SQLite，建议192MiB内存/25%CPU、8
 - [实时CA](./ca-alert.example.json)、[关闭快照](./ca-alert-expired.example.json)、[追赶CA](./ca-alert-catchup.example.json)：覆盖更新、失效和不弹历史。
 - [设备心跳](./heartbeat.example.json)：八字段、AI离线与CA在线可独立表示。
 - [三类签名向量](./signature.example.json)：公开测试key、固定时钟、固定字节，禁止生产使用。
-- 离线验收只读上述合成文件，不访问真实库、网络或配置；来源内容由Mac保留不进入样例。
+- 样例和验收源库全部合成；集成测试仅访问本机回环测试服务，不读取真实库/配置，不调用付费模型。来源正文只存在测试临时源库，不上传至网站。
 
-下一阶段由两端分别实现并做假时钟/临时库联调，至少覆盖结构与引用、布尔/整数、UTF-16、匿名和跨账号读取、首收时间、修订乱序、冷却、catchup、窗口关闭、队列恢复及资源达限。**文档对齐不等于离线接收器联调通过；更不等于生产就绪。** 在各自回传实现与测试证据、用户另行确认部署/凭证/启用前，不接收真实数据。
+实现和验证证据集中于 [Windows 回执](./WINDOWS-RECEIVER-RECEIPT.md)。Windows 本机的 Mac 导出/检测/签名测试不替代 Mac 上 POSIX 队列、LaunchAgent、真实部署资源隔离与断网恢复验收。**合成测试通过不等于生产已上线或真实同步已启用。** 在两端回传证据、用户另行确认部署/凭证/启用前，不接收真实数据。
