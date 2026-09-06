@@ -2,6 +2,17 @@
 
 日期：2026-09-07。用户已明确授权直接部署、启用真实同步，并要求企微总结免密码查看。该授权取代先前“仅合成、不部署”的阶段限制。
 
+## Windows 实际上线回执
+
+- 已推送 GitHub `main` 和 `codex/wecom-v2-receiver`，正式代码提交 `9b4823eafeaf163062b6761acfb21fc0e2151a4b`（包含接收实现 `4c93dc9`）。
+- VPS 正式 release：`/home/ubuntu/signal-hub-releases/9b4823e-wDBXwFZA`，2026-09-07 01:25（Asia/Shanghai）启用。原 release `a5ac4ed-xqo5hdd1` 保留用于回滚。
+- Windows、VPS 各 223 个测试文件通过；VPS Linux 隔离发布/开关/失败回滚测试通过；类型检查、ESLint 和正式 Next 构建通过。
+- 公网 `/wecom` 及三个读 API 无登录返回 200；桌面 1440x1000、手机 390x844 Chrome 验证通过，无页面异常或横向溢出。持仓和设置页面仍 307，实际币安持仓 API 仍 401。
+- 无签名写入 401；使用真实专用签名发送无效版本只返回 `400 unsupported_schema`，证明已到达正确验证链路，未写入测试报告/假心跳。
+- `signal-hub-web` 与 `signal-hub-wecom-receiver` 均 active；接收器 enabled、仅 127.0.0.1:3041、内存上限 192 MiB、CPU 25%，检查时约 46 MiB、重启次数 0。
+- **网站已上线并允许接收，不等于 Mac 已启用。** 检查时 `configured=true`、`connection=waiting`、`lastSeenAt=null`；报告和 CA 均为 0。未收到真实 Mac 心跳，不能声称完整生产同步成功。
+- 专用配置已在 VPS 私密文件和 Windows 私密交接包准备好；不在 GitHub。下一步由 Mac Codex 按下节启动，不再重复请求用户许可。
+
 ## 网站变化
 
 - `WECOM_PUBLIC_READ=true` 时，`/wecom` 和报告、CA、状态三个读取接口免登录；保留群名、昵称、完整结构化总结、来源元数据。
