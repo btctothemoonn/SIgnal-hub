@@ -1,209 +1,220 @@
-# 企业微信群总结接入 SignalHub：两端交接规范 v1
+# 企业微信群总结接入 SignalHub：对接规范 v2
 
-日期：2026-09-06。状态：**供两端 Codex 审阅、对齐和实现的接入约定；不是接口已上线的声明。**
+日期：2026-09-06。**仅文档对齐，未实现接口、未部署、未接收真实数据。**
 
-本次提交只包含文档及合成样例，不发布页面、接口或 Mac 常驻程序，不修改生产配置，不上传真实群消息。Signal 本地曾开始的实现草稿不属于本次交付；不能据此假设线上已有接口。
+本规范对齐 Mac [dc259a93ab41a8b00f64a638a5a3ab0c762ffb95](https://github.com/btctothemoonn/wecom-summary/commit/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95) 的[设计](https://github.com/btctothemoonn/wecom-summary/blob/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95/docs/superpowers/specs/2026-09-06-signalhub-sync-design.md)与[实施计划](https://github.com/btctothemoonn/wecom-summary/blob/dc259a93ab41a8b00f64a638a5a3ab0c762ffb95/docs/superpowers/plans/2026-09-06-signalhub-sync.md)。已完整阅读两份文件并核对该提交的 briefing 校验代码。该提交位于 `codex/wecom-notification-probe`，不是 Mac `main`，也不能据源码推断运行进程版本。
 
-## 1. 仓库与协作边界
+本文件取代 [55dfa50 的 v1 文档](https://github.com/btctothemoonn/SIgnal-hub/blob/55dfa500c37d550721a9c1aec0f71e9e6496cc90/docs/integrations/wecom-summary/README.md)。旧样例不可继续用于 v2。参见 [不兼容项与实施缺口](./V2-COMPATIBILITY.md)。
 
-- Signal 仓库：<https://github.com/btctothemoonn/SIgnal-hub>，交接文档分支 `main`。
-- 本文件：`docs/integrations/wecom-summary/README.md`。Mac 端先读取本文件及同目录全部样例。
-- Mac 仓库已改名：<https://github.com/btctothemoonn/wecom-summary>。不要继续向旧名称提交。
-- 前期研究依据：Mac 仓库 `codex/wecom-notification-probe` 分支的 `3ba605e6844913f866658dbd63b6b5a9db099b50`。这不是要求 Mac 回退到该版本。Mac Codex 应先核对当前分支、提交和运行版本，再反馈实际差异。
-- Mac 负责：保留企业微信监听、群归属边界、现有总结调度和 MiniMax 配置；新增只读导出、独立可靠发送队列。不要改回普通微信监听。
-- Signal 负责：独立接收服务、鉴权、持久化、登录后的展示页和 VPS 部署；不负责重新监听或调用模型重做群总结。
-- 先代码审阅和合成数据联调，再交换专用凭证、确认首次同步范围，最后启用真实同步。两端各自提交自己的仓库，不需要 Mac SSH 暴露到公网。
+## 1. 范围与隐私
 
-## 2. 展示与数据范围
+- 独立页面 `/wecom` 展示完整群聊总结、来源元数据、实时“跨群提及”CA 卡片及设备状态，不混入 X/TG 或市场简报。
+- **保留用户已授权的群名、昵称、观点归属和来源元数据**；不默认匿名化、删除名字或压平完整总结。
+- **不上传原始聊天、逐条内容、引用原文、附件、通讯录、成员列表、源库文件或平台事件 ID。** `sources` 必须是空数组；`sourceReferences` 没有 content/excerpt 等正文键。
+- 总结中保留既有结论和说话人归属，不把原文粘贴到 summary/note 绕过限制。只允许最终版总结，不输出模型思考过程。原 CA 字符串不是凭证，不能因长度或混合大小写被误删。
+- 不上传 MiniMax Key、LAN 密码、同步 secret、provider_request_id、token 用量或诊断对象。疑似凭证/核心正文超限时隔离整份结果并记固定错误码，不静默删结论或引用。
+- 此次没有授权历史回填、重新生成 AI 总结、开启发送、配置真实凭证或部署。原监听、群配置、relay 边界、2h/6h/24h 调度及源数据库保持不变。
 
-新增独立页面“群聊总结” `/wecom`，展示 2 小时 / 6 小时 / 24 小时报告、报告时间范围、生成时间、最后同步时间和设备状态。它不是 `/intel` 市场简报，也不混入 X/TG 信息流。
+## 2. 授权边界
 
-| 数据 | 默认行为 |
+所有页面、报告列表/详情、CA 历史/活跃列表、设备状态及以后添加的导出/推送读取都要先验证**登录会话和该设备数据的访问授权**。不能只隐藏菜单、只校验请求带有 deviceId，或把 HMAC 写入凭证当作读取凭证。
+
+当前 Signal `src/lib/admin-auth.ts` 是单管理员会话，没有 userId/多账号 ACL。首版只能作为本人独占管理员空间：部署前必须确认该登录权限未共享给其他人；否则先补真实身份与设备归属授权再启用。未来多用户时，服务器须绑定 owner 与 device，并在查询前过滤，不能默认向其他已登录账号开放。客户端不能自报 owner 获得访问权。
+
+匿名 API 请求返回 401；登录但无该设备权限返回 403（资源 ID 不泄露是否存在）；页面未登录跳转登录页。页面/读 API 均做服务端授权，不依赖客户端检查或仅依赖全局代理。登录失效立即清空前端群数据，不将“网络故障保留缓存”用于绕过退出登录。
+
+所有带内容或设备状态的响应使用 `Cache-Control: private, no-store`；不进公共 CDN、静态构建、公开日志或共享 Service Worker 缓存。服务器独立 SQLite 是私有持久缓存，断网仍可在登录授权后读取；浏览器只保留当前授权会话中的内存副本。
+
+## 3. 传输与端点
+
+| 目标端点 | 约定 |
 | --- | --- |
-| 已成功生成的总结 | 同步最终版正文、话题、发现、模型名、窗口、生成时间及必要计数；不上传模型思考过程 |
-| CA 讨论 | 可同步该份报告已有的合约地址、网络、聚合计数和分析；默认不上传群名及成员身份 |
-| 原始群消息、逐条聊天、附件 | **不上传**；`sources: []`，各 `sourceMessageIDs: []`，CA 的 `groups: []` |
-| 原文引用 | 首版默认关闭；仅在用户明确同意后增加有界引用。不得借“补充引用”上传整窗聊天 |
-| 历史报告 | 默认不自动回填。正式启用时记录当前结果水位，只接续之后成功落库的结果 |
-| 首屏旧报告/历史补传 | 可另行批准“每个周期最近 1 份”或明确时间范围；仅同步已存在的总结，不补跑付费 AI |
-| 密钥和本机数据文件 | 永不进入 Git、请求正文、日志或浏览器；不上传数据库、LAN 密码、MiniMax Key、同步 secret |
+| `POST https://holdrich.online/api/wecom/ingest` | 唯一机器写入口；HMAC；接受 v2 report / ca_alert / heartbeat |
+| `GET /api/wecom/reports?cadence=two_hour&limit=10&before=...` | 授权后，周期分页摘要 |
+| `GET /api/wecom/reports?id=...` | 授权后，完整结构化报告 |
+| `GET /api/wecom/ca-alerts?limit=10&before=...` | 授权后，CA 历史分页 |
+| `GET /api/wecom/ca-alerts?active=1&limit=50` | 授权后，当前有效卡片与总量 |
+| `GET /api/wecom/status` | 授权后，设备/通道状态；与列表中的 status 同结构 |
+| `GET http://127.0.0.1:3041/health` | 仅 VPS 内部最小存活检查，不返回设备状态、配置或数据，不反向代理到公网 |
 
-总结文字本身也可能包含群内隐私。Mac 端导出必须字段白名单，检测和排除凭证；发现敏感内容时隔离该报告、显示固定错误码，不静默发送。需要映射匿名群名时先反馈约定，不自行扩大范围。
+以上均为**待实现接口**，不能依据这份文档向线上发送。只有精确 POST 写入口可免除网页登录跳转，同时强制 HMAC；该路径的 GET/其他方法、子路径及所有读 API 不因写入口豁免而变公开。写凭证仅能向服务器绑定的设备写入，验证 body ID 的设备/store 前缀，不能冒充另一设备。
 
-“已生成结果”以数据库成功落库为准。启用前已排队、启用后才成功完成的任务允许发送，这不意味着重新扫描历史聊天。用户尚未选择首次同步截止点时，只可本地 dry-run 或发送合成数据。
+HTTP 正文为 UTF-8 JSON，无压缩，最多 **262144 字节**；不跟随重定向、不跳过 TLS、不允许 URL 中携带凭证。未知字段、未知类型、未知版本、无效 Unicode、控制字符（除 TAB/LF/CR）拒绝。JSON 对象不允许重复键；布尔不能替代整数，所有计数是 0 至 9007199254740991 的整数。
 
-## 3. 独立运行与性能边界
+### 签名保持 v1
 
-```text
-Mac 企业微信监听 -> 现有消息库 -> 现有总结进程 -> 已完成报告库
-                                                    |
-                                         只读导出 -> 本地持久队列
-                                                    |
-                                           HTTPS + HMAC
-                                                    v
-Signal 登录站点 -> 有界认证转发 -> VPS 独立接收进程 -> 独立 SQLite
-                                                    |
-                                         登录后的本地缓存读取页
-```
+必填头：`X-Wecom-Device`（1-64 位，`[A-Za-z0-9][A-Za-z0-9._-]*`）、`X-Wecom-Timestamp`（10 位 Unix 秒）、`X-Wecom-Nonce`（随机 16 字节的 32 位小写 hex）、`X-Wecom-Signature`（64 位小写 hex）。secret 至少 32 字符，建议随机 32 字节的 64 位 hex 文本；HMAC 使用该文本的 UTF-8 字节，**不进行 hex 解码**。
 
-- 浏览器只访问 Signal，不等待 Mac，不调用 AI。Mac 断网、重启、总结失败时保留服务器最后一次成功结果。
-- 接收进程仅监听 VPS `127.0.0.1:3041`，不对公网开放该端口。与 Signal 主站进程隔离，独立数据库，禁止共用主信号流 SQLite 写锁。
-- 下一阶段建议上限：单条请求 256 KiB、并发最多 8、接收连接最多 16、正文读取 3 秒、站内转发 3 秒；接收服务内存 192 MiB、CPU 配额 25%。这些是实施目标，需 VPS 实测，不是零影响承诺。
-- 数据库含 WAL 的磁盘预算先设 256 MiB，达限拒绝新写入、报警并由 Mac 保留队列；不得自动删除未确认报告。容量扩充/历史保留周期另行确认。
-- 列表每页 10 条、最多 10 条，只读简版字段；正文按需读取。页面可见时每 60 秒刷新，隐藏时停止；刷新失败保留已显示结果。
-- 认证不能仅依赖“从网站转发过来”：接收进程必须再次校验 HMAC。签名和实际正文不一致必须拒绝。
-
-## 4. 接口与认证
-
-以下为**待实现目标**。Signal Codex 提供上线就绪确认前，不向生产地址批量发送。
-
-| 接口 | 用途与权限 |
-| --- | --- |
-| `POST https://holdrich.online/api/wecom/ingest` | Mac 推送唯一公网入口；专用 HMAC，不用网页密码/Cookie |
-| `GET /api/wecom/reports?cadence=two_hour&limit=10&before=...` | 登录用户读取分页摘要；游标由服务端给出，不自行构造 |
-| `GET /api/wecom/reports?id=...` | 登录用户读取报告详情；ID 需 URL 编码 |
-| `GET http://127.0.0.1:3041/health` | VPS 内部健康检查，不含报告、配置值或密钥 |
-
-只对精确路径 `/api/wecom/ingest` 免除网页登录跳转，转而强制机器认证；其子路径及所有读接口仍受原站点登录保护。只支持 POST、`Content-Type: application/json`、UTF-8、无压缩，请求体最大 **262144 字节**。不允许重定向、更换域名转发签名、跳过 TLS 校验或把 secret 放入 URL。
-
-必填请求头：
-
-| 头 | 格式 |
-| --- | --- |
-| `X-Wecom-Device` | 1-64 位，`[A-Za-z0-9][A-Za-z0-9._-]*`；初期一个设备 |
-| `X-Wecom-Timestamp` | Unix 秒，10 位十进制；不是毫秒 |
-| `X-Wecom-Nonce` | 每次请求新生成的 16 字节随机数，32 位小写十六进制 |
-| `X-Wecom-Signature` | HMAC-SHA256 结果，64 位小写十六进制 |
-
-签名字符串由以下 6 行通过 ASCII `\n` 连接，**末尾没有换行**：
-
+以下六行由 LF 连接，末尾无 LF，使用 HMAC-SHA256：
 ```text
 POST
 /api/wecom/ingest
 {deviceId}
 {timestamp}
 {nonce}
-{sha256(实际发送的原始 body 字节)，小写 hex}
+{sha256(实际发送的 body 字节)，小写 hex}
 ```
 
-以 secret 的 UTF-8 字节为 HMAC key。建议专用随机 32 字节以 64 位 hex 文本保存；签名时用该文本的 UTF-8 字节，**不是 hex 解码后的字节**。服务端至少要求 32 字符。不要重复 JSON 序列化后再验签，空格、中文转义和末尾换行都会影响 body hash。
+时间容差 300 秒；接受 nonce 持久保存至少 610 秒，与对象/心跳写入同一事务，重启后仍拒绝重放。重试更新 timestamp/nonce/signature，但固定原 payload 字节。Mac 规范序列化沿用其计划：`ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")`，再 UTF-8 编码；接收端直接验实际字节，不重排 JSON 后验签。
 
-离线跨语言校验使用 [signature.example.json](./signature.example.json)：对其中 `body` 字符串的 UTF-8 字节计算摘要，应匹配 `bodySha256` 和 `signature`。这个公开测试 key 不能用于生产；固定 timestamp 仅用于固定测试时钟，不能原样用于在线请求。
+[signature.example.json](./signature.example.json) 含三种类型的公开离线向量，`body` 是确切签名字符串。固定时间和公开测试 key 只能用于离线测试，禁止作为生产配置。
 
-请求时间容差为前后 300 秒。服务端持久化已接受 nonce 至少 610 秒，重启不能丢失重放保护；nonce 与报告/心跳写入在同一事务中完成。重复 nonce 返回 409。Mac 重试必须换 timestamp 和 nonce，但同一报告版本保持原始 payload 不变。
+私密配置仍为 Mac `~/Library/Application Support/wxFomo LAN/signalhub-sync.json` 的 `url/deviceId/secret`；目录 0700、文件 0600，验证所有权，拒绝符号链接/硬链接。不修改原目录权限。VPS 使用非公开 `WECOM_SYNC_DEVICE_ID/WECOM_SYNC_SECRET`，可选 `WECOM_RECEIVER_PORT=3041`；禁止 `NEXT_PUBLIC_` 或将密钥写入 Git。本轮不创建真实配置。
 
-私密配置示例（仅占位，不是可用凭证）：
+## 4. report v2
 
-```json
-{
-  "url": "https://holdrich.online/api/wecom/ingest",
-  "deviceId": "mac-wecom",
-  "secret": "<由两端在各自私密配置中填写同一个专用随机值>"
-}
-```
+封装严格为 `{schemaVersion:2,type:"report",report:{...}}`。`schemaVersion` 是传输版本，`briefing.version` 是内部总结版本，独立校验，不能相互替代。
 
-Mac 推荐路径 `~/Library/Application Support/wxFomo LAN/signalhub-sync.json`，目录 0700、文件 0600，拒绝不安全所有权/权限和符号链接。单独发送进程，不复用 LAN access-token 或 AI 配置。VPS 使用非公开环境变量 `WECOM_SYNC_DEVICE_ID`、`WECOM_SYNC_SECRET`、可选 `WECOM_RECEIVER_PORT=3041`。不得使用 `NEXT_PUBLIC_` 前缀。凭证通过用户控制的私密本机配置传递，不贴在 Git、PR 或聊天里；换 key 后需协调重载两端。
+| 字段（全部必填） | 规则 |
+| --- | --- |
+| id / revision | id 最多 1024，`[A-Za-z0-9][A-Za-z0-9._:-]*`；`wecom:{deviceId}:{storeId}:{sha256(job_id UTF-8)}`。revision 为成功结果 analysis_id，正安全整数 |
+| cadence | two_hour / six_hour / daily |
+| windowStart / windowEnd / generatedAt | UTC ISO 8601；推荐毫秒格式，起点 < 终点；生成时间取 result.created_at，不取任务创建/同步时间 |
+| summary / model | 非空，最长 10000 / 256 UTF-16 单位。summary 只是 quick_read 三条预览，不是完整正文 |
+| sourceCount / sourceComplete | 冻结输入数量；完整性只针对本地冻结记录，不保证采集了完整群聊 |
+| sourcesTruncated / sources | `sourcesTruncated = sourceCount > 0`，`sources = []`；表示不分享原文，**不表示 briefing 被截断** |
+| topics / findings | v2 均固定 []，不能退回 v1 从这里读完整结论 |
+| caDiscussions | 报告窗口的 CA 聚合，最多 50 项，格式见第 6 节 |
+| briefing | 下节完整结构，不能压平、补写或调用 AI 重做 |
+| scope | 严格字段见下文 |
+| sourceReferences | 实际引用的元数据并集，最多 500 项，无原文 |
+| caCoverage | `{sourcesComplete,totalItems,exportedItems,truncated}` |
 
-## 5. JSON v1
+storeId 首次启用时持久化，重启不重建。结果代际回退/替换须暂停对应通道并审阅，不拿 worker instance_id 当库代际。已知源库恢复需先停用同步再建立新 storeId；现有锚点检测不能保证识别所有相同锚点的备份恢复。
 
-正文有两种，所有列出的字段必须出现；空集合用 `[]`，规定可空的值用 `null`。未知字段和未知 `schemaVersion` 拒绝，不忽略错误。完整合成示例见 [report.example.json](./report.example.json) 和 [heartbeat.example.json](./heartbeat.example.json)。
+### scope 与来源闭包
 
-```text
-{ "schemaVersion": 1, "type": "report", "report": { ... } }
-{ "schemaVersion": 1, "type": "heartbeat", "status": { ... } }
-```
+scope 仅有：
+`groupNames, timeZone, timeBasis, dataCutoff, frozenCount, analyzedCount, readableCount, missingCount, unknownTimeCount, completeChatHistory, externalVerification`。
 
-Report 字段：
+- groupNames 是可读冻结记录的群名集合，最多 50 个、每个最多 200 UTF-16 单位，不猜不可读来源的群名。不静默裁群；真实范围超限时隔离并反馈。
+- timeZone 固定 Asia/Shanghai，timeBasis 固定 notification_observed_at。dataCutoff 是读取记录中最新采集时间，UTC 或 null。
+- `frozenCount = analyzedCount = sourceCount`；`readableCount + missingCount = frozenCount`；`unknownTimeCount <= readableCount`。
+- sourceComplete 与 caCoverage.sourcesComplete 均基于是否能匹配完整冻结输入；缺失记录时为 false。`completeChatHistory = externalVerification = false`，不冒充完整群聊或外部核验。
+- caCoverage 的 exportedItems 等于 caDiscussions.length；totalItems 是可读冻结输入中裁剪前聚合总数，至少 exportedItems；truncated 等于 exportedItems < totalItems。完整性与展示裁剪是两个独立维度。
+
+sourceReferences 每项严格为 `{id,group,sender,observedAt,available}`：
+- id 是按冻结顺序映射的报告内编号 `M0001` 等，匹配 `M[0-9]{4,}`、最长 32；不是平台事件 ID。编号唯一，不能按引用发现顺序重新编号。
+- group/sender 是群名/昵称或 null，最长 200 UTF-16 单位；observedAt 为 UTC 或 null，标注“通知采集时间”而非发言时间。
+- available=false 时上述三项均为 null。可读来源缺少昵称/时间仍可 available=true，缺失项用 null；不能伪造来源。
+- 所有 briefing.source_message_ids 和 caDiscussions.sourceMessageIDs 都必须解析到本报告的元数据。元数据集合必须恰好是实际引用并集，不能夹带其他消息身份。
+- 缺失原记录仍保留被引用编号和缺口；没有正文就显示“原文仅保存在 Mac，未同步”，不提供假“查看原文”。
+
+源库暂时不可读应重试，不能当空库；可读但确实缺失时可保留原总结并标不完整。scope 缺口计数涵盖全部冻结输入，不只是实际引用的子集。
+
+## 5. 完整 briefing
+
+与 Mac dc259a9 的 `briefing.py:validate_briefing` 对齐。所有对象严格字段白名单，数组必填、不能 null：
+
+| 对象 | 精确字段与限制 |
+| --- | --- |
+| briefing | version=2、kind=market/business、quick_read、projects、events、gaps、business |
+| NOTE | text、source_message_ids |
+| quick_read | focus/news/risk，均为 NOTE |
+| project（最多 8） | name、chain、summary、catalysts、latest、risks、data、addresses、source_message_ids |
+| data（每项目最多 4） | value、unit、source、recorded_at、kind、source_message_ids；kind=历史快照/个人预测，其余标量为原有字符串 |
+| address（每项目最多 1） | address、chain、source_message_ids；chain 等于项目 chain；32-44 个 ASCII 字母数字，原样保留 |
+| event（最多 10） | event、asset、nature、impact、pending、source_message_ids；nature=自述/转述/推测/待核实 |
+| gaps（最多 8） | NOTE 数组 |
+| business | progress/notices/blockers 为 NOTE 数组；tasks 为 task 数组，每数组最多 10 |
+| task | text、owner、deadline、source_message_ids |
+
+每处引用最多 5 个本地编号；实质结论必须引用。仅 quick_read 的“无有效信息”/“未提供”可用空引用。未知信息沿用“未提供/待核实/未确认”，不能编造负责人、日期、链或证实结论。market 的 business 四数组为空；business 的 projects/events 为空。快照中的 recorded_at 是来源原有记录口径，不强行当作机器 UTC 时间解析。
+
+Mac 先在本地按原规则验证正文（最多 600 个 Python 字符、实际地址证据和引用），再仅映射引用字段。v2 briefing 文本传输上限 **1200 UTF-16 单位**，无损容纳补充平面字符；不将此限制误套 group/sender 或旧字段，也不能把 600 个普通字符上限放宽成 1200 个普通字符的模型输出。
+
+Signal 不拥有原文，能校验结构、引用闭包和计数，**不能独立证明总结或 CA 获原文支持**；证据核对由 Mac 完成。不因元数据 available=true 就标“已核验”。正文中的 HTML/脚本仅作安全文本，禁止执行。
+
+优先保留核心 briefing 和其必要元数据。仅可从已排序可选 CA 卡尾部减少条目以满足 500 引用/256 KiB 上限，记录 coverage；留下的卡片计数不改。核心本身超限则隔离整份，不偷偷删结论、姓名或引用。
+
+## 6. 报告 CA 与实时 CA 分离
+
+报告 caDiscussions 项继续使用：
+`{address,network,groups,mentionCount,uniqueStatementCount,duplicateCount,summary,sourceMessageIDs}`。
+address/network 最长 128/40；groups 最多 50、每项 200；summary 最长 2000 或 null；引用最多 5。所有计数为非负安全整数，`mentionCount = uniqueStatementCount + duplicateCount`。报告 CA 可有 unknown 网络，但未知 EVM 按群隔离，不强行跨群合并。
+
+报告 CA 只对每份新成功结果的完整冻结范围聚合一次并固化；重试不重算。显示地址取直接来源中首次原样字符串，匹配键可规范化，显示值不可随之改大小写；无证据恢复原样时隔离导出。昵称不等同真实身份，重复搬运不等于独立证实。
+
+network 使用 dc259a9 现有规则的规范值：base/bsc/ethereum/arbitrum/polygon/optimism/avalanche/solana（报告另允许 unknown）；它与 briefing 中原样 chain 文本、原样地址的大小写规则不同。
+
+### ca_alert v2 字段
+
+封装严格为 `{schemaVersion:2,type:"ca_alert",alert:{...}}`，alert 字段全部必填：
 
 | 字段 | 规则 |
 | --- | --- |
-| `id` | 最长 1024，`[A-Za-z0-9][A-Za-z0-9._:-]*`；稳定、不含群名成员名，不用发送时刻生成 |
-| `revision` | 正整数，最大 `9007199254740991`；当前不可变结果建议使用 `analysis_id` |
-| `cadence` | `two_hour` / `six_hour` / `daily`，对应现有 2h/6h/24h 调度，不改动其时区/宽限时间 |
-| `windowStart`, `windowEnd`, `generatedAt` | UTC ISO 8601，如 `2026-09-06T00:00:00.000Z`；起点小于终点。不要用推送时间覆盖生成时间 |
-| `summary`, `model` | 非空文本，分别最长 10000 / 256 |
-| `sourceCount` | 非负安全整数，原报告冻结输入数量；不是本次导出条数 |
-| `sourceComplete` | 原报告输入是否完整匹配其冻结的本地消息范围；未知填 false，不代表企业微信绝对未漏消息 |
-| `sourcesTruncated` | 来源详情未完整上传时 true；默认只总结模式在 `sourceCount > 0` 时 true |
-| `topics` | 最多 30；每项 `{title, summary, sourceMessageIDs}`，长度分别 200 / 2000 / 最多 50 个 ID |
-| `findings` | 最多 40；每项 `{category, text, epistemicStatus, sourceMessageIDs}`，category 最长 80，text 最长 2000，引用最多 50 |
-| `caDiscussions` | 最多 50，格式见下文 |
-| `sources` | 默认 `[]`，仅经用户授权后启用下述引用格式 |
+| id / revision | `wecom-ca:{deviceId}:{storeId}:{持久 episode 序号}`；同活跃期 ID 稳定，revision 正安全整数、持久单调增加 |
+| address / network | 原样 CA，最长 128/40；network 是现有文本规则识别值，实时跨群不允许 unknown，不访问链上或行情服务 |
+| groups / groupCount | 不重复群名数组，2-50 群、每项 200；groupCount 等于长度，不静默裁群 |
+| mentionCount / uniqueStatementCount / duplicateCount | 非负安全整数，mentionCount=uniqueStatementCount+duplicateCount；同事件只计一次，不拿刷屏条数代替群数 |
+| firstSeenAt / lastSeenAt | 最后有效窗口统计的采集时间范围 |
+| triggeredAt / evaluatedAt / expiresAt | 首次满足条件的检测时间 / 本版计算时间 / 跨群条件预计失效时间，全部 UTC |
+| windowSeconds / thresholdGroups | 首版固定 3600 / 2，冷却规则为 1800 秒 |
+| status | active/expired；expired 沿用最后有效快照的群、计数、firstSeenAt/lastSeenAt/expiresAt，只更新状态、revision、evaluatedAt |
+| notificationVersion | 非负安全整数且 <= revision；本规则仅 0 或 1，同 episode 不变。正常首次通过冷却为 1；冷却抑制或 catchup 为 0 |
+| catchup | 首次形成于停机/积压追赶则 true，同 episode 保持不变，网页不弹实时新提醒 |
 
-`epistemicStatus` 只能是 `fact` / `inference` / `uncertain`，保留原总结的事实与推断区分，不把推断升级为事实。
+active 满足 firstSeenAt <= lastSeenAt <= evaluatedAt、triggeredAt <= evaluatedAt、evaluatedAt < expiresAt；过去窗口边界 `(evaluatedAt-3600秒,evaluatedAt]`。expired 可能由合法消息修订/归并导致早于预计 expiresAt 关闭，因此**不能强制 expired.evaluatedAt >= expiresAt**。服务器按显式 expired 或当前时间 >= expiresAt 视为失效；关闭后不接受同 episode 重新 active，重新触发应新建 ID。
 
-每项 CA：`{address, network, groups, mentionCount, uniqueStatementCount, duplicateCount, summary, sourceMessageIDs}`。address 最长 128、network 最长 40；无现成网络结论可写 `unknown`，不能猜测。summary 是最长 2000 的文本或 null。三个计数是非负安全整数，必须满足 `mentionCount = uniqueStatementCount + duplicateCount`。裁剪展示不能更改原聚合计数。groups 默认空；获得同意后最多 50 项、每项 200。引用 ID 默认空，最多 5 项。
+提醒仅称“跨群提及”，不是投资机会或事实核验。CA payload 不含昵称列表、消息内容、原始事件 ID、源库路径或 AI 摘要。
 
-仅经批准后的引用项：`{id, group, sender, content, observedAt}`；id 同报告 ID 字符规则，group 最长 200，sender 最长 200 或 null，content 最长 800，observedAt 是上述 UTC 时间。每份最多 50 条、ID 唯一、只取报告实际引用的片段，不补充无关消息。`sourceCount >= sources.length`，引用因裁剪未导出时允许引用 ID 不出现在 sources 中。
+### 触发、冷却与追赶
 
-文本长度统一按 **UTF-16 code units** 计数，兼容 JavaScript；Python 不能直接拿 `len()` 当这一上限。禁止非文本控制字符和无效 Unicode。单请求字节上限优先于所有字段上限。若超限，先缩减可选数组；不能通过静默丢失核心结论来强行发送，无法安全投影时本地隔离并报错。省略/裁剪情况必须可观察。
+- Mac 每 10 秒有界读取新消息。60 分钟内至少 2 个不同已配置群、同链同 CA 才触发；未知 EVM 按群隔离，可能漏掉未注明链的讨论，页面如实说明。
+- 用 messages.id 插入序号推进，observed_at 用于窗口、inserted_at 用于本地延迟度量；不能用采集时间当游标。原位 record_version 修改/别名归并/删行需每 60 秒分批核对滚动索引，触发前复核候选直接来源。
+- EVM 内部键小写、Solana 原样；同昵称+归一化相同文本的搬运记重复，无昵称按事件键处理，不宣称独立人数。
+- expiresAt = 各群最近有效采集时间中第二新的时间 + 3600 秒，不是全局 lastSeenAt + 3600 秒；无新消息也要评估过期。
+- 同 episode 只更新卡片。失去第二个有效群关闭，重新达到阈值新 episode；同键 30 分钟内不再发站内新提示，但保留卡片。冷却结束本身不重弹，单纯重复搬运不反复弹。
+- 网络断开时已经检测入队的事件原样补传，过期/延迟展示，不冒充刚触发。停机未检测的过期窗口只计漏检、不编造历史提醒；重启追赶水位内或处理延迟 >60 秒派生的新 episode 为 catchup=true。
+- 正常联网、无积压、页面可见时，目标为采集入库至网页可见 <=60 秒，**不是 SLA，也不是从实际发言时间起算**。Mac 本地插入时间、检测时间和网站接收/显示时间用合成联调独立测量，不能用 HTTP 200 代替。
 
-报告 ID 建议 `wecom:{deviceId}:{storeId}:{sha256(原始 job_id UTF-8)}`。storeId 为首次接入时持久化的随机 UUID，重启不得重建；同一结果重发不能换 ID。数据库重建/回滚造成 `analysis_id` 倒退时停止自动推进并报警，由操作者审阅后建立新 storeId，避免旧 ID 覆盖其他报告。
+## 7. 设备状态与读响应
 
-心跳字段：`{listener, worker, pendingReports, lastError}`。listener/worker 分别是 `online` / `offline` / `unknown`；取现有进程真实心跳而非“同步 HTTP 成功”推断。pendingReports 为未确认报告数，非负安全整数。lastError 是 null 或 `[a-z][a-z0-9_]{0,79}` 固定错误码，禁止直接放异常字符串、URL、消息正文或凭证。
+heartbeat 封装 `{schemaVersion:2,type:"heartbeat",status:{...}}`，status 精确八字段：
+`listener,worker,pendingReports,lastError,caDetector,pendingAlerts,lastMessageObservedAt,lastCaEvaluatedAt`。
+三进程状态为 online/offline/unknown；两个 pending 为安全整数、报告和 CA 分开；两个时间为 UTC 或 null。lastError 为 null 或 `[a-z][a-z0-9_]{0,79}` 固定码，不能放原异常。
 
-## 6. 成功确认、去重与失败
+监听/worker 使用真实心跳（Mac 当前 5 秒/15 秒判定）；CA 超过 30 秒无成功评估为 offline，源不可读为 unknown；不能用 AI/HTTP 成功推断 CA 在线。设备连接超过 180 秒无有效请求为 offline，最后报告仍可读取。待确认与隔离队列不可通过假“0”隐藏错误；隔离/积压至少通过固定错误码明确标记。
 
-```json
-{"ok":true,"id":"<与请求相同>","revision":1,"disposition":"stored"}
-```
+服务器读 status = 八个心跳字段，加 `configured,connection,lastSeenAt,lastReportAt`，connection 为 waiting/online/offline，其余时间 UTC 或 null。未收到心跳时进程均 unknown。即使仍返回上次进程证据，connection=offline 时网页必须整体标“状态已过时”，不把旧 online 当实时。
 
-- `stored`：已持久化新报告或更高版本；同 ID 更高 revision 才能更新。
-- `duplicate`：同 ID、同 revision、同 payload，返回成功，不新增重复卡片。
-- `stale`：服务器已有更高 revision，旧版本不覆盖，仍回显本次请求的 id/revision 以确认无需补传。
-- 同 ID、同 revision 但内容不同：409 `revision_conflict`，必须检查原因，不能假装成功。
-- 心跳成功只返回 `{"ok":true}`。报告必须核对 HTTP 200、JSON、ok、id、revision 和 disposition 全部匹配后才可出队；重定向、登录 HTML 或不匹配确认都不是成功。
+报告列表返回 `{items,nextCursor,status}`；每项是 v1 的简版字段 id/cadence/windowStart/windowEnd/generatedAt/summary/model/sourceCount/sourceComplete/sourcesTruncated，另加 syncedAt；summary 预览最多 450 UTF-16 单位。按 `(windowEnd DESC,id DESC)` 分页，limit 1-10。详情返回 `{report,syncedAt}`，report 是完整 v2 对象，不能只回 summary。
 
-| HTTP/错误 | Mac 行为 |
-| --- | --- |
-| 超时/断网/408/5xx | 保留原 payload，指数退避并加随机抖动；不重跑 AI |
-| 429 | 按 Retry-After（最长 15 分钟）等待；无该头时退避 |
-| 401 `invalid_signature` | 暂停发送并显示认证/时钟异常；不逐条丢弃报告 |
-| 503 `sync_unconfigured`、404/405 | 视为服务尚未就绪，保留队列、低频探测，不连续重试 |
-| 400/413/415 或 409 `revision_conflict` | 将该条持久化到失败队列，显示错误和计数；不堵住后续合法报告，不删除失败 payload |
-| 409 `replay` | 保留 payload、生成新 nonce，按退避重试 |
+CA 历史返回 `{items,nextCursor,status}`，按 `(triggeredAt DESC,id DESC)` 分页，limit 1-10；active 模式 limit 1-50、不得同时 before，返回 `{items,nextCursor:null,status,total,truncated}`，total 是**已授权**有效卡片总量，truncated=items.length<total。每项为 alert 全字段加以下**仅服务器读取字段**：
+- firstReceivedAt：该 typed ID 第一次持久收到的服务器时间，不随后续修订变化。
+- syncedAt：当前存储版本的接收时间，不覆盖源时间；duplicate/stale 不刷新版本时间。
+- effectiveStatus：服务器依据 status/expiresAt 计算的 active/expired。
+- delayed：首次接收相对 triggeredAt >60 秒；不与 catchup 混用，不代表完整入库至网页耗时。
 
-错误响应为 `{"error":"固定错误码"}`，不得返回堆栈、聊天或数据库内容。数据库忙/磁盘满/接收进程失败返回 503，不确认尚未持久化的内容。匿名请求无权探测报告是否存在。
+上述读字段不允许出现在 Mac 上传的 alert。跨类型分开存储，episode 新修订不能重设 triggeredAt/catchup/notificationVersion/firstReceivedAt。乱序低版本不得覆盖高版本，关闭版本先到时旧 active 不得复活。
 
-## 7. Mac 同步规则
+所有查询严格校验枚举、整数、重复参数、游标及组合；before 为不透明游标、不能用于跨设备越权。不存在且已授权的详情返回 404。正文按需读取；列表不开完整来源数组。
 
-1. 只读查询已完成结果表，按 `analysis_id` 升序增量分页。不要用现有只显示最近 30 份的 `/api/analyses` 当同步水位，也不要每分钟重读整窗聊天和重算全部历史 CA。
-2. 保留现有源数据库、relay 归属边界和监听权限。原库以只读连接打开；同步队列、配置和 checkpoint 写入独立目录/库，不改原 schema 或迁移原库。
-3. 每 60 秒检查新完成报告并发心跳；每轮最多导出 10 份、一次只发 1 个请求。总结生成仍沿用现有周期，不把 60 秒同步误做 60 秒 AI 生成。
-4. 先将固定 payload 和读取水位在同步库同一事务中落盘，再发请求。读取水位只代表“已可靠入队”，不代表“服务器已收到”；发送确认单独持久化。损坏源行要留下可重试失败记录，不能静默越过。
-5. 请求超时建议 10 秒；失败退避 5、10、20、40 秒递增至 300 秒并加抖动。有新任务也不能绕过已生效的全局限流/认证暂停。
-6. 重启恢复未确认队列。最多 1000 条或 128 MiB 待发送数据，先达到任一上限就暂停继续读取并报警，不能删除未发送记录腾空间。源库仍保留原总结。
-7. 不通过公网暴露 Mac 的 LAN 服务；发送端不跟随重定向，不把自定义认证头透传到其他域名，不在代理或诊断日志中打印认证头和正文。
-8. 默认停用常驻同步，先 dry-run 合成数据及只统计候选数量。凭证、截止点和真实范围确认后，再安装/启用独立 LaunchAgent。关闭同步仅停止新模块，不停监听和总结。
+CA 当前可见区每 15 秒刷新，总结每 60 秒；隐藏时停、重开立即加载。浏览器按 `(id,notificationVersion)` 去重：首次进入只展示，后续仅对 notificationVersion>0、catchup=false、未过期、且首次接收距离 triggeredAt <=60 秒的未提示事件发站内提示。重新打开不批量弹历史。退出登录清缓存；网络异常保留本会话上次成功结果。首版不申请系统通知、邮件、Telegram 或后台 Web Push。
 
-原报告没有现成可安全投影的 CA 或来源信息时，先反馈缺失，不额外调用模型。源库暂时忙/不可读应重试；不能为了交付而伪造空报告或完整标记。
+## 8. 持久确认、限流与独立资源
 
-## 8. Signal 读取约定
+report/ca_alert 成功均回显 `{ok:true,id,revision,disposition:"stored"|"duplicate"|"stale"}`；heartbeat 成功为 `{ok:true}`。必须在持久提交后才返回。Mac 校验 HTTP 200、合法 JSON、匹配当前 type 对应的 id/revision 和 disposition 才出队；type 由固定请求上下文关联，不修改 v1 确认格式。响应读取最多 16 KiB。
 
-列表响应：`{items, nextCursor, status}`。items 每项仅含 `id, cadence, windowStart, windowEnd, generatedAt, summary, model, sourceCount, sourceComplete, sourcesTruncated, syncedAt`；summary 是最多 450 字的预览。按 `(windowEnd DESC, id DESC)` 稳定游标分页，nextCursor 无下一页时 null。
+同 type+id+revision 同字节为 duplicate；同版异内容 409 revision_conflict；低版本 stale 回显请求版本、高版本才可更新。数据库键至少包含 owner/device/type/id；队列键包含 type/id/revision，不共用无类型 ID。重放 nonce 409 replay；不修改未确认 payload 绕过冲突。
 
-详情响应：`{report, syncedAt}`，report 为完整 v1 Report。syncedAt 由服务器收取成功时生成，不能覆盖 Mac 的 generatedAt。
+401 全局暂停；429 解析 Retry-After（秒或日期，最长 900 秒）；404/405、503 sync_unconfigured 低频探测；408/5xx/断网指数退避 5 秒到 300 秒并抖动；400/413/415/revision_conflict 持久隔离，不丢弃或无限阻塞其他合法数据。未知版本 400 unsupported_schema 后暂停该版本通道并回报，不降级成残缺 v1。错误只回固定码、不回堆栈或私密内容。
 
-status 包含 `configured, connection, lastSeenAt, lastReportAt, listener, worker, pendingReports, lastError`。connection 为 `waiting` / `online` / `offline`，距有效心跳/请求超过 180 秒显示离线，时间未知用 null。同步连接在线不等于监听/总结进程在线。Mac 不在线也必须能读取历史缓存。
+Mac 使用只读源连接、独立同步库和双水位；payload+对应游标+最小 CA 状态同事务保存，确认单独持久化。报告每60秒最多10份；CA每轮最多500行或2秒；滚动复核每批500行。新鲜CA最多连续3个后给到期报告机会，心跳60秒，不绕过全局暂停。报告计算不占用CA循环，发送一次一个请求、超时10秒。
 
-不要把上次同步时间、生成时间、窗口结束时间都写成“更新”。数据不可读需明确标错，避免错误的“0 条”覆盖用户已经看到的缓存。网页正文按安全文本/受限 Markdown 显示，不执行报告中的 HTML、脚本、链接指令。
+队列（含隔离）上限1000条或128MiB，滚动索引额外32MiB；达限暂停对应读取并报错，不删未确认事件。过期索引可清理，但其未确认payload不得删除。源库坏行可定位隔离，不静默越过；原库与relay不写。
 
-## 9. 联调和验收门槛
+VPS 独立127.0.0.1:3041接收器、独立SQLite，建议192MiB内存/25%CPU、8并发/16连接、正文/转发3秒；数据库含WAL预算256MiB。达限503让Mac保留队列，不影响主信号流写锁。指标需实测，本轮不配置资源或声称零影响。
 
-- [ ] Mac Codex 回报当前分支/commit、成功报告表结构、现有监听和总结运行方式，标出与本协议冲突点；不得直接改监听和任务周期。
-- [ ] 两端用同目录合成样例验证必填字段、时区、UTF-16/字节上限、签名；测试密钥不能用于生产。
-- [ ] 测试篡改、错误 secret、过期时间、重复 nonce、过大 body、未知字段和未登录读接口均被拒绝。
-- [ ] 同报告重发只一份；确认丢失后重试可恢复；旧 revision 不覆盖新结果；冲突隔离，不无限堵塞队列。
-- [ ] 超过 30 份模拟积压不漏读；Mac 重启不丢队列；源库暂时不可读不被标为已同步；坏数据和磁盘达限可见。
-- [ ] 断开 Mac、停止接收进程和模拟 429 时，Signal 现有页面仍可用、最后总结仍可见；无需付费模型调用。
-- [ ] 默认只总结模式的请求无聊天原文、群名、成员身份和凭证；真实范围外的旧消息没有被导出。
-- [ ] Mac/Linux 实测配置权限和开机恢复；VPS 验证资源限制、健康检查和首次部署回滚不影响旧站点。
-- [ ] 桌面/手机浏览器验证登录、分页、周期切换、缓存回退及无重复卡片；对比启用前后的主站响应时间和内存，提供实测，不承诺绝不会卡顿。
-- [ ] Signal 回传已部署 commit、接口就绪和拒绝匿名写入的证据；再由用户确认 cutoff/可选首屏报告，配置私密凭证并启用真实同步。
-- [ ] 首次真实同步核对同一报告的窗口、正文、计数和生成时间；两端均确认后再视为上线完成。
+首次启用须用户明确确认：记录结果和消息两个当前水位，只接续新数据；不扫启用前一小时、不自动补首屏旧报告、不重跑付费AI。暂停恢复使用原水位和队列。LaunchAgent不安装、不启用；本轮仅离线合成材料。
 
-## 10. 给 Mac Codex 的任务
+## 9. 合成材料与下一步
 
-先审阅本文件以及 `wecom-summary` 当前正在运行的版本，列出兼容性差异和最小改动范围。保留现有企业微信监听、总结调度、模型配置和原始数据库；只实现独立的只读导出与可靠同步模块。优先让合成数据测试通过，再与 Signal 端确认就绪。不擅自上传历史消息、原文、身份或密钥，不启用付费补跑，不在接口尚未就绪时打开常驻生产发送。
+- [完整市场报告](./report.example.json)：六栏结构、群名昵称、引用闭包、缺失元数据及CA覆盖。
+- [完整业务报告](./report-business.example.json)：四类业务内容、负责人/截止时间均为合成。
+- [实时CA](./ca-alert.example.json)、[关闭快照](./ca-alert-expired.example.json)、[追赶CA](./ca-alert-catchup.example.json)：覆盖更新、失效和不弹历史。
+- [设备心跳](./heartbeat.example.json)：八字段、AI离线与CA在线可独立表示。
+- [三类签名向量](./signature.example.json)：公开测试key、固定时钟、固定字节，禁止生产使用。
+- 离线验收只读上述合成文件，不访问真实库、网络或配置；来源内容由Mac保留不进入样例。
 
-请将审阅结论和后续对接代码提交到 Mac 仓库自己的工作分支，并回传：仓库链接、分支、commit、改动文件、通过/未通过的测试、尚未确认项、合成请求示例和首次同步默认行为。不要只说“已接入”，要区分代码完成、接口联调和真实同步三个状态。
+下一阶段由两端分别实现并做假时钟/临时库联调，至少覆盖结构与引用、布尔/整数、UTF-16、匿名和跨账号读取、首收时间、修订乱序、冷却、catchup、窗口关闭、队列恢复及资源达限。**文档对齐不等于离线接收器联调通过；更不等于生产就绪。** 在各自回传实现与测试证据、用户另行确认部署/凭证/启用前，不接收真实数据。
