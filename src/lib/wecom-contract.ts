@@ -77,7 +77,7 @@ function citations(value: unknown, known: Set<string>, used: Set<string>) {
 }
 function briefing(value: unknown, known: Set<string>, used: Set<string>) {
   const b = object<WecomBriefing>(value, "version kind quick_read projects events gaps business");
-  requireValue(b.version === 2 && ["market", "business"].includes(b.kind));
+  requireValue([2, 3].includes(b.version) && ["market", "business"].includes(b.kind));
   function cited(item: unknown, fields: string, allowEmpty = false) {
     const row = object<Record<string, unknown>>(item, fields + " source_message_ids");
     for (const field of fields.split(" ")) {
@@ -90,9 +90,15 @@ function briefing(value: unknown, known: Set<string>, used: Set<string>) {
   }
   object(b.quick_read, "focus news risk");
   Object.values(b.quick_read).forEach(n => cited(n, "text", true));
-  for (const p of rows<WecomBriefing["projects"][number]>(b.projects, 8)) {
-    object(p, "name chain summary catalysts latest risks data addresses source_message_ids");
+  for (const p of rows<WecomBriefing["projects"][number]>(b.projects, b.version === 3 ? 24 : 8)) {
+    object(p, "name chain summary catalysts latest risks data addresses source_message_ids" + (b.version === 3 ? " section views disagreement" : ""));
+    if (b.version === 3) {
+      requireValue(["opportunity", "subject", "market"].includes(p.section!));
+      for (const view of rows(p.views, 6)) cited(view, "speaker text");
+      text(p.disagreement, 1200); requireValue(Array.from(p.disagreement!).length <= 600);
+    }
     const { data, addresses, ...rest } = p;
+    delete rest.section; delete rest.views; delete rest.disagreement;
     cited(rest, "name chain summary catalysts latest risks");
     for (const d of rows<typeof p.data[number]>(data, 4)) {
       cited(d, "value unit source recorded_at kind"); requireValue(["历史快照", "个人预测"].includes(d.kind));
@@ -102,7 +108,12 @@ function briefing(value: unknown, known: Set<string>, used: Set<string>) {
     }
   }
   for (const e of rows<typeof b.events[number]>(b.events, 10)) {
-    cited(e, "event asset nature impact pending"); requireValue(["自述", "转述", "推测", "待核实"].includes(e.nature));
+    if (b.version === 3) {
+      object(e, "event asset nature impact pending source_message_ids section");
+      requireValue(["news", "warning"].includes(e.section!));
+    }
+    const event = {...e}; delete event.section;
+    cited(event, "event asset nature impact pending"); requireValue(["自述", "转述", "推测", "待核实"].includes(e.nature));
   }
   for (const n of rows(b.gaps, 8)) cited(n, "text");
   object(b.business, "progress notices blockers tasks");

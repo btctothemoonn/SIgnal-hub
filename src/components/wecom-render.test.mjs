@@ -31,6 +31,27 @@ try {
     for (const match of html.matchAll(/href="#([^"]+)"/g)) assert.ok(html.includes(`id="${match[1]}"`));
   });
 
+  test("v3 template renders five sections, cited speakers and source time without inventing missing values", () => {
+    const report=fixture("report").report;report.briefing.version=3;
+    for(const p of report.briefing.projects) Object.assign(p,{section:"opportunity",views:[{speaker:"小林",text:"本人观点",source_message_ids:p.source_message_ids}],disagreement:"未提供"});
+    for(const e of report.briefing.events)e.section="warning";
+    report.briefing.projects[0].latest="[小林]补充最新进展 <img src=x onerror=alert(1)>";
+    report.briefing.projects[0].catalysts="【小林】说明触发条件";
+    const html=renderToStaticMarkup(detail(report));
+    for(const title of ["机会与逻辑","消息面","标的与事件","大盘与主流币","警示","[小林]","已引用"]) assert.ok(html.includes(title),title);
+    assert.ok(!html.includes("分歧：未提供"));
+    assert.ok(!html.includes("概述："), "latest and summary must not create duplicate paragraphs");
+    assert.match(html, /<strong[^>]*>\[小林\]<\/strong>补充最新进展/);
+    assert.match(html, /<strong[^>]*>【小林】<\/strong>说明触发条件/);
+    assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
+    assert.doesNotMatch(html, /<img/);
+    assert.ok(html.includes(`CA: ${report.briefing.projects[0].addresses[0].address}`));
+    assert.ok(html.includes("intel-sources"), "source metadata remains linked without repeated visible IDs");
+    assert.ok(html.includes("报告窗口 CA 聚合"));
+    assert.ok(html.includes("通知采集时间"));
+    for (const match of html.matchAll(/href="#([^"]+)"/g)) assert.ok(html.includes(`id="${match[1]}"`));
+  });
+
   test("business detail preserves all four categories, owner, unknown deadline and original snapshot wording", () => {
     const report = fixture("report-business").report;
     const html = renderToStaticMarkup(detail(report));
@@ -80,6 +101,32 @@ try {
       assert.ok(textContent(renderer.toJSON()).includes("已复制"));
       globalThis.navigator.clipboard.writeText = async () => { throw new Error("private clipboard failure"); };
       await act(async () => { await renderer.root.findByProps({ "aria-label": "复制地址" }).props.onClick(); });
+      assert.ok(textContent(renderer.toJSON()).includes("复制失败"));
+      assert.doesNotMatch(textContent(renderer.toJSON()), /private clipboard/);
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+      if (previous) Object.defineProperty(globalThis, "navigator", previous); else delete globalThis.navigator;
+    }
+  });
+
+  test("v3 inline CA copies the complete address and exposes accessible feedback", async () => {
+    const report = fixture("report").report;
+    report.briefing.version = 3;
+    for (const project of report.briefing.projects) Object.assign(project, { section: "opportunity", views: [], disagreement: "未提供" });
+    for (const event of report.briefing.events) event.section = "news";
+    const address = report.briefing.projects[0].addresses[0].address;
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    let copied;
+    let renderer;
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { clipboard: { writeText: async (value) => { copied = value; } } } });
+    try {
+      await act(async () => { renderer = TestRenderer.create(detail(report)); });
+      const button = renderer.root.findByProps({ "aria-label": `复制地址 ${address}` });
+      await act(async () => { await button.props.onClick(); });
+      assert.equal(copied, address);
+      assert.ok(textContent(renderer.toJSON()).includes("已复制"));
+      globalThis.navigator.clipboard.writeText = async () => { throw new Error("private clipboard failure"); };
+      await act(async () => { await button.props.onClick(); });
       assert.ok(textContent(renderer.toJSON()).includes("复制失败"));
       assert.doesNotMatch(textContent(renderer.toJSON()), /private clipboard/);
     } finally {

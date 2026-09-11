@@ -4,16 +4,17 @@ export type WecomProcessState = "online" | "offline" | "unknown";
 export type WecomAccess = { ownerId: string; deviceId: string };
 export type WecomNote = { text: string; source_message_ids: string[] };
 export type WecomBriefing = {
-  version: 2;
+  version: 2 | 3;
   kind: "market" | "business";
   quick_read: { focus: WecomNote; news: WecomNote; risk: WecomNote };
   projects: {
+    section?: "opportunity" | "subject" | "market"; views?: {speaker: string; text: string; source_message_ids: string[]}[]; disagreement?: string;
     name: string; chain: string; summary: string; catalysts: string; latest: string; risks: string;
     data: { value: string; unit: string; source: string; recorded_at: string; kind: "历史快照" | "个人预测"; source_message_ids: string[] }[];
     addresses: { address: string; chain: string; source_message_ids: string[] }[];
     source_message_ids: string[];
   }[];
-  events: { event: string; asset: string; nature: "自述" | "转述" | "推测" | "待核实"; impact: string; pending: string; source_message_ids: string[] }[];
+  events: { section?: "news" | "warning"; event: string; asset: string; nature: "自述" | "转述" | "推测" | "待核实"; impact: string; pending: string; source_message_ids: string[] }[];
   gaps: WecomNote[];
   business: {
     progress: WecomNote[]; notices: WecomNote[]; blockers: WecomNote[];

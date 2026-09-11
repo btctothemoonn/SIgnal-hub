@@ -41,3 +41,12 @@ for(const numeric of ["2.0000000000000001","2e0"]){
  assert.throws(()=>parseWecomPacket(Buffer.from(raw)),e=>e.message==="payload_invalid","JSON numeric rounding must not hide noninteger wire values");
 }
 console.log("ok - strict WeCom v2 contract fixtures and rejection boundaries");
+const modern=structuredClone(packet);
+modern.report.briefing.version=3;
+for (const p of modern.report.briefing.projects) Object.assign(p,{section:'opportunity',views:[{speaker:'小林（合成昵称）',text:'据本人自述',source_message_ids:p.source_message_ids}],disagreement:'未提供'});
+for (const e of modern.report.briefing.events) e.section='warning';
+assert.deepEqual(validateWecomPacket(modern),modern);
+const invalidSection=structuredClone(modern);invalidSection.report.briefing.projects[0].section='guaranteed_profit';
+assert.throws(()=>validateWecomPacket(invalidSection));
+const invalidView=structuredClone(modern);invalidView.report.briefing.projects[0].views[0].source_message_ids=[];
+assert.throws(()=>validateWecomPacket(invalidView));
