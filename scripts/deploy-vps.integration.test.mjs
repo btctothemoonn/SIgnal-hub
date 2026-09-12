@@ -9,7 +9,7 @@ if (process.platform !== "linux") {
   process.exit(0);
 }
 const source = readFileSync(new URL("./deploy-vps.sh", import.meta.url), "utf8");
-for (const [failure, wecomEnabled] of [["none", "1"], ["none", "0"], ["build", "1"], ["readiness", "1"]]) {
+for (const [failure, wecomEnabled] of [["none", "1"], ["none", "0"], ["build", "1"], ["readiness", "1"], ["transient-service", "1"], ["failed-service", "1"]]) {
   const root = mkdtempSync(join(tmpdir(), "signal-release-test-"));
   try {
     const app = join(root, "app");
@@ -29,7 +29,15 @@ for (const [failure, wecomEnabled] of [["none", "1"], ["none", "0"], ["build", "
     run("git", ["-c", "user.name=Release Test", "-c", "user.email=release@test.invalid", "commit", "-qm", "fixture"]);
     const executable = (name, body) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\nset -e\n${body}\n`, { mode: 0o755 });
     executable("pnpm", "exit 0");
-    executable("systemctl", 'printf "%s\\n" "$*" >> "$TEST_SERVICES_LOG"');
+    executable("sleep", "exit 0");
+    executable("systemctl", `printf "%s\\n" "$*" >> "$TEST_SERVICES_LOG"
+if [[ "$1" == "is-active" && "$3" == "signal-hub-x-hybrid" ]]; then
+  if [[ "$TEST_FAILURE" == "failed-service" ]]; then exit 3; fi
+  if [[ "$TEST_FAILURE" == "transient-service" && ! -f "$TEST_SERVICES_LOG.recovered" ]]; then
+    touch "$TEST_SERVICES_LOG.recovered"
+    exit 3
+  fi
+fi`);
     executable("sudo", 'if [[ "$1" == "tee" ]]; then cat >> "$TEST_UNITS_LOG"; elif [[ "$1" == "systemctl" ]]; then shift; systemctl "$@"; fi');
     executable("node", `
 case "$*" in
@@ -50,8 +58,9 @@ esac`);
         SIGNAL_HUB_DEPLOY_REEXEC: "1", TEST_FAILURE: failure, TEST_OLD_RELEASE: old,
         TEST_WECOM_ENABLED: wecomEnabled, TEST_SERVICES_LOG: join(root,"services.log"), TEST_UNITS_LOG: join(root,"units.log") },
     });
-    assert.equal(result.status, failure === "none" ? 0 : failure === "build" ? 8 : 9, result.stdout + result.stderr);
-    if (failure === "none") {
+    const success = failure === "none" || failure === "transient-service";
+    assert.equal(result.status, success ? 0 : failure === "build" ? 8 : failure === "failed-service" ? 1 : 9, result.stdout + result.stderr);
+    if (success) {
       assert.notEqual(realpathSync(current), old);
       assert.equal(realpathSync(join(current, ".signal-hub")), join(app, ".signal-hub"));
       const services = readFileSync(join(root,"services.log"),"utf8");

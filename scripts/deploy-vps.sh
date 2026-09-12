@@ -161,7 +161,28 @@ if [[ "$wecom_enabled" == "0" ]] && systemctl cat signal-hub-wecom-receiver >/de
   sudo systemctl stop signal-hub-wecom-receiver
 fi
 "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
-for service in "${services[@]}"; do systemctl is-active --quiet "$service"; done
+wait_for_services() {
+  local attempt service stable=0
+  local -a pending
+  # Allow systemd restart recovery, but require consecutive healthy observations.
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    pending=()
+    for service in "${services[@]}"; do
+      if ! systemctl is-active --quiet "$service"; then pending+=("$service"); fi
+    done
+    if (( ${#pending[@]} == 0 )); then
+      stable=$((stable + 1))
+      if (( stable >= 3 )); then return 0; fi
+    else
+      stable=0
+      echo "Waiting for services ($attempt/30): ${pending[*]}" >&2
+    fi
+    if (( attempt < 30 )); then sleep 2; fi
+  done
+  echo "Services did not stabilize; deployment will roll back: ${pending[*]}" >&2
+  return 1
+}
+wait_for_services
 trap - ERR
 trap - TERM INT
 echo "Active release: $release"

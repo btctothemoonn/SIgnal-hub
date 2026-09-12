@@ -501,11 +501,17 @@ export function openXPipelineDb(path = getXPipelineConfig().dbPath) {
     mkdirSync(dirname(path), { recursive: true });
   }
   const db = new DatabaseSync(path);
-  db.exec("pragma journal_mode = wal");
-  db.exec("pragma synchronous = normal");
-  db.exec("pragma busy_timeout = 5000");
-  initXPipelineDb(db);
-  return db;
+  try {
+    // Concurrent workers can hold a lock even during WAL initialization.
+    db.exec("pragma busy_timeout = 5000");
+    db.exec("pragma journal_mode = wal");
+    db.exec("pragma synchronous = normal");
+    initXPipelineDb(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export function getXPipelineDb() {
