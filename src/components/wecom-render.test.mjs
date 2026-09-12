@@ -15,7 +15,7 @@ try {
   const { WecomStatus } = await runtime.load("wecom-status");
   const detail = (report) => React.createElement(WecomReportView, { detail: { report, syncedAt: "2026-09-06T02:06:00.000Z" } });
 
-  test("market detail preserves all six sections, structured values, identity and citation metadata", () => {
+  test("market detail preserves narrative and numeric values without source metadata", () => {
     const report = fixture("report").report;
     const html = renderToStaticMarkup(detail(report));
     for (const heading of ["焦点", "消息", "风险速览", "项目动态", "事件", "信息缺口"]) assert.ok(html.includes(heading), heading);
@@ -26,20 +26,19 @@ try {
       return [];
     };
     const visible = html.replace(/<[^>]*>/g, "");
-    for (const value of textFields(report.briefing).filter((v) => v !== "market" && !/^M\d+$/.test(v))) assert.ok(visible.includes(value.replace(/\bM\d{4}\b/g, "")), value);
-    for (const value of ["合成甲群", "小林（合成昵称）", "来源记录缺失", "通知采集时间", "2026/09/06 08:10:00", "总结窗口", "生成时间", "同步时间", "原文仅保存在 Mac，未同步", "冻结来源存在缺口", "CA 来源不完整", "CA 聚合未裁剪"]) assert.ok(html.includes(value), value);
-    assert.doesNotMatch(html, /查看原文|总结已截断|已核验/);
-    for (const match of html.matchAll(/href="#([^"]+)"/g)) assert.ok(html.includes(`id="${match[1]}"`));
+    for (const value of textFields(report.briefing).filter((v) => v !== "market" && v !== "历史快照" && !/^M\d+$/.test(v))) assert.ok(visible.includes(value.replace(/\bM\d{4}\b/g, "")), value);
+    for (const value of ["合成甲群", "通知采集时间", "总结窗口", "生成时间", "同步时间", "冻结来源存在缺口", "CA 来源不完整", "CA 聚合未裁剪"]) assert.ok(html.includes(value), value);
+    assert.doesNotMatch(html, /查看原文|总结已截断|已核验|引用元数据|来源元数据|原文仅保存在|历史快照|href="#/);
   });
 
-  test("v3 template renders five sections, cited speakers and source time without inventing missing values", () => {
+  test("v3 template renders five sections and speakers without source rows or missing placeholders", () => {
     const report=fixture("report").report;report.briefing.version=3;
     for(const p of report.briefing.projects) Object.assign(p,{section:"opportunity",views:[{speaker:"小林",text:"本人观点",source_message_ids:p.source_message_ids}],disagreement:"未提供"});
     for(const e of report.briefing.events)e.section="warning";
     report.briefing.projects[0].latest="[小林]补充最新进展 <img src=x onerror=alert(1)>";
     report.briefing.projects[0].catalysts="【小林】说明触发条件";
     const html=renderToStaticMarkup(detail(report));
-    for(const title of ["机会与逻辑","消息面","标的与事件","大盘与主流币","警示","[小林]","已引用"]) assert.ok(html.includes(title),title);
+    for(const title of ["机会与逻辑","消息面","标的与事件","大盘与主流币","警示","[小林]"]) assert.ok(html.includes(title),title);
     assert.ok(!html.includes("分歧：未提供"));
     assert.ok(!html.includes("概述："), "latest and summary must not create duplicate paragraphs");
     assert.match(html, /<strong[^>]*>\[小林\]<\/strong>补充最新进展/);
@@ -47,13 +46,11 @@ try {
     assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
     assert.doesNotMatch(html, /<img/);
     assert.ok(html.includes(`CA: ${report.briefing.projects[0].addresses[0].address}`));
-    assert.ok(html.includes("intel-sources"), "source metadata remains linked without repeated visible IDs");
     assert.ok(html.includes("报告窗口 CA 聚合"));
-    assert.ok(html.includes("通知采集时间"));
-    for (const match of html.matchAll(/href="#([^"]+)"/g)) assert.ok(html.includes(`id="${match[1]}"`));
+    assert.doesNotMatch(html, /intel-sources|已引用|来源元数据|引用元数据|范围、引用与信息缺口|原文仅保存在|历史快照|href="#/);
   });
 
-  for (const version of [2, 3]) test(`v${version} highlights exact known nicknames and hides citation numbers while retaining source access`, () => {
+  for (const version of [2, 3]) test(`v${version} highlights exact known nicknames without source controls and places complete CA after the title`, () => {
     const report = fixture("report").report;
     const speakers = ["小林", "小林同学", "S. F]并向你翻了个白眼", "Ken", "SOL", "𠀀小牛", '<img src=x onerror="bad()">'];
     report.sourceReferences = speakers.map((sender, index) => ({ ...report.sourceReferences[0], id: `M${String(index + 1).padStart(4, "0")}`, sender }));
@@ -80,22 +77,25 @@ try {
     const visible = html.replace(/<[^>]*>/g, "");
     assert.doesNotMatch(visible, /M\d{4}/, "chat record numbers must not appear in narrative or source metadata");
     assert.doesNotMatch(html, /(?:aria-label|title)="[^"]*M\d{4}/, "accessible link names must not announce hidden record IDs");
-    const links = [...html.matchAll(/href="#([^"]+)"[^>]*>([^<]*)<\/a>/g)];
-    assert.ok(links.length);
-    for (const [, id, label] of links) { assert.ok(html.includes(`id="${id}"`)); assert.match(label, /^来源(?: \d+)?$/); }
-    if (version === 2) {
-      const focus = html.match(/焦点<\/h4><p[^>]*>([\s\S]*?)<\/p>/)[1];
-      const focusLinks = [...focus.matchAll(/href="#([^"]+)"/g)].map((match) => match[1]);
-      assert.equal(focusLinks.length, new Set(report.briefing.quick_read.focus.source_message_ids).size);
-      for (const id of report.briefing.quick_read.focus.source_message_ids) assert.ok(focusLinks.some((target) => target.endsWith(`-${id}`)), "each cited record remains directly accessible");
-    } else {
-      const card = html.slice(html.indexOf(">标的与事件</h4>")).match(/<article[^>]*>([\s\S]*?)<\/article>/)[1];
-      const cardLinks = [...card.matchAll(/href="#([^"]+)"/g)].map((match) => match[1]);
-      const project = report.briefing.projects[0];
-      const ids = new Set([project, ...project.data, ...project.addresses, ...project.views].flatMap((item) => item.source_message_ids));
-      assert.equal(cardLinks.length, ids.size);
-      for (const id of ids) assert.ok(cardLinks.some((target) => target.endsWith(`-${id}`)), "v3 cards retain the source association for every cited record");
+    assert.doesNotMatch(html, /href="#|来源元数据|引用元数据|原文仅保存在|已引用/);
+    const project = report.briefing.projects[0];
+    const card = html.slice(html.indexOf(version === 3 ? ">标的与事件</h4>" : ">项目动态</h4>")).match(/<article[^>]*>([\s\S]*?)<\/article>/)[1];
+    const bodyStart = card.indexOf(version === 3 ? '<div class="space-y-[3px]">' : '<dl');
+    const titleArea = card.slice(0, bodyStart);
+    assert.ok(titleArea.includes(project.name));
+    for (const { address } of project.addresses) {
+      assert.ok(titleArea.includes(`CA: ${address}`), "the full CA appears directly after the project name in its title area");
+      assert.ok(titleArea.indexOf(project.name) < titleArea.indexOf(`CA: ${address}`));
+      assert.ok(!card.slice(bodyStart).includes(address), "project body must not repeat its CA row");
     }
+    project.data[0].kind = "个人预测";
+    project.latest = "【历史快照】小林表示等待；（历史快照）数据保持。历史快照：不删记录值";
+    const updated = renderToStaticMarkup(detail(report));
+    assert.ok(updated.includes("个人预测"));
+    assert.ok(updated.includes(project.data[0].value));
+    assert.ok(updated.includes(project.data[0].recorded_at));
+    assert.doesNotMatch(updated, /历史快照/);
+
   });
 
   for (const version of [2, 3]) test(`v${version} preserves literal ID names and URLs while hiding explicit source notation`, () => {
@@ -144,7 +144,7 @@ try {
     const report = fixture("report-business").report;
     const html = renderToStaticMarkup(detail(report));
     for (const value of ["业务进展", "通知", "阻塞", "待办", "负责人", "截止时间", "未提供", "小林（合成昵称）", ...report.briefing.business.tasks.map((t) => t.text)]) assert.ok(html.includes(value), value);
-    assert.doesNotMatch(html, /暂无项目|暂无事件/);
+    assert.doesNotMatch(html, /暂无项目|暂无事件|来源元数据|引用元数据|原文仅保存在|href="#/);
   });
 
   test("quotes, markup, placeholders and supplementary Unicode are React text, never executable HTML", () => {
@@ -197,9 +197,9 @@ try {
     }
   });
 
-  test("v3 inline CA copies the complete address and exposes accessible feedback", async () => {
+  for (const version of [2, 3]) test(`v${version} title CA copies the complete address and exposes accessible feedback`, async () => {
     const report = fixture("report").report;
-    report.briefing.version = 3;
+    report.briefing.version = version;
     for (const project of report.briefing.projects) Object.assign(project, { section: "opportunity", views: [], disagreement: "未提供" });
     for (const event of report.briefing.events) event.section = "news";
     const address = report.briefing.projects[0].addresses[0].address;
