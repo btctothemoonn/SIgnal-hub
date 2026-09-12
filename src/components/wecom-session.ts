@@ -58,7 +58,7 @@ export class WecomSession {
   constructor(initial: WecomInitial, runtime: Runtime) {
     this.runtime = runtime;
     this.state = {
-      auth: "ok", cadence: "two_hour", caMode: "active",
+      auth: "ok", cadence: "six_hour", caMode: "active",
       reports: initial.initialReports ?? null, activeAlerts: initial.initialAlerts ?? null,
       caHistory: null, status: initial.initialReports?.status ?? initial.initialAlerts?.status ?? null,
       selectedId: null, detail: null, toasts: [],
@@ -167,7 +167,7 @@ export class WecomSession {
     this.baseline = false;
     this.reportsPaged = false;
     this.historyPaged = false;
-    this.update({ auth, reports: null, activeAlerts: null, caHistory: null, status: null, selectedId: null, detail: null, toasts: [], errors: {}, loading: {}, cadence: "two_hour", caMode: "active" });
+    this.update({ auth, reports: null, activeAlerts: null, caHistory: null, status: null, selectedId: null, detail: null, toasts: [], errors: {}, loading: {}, cadence: "six_hour", caMode: "active" });
     if (auth === 401) this.runtime.onUnauthorized();
   }
 
