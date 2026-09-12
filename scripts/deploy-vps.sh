@@ -10,15 +10,17 @@ RELEASES_DIR="${SIGNAL_HUB_RELEASES_DIR:-${APP_DIR}-releases}"
 CURRENT_LINK="${SIGNAL_HUB_CURRENT_LINK:-${APP_DIR}-current}"
 
 cd "$APP_DIR"
+if [[ "${SIGNAL_HUB_DEPLOY_LOCK_HELD:-0}" != "1" ]]; then
+  exec 9>"$APP_DIR/.signal-hub-deploy.lock"
+  flock -n 9 || { echo "Another deployment is in progress" >&2; exit 75; }
+fi
 "$NODE_BIN" -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 5)) { throw new Error("Signal Hub requires Node.js >=22.5.0 for node:sqlite"); } require("node:sqlite");'
 if [[ "${SIGNAL_HUB_DEPLOY_REEXEC:-0}" != "1" ]]; then
   previous_commit="$(git rev-parse HEAD)"
   git pull --ff-only origin "$BRANCH"
-  exec env SIGNAL_HUB_DEPLOY_REEXEC=1 SIGNAL_HUB_PREVIOUS_COMMIT="$previous_commit" bash "$APP_DIR/scripts/deploy-vps.sh"
+  exec env SIGNAL_HUB_DEPLOY_REEXEC=1 SIGNAL_HUB_PREVIOUS_COMMIT="$previous_commit" SIGNAL_HUB_DEPLOY_LOCK_HELD=1 bash "$APP_DIR/scripts/deploy-vps.sh"
 fi
 
-exec 9>"$APP_DIR/.signal-hub-deploy.lock"
-flock -n 9 || { echo "Another deployment is in progress" >&2; exit 1; }
 [[ ! -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]] || { echo "Current release path must be a symlink" >&2; exit 1; }
 mkdir -p "$RELEASES_DIR" "$APP_DIR/.signal-hub"
 
@@ -43,6 +45,7 @@ fi
 
 release="$(mktemp -d "$RELEASES_DIR/$(git rev-parse --short HEAD)-XXXXXXXX")"
 git archive HEAD | tar -x -C "$release"
+git rev-parse HEAD > "$release/.release-commit"
 link_env "$release"
 cd "$release"
 CI=true "$PNPM_BIN" install --frozen-lockfile --ignore-scripts
@@ -84,7 +87,7 @@ activate() {
 }
 
 rollback() {
-  local result=$?
+  local result="${1:-$?}"
   trap - ERR
   if [[ -n "$previous_release" ]]; then
     echo "Deployment failed; restoring $previous_release" >&2
@@ -98,6 +101,7 @@ rollback() {
   exit "$result"
 }
 trap rollback ERR
+trap 'rollback 143' TERM INT
 
 # A final drop-in preserves existing environment, resource and security settings.
 for index in "${!services[@]}"; do
@@ -159,5 +163,6 @@ fi
 "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
 for service in "${services[@]}"; do systemctl is-active --quiet "$service"; done
 trap - ERR
+trap - TERM INT
 echo "Active release: $release"
 echo "Previous release: ${previous_release:-none}"

@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const source = readFileSync(new URL("./auto-update-vps.sh",import.meta.url),"utf8");
+const service = readFileSync(new URL("../deploy/systemd/signal-hub-auto-update.service",import.meta.url),"utf8");
+const timer = readFileSync(new URL("../deploy/systemd/signal-hub-auto-update.timer",import.meta.url),"utf8");
+assert.match(source,/ls-remote.*refs\/heads\/main/);
+assert.match(source,/flock -n/);
+assert.match(source,/\.release-commit/);
+assert.match(source,/\.signal-hub-auto-update-attempt/);
+assert.match(source,/deploy-vps\.sh/);
+assert.match(service,/User=ubuntu/);
+assert.match(service,/CPUQuota=50%/);
+assert.match(service,/MemoryMax=1536M/);
+assert.match(service,/Nice=10/);
+assert.match(timer,/OnCalendar=\*-\*-\* \*:0\/5:00/);
+assert.match(timer,/Persistent=true/);
+console.log("ok - VPS-only updater, main branch, locks and resource limits");

@@ -1,0 +1,28 @@
+[Unit]
+Description=Check GitHub main and update Signal Hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/signal-hub
+ExecStart=/bin/bash /home/ubuntu/signal-hub/scripts/auto-update-vps.sh
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_OPTIONS=--max-old-space-size=1024
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=GIT_TERMINAL_PROMPT=0
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=50%
+CPUWeight=10
+IOWeight=10
+MemoryHigh=1G
+MemoryMax=1536M
+MemorySwapMax=1536M
+OOMPolicy=continue
+TimeoutStartSec=50min
+UMask=0077
+StandardOutput=journal
+StandardError=journal

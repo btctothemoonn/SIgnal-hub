@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Signal Hub GitHub main every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/5:00
+AccuracySec=15s
+RandomizedDelaySec=10s
+Persistent=true
+Unit=signal-hub-auto-update.service
+
+[Install]
+WantedBy=timers.target
