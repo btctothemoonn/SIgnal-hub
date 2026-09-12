@@ -4,19 +4,91 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode 
 import type { WecomNote, WecomReportDetail } from "@/lib/wecom-types";
 import { WecomAddress, WecomField, WecomTime } from "./wecom-ui";
 
-function References({ ids, prefix }: { ids: string[]; prefix: string }) {
-  return ids.length ? <span className="ml-2 inline-flex flex-wrap gap-2 text-xs text-accent">
-    {ids.map((id) => <a key={id} className="underline underline-offset-2" href={`#${prefix}-${id}`} aria-label={`来源元数据 ${id}`}>{id}</a>)}
-  </span> : null;
+type NarrativeRenderer = (value: string) => ReactNode;
+const nicknameClass = "font-extrabold text-[#138390]";
+const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function narrativeRenderer(report: WecomReportDetail["report"]): NarrativeRenderer {
+  const names = [...new Set([
+    ...report.sourceReferences.map((reference) => reference.sender),
+    ...report.briefing.projects.flatMap((project) => (project.views ?? []).map((view) => view.speaker)),
+  ].filter((name): name is string => !!name && !!name.trim()))];
+  // Match complete known names, including names that themselves contain brackets.
+  const variants = names.flatMap((name) => [name, `[${name}]`, `【${name}】`]).sort((a, b) => b.length - a.length);
+  const pattern = variants.length ? new RegExp(variants.map(escapePattern).join("|"), "gu") : null;
+  const referenceIds = report.sourceReferences.filter((reference) => !names.includes(reference.id)).map((reference) => reference.id).sort((left, right) => right.length - left.length);
+  const ids = referenceIds.length ? `(?:${referenceIds.map(escapePattern).join("|")})(?![A-Za-z0-9_])` : "";
+  const citationGroup = ids ? new RegExp(`(?:\\[|【|\\(|（)\\s*(?:(?:来源|引用)[：:]?\\s*)?(?:${ids})(?:[\\s,，、;；]+(?:${ids}))*\\s*(?:\\]|】|\\)|）)`, "g") : null;
+  const citationLabel = ids ? new RegExp(`(?:来源|引用)[：:]\\s*(?:${ids})(?:[\\s,，、;；]+(?:${ids}))*`, "g") : null;
+  const missingRecord = ids ? new RegExp(`(?<![A-Za-z0-9_])(?:${ids})(?=\\s*对应冻结记录)`, "g") : null;
+  return (value) => {
+    // Hide explicit citation notation only; an ID can also be a literal name or a URL segment.
+    const urls = [...value.matchAll(/https?:\/\/[^\s<>"'，。；）】]+/gu)].map((match) => [match.index, match.index + match[0].length]);
+    const removals = [citationGroup, citationLabel, missingRecord].filter((expression): expression is RegExp => !!expression)
+      .flatMap((expression) => [...value.matchAll(expression)])
+      .map((match) => [match.index, match.index + match[0].length])
+      .filter(([start, end]) => !urls.some(([left, right]) => start < right && end > left))
+      .sort(([left], [right]) => left - right);
+    let text = "";
+    let copiedTo = 0;
+    for (const [start, end] of removals) {
+      if (end <= copiedTo) continue;
+      text += value.slice(copiedTo, Math.max(copiedTo, start));
+      copiedTo = end;
+    }
+    text += value.slice(copiedTo);
+    if (!pattern) return text;
+    const protectedRanges = [...text.matchAll(/https?:\/\/[^\s<>"'，。；）】]+|0x[a-fA-F0-9]{40}\b|\$[\p{L}\p{N}_]+|[1-9A-HJ-NP-Za-km-z]{32,44}/gu)]
+      .map((match) => [match.index, match.index + match[0].length]);
+    const result: ReactNode[] = [];
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+      const token = match[0];
+      const start = match.index;
+      const end = start + token.length;
+      if (protectedRanges.some(([left, right]) => start < right && end > left)) continue;
+      const bracketed = !names.includes(token) && names.includes(token.slice(1, -1));
+      if (!bracketed) {
+        const before = Array.from(text.slice(0, start)).at(-1) ?? "";
+        const after = Array.from(text.slice(end))[0] ?? "";
+        const startsAtBoundary = !/[\p{L}\p{N}_]/u.test(before)
+          || /(?:群友|用户|昵称|和|与|及|据|由)$/.test(text.slice(0, start));
+        const endsAtBoundary = !/[\p{L}\p{N}_]/u.test(after)
+          || /^(?:认为|表示|自述|更正|称|说|提到|提及|指出|分享|询问|回复|回应|建议|补充|确认|质疑|提醒|解释|关注|强调|看好|看空|买入|持有|转发|已经|在|已|对|的观点)/.test(text.slice(end));
+        if (!startsAtBoundary || !endsAtBoundary) continue;
+      }
+      result.push(text.slice(cursor, start), <strong key={start} className={nicknameClass}>{token}</strong>);
+      cursor = end;
+    }
+    result.push(text.slice(cursor));
+    return result;
+  };
 }
-function Note({ note, prefix }: { note: WecomNote; prefix: string }) {
-  return <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">{note.text}<References ids={note.source_message_ids} prefix={prefix} /></p>;
+
+function openSource(id: string) {
+  const target = document.getElementById(id);
+  const disclosure = target?.closest("details");
+  if (disclosure) disclosure.open = true;
+}
+function SourceLinks({ ids, prefix, className = "underline underline-offset-2" }: { ids: string[]; prefix: string; className?: string }) {
+  const uniqueIds = [...new Set(ids)];
+  return uniqueIds.map((id, index) => {
+    const targetId = `${prefix}-${id}`;
+    const label = uniqueIds.length > 1 ? `来源 ${index + 1}` : "来源";
+    return <span key={id}>{index ? " / " : ""}<a className={className} href={`#${targetId}`} aria-label={`查看${label}`} onClick={() => openSource(targetId)}>{label}</a></span>;
+  });
+}
+function References({ ids, prefix }: { ids: string[]; prefix: string }) {
+  return ids.length ? <span className="ml-2 inline-flex flex-wrap text-xs text-accent"><SourceLinks ids={ids} prefix={prefix} /></span> : null;
+}
+function Note({ note, prefix, renderText }: { note: WecomNote; prefix: string; renderText: NarrativeRenderer }) {
+  return <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">{renderText(note.text)}<References ids={note.source_message_ids} prefix={prefix} /></p>;
 }
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return <section className="min-w-0 border-t border-workspace-line-strong py-4"><h4 className="mb-3 text-sm font-semibold">{title}</h4>{children}</section>;
 }
-function Notes({ notes, prefix }: { notes: WecomNote[]; prefix: string }) {
-  return notes.length ? <div className="space-y-2">{notes.map((note, index) => <Note key={index} note={note} prefix={prefix} />)}</div> : <p className="text-sm text-muted">无有效信息</p>;
+function Notes({ notes, prefix, renderText }: { notes: WecomNote[]; prefix: string; renderText: NarrativeRenderer }) {
+  return notes.length ? <div className="space-y-2">{notes.map((note, index) => <Note key={index} note={note} prefix={prefix} renderText={renderText} />)}</div> : <p className="text-sm text-muted">无有效信息</p>;
 }
 
 const reportTime = new Intl.DateTimeFormat("zh-CN", {
@@ -58,13 +130,7 @@ function IntelligenceReport({ detail, prefix }: { detail: WecomReportDetail; pre
     if (!value || typeof value !== "object") return [];
     return Object.entries(value).flatMap(([key, child]) => key === "source_message_ids" ? child as string[] : idsOf(child));
   };
-  const speakers = new Set([
-    ...report.sourceReferences.map((reference) => reference.sender).filter((name): name is string => !!name),
-    ...b.projects.flatMap((project) => (project.views ?? []).map((view) => view.speaker)),
-  ]);
-  const attributed = (value: string) => value.split(/(\[[^\]\r\n]{1,120}\]|【[^】\r\n]{1,120}】)/g).map((part, index) =>
-    speakers.has(part.slice(1, -1)) && /^[\[【]/.test(part)
-      ? <strong key={index} className="font-bold text-[#087f8b]">{part}</strong> : part);
+  const attributed = narrativeRenderer(report);
   const row = (children: ReactNode, className = "") => <div className={`grid min-w-0 grid-cols-[7px_minmax(0,1fr)] gap-x-[10px] ${className}`}>
     <span aria-hidden className="mt-[0.62em] h-[7px] w-[7px] rounded-full" style={{ background: "var(--intel-ink, #159c9f)" }} />
     <div className="min-w-0 whitespace-pre-wrap">{children}</div>
@@ -77,12 +143,7 @@ function IntelligenceReport({ detail, prefix }: { detail: WecomReportDetail; pre
     const times = refs.map((reference) => reference.observedAt)
       .filter((time): time is string => !!time && Number.isFinite(Date.parse(time)))
       .sort((left, right) => Date.parse(left) - Date.parse(right));
-    const targetId = `${prefix}-${ids[0] ?? "sources"}`;
-    return row(<><a href={`#${targetId}`} className="hover:underline" onClick={() => {
-      const target = document.getElementById(targetId);
-      const disclosure = target?.closest("details");
-      if (disclosure) disclosure.open = true;
-    }}>来源</a>：已引用 {names.size} 个昵称
+    return row(<><SourceLinks ids={ids.length ? ids : ["sources"]} prefix={prefix} className="hover:underline" />：已引用 {names.size} 个昵称
       {times.length ? <> · <IntelligenceTime value={times[0]} />{times[0] !== times[times.length - 1] ? <>—<IntelligenceTime value={times[times.length - 1]} /></> : null}</> : null}
       {refs.length < ids.length ? " · 部分引用缺失" : null}</>, "intel-sources");
   };
@@ -93,12 +154,12 @@ function IntelligenceReport({ detail, prefix }: { detail: WecomReportDetail; pre
       {item.data.map((data, dataIndex) => <div key={dataIndex}>{field("数据", `${data.source} ${data.value} ${data.unit}（${data.recorded_at}）${missing(data.kind) ? "" : ` · ${data.kind}`}`)}</div>)}
       {field("动态", missing(item.latest) ? item.summary : item.latest)}
       {field("逻辑", item.catalysts)}
-      {item.views?.length ? row(<>观点：{item.views.map((view, viewIndex) => <span key={viewIndex}>{viewIndex ? "；" : ""}<strong className="font-bold text-[#087f8b]">[{view.speaker}]</strong>：{attributed(view.text)}</span>)}</>) : null}
+      {item.views?.length ? row(<>观点：{item.views.map((view, viewIndex) => <span key={viewIndex}>{viewIndex ? "；" : ""}<strong className={nicknameClass}>[{view.speaker}]</strong>：{attributed(view.text)}</span>)}</>) : null}
       {field("分歧", item.disagreement)}{field("风险", item.risks)}{source(item)}
     </div>
   </article>;
   const event = (item: typeof b.events[number], index: number) => <article key={index} className="min-w-0 [break-inside:avoid]">
-    <h5 className="mb-[5px] text-[18px] leading-[1.3] tracking-[-0.6px] [font-family:Arial_Narrow,Arial,PingFang_SC,sans-serif] font-extrabold text-[#18212f] sm:text-[20px]">{item.event}</h5>
+    <h5 className="mb-[5px] text-[18px] leading-[1.3] tracking-[-0.6px] [font-family:Arial_Narrow,Arial,PingFang_SC,sans-serif] font-extrabold text-[#18212f] sm:text-[20px]">{attributed(item.event)}</h5>
     <div className="space-y-[3px]">{field("涉及", item.asset)}{field("性质", item.nature)}{field(item.section === "warning" ? "警示" : "动态", item.impact)}{field("待确认", item.pending)}{source(item)}</div>
   </article>;
   const sections = [
@@ -130,7 +191,7 @@ function IntelligenceReport({ detail, prefix }: { detail: WecomReportDetail; pre
           <WecomAddress address={item.address} network={item.network} />
           <p className="text-xs text-muted">{item.groups.join(" · ")}</p>
           <dl className="my-3 grid grid-cols-3 gap-3"><WecomField label="提及数">{item.mentionCount}</WecomField><WecomField label="去重陈述">{item.uniqueStatementCount}</WecomField><WecomField label="重复搬运">{item.duplicateCount}</WecomField></dl>
-          <p className="whitespace-pre-wrap text-sm leading-6">{item.summary ?? "未提供"}<References ids={item.sourceMessageIDs} prefix={prefix} /></p>
+          <p className="whitespace-pre-wrap text-sm leading-6">{attributed(item.summary ?? "未提供")}<References ids={item.sourceMessageIDs} prefix={prefix} /></p>
         </article>)}</div>
       </Section>
     </details>
@@ -138,7 +199,7 @@ function IntelligenceReport({ detail, prefix }: { detail: WecomReportDetail; pre
       <p>实际分析 {report.scope.analyzedCount} 条通知；来源昵称不等于独立人数。文中来源时间均为通知采集时间，时区为 Asia/Shanghai。群内陈述未经外部核验，采集记录不等于完整群聊。</p>
       {b.gaps.map((gap, index) => <div key={index}>{field("缺口", gap.text)}{source(gap)}</div>)}
       <p>原文仅保存在 Mac，未同步。以下是引用元数据：</p>
-      {report.sourceReferences.map((reference) => <p key={reference.id} id={`${prefix}-${reference.id}`} className="scroll-mt-28">{reference.id} · {reference.available ? <>{reference.group} · {reference.sender || "昵称未提供"} · <IntelligenceTime value={reference.observedAt} /></> : "来源记录缺失"}</p>)}
+      {report.sourceReferences.map((reference) => <p key={reference.id} id={`${prefix}-${reference.id}`} className="scroll-mt-28">{reference.available ? <>{reference.group} · {reference.sender ? <strong className={nicknameClass}>{reference.sender}</strong> : "昵称未提供"} · <IntelligenceTime value={reference.observedAt} /></> : "来源记录缺失"}</p>)}
       <p>生成时间：<IntelligenceTime value={report.generatedAt} /> · 同步时间：<IntelligenceTime value={detail.syncedAt} /></p>
     </details>
     <p className="mt-8 text-center text-[11px] leading-[1.6] text-[#a7aab5] sm:text-[12px]">由 {report.model} 根据{report.scope.groupNames.length === 1 ? report.scope.groupNames[0] : "已采集群聊"}聊天自动整理 · <IntelligenceTime value={report.generatedAt} /></p>
@@ -149,13 +210,14 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
   const { report, syncedAt } = detail;
   const { briefing, scope, caCoverage } = report;
   const prefix = useId().replaceAll(":", "");
+  const renderText = narrativeRenderer(report);
   if (briefing.version === 3 && briefing.kind === "market") return <IntelligenceReport detail={detail} prefix={prefix}/>;
   return (
     <div className="min-w-0 [overflow-wrap:anywhere]">
       <header className="py-4">
         <h3 className="text-base font-semibold">{briefing.kind === "market" ? "市场简报" : "业务简报"}</h3>
         <p className="mt-1 text-xs text-muted">版本 {briefing.version} · 修订 {report.revision} · 模型 {report.model}</p>
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{report.summary}</p>
+        <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{renderText(report.summary)}</p>
         <dl className="mt-4 grid grid-cols-1 gap-3 text-muted sm:grid-cols-3">
           <WecomField label="总结窗口"><WecomTime value={report.windowStart} /> 至 <WecomTime value={report.windowEnd} /></WecomField>
           <WecomField label="生成时间"><WecomTime value={report.generatedAt} /></WecomField>
@@ -163,7 +225,7 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
         </dl>
       </header>
       <div className="grid min-w-0 grid-cols-1 gap-x-5 xl:grid-cols-3">
-        {([['focus', '焦点'], ['news', '消息'], ['risk', '风险速览']] as const).map(([key, title]) => <Section key={key} title={title}><Note note={briefing.quick_read[key]} prefix={prefix} /></Section>)}
+        {([['focus', '焦点'], ['news', '消息'], ['risk', '风险速览']] as const).map(([key, title]) => <Section key={key} title={title}><Note note={briefing.quick_read[key]} prefix={prefix} renderText={renderText} /></Section>)}
       </div>
       {briefing.kind === "market" ? <>
         <Section title="项目动态">
@@ -172,16 +234,16 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
             {briefing.projects.map((project, index) => <article className="min-w-0 py-3 first:pt-0" key={index}>
               <h5 className="text-sm font-semibold">{project.name} <span className="font-normal text-muted">{project.chain}</span><References ids={project.source_message_ids} prefix={prefix} /></h5>
               <dl className="mt-3 grid min-w-0 grid-cols-1 gap-x-5 gap-y-3 lg:grid-cols-2">
-                <WecomField label="总结">{project.summary}</WecomField>
-                <WecomField label="催化">{project.catalysts}</WecomField>
-                <WecomField label="最新进展">{project.latest}</WecomField>
-                <WecomField label="风险">{project.risks}</WecomField>
+                <WecomField label="总结">{renderText(project.summary)}</WecomField>
+                <WecomField label="催化">{renderText(project.catalysts)}</WecomField>
+                <WecomField label="最新进展">{renderText(project.latest)}</WecomField>
+                <WecomField label="风险">{renderText(project.risks)}</WecomField>
               </dl>
               {project.data.length ? <dl className="mt-4 grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-2">
                 {project.data.map((data, dataIndex) => <div key={dataIndex} className="min-w-0 border-l-2 border-accent/30 pl-3">
                   <dt className="text-xs text-muted">{data.kind}</dt><dd className="mt-1 text-sm">
                     <p>{data.value} {data.unit}<References ids={data.source_message_ids} prefix={prefix} /></p>
-                    <p className="mt-1 text-xs text-muted">数据来源：{data.source}</p>
+                    <p className="mt-1 text-xs text-muted">数据来源：{renderText(data.source)}</p>
                     <p className="mt-1 text-xs text-muted">原记录时间口径：{data.recorded_at}</p>
                   </dd>
                 </div>)}
@@ -196,25 +258,25 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
           {briefing.events.length === 0 ? <p className="text-sm text-muted">无有效信息</p> : null}
           <div className="divide-y divide-workspace-line-strong">
             {briefing.events.map((event, index) => <article key={index} className="py-3 first:pt-0">
-              <h5 className="text-sm font-medium">{event.event}<References ids={event.source_message_ids} prefix={prefix} /></h5>
+              <h5 className="text-sm font-medium">{renderText(event.event)}<References ids={event.source_message_ids} prefix={prefix} /></h5>
               <dl className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <WecomField label="关联资产">{event.asset}</WecomField><WecomField label="性质">{event.nature}</WecomField>
-                <WecomField label="影响">{event.impact}</WecomField><WecomField label="待确认">{event.pending}</WecomField>
+                <WecomField label="关联资产">{renderText(event.asset)}</WecomField><WecomField label="性质">{renderText(event.nature)}</WecomField>
+                <WecomField label="影响">{renderText(event.impact)}</WecomField><WecomField label="待确认">{renderText(event.pending)}</WecomField>
               </dl>
             </article>)}
           </div>
         </Section>
       </> : <>
-        {([['progress', '业务进展'], ['notices', '通知'], ['blockers', '阻塞']] as const).map(([key, title]) => <Section key={key} title={title}><Notes notes={briefing.business[key]} prefix={prefix} /></Section>)}
+        {([['progress', '业务进展'], ['notices', '通知'], ['blockers', '阻塞']] as const).map(([key, title]) => <Section key={key} title={title}><Notes notes={briefing.business[key]} prefix={prefix} renderText={renderText} /></Section>)}
         <Section title="待办">
           {briefing.business.tasks.length === 0 ? <p className="text-sm text-muted">无有效信息</p> : null}
           <div className="divide-y divide-workspace-line-strong">{briefing.business.tasks.map((task, index) => <article key={index} className="py-3 first:pt-0">
-            <p className="whitespace-pre-wrap text-sm leading-6">{task.text}<References ids={task.source_message_ids} prefix={prefix} /></p>
-            <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2"><WecomField label="负责人">{task.owner}</WecomField><WecomField label="截止时间">{task.deadline}</WecomField></dl>
+            <p className="whitespace-pre-wrap text-sm leading-6">{renderText(task.text)}<References ids={task.source_message_ids} prefix={prefix} /></p>
+            <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2"><WecomField label="负责人">{renderText(task.owner)}</WecomField><WecomField label="截止时间">{task.deadline}</WecomField></dl>
           </article>)}</div>
         </Section>
       </>}
-      <Section title="信息缺口"><Notes notes={briefing.gaps} prefix={prefix} /></Section>
+      <Section title="信息缺口"><Notes notes={briefing.gaps} prefix={prefix} renderText={renderText} /></Section>
       <Section title="报告窗口 CA 聚合">
         <p className="mb-3 text-xs text-muted">{caCoverage.sourcesComplete ? "CA 来源完整（冻结范围）" : "CA 来源不完整"} · 导出 {caCoverage.exportedItems} / {caCoverage.totalItems} · {caCoverage.truncated ? "CA 聚合已裁剪" : "CA 聚合未裁剪"}</p>
         {report.caDiscussions.length === 0 ? <p className="text-sm text-muted">本报告无 CA 聚合</p> : null}
@@ -222,7 +284,7 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
           <WecomAddress address={item.address} network={item.network} />
           <p className="text-xs text-muted">{item.groups.join(" · ")}</p>
           <dl className="my-3 grid grid-cols-3 gap-3"><WecomField label="提及数">{item.mentionCount}</WecomField><WecomField label="去重陈述">{item.uniqueStatementCount}</WecomField><WecomField label="重复搬运">{item.duplicateCount}</WecomField></dl>
-          <p className="whitespace-pre-wrap text-sm leading-6">{item.summary ?? "未提供"}<References ids={item.sourceMessageIDs} prefix={prefix} /></p>
+          <p className="whitespace-pre-wrap text-sm leading-6">{renderText(item.summary ?? "未提供")}<References ids={item.sourceMessageIDs} prefix={prefix} /></p>
         </article>)}</div>
       </Section>
       <Section title="范围与完整性">
@@ -238,10 +300,10 @@ export function WecomReportView({ detail }: { detail: WecomReportDetail }) {
       </Section>
       <Section title="来源元数据">
         {report.sourceReferences.length === 0 ? <p className="text-sm text-muted">无引用元数据</p> : null}
-        <dl className="divide-y divide-workspace-line-strong">{report.sourceReferences.map((source) => <div id={`${prefix}-${source.id}`} key={source.id} className="grid min-w-0 scroll-mt-28 grid-cols-1 gap-2 py-3 sm:grid-cols-[4rem_minmax(0,1fr)]">
-          <dt className="font-mono text-xs text-muted">{source.id}</dt>
+        <dl className="divide-y divide-workspace-line-strong">{report.sourceReferences.map((source) => <div id={`${prefix}-${source.id}`} key={source.id} className="min-w-0 scroll-mt-28 py-3">
+          <dt className="text-xs">{source.available && source.sender ? <strong className={nicknameClass}>{source.sender}</strong> : "昵称未提供"}</dt>
           <dd className="min-w-0 text-xs leading-6">
-            {source.available ? <><p className="whitespace-pre-wrap">{source.group ?? "群名未提供"} · {source.sender ?? "昵称未提供"}</p><p className="text-muted">通知采集时间：<WecomTime value={source.observedAt} /></p></> : <p className="text-warning">来源记录缺失；群名、昵称与采集时间未提供。</p>}
+            {source.available ? <><p className="whitespace-pre-wrap">{source.group ?? "群名未提供"}</p><p className="text-muted">通知采集时间：<WecomTime value={source.observedAt} /></p></> : <p className="text-warning">来源记录缺失；群名、昵称与采集时间未提供。</p>}
           </dd>
         </div>)}</dl>
       </Section>
