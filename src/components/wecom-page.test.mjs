@@ -23,7 +23,7 @@ globalThis.__wecomPageTest = {
   },
   reports: (options) => {
     calls.push("reports");
-    assert.deepEqual(options, { ownerId: "synthetic-owner", deviceId: "synthetic-device", cadence: "two_hour", limit: 10 });
+    assert.deepEqual(options, { ownerId: "synthetic-owner", deviceId: "synthetic-device", cadence: "six_hour", limit: 10 });
     if (failure === "storage") throw new Error("private-db-path");
     return reports();
   },

@@ -28,7 +28,7 @@ export default async function WecomPage() {
   let initialAlerts = null;
   let initialError = null;
   try {
-    initialReports = getWecomReports({ ...access, cadence: "two_hour", limit: 10 });
+    initialReports = getWecomReports({ ...access, cadence: "six_hour", limit: 10 });
     initialAlerts = getWecomCaAlerts({ ...access, active: true, limit: 50 });
   } catch (error) {
     if (error instanceof WecomError && error.status === 401) redirect("/login?next=%2Fwecom");

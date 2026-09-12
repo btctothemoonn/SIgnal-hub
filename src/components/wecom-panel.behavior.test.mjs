@@ -49,9 +49,11 @@ try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(React.StrictMode, null, React.createElement(WecomPanel, props))); await flush(); });
     assert.ok(textContent(renderer.toJSON()).includes(report.summary));
     assert.equal(renderer.root.findAllByProps({ "aria-label": "新跨群提及" }).length, 0);
-    await act(async () => { renderer.root.findByProps({ "aria-label": "简报周期" }).findAllByType("button")[1].props.onClick(); await flush(); });
-    assert.ok(h.requests.some(({ url }) => url.includes("cadence=six_hour&limit=10")));
     assert.equal(renderer.root.findByProps({ "aria-label": "简报周期" }).findAllByType("button")[1].props["aria-pressed"], true);
+    assert.ok(h.requests.some(({ url }) => url.includes("cadence=six_hour&limit=10")));
+    await act(async () => { renderer.root.findByProps({ "aria-label": "简报周期" }).findAllByType("button")[0].props.onClick(); await flush(); });
+    assert.ok(h.requests.some(({ url }) => url.includes("cadence=two_hour&limit=10")));
+    assert.equal(renderer.root.findByProps({ "aria-label": "简报周期" }).findAllByType("button")[0].props["aria-pressed"], true);
     await act(async () => { renderer.root.findByProps({ "aria-label": "CA 范围" }).findAllByType("button")[1].props.onClick(); await flush(); });
     assert.ok(h.requests.some(({ url }) => url === "/api/wecom/ca-alerts?limit=10"));
     assert.match(textContent(renderer.toJSON()), /历史记录/);

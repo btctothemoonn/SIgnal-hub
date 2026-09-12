@@ -128,9 +128,9 @@ test("cadence changes and detail changes abort old requests and reject late resp
   h.session.start(true);
   h.session.setCadence("daily");
   await flush();
-  assert.ok(h.requests.find((r) => r.url.includes("cadence=two_hour")).options.signal.aborted);
+  assert.ok(h.requests.find((r) => r.url.includes("cadence=six_hour")).options.signal.aborted);
   pending.find((p) => p.url.includes("daily")).resolve(reports([{ ...fixture("report").report, id: "daily", cadence: "daily" }]));
-  pending.find((p) => p.url.includes("two_hour")).resolve(reports());
+  pending.find((p) => p.url.includes("six_hour")).resolve(reports());
   await flush();
   assert.equal(h.session.getSnapshot().reports.items[0].id, "daily");
   h.session.selectReport("a:with+symbols");
