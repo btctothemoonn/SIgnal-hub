@@ -10,7 +10,6 @@ import { WecomStatus } from "./wecom-status";
 import { WecomTime, wecomCommand, wecomIconButton } from "./wecom-ui";
 
 const cadences: { value: WecomCadence; label: string }[] = [
-  { value: "two_hour", label: "2 小时" },
   { value: "six_hour", label: "6 小时" },
   { value: "daily", label: "日报" },
 ];
