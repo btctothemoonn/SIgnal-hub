@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SignalEventSummary } from "./signal-event-summary";
 import type {
   AlphaSummaryAudience,
   AlphaSummaryScope,
@@ -156,7 +155,6 @@ function AlphaSummaryScopeResult({
         ) : null}
 
         {summary ? (
-          audience === "signals" ? <SignalEventSummary summary={summary} /> :
           <div className="space-y-5">
             <div className="border-l-2 border-accent pl-3">
               <p className="text-xs font-semibold uppercase text-muted">
