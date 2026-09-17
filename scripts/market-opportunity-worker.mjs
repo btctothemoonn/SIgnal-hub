@@ -1,6 +1,7 @@
 import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
 import { runMarketOpportunityScan } from "../src/lib/market-opportunity-worker.ts";
 import { runMarketBriefCheck } from "../src/lib/market-alert-brief-worker.ts";
+import { MARKET_BRIEF_INTERVAL_MS } from "../src/lib/market-alert-brief-types.ts";
 import {
   installWorkerShutdown,
   loadWorkerEnv,
@@ -27,7 +28,7 @@ if (!config.enabled) {
 // Independent async loop: summarization must not delay the market scan cadence.
 const briefTask = (async () => {
   do {
-    let nextCheckAt = Date.now() + 60 * 60_000;
+    let nextCheckAt = Date.now() + MARKET_BRIEF_INTERVAL_MS;
     try {
       const result = await runMarketBriefCheck({ signal: controller.signal });
       nextCheckAt = result.nextCheckAt ?? nextCheckAt;

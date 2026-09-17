@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
 const {openMarketAlertsStore}=await import('./market-alerts-store.ts');
 const dir=mkdtempSync(join(tmpdir(),'market-brief-'));
 const store=openMarketAlertsStore(join(dir,'alerts.sqlite'));
@@ -26,9 +27,21 @@ try {
   assert.match(input['1h'].risks.join(' '),/AAAUSDT/);
   assert.equal(input['1h'].totals.squeeze,1);
   assert.equal(store.claimMarketBriefCheck(now),true);
-  assert.equal(store.claimMarketBriefCheck(now+3599999),false);
+  assert.equal(store.claimMarketBriefCheck(now+3*3600000-1),false,'three-hour cooldown');
   store.close();
   const reopened=openMarketAlertsStore(join(dir,'alerts.sqlite'));
-  assert.equal(reopened.claimMarketBriefCheck(now+1000),false,'restart must not bypass hourly quota');
+  assert.equal(reopened.claimMarketBriefCheck(now+2*3600000),false,'restart must not bypass three-hour quota');
+  assert.equal(reopened.readMarketBriefCache(now).nextCheckAt,now+3*3600000);
+  assert.equal(reopened.claimMarketBriefCheck(now+3*3600000),true);
   reopened.close();
+  const legacyDb=new DatabaseSync(join(dir,'alerts.sqlite'));
+  legacyDb.prepare('UPDATE market_alert_brief SET next_check_ms=?, checked_at=? WHERE id=1')
+    .run(now+3600000,new Date(now).toISOString());
+  legacyDb.close();
+  const migrated=openMarketAlertsStore(join(dir,'alerts.sqlite'));
+  try {
+    assert.equal(migrated.readMarketBriefCache(now).nextCheckAt,now+3*3600000,'legacy hourly deadline is extended from the last check');
+    assert.equal(migrated.claimMarketBriefCheck(now+3*3600000-1),false,'legacy state cannot bypass the new interval');
+    assert.equal(migrated.claimMarketBriefCheck(now+3*3600000),true);
+  } finally {migrated.close();}
 } finally {try{store.close()}catch{} rmSync(dir,{recursive:true,force:true});}

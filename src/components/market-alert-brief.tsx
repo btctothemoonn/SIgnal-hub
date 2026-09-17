@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { MarketBriefSnapshot } from "@/lib/market-alert-brief-types";
+import { MARKET_BRIEF_STALE_AFTER_MS } from "../lib/market-alert-brief-types.ts";
 
 type MarketAlertBriefProps = {
   briefs?: Partial<Record<"1h" | "24h", MarketBriefSnapshot>>;
@@ -72,7 +73,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
   const checkedAtMs = Date.parse(brief?.checkedAt ?? "");
   const effectiveStale = Boolean(brief && (
     brief.stale || (Number.isFinite(checkedAtMs)
-      ? nowMs - checkedAtMs > 75 * 60_000
+      ? nowMs - checkedAtMs > MARKET_BRIEF_STALE_AFTER_MS
       : hasReport)
   ));
   const statusText = !brief

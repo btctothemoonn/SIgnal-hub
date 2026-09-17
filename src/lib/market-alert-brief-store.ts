@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { MARKET_BRIEF_INTERVAL_MS, MARKET_BRIEF_STALE_AFTER_MS } from "./market-alert-brief-types.ts";
 import type { MarketBriefItem, MarketBriefScope, MarketBriefSnapshot } from "./market-alert-brief-types.ts";
 
-export const MARKET_BRIEF_INTERVAL_MS = 60 * 60_000;
+export { MARKET_BRIEF_INTERVAL_MS } from "./market-alert-brief-types.ts";
 export type MarketBriefReports = Record<MarketBriefScope, MarketBriefSnapshot>;
 type Row = Record<string, unknown>;
 const number = (value: unknown) => Number(value) || 0;
@@ -18,7 +19,7 @@ export function createMarketBriefStore(db: DatabaseSync) {
     const windowEnd = new Date(nowMs).toISOString();
     const reports = {} as MarketBriefReports;
     for (const scope of ["1h", "24h"] as const) {
-      const windowStart = new Date(nowMs - (scope === "1h" ? 1 : 24) * MARKET_BRIEF_INTERVAL_MS).toISOString();
+      const windowStart = new Date(nowMs - (scope === "1h" ? 1 : 24) * 60 * 60_000).toISOString();
       // Aggregate the complete time window, independent of the UI's paginated feed.
       const rows = db.prepare(`WITH recent AS (
         SELECT *, ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY occurred_at DESC, created_at DESC, id DESC) AS n
@@ -55,14 +56,17 @@ export function createMarketBriefStore(db: DatabaseSync) {
     let reports: Partial<MarketBriefReports> = {};
     try { reports = JSON.parse(String(row.reports_json || "{}")); } catch { /* Preserve the feed if a cache file was damaged. */ }
     for (const report of Object.values(reports)) {
-      report.stale = !!row.failed || !report.checkedAt || nowMs-Date.parse(report.checkedAt) > 75*60_000;
+      report.stale = !!row.failed || !report.checkedAt || nowMs-Date.parse(report.checkedAt) > MARKET_BRIEF_STALE_AFTER_MS;
       if (row.failed) report.status = "error";
     }
-    return { reports, fingerprint: String(row.fingerprint || ""), nextCheckAt: number(row.next_check_ms) };
+    const checkedAtMs = Date.parse(String(row.checked_at || ""));
+    const nextCheckAt = Math.max(number(row.next_check_ms), Number.isFinite(checkedAtMs) ? checkedAtMs + MARKET_BRIEF_INTERVAL_MS : 0);
+    return { reports, fingerprint: String(row.fingerprint || ""), nextCheckAt };
   }
   function claimMarketBriefCheck(nowMs: number) {
-    return db.prepare("UPDATE market_alert_brief SET next_check_ms=?, checked_at=? WHERE id=1 AND next_check_ms<=?")
-      .run(nowMs+MARKET_BRIEF_INTERVAL_MS,new Date(nowMs).toISOString(),nowMs).changes === 1;
+    // Also guard the last check so persisted hourly deadlines respect the longer cadence after upgrade.
+    return db.prepare("UPDATE market_alert_brief SET next_check_ms=?, checked_at=? WHERE id=1 AND next_check_ms<=? AND (checked_at IS NULL OR checked_at<=?)")
+      .run(nowMs+MARKET_BRIEF_INTERVAL_MS,new Date(nowMs).toISOString(),nowMs,new Date(nowMs-MARKET_BRIEF_INTERVAL_MS).toISOString()).changes === 1;
   }
   function saveMarketBriefCache(reports: MarketBriefReports, fingerprint: string, nowMs: number, failed = false) {
     return db.prepare("UPDATE market_alert_brief SET reports_json=?, fingerprint=?, failed=? WHERE id=1 AND checked_at=?")

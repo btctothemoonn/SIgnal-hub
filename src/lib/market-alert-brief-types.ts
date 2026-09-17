@@ -1,3 +1,6 @@
+export const MARKET_BRIEF_INTERVAL_MS = 3 * 60 * 60_000;
+export const MARKET_BRIEF_STALE_AFTER_MS = MARKET_BRIEF_INTERVAL_MS + 15 * 60_000;
+
 export type MarketBriefScope = "1h" | "24h";
 export type MarketBriefItem = {
   symbol: string; pump: number; crash: number; squeeze: number; total: number;

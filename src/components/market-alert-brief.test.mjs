@@ -162,15 +162,15 @@ for (const [status, expected] of [
   });
 }
 
-test("freshness uses checkedAt with a strict 75-minute limit, never generatedAt", async () => {
+test("freshness uses checkedAt with a strict 195-minute limit, never generatedAt", async () => {
   const cached = brief({
     generatedAt: "2026-09-17T01:00:00.000Z",
-    checkedAt: "2026-09-18T03:00:00.000Z",
+    checkedAt: "2026-09-18T01:00:00.000Z",
     stale: false,
   });
   assert.doesNotMatch(await markup({ "1h": cached }), /数据可能已过期/);
   assert.match(await markup({ "1h": {
-    ...cached, checkedAt: "2026-09-18T02:59:59.999Z",
+    ...cached, checkedAt: "2026-09-18T00:59:59.999Z",
   } }), /数据可能已过期/);
   assert.match(await markup({ "1h": { ...cached, stale: true } }), /数据可能已过期/);
   assert.match(await markup({ "1h": brief({ stale: true }) }), /数据可能已过期/);
@@ -184,7 +184,7 @@ test("freshness uses checkedAt with a strict 75-minute limit, never generatedAt"
 
 test("the existing parent clock marks an unchanged report stale when all workers stop", async () => {
   const Component = await loadComponent();
-  const briefs = { "1h": brief({ checkedAt: "2026-09-18T03:00:00.000Z" }) };
+  const briefs = { "1h": brief({ checkedAt: "2026-09-18T01:00:00.000Z" }) };
   let renderer;
   try {
     await act(async () => {
