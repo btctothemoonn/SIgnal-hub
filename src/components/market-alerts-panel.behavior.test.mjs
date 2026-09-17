@@ -42,6 +42,9 @@ export function getMarketAlertWorkerView() {
 export function MarketOpportunityPanel() {
   return React.createElement("section", { "data-opportunity-panel": true });
 }
+export function MarketAlertBrief() {
+  return React.createElement("section", { "data-market-alert-brief": true });
+}
 `,
     "utf8",
   );
@@ -55,6 +58,7 @@ export function MarketOpportunityPanel() {
   }).outputText
     .replace('from "next/image"', `from "${stubsImport}"`)
     .replace('from "@/lib/market-alerts-health"', `from "${stubsImport}"`)
+    .replace('from "./market-alert-brief"', `from "${stubsImport}"`)
     .replace('from "./market-opportunity-panel"', `from "${stubsImport}"`);
   writeFileSync(runtimePath, output, "utf8");
 

@@ -1,5 +1,6 @@
 import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
 import { runMarketOpportunityScan } from "../src/lib/market-opportunity-worker.ts";
+import { runMarketBriefCheck } from "../src/lib/market-alert-brief-worker.ts";
 import {
   installWorkerShutdown,
   loadWorkerEnv,
@@ -23,6 +24,21 @@ if (!config.enabled) {
   process.exit(0);
 }
 
+// Independent async loop: summarization must not delay the market scan cadence.
+const briefTask = (async () => {
+  do {
+    let nextCheckAt = Date.now() + 60 * 60_000;
+    try {
+      const result = await runMarketBriefCheck({ signal: controller.signal });
+      nextCheckAt = result.nextCheckAt ?? nextCheckAt;
+      logWorker("market.brief.done", result);
+    } catch (error) {
+      logWorker("market.brief.error", { error: safeError(error) });
+    }
+    if (!once) await waitFor(Math.max(1000, nextCheckAt - Date.now()), controller.signal);
+  } while (!once && !controller.signal.aborted);
+})();
+
 do {
   const cycleStartedAt = Date.now();
   try {
@@ -40,3 +56,4 @@ do {
     await waitFor(nextWorkerDelay(60_000, cycleStartedAt), controller.signal);
   }
 } while (!once && !controller.signal.aborted);
+await briefTask;

@@ -20,6 +20,7 @@ import type {
   MarketOpportunityMetrics,
 } from "./market-opportunity-core.ts";
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
+import { createMarketBriefStore } from "./market-alert-brief-store.ts";
 
 type DbValue = string | number | null;
 type DbRow = Record<string, unknown>;
@@ -248,6 +249,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   db.exec("PRAGMA busy_timeout=10000;");
   db.exec("PRAGMA journal_mode=WAL;");
   db.exec("PRAGMA synchronous=NORMAL;");
+  const briefStore = createMarketBriefStore(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_volatility_state (
       key TEXT PRIMARY KEY,
@@ -441,6 +443,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     INSERT OR IGNORE INTO market_alert_revision (id, revision) VALUES (1, 0);
   `);
   const revisionTables = [
+    "market_alert_brief",
     "market_volatility_state",
     "market_squeeze_active",
     "market_alert_events",
@@ -1781,6 +1784,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       page,
       limit,
       activeSignals: [...volatilityActive, ...squeezeActive],
+      briefs: briefStore.readMarketBriefCache(snapshotNowMs).reports,
       opportunities,
       opportunityMeta: {
         fingerprint: opportunityFingerprint,
@@ -1833,6 +1837,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
 
   return {
     reserveVolatilityAlert,
+    ...briefStore,
     commitVolatilityAlert,
     commitVolatilityAlertUncertain,
     releaseVolatilityAlert,
