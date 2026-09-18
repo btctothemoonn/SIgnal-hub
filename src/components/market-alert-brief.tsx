@@ -9,11 +9,11 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useState } from "react";
-import type { MarketBriefSnapshot } from "@/lib/market-alert-brief-types";
+import type { MarketBriefScope, MarketBriefSnapshot } from "@/lib/market-alert-brief-types";
 import { MARKET_BRIEF_STALE_AFTER_MS } from "../lib/market-alert-brief-types.ts";
 
 type MarketAlertBriefProps = {
-  briefs?: Partial<Record<"1h" | "24h", MarketBriefSnapshot>>;
+  briefs?: Partial<Record<MarketBriefScope, MarketBriefSnapshot>>;
   nowMs: number;
 };
 
@@ -65,7 +65,7 @@ function AlertCounts({ counts }: { counts: MarketBriefSnapshot["totals"] | Marke
 }
 
 export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
-  const [scope, setScope] = useState<"1h" | "24h">("1h");
+  const [scope, setScope] = useState<MarketBriefScope>("3h");
   const brief = briefs?.[scope];
   const hasReport = Boolean(brief && (
     brief.status === "ready" || brief.status === "empty" || brief.generatedAt || brief.items.length
@@ -107,7 +107,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
           ) : null}
         </div>
         <div role="group" aria-label="速览时段" className="grid shrink-0 grid-cols-2 gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
-          {(["1h", "24h"] as const).map((value) => (
+          {(["3h", "24h"] as const).map((value) => (
             <button
               key={value}
               type="button"

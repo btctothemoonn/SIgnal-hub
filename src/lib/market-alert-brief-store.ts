@@ -18,8 +18,8 @@ export function createMarketBriefStore(db: DatabaseSync) {
   function getMarketBriefInput(nowMs = Date.now()): MarketBriefReports {
     const windowEnd = new Date(nowMs).toISOString();
     const reports = {} as MarketBriefReports;
-    for (const scope of ["1h", "24h"] as const) {
-      const windowStart = new Date(nowMs - (scope === "1h" ? 1 : 24) * 60 * 60_000).toISOString();
+    for (const scope of ["3h", "24h"] as const) {
+      const windowStart = new Date(nowMs - (scope === "3h" ? 3 : 24) * 60 * 60_000).toISOString();
       // Aggregate the complete time window, independent of the UI's paginated feed.
       const rows = db.prepare(`WITH recent AS (
         SELECT *, ROW_NUMBER() OVER(PARTITION BY symbol ORDER BY occurred_at DESC, created_at DESC, id DESC) AS n
@@ -42,7 +42,7 @@ export function createMarketBriefStore(db: DatabaseSync) {
         reason: number(row.pump) && number(row.crash) ? "涨跌预警均有触发，注意方向反复。" : number(row.squeeze) ? "出现轧空信号，等待后续价格确认。" : "同币预警已合并，关注最新触发方向。",
       }));
       const mixed = rows.filter(row => number(row.pump) > 0 && number(row.crash) > 0).slice(0,3).map(row=>String(row.symbol));
-      const old = items.filter(item=>nowMs-Date.parse(item.latestAt) > (scope === "1h" ? 30 : 120)*60_000).map(item=>item.symbol);
+      const old = items.filter(item=>nowMs-Date.parse(item.latestAt) > (scope === "3h" ? 30 : 120)*60_000).map(item=>item.symbol);
       reports[scope] = {
         scope,windowStart,windowEnd,generatedAt:null,checkedAt:windowEnd,model:null,status:totals.total ? "pending" : "empty",stale:false,
         headline: totals.total ? "预警统计已更新，AI 概况暂未生成。" : "本时间段暂无异动预警。",totals,items,
@@ -53,8 +53,14 @@ export function createMarketBriefStore(db: DatabaseSync) {
   }
   function readMarketBriefCache(nowMs = Date.now()) {
     const row = db.prepare("SELECT * FROM market_alert_brief WHERE id=1").get() as Row;
-    let reports: Partial<MarketBriefReports> = {};
-    try { reports = JSON.parse(String(row.reports_json || "{}")); } catch { /* Preserve the feed if a cache file was damaged. */ }
+    const reports: Partial<MarketBriefReports> = {};
+    try {
+      const cached = JSON.parse(String(row.reports_json || "{}"));
+      // Keep compatible caches, but never relabel a legacy one-hour report as three hours.
+      for (const scope of ["3h", "24h"] as const) {
+        if (cached?.[scope]?.scope === scope) reports[scope] = cached[scope];
+      }
+    } catch { /* Preserve the feed if a cache file was damaged. */ }
     for (const report of Object.values(reports)) {
       report.stale = !!row.failed || !report.checkedAt || nowMs-Date.parse(report.checkedAt) > MARKET_BRIEF_STALE_AFTER_MS;
       if (row.failed) report.status = "error";

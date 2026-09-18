@@ -20,6 +20,8 @@ const fetchImpl=async (_url,options)=>{
   const request=JSON.parse(options.body);
   assert.equal(request.model,'MiniMax-M3');
   assert.equal(request.thinking.type,'disabled');
+  assert.match(request.messages[1].content,/3h或24h/);
+  assert.doesNotMatch(request.messages[1].content,/1h/);
   if(fail) return new Response('{}',{status:429});
   return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({summaries:[{scope:'24h',headline:'上涨预警集中于少数币种。',items:[{symbol:'AAAUSDT',reason:'出现上涨预警，仍需观察延续。'}]}]})}}]});
 };
@@ -35,7 +37,7 @@ try{
   assert.equal(calls,1);
   const db=openStore();
   const cached=db.readMarketBriefCache(now+interval).reports;
-  assert.equal(cached['1h'].status,'empty');assert.equal(cached['24h'].model,'MiniMax-M3');
+  assert.equal(cached['3h'].status,'empty');assert.equal(cached['24h'].model,'MiniMax-M3');
   assert.equal(cached['24h'].totals.total,1);
   assert.equal(cached['24h'].windowEnd,new Date(now+interval).toISOString());
   db.insertMarketAlertEvent({id:'two',symbol:'AAAUSDT',type:'volatility',side:'SHORT',level:2,stage:'test',trigger:'test',source:'ws',price:0.9,changePct:-5,volumeRatio:3,score:null,metrics:{},reasons:[],occurredAt:new Date(now+2*interval-1000).toISOString()});db.close();
@@ -53,8 +55,10 @@ try{
   assert.equal(worker.parseMarketBriefResponse(JSON.stringify(valid),both).length,2);
   const forged=structuredClone(valid);forged.summaries[0].items[0].symbol='FAKEUSDT';
   assert.throws(()=>worker.parseMarketBriefResponse(JSON.stringify(forged),both),/symbol/);
-  const duplicated=structuredClone(valid);duplicated.summaries[1].scope='1h';
+  const duplicated=structuredClone(valid);duplicated.summaries[1].scope='3h';
   assert.throws(()=>worker.parseMarketBriefResponse(JSON.stringify(duplicated),both),/shape/);
+  const oldScope=structuredClone(valid);oldScope.summaries[0].scope='1h';
+  assert.throws(()=>worker.parseMarketBriefResponse(JSON.stringify(oldScope),both),/shape/);
   let batchedCalls=0;
   const newPath=join(dir,'batch.sqlite');
   const batchStore=()=>openMarketAlertsStore(newPath);
