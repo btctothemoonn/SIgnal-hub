@@ -8,6 +8,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import TestRenderer, { act } from "react-test-renderer";
 import ts from "typescript";
+import { MARKET_BRIEF_STALE_AFTER_MS } from "../lib/market-alert-brief-types.ts";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,12 +49,21 @@ function item(symbol, overrides = {}) {
     maxLevel: 2,
     direction: "up",
     reason: `${symbol} 成交放量，连续触发。`,
+    tracking: {
+      state: "new",
+      observedAt: "2026-09-18T04:00:00.000Z",
+      evidence: ["15 分钟涨幅 +2.30%，方向延续。", "5 分钟量比 2.10，放量得到确认。"],
+      nextWatch: "观察 5 分钟量比能否保持 1.50 以上，以及 15 分钟涨幅是否仍为正。",
+      dropIf: "若 15 分钟涨幅转负，或缓存超过 15 分钟未更新，移出跟踪。",
+      signalKey: "up:volume-confirmed",
+    },
     ...overrides,
   };
 }
 
 function brief(overrides = {}) {
   return {
+    schemaVersion: 2,
     scope: "3h",
     windowStart: "2026-09-18T01:00:00.000Z",
     windowEnd: "2026-09-18T04:00:00.000Z",
@@ -66,6 +76,7 @@ function brief(overrides = {}) {
     totals: { symbols: 3, pump: 9, crash: 3, squeeze: 6, total: 18 },
     items: [item("BTCUSDT"), item("ETHUSDT"), item("SOLUSDT")],
     risks: ["短时波动扩大。", "多空信号交错。"],
+    changes: { added: ["BTCUSDT"], downgraded: ["OLDUSDT"] },
     ...overrides,
   };
 }
@@ -80,256 +91,207 @@ async function markup(briefs) {
   return renderToStaticMarkup(React.createElement(Component, { briefs, nowMs }));
 }
 
-test("SSR defaults to the three-hour report and labels historical alert changes", async () => {
-  const html = await markup({
-    "3h": brief(),
-    "24h": brief({ scope: "24h", headline: "全天报告" }),
-  });
-  assert.match(html, /异动速览/);
-  assert.match(html, /小时报告/);
-  assert.doesNotMatch(html, /全天报告/);
-  assert.match(html, /aria-pressed="true"[^>]*>3h<\/button>/);
-  assert.doesNotMatch(html, />1h<\/button>/);
-  assert.match(html, /aria-pressed="false"[^>]*>24h<\/button>/);
-  assert.match(html, /3 币种/);
-  assert.match(html, /18 次预警/);
-  assert.match(html, /暴涨 9/);
-  assert.match(html, /暴跌 3/);
-  assert.match(html, /轧空 6/);
-  assert.match(html, /BTCUSDT/);
-  assert.match(html, /暴涨 3/);
-  assert.match(html, /最近触发/);
-  assert.match(html, /\+7\.25%/);
-  assert.match(html, /数据截至/);
+test("defaults to a three-candidate tracking list with evidence and observation conditions", async () => {
+  const html = await markup({ "3h": brief(), "24h": brief({ scope: "24h", headline: "全天报告" }) });
+  assert.match(html, /异动跟踪/);
+  assert.match(html, /aria-pressed="true"[^>]*>跟踪清单<\/button>/);
+  assert.match(html, /aria-pressed="false"[^>]*>24h 回顾<\/button>/);
+  assert.match(html, /新出现/);
+  assert.match(html, /入选理由/);
+  assert.match(html, /15 分钟涨幅 \+2\.30%/);
+  assert.match(html, /5 分钟量比 2\.10/);
+  assert.match(html, /下一步观察/);
+  assert.match(html, /量比能否保持 1\.50 以上/);
+  assert.match(html, /移出条件/);
+  assert.match(html, /缓存超过 15 分钟未更新/);
+  assert.match(html, /指标观测/);
+  assert.match(html, /本轮新增[^<]*BTCUSDT/);
+  assert.match(html, /本轮已降级[^<]*OLDUSDT/);
   assert.match(html, /dateTime="2026-09-18T04:00:00.000Z"/);
-  assert.match(html, /生成/);
-  assert.match(html, /dateTime="2026-09-18T04:01:00.000Z"/);
-  assert.match(html, /检查/);
   assert.match(html, /13 分钟前/);
-  assert.match(html, /缓存/);
-  assert.doesNotMatch(html, /98,?765\.43|实时价格|10\s*分钟更新/);
+  assert.doesNotMatch(html, /全天报告|98,?765\.43|实时价格/);
 });
 
-test("caps the compact report at five rows and two risks without padding short reports", async () => {
-  const html = await markup({
-    "3h": brief({
-      items: ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"].map((symbol) => item(symbol)),
-      risks: ["第一条风险", "第二条风险", "第三条风险"],
-    }),
-  });
-  assert.equal((html.match(/data-market-brief-symbol=/g) ?? []).length, 5);
-  assert.match(html, /EEE/);
-  assert.doesNotMatch(html, /FFF|第三条风险/);
-  assert.match(html, /第一条风险/);
-  assert.match(html, /第二条风险/);
+test("tracking never pads a short list and caps candidates at three", async () => {
+  const html = await markup({ "3h": brief({
+    items: ["AAA", "BBB", "CCC", "DDD", "EEE"].map((symbol) => item(symbol)),
+    risks: ["第一条风险", "第二条风险", "第三条风险"],
+  }) });
+  assert.equal((html.match(/data-market-brief-symbol=/g) ?? []).length, 3);
+  assert.match(html, /CCC/);
+  assert.doesNotMatch(html, /DDD|EEE|第三条风险/);
   const short = await markup({ "3h": brief({ items: [item("ONLYUSDT")] }) });
   assert.equal((short.match(/data-market-brief-symbol=/g) ?? []).length, 1);
 });
 
-test("missing optional snapshots have an explicit unavailable state", async () => {
-  for (const snapshots of [undefined, {}, { "24h": brief({ scope: "24h" }) }]) {
+test("tracking states distinguish stable continuation from strengthening and missing evidence", async () => {
+  for (const [state, label] of [["new", "新出现"], ["strengthening", "持续增强"], ["continuing", "持续跟踪"], ["waiting", "等待确认"]]) {
+    const html = await markup({ "3h": brief({ items: [item("STATE", {
+      tracking: { ...item("STATE").tracking, state },
+    })] }) });
+    assert.match(html, new RegExp(label));
+  }
+  const malformed = await markup({ "3h": brief({ items: [item("OLD", { tracking: undefined })] }) });
+  assert.doesNotMatch(malformed, /data-market-brief-symbol=/);
+  assert.match(malformed, /暂无证据充分、值得继续跟踪的异动/);
+});
+
+test("missing or pre-v2 reports stay pending instead of showing old frequency rankings", async () => {
+  for (const snapshots of [undefined, {}, { "24h": brief({ scope: "24h" }) },
+    { "1h": brief({ scope: "1h" }) }, { "3h": brief({ schemaVersion: undefined }) },
+    { "3h": brief({ schemaVersion: 1 }) }]) {
     const html = await markup(snapshots);
-    assert.match(html, /速览尚未生成/);
-    assert.doesNotMatch(html, /animate-spin|加载中|小时报告/);
+    assert.match(html, /跟踪清单待生成/);
+    assert.doesNotMatch(html, /小时报告|BTCUSDT|animate-spin|加载中/);
   }
 });
 
-test("legacy hourly snapshots are never presented as a three-hour summary", async () => {
-  const html = await markup({ "1h": brief({ scope: "1h", headline: "旧一小时内容" }) });
-  assert.match(html, /aria-pressed="true"[^>]*>3h<\/button>/);
-  assert.match(html, /速览尚未生成/);
-  assert.doesNotMatch(html, /旧一小时内容|BTCUSDT|>1h<\/button>/);
+test("an empty rule result states no qualifying candidates even when alerts exist", async () => {
+  const html = await markup({ "3h": brief({ status: "empty", generatedAt: null, items: [], headline: "", model: null }) });
+  assert.match(html, /暂无证据充分、值得继续跟踪的异动/);
+  assert.match(html, /18 次预警/);
+  assert.doesNotMatch(html, /本时段暂无异动预警|data-market-brief-symbol=/);
 });
 
-for (const [status, expected] of [
-  ["pending", /速览待生成/],
-  ["error", /速览生成失败/],
-  ["empty", /本时段暂无异动预警/],
-]) {
-  test(`${status} without a cached report does not pretend to load forever`, async () => {
-    const html = await markup({
-      "3h": brief({ status, generatedAt: null, headline: "", items: [], risks: [] }),
-    });
-    assert.match(html, expected);
-    assert.doesNotMatch(html, /animate-spin|加载中|data-market-brief-symbol=/);
-  });
-}
+test("AI failure keeps current rule evidence visible and explicitly labels the fallback", async () => {
+  const html = await markup({ "3h": brief({ status: "error", model: null, generatedAt: null }) });
+  assert.match(html, /AI 解读暂不可用/);
+  assert.match(html, /规则筛选/);
+  assert.match(html, /BTCUSDT/);
+  assert.match(html, /下一步观察/);
+  assert.doesNotMatch(html, /保留缓存|速览生成失败/);
+});
 
-for (const [status, expected] of [
-  ["pending", /更新待完成/],
-  ["error", /更新失败/],
-]) {
-  test(`${status} keeps the previous report visible and labels it as cached`, async () => {
-    const html = await markup({ "3h": brief({ status, stale: true }) });
-    assert.match(html, expected);
-    assert.match(html, /缓存/);
-    assert.match(html, /数据可能已过期/);
-    assert.match(html, /小时报告/);
-    assert.match(html, /BTCUSDT/);
-    assert.match(html, /短时波动扩大/);
-  });
-}
+test("rule-only results and pending results make their state clear", async () => {
+  const rules = await markup({ "3h": brief({ model: null, generatedAt: null }) });
+  assert.match(rules, /规则筛选/);
+  const pending = await markup({ "3h": brief({ status: "pending", generatedAt: null, headline: "", items: [], risks: [] }) });
+  assert.match(pending, /跟踪清单待生成/);
+  assert.doesNotMatch(pending, /animate-spin|data-market-brief-symbol=/);
+});
 
-test("freshness uses checkedAt with a strict 195-minute limit, never generatedAt", async () => {
-  const cached = brief({
-    generatedAt: "2026-09-17T01:00:00.000Z",
-    checkedAt: "2026-09-18T01:00:00.000Z",
-    stale: false,
-  });
+test("freshness uses checkedAt and the shared deadline, never AI generation time", async () => {
+  const checkedAt = new Date(nowMs - MARKET_BRIEF_STALE_AFTER_MS).toISOString();
+  const cached = brief({ generatedAt: "2026-09-17T01:00:00.000Z", checkedAt, stale: false });
   assert.doesNotMatch(await markup({ "3h": cached }), /数据可能已过期/);
-  assert.match(await markup({ "3h": {
-    ...cached, checkedAt: "2026-09-18T00:59:59.999Z",
+  assert.match(await markup({ "3h": { ...cached,
+    checkedAt: new Date(nowMs - MARKET_BRIEF_STALE_AFTER_MS - 1).toISOString(),
   } }), /数据可能已过期/);
   assert.match(await markup({ "3h": { ...cached, stale: true } }), /数据可能已过期/);
-  assert.match(await markup({ "3h": brief({ stale: true }) }), /数据可能已过期/);
-  for (const checkedAt of [null, "invalid-date"]) {
-    assert.match(await markup({ "3h": brief({ checkedAt }) }), /数据可能已过期/);
+  for (const invalid of [null, "invalid-date"]) {
+    assert.match(await markup({ "3h": brief({ checkedAt: invalid }) }), /数据可能已过期/);
     assert.doesNotMatch(await markup({ "3h": brief({
-      checkedAt, status: "pending", generatedAt: null, headline: "", items: [], risks: [],
+      checkedAt: invalid, status: "pending", generatedAt: null, headline: "", items: [], risks: [],
     }) }), /数据可能已过期/);
   }
 });
 
-test("the existing parent clock marks an unchanged report stale when all workers stop", async () => {
+test("the parent clock marks unchanged tracking stale when workers stop", async () => {
   const Component = await loadComponent();
-  const briefs = { "3h": brief({ checkedAt: "2026-09-18T01:00:00.000Z" }) };
+  const briefs = { "3h": brief({ checkedAt: new Date(nowMs - MARKET_BRIEF_STALE_AFTER_MS).toISOString() }) };
   let renderer;
   try {
-    await act(async () => {
-      renderer = TestRenderer.create(React.createElement(Component, { briefs, nowMs }));
-    });
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Component, { briefs, nowMs })); });
     assert.doesNotMatch(renderedText(renderer.toJSON()), /数据可能已过期/);
-    await act(async () => renderer.update(React.createElement(Component, {
-      briefs, nowMs: nowMs + 1,
-    })));
+    await act(async () => renderer.update(React.createElement(Component, { briefs, nowMs: nowMs + 1 })));
     assert.match(renderedText(renderer.toJSON()), /数据可能已过期/);
-    assert.match(renderedText(renderer.toJSON()), /小时报告/);
-  } finally {
-    if (renderer) await act(async () => renderer.unmount());
+    assert.match(renderedText(renderer.toJSON()), /下一步观察/);
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+test("tracking evidence expires independently of a recent successful check", async () => {
+  const Component = await loadComponent();
+  const observedAt = new Date(nowMs - 19 * 60_000).toISOString();
+  const briefs = { "3h": brief({
+    checkedAt: new Date(nowMs).toISOString(),
+    items: [item("AGING", { tracking: { ...item("AGING").tracking, observedAt } })],
+  }) };
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Component, { briefs, nowMs })); });
+    assert.doesNotMatch(renderedText(renderer.toJSON()), /数据可能已过期/);
+    await act(async () => renderer.update(React.createElement(Component, { briefs, nowMs: nowMs + 2 * 60_000 })));
+    assert.match(renderedText(renderer.toJSON()), /数据可能已过期/);
+    assert.match(renderedText(renderer.toJSON()), /检查 2 分钟前/);
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+test("invalid, future, or expired candidate timestamps cannot appear fresh", async () => {
+  for (const observedAt of ["invalid-date", new Date(nowMs + 1).toISOString(),
+    new Date(nowMs - MARKET_BRIEF_STALE_AFTER_MS - 1).toISOString()]) {
+    const html = await markup({ "3h": brief({ checkedAt: new Date(nowMs).toISOString(),
+      items: [item("INVALID", { tracking: { ...item("INVALID").tracking, observedAt } })],
+    }) });
+    assert.match(html, /数据可能已过期/);
+    assert.doesNotMatch(html, /Invalid Date/);
+  }
+  const eligible = item("BOUNDARY", { latestAt: new Date(nowMs - 60 * 60_000).toISOString() });
+  assert.doesNotMatch(await markup({ "3h": brief({ items: [eligible] }) }), /数据可能已过期/);
+  for (const latestAt of [new Date(nowMs - 60 * 60_000 - 1).toISOString(), "invalid-date", new Date(nowMs + 1).toISOString()]) {
+    assert.match(await markup({ "3h": brief({ items: [{ ...eligible, latestAt }] }) }), /数据可能已过期/);
   }
 });
 
-test("unknown change and invalid times never render as zero or Invalid Date", async () => {
-  const html = await markup({
-    "3h": brief({
-      generatedAt: null,
-      checkedAt: "not-a-date",
-      windowEnd: "not-a-date",
-      items: [
-        item("NULLUSDT", { latestAt: "not-a-date", latestChangePct: null }),
-        item("DOWNUSDT", { latestChangePct: -3.5, direction: "down" }),
-        item("ZEROUSDT", { latestChangePct: 0, direction: "squeeze" }),
-        item("NANUSDT", { latestChangePct: NaN }),
-      ],
-    }),
-  });
-  assert.match(html, /n\/a/);
-  assert.match(html, /-3\.50%/);
-  assert.match(html, /\+0\.00%/);
-  assert.doesNotMatch(html, /Invalid Date|not-a-date|NaN%/);
-});
-
-test("latest change identifies the alert trigger and never implies a scope-wide return", async () => {
+test("tracking evidence and invalidation remain readable without truncation", async () => {
   const Component = await loadComponent();
   let renderer;
   try {
-    await act(async () => {
-      renderer = TestRenderer.create(React.createElement(Component, {
-        briefs: {
-          "3h": brief(),
-          "24h": brief({ scope: "24h", items: [item("DAYUSDT", { latestChangePct: -1.25 })] }),
-        },
-        nowMs,
-      }));
-    });
-    const changes = () => renderer.root.findAllByProps({ "data-market-brief-change": true });
-    assert.equal(changes().length, 3);
-    assert.match(changes()[0].props.title, /最近一次预警的触发涨跌幅/);
-    assert.match(changes()[0].props.title, /非所选时段累计涨跌幅/);
-    await act(async () => renderer.root.findAllByType("button")
-      .find((node) => renderedText(node) === "24h").props.onClick());
-    assert.equal(changes().length, 1);
-    assert.match(renderedText(changes()[0]), /-1\.25%/);
-    assert.match(changes()[0].props.title, /非所选时段累计涨跌幅/);
-    assert.doesNotMatch(renderedText(changes()[0]), /24h|3h|实时/);
-  } finally {
-    if (renderer) await act(async () => renderer.unmount());
-  }
-});
-
-test("scope selection survives refreshed props and never borrows the other scope's report", async () => {
-  const Component = await loadComponent();
-  let renderer;
-  const element = (briefs) => React.createElement(Component, { briefs, nowMs });
-  try {
-    await act(async () => {
-      renderer = TestRenderer.create(element({
-        "3h": brief(),
-        "24h": brief({ scope: "24h", headline: "全天报告", items: [item("DAYUSDT")] }),
-      }));
-    });
-    const button = (label) => renderer.root.findAllByType("button")
-      .find((node) => renderedText(node) === label);
-    await act(async () => button("24h").props.onClick());
-    assert.equal(button("24h").props["aria-pressed"], true);
-    assert.equal(button("3h").props["aria-pressed"], false);
-    assert.match(renderedText(renderer.toJSON()), /全天报告/);
-    assert.doesNotMatch(renderedText(renderer.toJSON()), /小时报告|BTCUSDT/);
-    await act(async () => renderer.update(element({
-      "3h": brief(),
-      "24h": brief({ scope: "24h", headline: "全天报告已更新" }),
-    })));
-    assert.match(renderedText(renderer.toJSON()), /全天报告已更新/);
-    await act(async () => renderer.update(element({ "3h": brief() })));
-    assert.equal(button("24h").props["aria-pressed"], true);
-    assert.match(renderedText(renderer.toJSON()), /速览尚未生成/);
-    assert.doesNotMatch(renderedText(renderer.toJSON()), /小时报告/);
-    await act(async () => button("3h").props.onClick());
-    assert.match(renderedText(renderer.toJSON()), /小时报告/);
-  } finally {
-    if (renderer) await act(async () => renderer.unmount());
-  }
-});
-
-test("long content stays in a legible wrapping band with two-line risks", async () => {
-  const Component = await loadComponent();
-  let renderer;
-  try {
-    await act(async () => {
-      renderer = TestRenderer.create(React.createElement(Component, {
-        briefs: { "3h": brief({ items: [item("VERYLONGSYMBOL".repeat(8))] }) },
-        nowMs,
-      }));
-    });
-    const section = renderer.root.findByType("section");
-    assert.match(section.props.className, /min-w-0/);
-    assert.match(section.props.className, /w-full/);
-    assert.doesNotMatch(section.props.className, /rounded|shadow|\bborder\b(?!-)/);
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Component, {
+      briefs: { "3h": brief({ items: [item("VERYLONGSYMBOL".repeat(8))] }) }, nowMs,
+    })); });
+    assert.match(renderer.root.findByType("section").props.className, /min-w-0/);
     assert.match(renderer.root.findByType("header").props.className, /flex-wrap/);
     const row = renderer.root.find((node) => typeof node.props["data-market-brief-symbol"] === "string");
-    assert.match(row.props.className, /min-w-0/);
-    assert.match(row.findAllByType("strong")[0].props.className, /text-\[13px\]/);
-    const headline = renderer.root.findByProps({ title: "小时报告：上行异动集中，留意反复。" });
-    assert.match(headline.props.className, /text-sm/);
-    const reason = row.findByType("p");
-    assert.match(reason.props.className, /text-xs/);
-    assert.match(reason.props.className, /leading-5/);
-    const counts = row.findAllByType("div").find((node) => node.props.className.includes("col-span-full"));
-    assert.match(counts.props.className, /text-\[11px\]/);
-    const totals = renderer.root.findAllByType("div").find((node) =>
-      node.props.className.includes("flex") && renderedText(node).includes("3 币种"),
-    );
-    assert.match(totals.props.className, /text-\[11px\]/);
-    const risks = renderer.root.findAllByProps({ "data-market-brief-risk": true });
-    assert.equal(risks.length, 2);
-    risks.forEach((risk) => {
-      assert.match(risk.props.className, /line-clamp-2/);
-      assert.doesNotMatch(risk.props.className, /truncate|whitespace-nowrap/);
-    });
+    const details = row.findByProps({ "data-market-brief-tracking": true });
+    for (const node of [details, ...details.findAll((node) => Boolean(node.props.className))]) {
+      assert.doesNotMatch(node.props.className, /line-clamp|truncate|whitespace-nowrap/);
+    }
+    assert.match(renderedText(details), /15 分钟涨幅转负/);
     assert.equal(renderer.root.findAllByType("details").length, 0);
-  } finally {
-    if (renderer) await act(async () => renderer.unmount());
-  }
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+test("24h retrospective keeps five rows and historical trigger labels", async () => {
+  const Component = await loadComponent();
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Component, {
+      briefs: { "3h": brief(), "24h": brief({ scope: "24h", schemaVersion: undefined,
+        headline: "全天报告", items: ["A", "B", "C", "D", "E", "F"].map((symbol) => item(symbol, { tracking: undefined, latestChangePct: -1.25 })),
+      }) }, nowMs,
+    })); });
+    await act(async () => renderer.root.findAllByType("button")
+      .find((node) => renderedText(node) === "24h 回顾").props.onClick());
+    const rows = renderer.root.findAll((node) => typeof node.props["data-market-brief-symbol"] === "string");
+    assert.equal(rows.length, 5);
+    const changes = renderer.root.findAllByProps({ "data-market-brief-change": true });
+    assert.equal(changes.length, 5);
+    assert.match(changes[0].props.title, /最近一次预警的触发涨跌幅/);
+    assert.match(changes[0].props.title, /非所选时段累计涨跌幅/);
+    assert.match(renderedText(changes[0]), /-1\.25%/);
+    assert.match(renderedText(renderer.toJSON()), /全天报告/);
+    assert.doesNotMatch(renderedText(renderer.toJSON()), /入选理由|本轮新增/);
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+test("scope selection survives refreshed props without borrowing the other report", async () => {
+  const Component = await loadComponent();
+  const element = (briefs) => React.createElement(Component, { briefs, nowMs });
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(element({ "3h": brief(), "24h": brief({ scope: "24h", headline: "全天报告" }) })); });
+    const button = (label) => renderer.root.findAllByType("button").find((node) => renderedText(node) === label);
+    await act(async () => button("24h 回顾").props.onClick());
+    assert.equal(button("24h 回顾").props["aria-pressed"], true);
+    await act(async () => renderer.update(element({ "3h": brief(), "24h": brief({ scope: "24h", headline: "全天报告已更新" }) })));
+    assert.match(renderedText(renderer.toJSON()), /全天报告已更新/);
+    await act(async () => renderer.update(element({ "3h": brief() })));
+    assert.equal(button("24h 回顾").props["aria-pressed"], true);
+    assert.match(renderedText(renderer.toJSON()), /回顾尚未生成/);
+    assert.doesNotMatch(renderedText(renderer.toJSON()), /小时报告|BTCUSDT/);
+    await act(async () => button("跟踪清单").props.onClick());
+    assert.match(renderedText(renderer.toJSON()), /下一步观察/);
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
 });
 
 test("the parent renders snapshot briefs above the unchanged alert workspace", async () => {
@@ -373,7 +335,7 @@ test("the parent renders snapshot briefs above the unchanged alert workspace", a
   const legacyHtml = renderToStaticMarkup(React.createElement(MarketAlertsPanel, {
     initialSnapshot: { ...snapshot, briefs: undefined },
   }));
-  assert.match(legacyHtml, /速览尚未生成/);
+  assert.match(legacyHtml, /跟踪清单待生成/);
   assert.match(legacyHtml, /实时预警/);
 });
 
@@ -421,7 +383,7 @@ test("existing snapshot stream updates the selected brief without extra timers o
     });
     const briefBand = () => renderer.root.findByProps({ "data-market-alert-brief": true });
     await act(async () => briefBand().findAllByType("button")
-      .find((node) => renderedText(node) === "24h").props.onClick());
+      .find((node) => renderedText(node) === "24h 回顾").props.onClick());
     assert.match(renderedText(briefBand()), /全天原报告/);
     await act(async () => listeners.get("market-alerts-snapshot")({
       data: JSON.stringify({
