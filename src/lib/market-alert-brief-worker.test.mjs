@@ -33,7 +33,7 @@ function transport(log,{fail=false}={}) {
     if(tracking){
       assert.equal(tracking.totals,undefined,'current qualitative prose must not use changing raw counts');
       assert.equal(tracking.items[0].latestPrice,undefined,'trigger price is not current evidence');
-      assert.deepEqual(Object.keys(tracking.items[0].tracking).sort(),['evidence','state'],'only fingerprinted categorical facts may inform cached prose');
+      assert.deepEqual(Object.keys(tracking.items[0].tracking).sort(),['confirmation','evidence','state','trend'],'only fingerprinted categorical facts may inform cached prose');
       assert.ok(tracking.items[0].tracking.evidence.every(fact=>!/[0-9%]/.test(fact)),'numeric evidence stays on the live rules display');
     }
     const retrospective=reports.find(report=>report.scope==='24h');
@@ -50,6 +50,42 @@ function transport(log,{fail=false}={}) {
 }
 
 try {
+  // A strong hourly move can coexist with an unconfirmed short-term setup.
+  // Losing these independent axes would invite AI to describe consolidation as
+  // an absence of trend, even though the rule engine still reports strength.
+  const trendStore=makeStore('trend-context');
+  const trendContext=(at,pct1h)=>({candleClosedAt:iso(at-60000),pct5m:0.2,pct15m:0.7,pct1h,volumeRatio5m:2,distanceFromHighPct:-0.5,distanceFromLowPct:8,supportBreak:false,lowerStructure:false,breakout20:false,spotChange15m:null});
+  const trendSeed=trendStore();alert(trendSeed,'AAAUSDT','trend',now-1000);enrich(trendSeed,'AAAUSDT',now-1000,{watchlist:trendContext(now,6)});trendSeed.close();
+  const trendRequests=[];
+  const trendPrompts=[];
+  const trendFetch=async(_url,options)=>{
+    const request=JSON.parse(options.body);
+    const inputs=JSON.parse(request.messages[1].content.split('数据：')[1]);
+    trendRequests.push(inputs);
+    trendPrompts.push(request.messages[1].content.split('数据：')[0]);
+    return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(explanation(inputs))}}]});
+  };
+  assert.equal((await runMarketBriefCheck({nowMs:now,openStore:trendStore,env,fetchImpl:trendFetch})).status,'generated');
+  const projected=trendRequests[0].find(report=>report.scope==='3h').items[0].tracking;
+  assert.equal(projected.trend,'strong_up','AI must receive the existing hourly strength classification');
+  assert.equal(projected.confirmation,'consolidating','short-term confirmation remains distinct from trend');
+  assert.ok(projected.evidence.includes('量能配合价格变化'),'consolidation can coexist with sufficient volume and weak short price movement');
+  assert.doesNotMatch(trendPrompts[0],/consolidating[^。]*尚缺新增放量确认/,'the provider must not be instructed to treat every consolidation as insufficient volume');
+  assert.match(trendPrompts[0],/方向、幅度和量能尚未同时满足确认/);
+  assert.deepEqual(Object.keys(projected).sort(),['confirmation','evidence','state','trend']);
+  assert.ok(projected.evidence.every(fact=>!/[0-9%]/.test(fact)),'the AI must not receive exact hourly measurements');
+  const trendRefresh=(at,hour)=>{const db=trendStore();enrich(db,'AAAUSDT',at-1000,{watchlist:trendContext(at,hour)});db.close();};
+  trendRefresh(now+interval,6.2);
+  assert.equal((await runMarketBriefCheck({nowMs:now+interval,openStore:trendStore,env,fetchImpl:trendFetch})).status,'generated','the initial new-to-continuing transition is meaningful');
+  trendRefresh(now+2*interval,6.25);
+  assert.equal((await runMarketBriefCheck({nowMs:now+2*interval,openStore:trendStore,env,fetchImpl:trendFetch})).status,'unchanged','small hourly changes within the same trend category reuse prose');
+  assert.equal(trendRequests.length,2);
+  trendRefresh(now+3*interval,0);
+  assert.equal((await runMarketBriefCheck({nowMs:now+3*interval,openStore:trendStore,env,fetchImpl:trendFetch})).status,'generated');
+  assert.deepEqual(trendRequests[2].map(report=>report.scope),['3h'],'hourly trend changes only refresh current-list prose');
+  const neutral=trendRequests[2][0].items[0].tracking;
+  assert.equal(neutral.trend,'neutral');assert.equal(neutral.confirmation,'waiting');
+
   // Counts do not make an empty tracking list eligible for an AI explanation.
   const parserStore=makeStore('parser');
   const parserDb=parserStore();

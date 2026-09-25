@@ -136,6 +136,37 @@ test("tracking states distinguish stable continuation from strengthening and mis
   assert.match(malformed, /暂无证据充分、值得继续跟踪的异动/);
 });
 
+test("hourly strength and short-term confirmation are shown as separate dimensions", async () => {
+  for (const [trend, confirmation, trendLabel, confirmationLabel] of [
+    ["strong_up", "consolidating", "小时强势", "短线整理"],
+    ["strong_down", "confirmed", "小时弱势", "短线已确认"],
+    ["neutral", "waiting", "趋势待确认", "短线待确认"],
+  ]) {
+    const html = await markup({ "3h": brief({ items: [item("TREND", {
+      tracking: { ...item("TREND").tracking, state: "waiting", trend, confirmation },
+    })] }) });
+    assert.match(html, new RegExp(trendLabel));
+    assert.match(html, new RegExp(confirmationLabel));
+    assert.doesNotMatch(html, />等待确认<\/span>/);
+    assert.match(html, /入选理由/);
+    assert.match(html, /下一步观察/);
+    assert.match(html, /移出条件/);
+  }
+});
+
+test("a missing new dimension is explicitly unconfirmed instead of inferred from lifecycle", async () => {
+  const trendOnly = await markup({ "3h": brief({ items: [item("PARTIAL", {
+    tracking: { ...item("PARTIAL").tracking, state: "strengthening", trend: "strong_up" },
+  })] }) });
+  assert.match(trendOnly, /小时强势/);
+  assert.match(trendOnly, /短线待确认/);
+  const confirmationOnly = await markup({ "3h": brief({ items: [item("PARTIAL", {
+    tracking: { ...item("PARTIAL").tracking, confirmation: "confirmed" },
+  })] }) });
+  assert.match(confirmationOnly, /趋势待确认/);
+  assert.match(confirmationOnly, /短线已确认/);
+});
+
 test("missing or pre-v2 reports stay pending instead of showing old frequency rankings", async () => {
   for (const snapshots of [undefined, {}, { "24h": brief({ scope: "24h" }) },
     { "1h": brief({ scope: "1h" }) }, { "3h": brief({ schemaVersion: undefined }) },
@@ -229,6 +260,48 @@ test("invalid, future, or expired candidate timestamps cannot appear fresh", asy
   assert.doesNotMatch(await markup({ "3h": brief({ items: [eligible] }) }), /数据可能已过期/);
   for (const latestAt of [new Date(nowMs - 60 * 60_000 - 1).toISOString(), "invalid-date", new Date(nowMs + 1).toISOString()]) {
     assert.match(await markup({ "3h": brief({ items: [{ ...eligible, latestAt }] }) }), /数据可能已过期/);
+  }
+});
+
+test("a valid trend expiry permits an older alert until the explicit deadline", async () => {
+  const Component = await loadComponent();
+  const expiresAt = "2026-09-18T04:34:00.000Z";
+  const briefs = { "3h": brief({ checkedAt: "2026-09-18T04:15:00.000Z", items: [item("TREND", {
+    latestAt: "2026-09-18T02:55:00.000Z",
+    tracking: { ...item("TREND").tracking, observedAt: "2026-09-18T04:14:00.000Z",
+      trend: "strong_up", confirmation: "consolidating", expiresAt },
+  })] }) };
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Component, { briefs, nowMs })); });
+    assert.doesNotMatch(renderedText(renderer.toJSON()), /数据可能已过期/);
+    await act(async () => renderer.update(React.createElement(Component, { briefs, nowMs: Date.parse(expiresAt) - 1 })));
+    assert.doesNotMatch(renderedText(renderer.toJSON()), /数据可能已过期/);
+    await act(async () => renderer.update(React.createElement(Component, { briefs, nowMs: Date.parse(expiresAt) })));
+    assert.match(renderedText(renderer.toJSON()), /数据可能已过期/);
+  } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+test("invalid or overlong expiry cannot extend stale metrics or alerts", async () => {
+  const current = item("EXPIRY", { latestAt: "2026-09-18T03:58:00.000Z",
+    tracking: { ...item("EXPIRY").tracking, trend: "strong_up", confirmation: "consolidating",
+      observedAt: "2026-09-18T04:14:00.000Z", expiresAt: "2026-09-18T04:34:00.000Z" },
+  });
+  for (const overrides of [
+    { tracking: { ...current.tracking, expiresAt: "invalid-date" } },
+    { tracking: { ...current.tracking, expiresAt: "" } },
+    { tracking: { ...current.tracking, expiresAt: "2026-09-18T04:14:59.999Z" } },
+    { tracking: { ...current.tracking, expiresAt: "2026-09-18T04:34:00.001Z" } },
+    { latestAt: "2026-09-18T02:55:00.000Z", tracking: { ...current.tracking, trend: "neutral" } },
+    { latestAt: "2026-09-18T02:55:00.000Z", tracking: { ...current.tracking, trend: undefined } },
+    { latestAt: "2026-09-18T02:20:00.000Z" },
+    { latestAt: "invalid-date" },
+    { latestAt: "2026-09-18T04:15:00.001Z" },
+    { tracking: { ...current.tracking, observedAt: "invalid-date" } },
+    { tracking: { ...current.tracking, observedAt: "2026-09-18T04:15:00.001Z" } },
+  ]) {
+    const html = await markup({ "3h": brief({ items: [{ ...current, ...overrides }] }) });
+    assert.match(html, /数据可能已过期/, JSON.stringify(overrides));
   }
 });
 

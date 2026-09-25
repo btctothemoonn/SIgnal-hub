@@ -51,6 +51,19 @@ export type MarketOpportunityMetrics = {
   quoteVolume: number | null;
   marketCapUsd: number | null;
   fdvUsd: number | null;
+  watchlist?: {
+    candleClosedAt: string;
+    pct5m: number | null;
+    pct15m: number | null;
+    pct1h: number | null;
+    volumeRatio5m: number | null;
+    distanceFromHighPct: number | null;
+    distanceFromLowPct: number | null;
+    supportBreak: boolean;
+    breakout20: boolean;
+    lowerStructure: boolean;
+    spotChange15m: number | null;
+  };
   alertCounts: {
     pump: number;
     crash: number;

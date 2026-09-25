@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 const {openMarketAlertsStore}=await import('./market-alerts-store.ts');
 const {marketBriefReportFingerprint}=await import('./market-alert-brief-store.ts');
+const {deriveOpportunityMetrics}=await import('./market-opportunity-enrichment.ts');
 const dir=mkdtempSync(join(tmpdir(),'market-brief-'));
 const path=join(dir,'alerts.sqlite');
 let store=openMarketAlertsStore(path);
@@ -95,4 +96,62 @@ try {
   assert.match(squeeze.evidence[0],/1m \/ 5m/);
   assert.match(squeeze.evidence[1],/1\.10/);
   assert.doesNotMatch(squeeze.evidence.join(' '),/100\.00|50\.00/);
+  store.close();store=openMarketAlertsStore(join(dir,'trend.sqlite'));
+  const closed={candleClosedAt:new Date(now-minute).toISOString(),pct5m:-.2,pct15m:.3,pct1h:6.95,volumeRatio5m:.6,distanceFromHighPct:-.7,distanceFromLowPct:8,supportBreak:false,lowerStructure:false,breakout20:false,spotChange15m:.2};
+  store.insertMarketAlertEvent(event('sui','SUIUSDT',80*minute));
+  enrich('SUIUSDT',{pct5m:-2,pct15m:-3,volumeRatio5m:.1,watchlist:closed});
+  const trendInput=store.getMarketBriefInput(now);
+  const sui=trendInput['3h'].items.find(item=>item.symbol==='SUIUSDT');
+  assert.ok(sui,'hourly strength with intact consolidation stays tracked beyond a single impulse, using complete candles');
+  assert.equal(sui.tracking.trend,'strong_up');
+  assert.equal(sui.tracking.confirmation,'consolidating');
+  assert.match(sui.reason,/小时.*强势.*整理/);
+  assert.match(sui.tracking.evidence.join(' '),/6\.95%/);
+  assert.match(sui.tracking.nextWatch,/1\.5/);
+  assert.doesNotMatch(sui.tracking.dropIf,/量比低于 0\.8/,'ordinary contraction alone does not invalidate sustained strength');
+  assert.equal(Date.parse(sui.tracking.expiresAt),now+19*minute,'closed candle freshness bounds expiry');
+  assert.equal(store.claimMarketBriefCheck(now),true);store.saveMarketBriefCache(trendInput,'trend',now);
+  enrich('SUIUSDT',{watchlist:{...closed,pct1h:6.8,distanceFromHighPct:-.8,volumeRatio5m:.65}});
+  assert.equal(marketBriefReportFingerprint(trendInput['3h']),marketBriefReportFingerprint(store.getMarketBriefInput(now)['3h']),'numeric drift within the same trend and confirmation facts does not trigger new narration');
+  enrich('SUIUSDT',{watchlist:{...closed,candleClosedAt:new Date(now+4*minute).toISOString(),pct5m:-.1,pct1h:6.8}},-5*minute);
+  const continuingTrend=store.getMarketBriefInput(now+5*minute)['3h'];
+  assert.equal(continuingTrend.items[0].tracking.state,'continuing');
+  assert.deepEqual(continuingTrend.changes.downgraded,[],'consolidation is not a trend downgrade');
+  enrich('SUIUSDT',{watchlist:{...closed,pct5m:1,pct15m:2,volumeRatio5m:2}});
+  const resumedTrend=store.getMarketBriefInput(now)['3h'];
+  assert.equal(resumedTrend.items[0].tracking.confirmation,'confirmed');
+  assert.notEqual(marketBriefReportFingerprint(trendInput['3h']),marketBriefReportFingerprint(resumedTrend));
+  for (const patch of [{pct1h:2.9},{distanceFromHighPct:-1.6},{pct15m:-.6},{pct5m:-.9},{supportBreak:true},{lowerStructure:true},{volumeRatio5m:0},{pct1h:null},{candleClosedAt:new Date(now-21*minute).toISOString()},{candleClosedAt:new Date(now+minute).toISOString()}]) {
+    enrich('SUIUSDT',{watchlist:{...closed,...patch}});
+    assert.equal(store.getMarketBriefInput(now)['3h'].items.length,0,`invalid trend evidence excluded: ${JSON.stringify(patch)}`);
+  }
+  enrich('SUIUSDT',{watchlist:{...closed,candleClosedAt:new Date(now+40*minute).toISOString()}},-41*minute);
+  assert.equal(store.getMarketBriefInput(now+41*minute)['3h'].items.length,0,'trend alerts cannot remain indefinitely');
+  enrich('SUIUSDT',{watchlist:closed});
+  store.insertMarketAlertEvent(event('trend-squeeze','SQTRUSDT',minute,null,'short_squeeze'));
+  enrich('SQTRUSDT',{pct1m:-2,pct5m:-2,pct15m:100,volumeRatio5m:50,watchlist:closed});
+  const sqTrend=store.getMarketBriefInput(now)['3h'].items.find(item=>item.symbol==='SQTRUSDT');
+  assert.equal(sqTrend.tracking.trend,'strong_up','complete candles also support squeeze candidates without old trigger values');
+  assert.doesNotMatch(sqTrend.tracking.evidence.join(' '),/100\.00|50\.00/);
+  store.insertMarketAlertEvent(event('trend-down','WEAKUSDT',minute,'SHORT'));
+  enrich('WEAKUSDT',{watchlist:{...closed,pct1h:-7,pct5m:.2,pct15m:-.3,distanceFromLowPct:.7,distanceFromHighPct:-8,supportBreak:true,lowerStructure:true,breakout20:false}});
+  const downTrend=store.getMarketBriefInput(now)['3h'].items.find(item=>item.symbol==='WEAKUSDT');
+  assert.equal(downTrend.tracking.trend,'strong_down','weak hourly structure has symmetric tracking');
+  assert.equal(downTrend.tracking.confirmation,'consolidating');
+  enrich('WEAKUSDT',{watchlist:{...closed,pct1h:-7,distanceFromLowPct:.7,breakout20:true}});
+  assert.ok(!store.getMarketBriefInput(now)['3h'].items.some(item=>item.symbol==='WEAKUSDT'),'upward breakout invalidates the sustained down route');
+  store.close();store=openMarketAlertsStore(join(dir,'incomplete-structure.sqlite'));
+  for (const [symbol,side,price,missingField] of [['NOLOWUSDT','LONG',106,3],['NOHIGHUSDT','SHORT',94,2]]) {
+    const candles=Array.from({length:288},(_,index)=>{
+      const value=index>=276 ? price : 100;
+      const openedAt=now-(288-index)*5*minute;
+      const row=[openedAt,value,value*1.001,value*.999,value,10,openedAt+5*minute-1];
+      if(index>=276) row[missingField]=null;
+      return row;
+    });
+    const metrics=deriveOpportunityMetrics({seed:{symbol,price,pct24h:0,quoteVolume:1e7,marketCapUsd:null,fdvUsd:null,squeezeMetrics:null,alertCounts:{pump:1,crash:0,squeeze:0,total:1}},futures5m:candles,futures1m:[],spot5m:null,premium:null,openInterest:[],globalLongShortRatio:null,topTraderLongShortRatio:null,takerBuySellRatio:null,observedAt:new Date(now).toISOString()});
+    store.insertMarketAlertEvent(event(symbol,symbol,minute,side));
+    enrich(symbol,metrics);
+    assert.ok(!store.getMarketBriefInput(now)['3h'].items.some(item=>item.symbol===symbol),'missing structure prices cannot establish intact hourly trend');
+  }
 } finally {try{store.close()}catch{} rmSync(dir,{recursive:true,force:true});}

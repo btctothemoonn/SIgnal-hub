@@ -97,6 +97,69 @@ function optionalMetric(source: Record<string, unknown> | null, key: string) {
   return numberValue(source?.[key]);
 }
 
+function completedCandles(rows: KlineRow[], nowMs: number) {
+  if (!Number.isFinite(nowMs)) return [];
+  return rows.filter((row) => {
+    const openedAt = numberValue(row[0]);
+    const closedAt = numberValue(row[6]);
+    return openedAt !== null && closedAt !== null &&
+      openedAt >= 0 && openedAt <= closedAt && closedAt <= nowMs;
+  }).sort((left, right) => Number(left[6]) - Number(right[6]));
+}
+
+function completeWindow(rows: KlineRow[], count: number) {
+  const window = rows.slice(-count);
+  return window.length === count && window.every((row, index) =>
+    index === 0 || Number(row[6]) - Number(window[index - 1][6]) === 300_000);
+}
+
+function completedChange(rows: KlineRow[], intervals: number) {
+  return completeWindow(rows, intervals + 1) ? changeForIntervals(rows, intervals) : null;
+}
+
+function watchlistContext(futures5m: KlineRow[], spot5m: KlineRow[] | null, observedAt: string): MarketOpportunityMetrics["watchlist"] {
+  const nowMs = Date.parse(observedAt);
+  const rows = completedCandles(futures5m, nowMs).slice(-288);
+  const latest = rows.at(-1);
+  if (!latest) return undefined;
+  const latestPrice = close(latest);
+  const enoughDailyHistory = rows.length >= 276 && completeWindow(rows, rows.length) &&
+    latestPrice !== null && latestPrice > 0;
+  const recentHigh = enoughDailyHistory && rows.every((row) => (high(row) ?? 0) > 0)
+    ? extreme(rows, high, "max") : null;
+  const recentLow = enoughDailyHistory && rows.every((row) => (low(row) ?? 0) > 0)
+    ? extreme(rows, low, "min") : null;
+  const prior20 = rows.slice(-21, -1);
+  const priorSupport = rows.slice(-13, -1);
+  const shortSupport = extreme(priorSupport, low, "min");
+  const previousStructureHigh = extreme(rows.slice(-7, -4), high, "max");
+  const latestStructureHigh = extreme(rows.slice(-4), high, "max");
+  const priceChange15m = completedChange(rows, 3);
+  const spot = completedCandles(spot5m ?? [], nowMs);
+  const completeVolume = completeWindow(rows, 27) && rows.slice(-27).every((row) => {
+    const amount = volume(row);
+    return amount !== null && amount >= 0;
+  });
+  return {
+    candleClosedAt: new Date(Number(latest[6])).toISOString(),
+    pct5m: completedChange(rows, 1),
+    pct15m: priceChange15m,
+    pct1h: completedChange(rows, 12),
+    volumeRatio5m: completeVolume ? volumeRatio(rows, 3, 24) : null,
+    distanceFromHighPct: percent(latestPrice, recentHigh),
+    distanceFromLowPct: percent(latestPrice, recentLow),
+    supportBreak: completeWindow(rows, 13) && priorSupport.every((row) => low(row) !== null) &&
+      latestPrice !== null && shortSupport !== null && latestPrice < shortSupport,
+    breakout20: completeWindow(rows, 21) && prior20.every((row) => high(row) !== null) &&
+      latestPrice !== null && latestPrice > Number(extreme(prior20, high, "max")),
+    lowerStructure: completeWindow(rows, 7) && rows.slice(-7).every((row) => high(row) !== null) &&
+      latestStructureHigh !== null && previousStructureHigh !== null &&
+      latestStructureHigh < previousStructureHigh && priceChange15m !== null && priceChange15m < 0,
+    // Confirmation must describe the same completed interval as the futures.
+    spotChange15m: Number(spot.at(-1)?.[6]) === Number(latest[6]) ? completedChange(spot, 3) : null,
+  };
+}
+
 export function deriveOpportunityMetrics(input: {
   seed: MarketOpportunitySeed;
   futures5m: KlineRow[];
@@ -176,6 +239,7 @@ export function deriveOpportunityMetrics(input: {
     quoteVolume: input.seed.quoteVolume,
     marketCapUsd: input.seed.marketCapUsd,
     fdvUsd: input.seed.fdvUsd,
+    watchlist: watchlistContext(input.futures5m, input.spot5m, input.observedAt),
     alertCounts: input.seed.alertCounts,
   };
 }

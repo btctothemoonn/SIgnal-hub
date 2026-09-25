@@ -96,6 +96,149 @@ assert.equal(Math.round(derived.perpSpotDivergencePct ?? 0), 1);
 assert.equal(Math.round(derived.oiGrowth15m ?? 0), 10);
 assert.equal(Math.round(derived.oiNotional ?? 0), 8_162_000);
 
+function completedWatchCandles(count = 30, latestCloseAt = nowMs - 1) {
+  return Array.from({ length: count }, (_, index) => {
+    const closeTime = latestCloseAt - (count - 1 - index) * 300_000;
+    const price = 100 + index;
+    return [closeTime - 299_999, String(price), String(price * 1.001),
+      String(price * 0.999), String(price), index >= count - 3 ? "30" : "10",
+      closeTime, String(price * 10)];
+  });
+}
+
+function watchMetrics(futuresRows, options = {}) {
+  return deriveOpportunityMetrics({
+    seed: seed(), futures5m: futuresRows, futures1m: [], spot5m: null,
+    premium: null, openInterest: [], globalLongShortRatio: null,
+    topTraderLongShortRatio: null, takerBuySellRatio: null,
+    observedAt: new Date(nowMs).toISOString(), ...options,
+  });
+}
+
+const closedWatchCandles = completedWatchCandles();
+const incompleteWatchCandle = [nowMs, "129", "999", "1", "999", "0.001", nowMs + 299_999, "0.1"];
+const watchInputs = [...closedWatchCandles, incompleteWatchCandle];
+const watchInputsBefore = structuredClone(watchInputs);
+const closedOnly = watchMetrics(closedWatchCandles);
+const withIncomplete = watchMetrics(watchInputs);
+assert.ok(withIncomplete.watchlist, "watchlist context is derived from completed candles");
+assert.deepEqual(withIncomplete.watchlist, closedOnly.watchlist,
+  "an incomplete tiny-volume candle cannot cool the watchlist context or change price structure");
+assert.equal(withIncomplete.watchlist.volumeRatio5m, 3,
+  "three completed five-minute volumes are compared with the preceding 24 completed volumes");
+assert.equal(withIncomplete.watchlist.candleClosedAt, new Date(nowMs - 1).toISOString());
+assert.ok(Math.abs(withIncomplete.watchlist.pct5m - ((129 / 128 - 1) * 100)) < 1e-9);
+assert.ok(Math.abs(withIncomplete.watchlist.pct15m - ((129 / 126 - 1) * 100)) < 1e-9);
+assert.ok(Math.abs(withIncomplete.watchlist.pct1h - ((129 / 117 - 1) * 100)) < 1e-9);
+assert.equal(withIncomplete.watchlist.breakout20, true);
+assert.equal(withIncomplete.watchlist.supportBreak, false);
+assert.equal(withIncomplete.watchlist.lowerStructure, false);
+assert.equal(withIncomplete.watchlist.distanceFromHighPct, null,
+  "a short sample cannot claim a distance from the near-24-hour high");
+assert.equal(withIncomplete.watchlist.distanceFromLowPct, null);
+assert.deepEqual(watchInputs, watchInputsBefore, "deriving context does not mutate input arrays");
+assert.notEqual(withIncomplete.pct5m, closedOnly.pct5m,
+  "legacy opportunity metrics retain their existing intrabar semantics");
+
+const seededWatch = watchMetrics(watchInputs, {
+  seed: seed("TESTUSDT", { squeezeMetrics: { priceChange15m: 99, volRatio: 99, breakout20: false } }),
+});
+assert.deepEqual(seededWatch.watchlist, withIncomplete.watchlist,
+  "old squeeze-trigger data never overrides completed-candle context");
+assert.equal(seededWatch.pct15m, 99, "existing squeeze metrics stay backward compatible");
+assert.equal(seededWatch.volumeRatio5m, 99);
+
+const invalidTimeRows = [
+  [nowMs - 299_999, "1", "1", "1", "1", "0.001", "invalid", "1"],
+  ["invalid", "1", "1", "1", "1", "0.001", nowMs - 1, "1"],
+  [nowMs + 1, "1", "1", "1", "1", "0.001", nowMs - 1, "1"],
+];
+assert.deepEqual(watchMetrics([...closedWatchCandles, ...invalidTimeRows]).watchlist, closedOnly.watchlist,
+  "invalid and future candle times cannot enter the context");
+assert.equal(watchMetrics([incompleteWatchCandle, ...invalidTimeRows]).watchlist, undefined,
+  "without any valid completed candle there is no timestamped watchlist context");
+assert.equal(watchMetrics(closedWatchCandles, { observedAt: "invalid" }).watchlist, undefined);
+assert.equal(watchMetrics(completedWatchCandles(30, nowMs)).watchlist.candleClosedAt, new Date(nowMs).toISOString(),
+  "a candle closing exactly at the observation time is complete");
+
+const shortWatch = watchMetrics(completedWatchCandles(1)).watchlist;
+assert.equal(shortWatch.pct5m, null);
+assert.equal(shortWatch.pct15m, null);
+assert.equal(shortWatch.pct1h, null);
+assert.equal(shortWatch.volumeRatio5m, null);
+assert.equal(shortWatch.breakout20, false);
+assert.equal(shortWatch.supportBreak, false);
+assert.equal(shortWatch.lowerStructure, false);
+assert.equal(watchMetrics(completedWatchCandles(26)).watchlist.volumeRatio5m, null,
+  "volume context requires all three recent and 24 baseline samples");
+const missingVolume = structuredClone(closedWatchCandles);
+missingVolume[15][5] = null;
+assert.equal(watchMetrics(missingVolume).watchlist.volumeRatio5m, null,
+  "a partial volume sample must not be treated as a complete baseline");
+const missingClose = structuredClone(closedWatchCandles);
+missingClose.at(-1)[4] = null;
+assert.equal(watchMetrics(missingClose).watchlist.pct5m, null,
+  "missing prices do not fall back to the alert-trigger price");
+
+const oldCloseAt = nowMs - 45 * 60_000;
+assert.equal(watchMetrics(completedWatchCandles(30, oldCloseAt)).watchlist.candleClosedAt,
+  new Date(oldCloseAt).toISOString(), "old completed candles keep their real age for freshness checks");
+const spotCompleted = completedWatchCandles(30);
+const spotWatch = watchMetrics(watchInputs, { spot5m: [...spotCompleted, incompleteWatchCandle] }).watchlist;
+assert.ok(Math.abs(spotWatch.spotChange15m - ((129 / 126 - 1) * 100)) < 1e-9,
+  "spot confirmation also uses completed candles");
+assert.equal(withIncomplete.watchlist.spotChange15m, null);
+assert.equal(watchMetrics(watchInputs, { spot5m: [incompleteWatchCandle] }).watchlist.spotChange15m, null);
+assert.equal(watchMetrics(watchInputs, { spot5m: completedWatchCandles(30, nowMs - 300_001) }).watchlist.spotChange15m,
+  null, "an older spot interval cannot confirm the latest futures interval");
+const stringTimeSpot = spotCompleted.map((row) => row.map((value, index) => index === 0 || index === 6 ? String(value) : value));
+assert.equal(watchMetrics(watchInputs, { spot5m: stringTimeSpot }).watchlist.spotChange15m,
+  spotWatch.spotChange15m, "equivalent numeric timestamp encodings refer to the same candle interval");
+const gappedCandles = closedWatchCandles.filter((_, index) => index !== closedWatchCandles.length - 2);
+assert.equal(watchMetrics(gappedCandles).watchlist.pct5m, null,
+  "a missing interval must not relabel a ten-minute move as a five-minute move");
+assert.equal(watchMetrics(gappedCandles).watchlist.pct15m, null);
+assert.equal(watchMetrics(gappedCandles).watchlist.pct1h, null);
+assert.equal(watchMetrics(gappedCandles).watchlist.volumeRatio5m, null);
+const decliningCandles = closedWatchCandles.map((row, index) => {
+  const price = 130 - index;
+  return [row[0], String(price), String(price * 1.001), String(price * 0.999), String(price), row[5], row[6], row[7]];
+});
+const decliningWatch = watchMetrics(decliningCandles).watchlist;
+assert.ok(decliningWatch.pct1h < 0);
+assert.equal(decliningWatch.supportBreak, true);
+assert.equal(decliningWatch.lowerStructure, true);
+assert.equal(decliningWatch.breakout20, false);
+
+const nearlyDailyCandles = completedWatchCandles(276);
+const nearlyDailyWatch = watchMetrics(nearlyDailyCandles).watchlist;
+assert.ok(Math.abs(nearlyDailyWatch.distanceFromHighPct - ((375 / 375.375 - 1) * 100)) < 1e-9);
+assert.ok(Math.abs(nearlyDailyWatch.distanceFromLowPct - ((375 / 99.9 - 1) * 100)) < 1e-9);
+const insufficientDaily = watchMetrics(completedWatchCandles(275)).watchlist;
+assert.equal(insufficientDaily.distanceFromHighPct, null);
+assert.equal(insufficientDaily.distanceFromLowPct, null);
+const fullDaily = completedWatchCandles(288);
+const dailyGap = fullDaily.filter((_, index) => index !== 20);
+assert.equal(watchMetrics(dailyGap).watchlist.distanceFromHighPct, null,
+  "enough rows with a missing interval still do not form a complete history");
+assert.equal(watchMetrics(dailyGap).watchlist.distanceFromLowPct, null);
+for (const invalid of [null, "invalid", "0", "-1"]) {
+  const missingHigh = structuredClone(nearlyDailyCandles);
+  missingHigh[15][2] = invalid;
+  assert.equal(watchMetrics(missingHigh).watchlist.distanceFromHighPct, null,
+    "the entire high window must contain valid positive prices");
+  const missingLow = structuredClone(nearlyDailyCandles);
+  missingLow[15][3] = invalid;
+  assert.equal(watchMetrics(missingLow).watchlist.distanceFromLowPct, null);
+  const invalidLatest = structuredClone(nearlyDailyCandles);
+  invalidLatest.at(-1)[4] = invalid;
+  const invalidLatestWatch = watchMetrics(invalidLatest).watchlist;
+  assert.equal(invalidLatestWatch.distanceFromHighPct, null);
+  assert.equal(invalidLatestWatch.distanceFromLowPct, null);
+}
+
+console.log("ok - watchlist context uses completed candles without replacing opportunity metrics");
+
 let cacheClientCalls = 0;
 const cachedMetrics = { ...derived, observedAt: new Date(nowMs - 60_000).toISOString() };
 const cached = await enrichOpportunitySeeds({

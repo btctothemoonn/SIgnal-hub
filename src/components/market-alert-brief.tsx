@@ -78,10 +78,19 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
   const staleTrackingData = isTracking && items.some((item) => {
     const observedAtMs = Date.parse(item.tracking?.observedAt ?? "");
     const latestAtMs = Date.parse(item.latestAt);
-    return !Number.isFinite(observedAtMs) || observedAtMs > nowMs
+    if (!Number.isFinite(observedAtMs) || observedAtMs > nowMs
       || nowMs - observedAtMs > MARKET_BRIEF_STALE_AFTER_MS
-      || !Number.isFinite(latestAtMs) || latestAtMs > nowMs
-      || nowMs - latestAtMs > 60 * 60_000;
+      || !Number.isFinite(latestAtMs) || latestAtMs > nowMs) return true;
+    if (item.tracking?.expiresAt !== undefined) {
+      const expiresAtMs = Date.parse(item.tracking.expiresAt);
+      const hasTrend = item.tracking.trend === "strong_up" || item.tracking.trend === "strong_down";
+      const latestAllowedExpiry = Math.min(
+        observedAtMs + MARKET_BRIEF_STALE_AFTER_MS,
+        latestAtMs + (hasTrend ? 120 : 60) * 60_000,
+      );
+      return !Number.isFinite(expiresAtMs) || expiresAtMs <= nowMs || expiresAtMs > latestAllowedExpiry;
+    }
+    return nowMs - latestAtMs > 60 * 60_000;
   });
   const checkedAtMs = Date.parse(brief?.checkedAt ?? "");
   const effectiveStale = Boolean(brief && (
@@ -171,9 +180,20 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
                 <li key={item.symbol} data-market-brief-symbol={item.symbol} className="min-w-0 py-3">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <strong className="min-w-0 break-all font-mono text-[13px] text-foreground">{item.symbol}</strong>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.tracking.state === "strengthening" ? "bg-success/10 text-success" : item.tracking.state === "waiting" ? "bg-warning/10 text-warning" : "bg-accent-soft text-accent"}`}>
-                      {item.tracking.state === "strengthening" ? "持续增强" : item.tracking.state === "continuing" ? "持续跟踪" : item.tracking.state === "waiting" ? "等待确认" : "新出现"}
-                    </span>
+                    {item.tracking.trend || item.tracking.confirmation ? (
+                      <>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.tracking.trend === "strong_up" ? "bg-success/10 text-success" : item.tracking.trend === "strong_down" ? "bg-danger/10 text-danger" : "bg-workspace-surface text-muted"}`}>
+                          {item.tracking.trend === "strong_up" ? "小时强势" : item.tracking.trend === "strong_down" ? "小时弱势" : "趋势待确认"}
+                        </span>
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.tracking.confirmation === "confirmed" ? "bg-accent-soft text-accent" : item.tracking.confirmation === "consolidating" ? "bg-workspace-surface text-muted" : "bg-warning/10 text-warning"}`}>
+                          {item.tracking.confirmation === "confirmed" ? "短线已确认" : item.tracking.confirmation === "consolidating" ? "短线整理" : "短线待确认"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.tracking.state === "strengthening" ? "bg-success/10 text-success" : item.tracking.state === "waiting" ? "bg-warning/10 text-warning" : "bg-accent-soft text-accent"}`}>
+                        {item.tracking.state === "strengthening" ? "持续增强" : item.tracking.state === "continuing" ? "持续跟踪" : item.tracking.state === "waiting" ? "等待确认" : "新出现"}
+                      </span>
+                    )}
                     <span className="text-[10px] text-muted">指标观测 <SnapshotTime value={item.tracking.observedAt} /></span>
                   </div>
                   {item.reason ? <p className="mt-1 break-words text-xs leading-5 text-foreground [overflow-wrap:anywhere]">{item.reason}</p> : null}

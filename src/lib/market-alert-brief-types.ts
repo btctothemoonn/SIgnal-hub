@@ -8,6 +8,9 @@ export type MarketBriefItem = {
   maxLevel: number; direction: "up" | "down" | "squeeze"; reason: string;
   tracking?: {
     state: "new" | "strengthening" | "continuing" | "waiting";
+    trend?: "strong_up" | "strong_down" | "neutral";
+    confirmation?: "confirmed" | "consolidating" | "waiting";
+    expiresAt?: string;
     observedAt: string; evidence: string[]; nextWatch: string; dropIf: string;
     signalKey: string; strength?: number; bands?: number[]; narrativeFacts?: string[];
   };
