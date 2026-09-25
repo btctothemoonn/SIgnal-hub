@@ -61,16 +61,44 @@ try {
   assert.equal(parseMarketBriefResponse(JSON.stringify(valid),parserInputs).length,1);
   const forged=structuredClone(valid);forged.summaries[0].items[0].symbol='FAKEUSDT';
   assert.throws(()=>parseMarketBriefResponse(JSON.stringify(forged),parserInputs),/symbol/);
-  const numeric=structuredClone(valid);numeric.summaries[0].items[0].reason='上涨百分之五，继续观察。';
-  assert.throws(()=>parseMarketBriefResponse(JSON.stringify(numeric),parserInputs),/text/);
-  numeric.summaries[0].items[0].reason='上涨5%，继续观察。';
-  assert.throws(()=>parseMarketBriefResponse(JSON.stringify(numeric),parserInputs),/text/);
-  numeric.summaries[0].items[0].reason='已经三连涨，继续观察。';
-  assert.throws(()=>parseMarketBriefResponse(JSON.stringify(numeric),parserInputs),/text/);
+  for(const unsafe of ['上涨百分之五，继续观察。','上涨5%，继续观察。','已经三连涨，继续观察。','目标价五美元，继续观察。','观察'.repeat(60)]){
+    const numeric=structuredClone(valid);numeric.summaries[0].items[0].reason=unsafe;
+    const safe=parseMarketBriefResponse(JSON.stringify(numeric),parserInputs)[0];
+    assert.equal(safe.items[0].reason,parserInputs['24h'].items[0].reason,'unsafe prose falls back to current deterministic text');
+    assert.equal(safe.headline,valid.summaries[0].headline,'valid AI fields survive another field being discarded');
+  }
+  for(const bad of ['',null,3]){
+    const missing=structuredClone(valid);missing.summaries[0].items[0].reason=bad;
+    assert.throws(()=>parseMarketBriefResponse(JSON.stringify(missing),parserInputs),/text/);
+    const missingHeadline=structuredClone(valid);missingHeadline.summaries[0].headline=bad;
+    assert.throws(()=>parseMarketBriefResponse(JSON.stringify(missingHeadline),parserInputs),/text/);
+  }
+  const longHeadline=structuredClone(valid);longHeadline.summaries[0].headline='观察'.repeat(60);
+  assert.equal(parseMarketBriefResponse(JSON.stringify(longHeadline),parserInputs)[0].headline,'历史预警回顾，触发次数不代表当前强度。');
+  const entirelyBad=structuredClone(valid);entirelyBad.summaries[0].headline='五个强势币种';entirelyBad.summaries[0].items[0].reason='上涨5%';
+  assert.throws(()=>parseMarketBriefResponse(JSON.stringify(entirelyBad),parserInputs),/text/,'an entirely unusable response must remain a failure');
   const duplicate=structuredClone(valid);duplicate.summaries.push(duplicate.summaries[0]);
   assert.throws(()=>parseMarketBriefResponse(JSON.stringify(duplicate),parserInputs),/count/);
   const oldScope=structuredClone(valid);oldScope.summaries[0].scope='1h';
   assert.throws(()=>parseMarketBriefResponse(JSON.stringify(oldScope),parserInputs),/shape/);
+
+  // MiniMax live response: an opening quote is omitted from both items keys,
+  // while otherwise useful explanations are mixed with numeric headlines.
+  const malformedStore=makeStore('provider-shape');
+  const malformedDb=malformedStore();alert(malformedDb,'AAAUSDT','malformed',now-1000);enrich(malformedDb,'AAAUSDT',now-1000);malformedDb.close();
+  const malformed='{ "summaries":[{"scope":"3h","headline":"三条等待确认的异动跟踪，短周期信号仍在反复",items":[{"symbol":"AAAUSDT","reason":"短周期信号仍在反复，等待量价重新配合。"}]},{"scope":"24h","headline":"历史预警以拉升为主、回落次之，仅现一条轧空预警",items":[{"symbol":"AAAUSDT","reason":"历史预警以上涨为主，仍需等待后续确认。"}]}]}';
+  let malformedCalls=0;
+  const malformedResult=await runMarketBriefCheck({nowMs:now,openStore:malformedStore,env,fetchImpl:async()=>{malformedCalls++;return Response.json({choices:[{finish_reason:'stop',message:{content:malformed}}]});}});
+  assert.equal(malformedResult.status,'generated');
+  assert.equal(malformedCalls,1,'field fallback and narrow JSON repair must not call the provider again');
+  const repaired=read(malformedStore,now);
+  assert.equal(repaired['3h'].headline,'当前候选仍需按量价条件继续观察。');
+  assert.equal(repaired['24h'].headline,'历史预警回顾，触发次数不代表当前强度。');
+  assert.equal(repaired['3h'].items[0].reason,'短周期信号仍在反复，等待量价重新配合。');
+  const malformedInputsDb=malformedStore();const malformedInputs=malformedInputsDb.getMarketBriefInput(now);malformedInputsDb.close();
+  assert.throws(()=>parseMarketBriefResponse(malformed.replace('AAAUSDT','FAKEUSDT'),malformedInputs),/symbol/,'repair never relaxes symbol validation');
+  assert.throws(()=>parseMarketBriefResponse(malformed.replace('"24h"','"3h"'),malformedInputs),/shape/,'repair never relaxes scope uniqueness');
+  assert.throws(()=>parseMarketBriefResponse(malformed.replace('"reason":','reason:'),malformedInputs),SyntaxError,'unobserved malformed JSON is not broadly guessed');
 
   const openStore=makeStore('refresh');
   const seed=openStore();alert(seed,'AAAUSDT','first',now-1000);enrich(seed,'AAAUSDT',now-1000);seed.close();

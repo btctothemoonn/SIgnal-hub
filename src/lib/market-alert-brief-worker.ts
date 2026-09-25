@@ -16,27 +16,47 @@ const prose = (value: unknown, max: number) => {
 };
 
 export function parseMarketBriefResponse(content: string, inputs: Partial<MarketBriefReports>): Explanation[] {
-  const parsed = JSON.parse(content.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, "").trim());
+  const clean = content.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, "").trim();
+  let parsed;
+  try { parsed = JSON.parse(clean); } catch (error) {
+    // MiniMax occasionally omits just the opening quote on a known object key.
+    // Recover that observed typo only; JSON.parse and all shape checks still apply.
+    const repaired = clean.replace(/([,{]\s*)(summaries|scope|headline|items|symbol|reason)"\s*:/g,'$1"$2":');
+    if (repaired === clean) throw error;
+    parsed = JSON.parse(repaired);
+  }
   const expected = Object.values(inputs).filter(report=>report.items.length > 0);
   if (!Array.isArray(parsed?.summaries) || parsed.summaries.length !== expected.length) throw new Error("Invalid market brief count");
+  let validAiFields = 0;
+  const safeField = (value: unknown, max: number, fallback: string) => {
+    // Empty, missing and non-text fields indicate a broken response. A present
+    // but numeric/overlong sentence may fall back without discarding useful peers.
+    if (!text(value,Number.MAX_SAFE_INTEGER)) throw new Error("Invalid market brief text");
+    const accepted = prose(value,max);
+    if (accepted) { validAiFields++; return accepted; }
+    const safeFallback = prose(fallback,max);
+    if (!safeFallback) throw new Error("Invalid market brief fallback text");
+    return safeFallback;
+  };
   const seen = new Set<string>();
-  return parsed.summaries.map((value: Record<string, unknown>) => {
+  const explanations = parsed.summaries.map((value: Record<string, unknown>) => {
     const report = expected.find(report=>report.scope === value?.scope);
     if (!report || seen.has(report.scope) || !Array.isArray(value.items) || value.items.length !== report.items.length) throw new Error("Invalid market brief shape");
-    const headline = prose(value.headline,100);
-    if (!headline) throw new Error("Invalid market brief text");
+    const headline = safeField(value.headline,100,report.scope === "3h" ? "当前候选仍需按量价条件继续观察。" : "历史预警回顾，触发次数不代表当前强度。");
     seen.add(report.scope);
     const symbols = new Set<string>();
     const items = value.items.map((item: Record<string,unknown>) => {
       const symbol = text(item?.symbol,40);
-      if (!report.items.some(row=>row.symbol === symbol) || symbols.has(symbol)) throw new Error("Invalid market brief symbol");
-      const reason = prose(item?.reason,90);
-      if (!reason) throw new Error("Invalid market brief text");
+      const inputItem = report.items.find(row=>row.symbol === symbol);
+      if (!inputItem || symbols.has(symbol)) throw new Error("Invalid market brief symbol");
+      const reason = safeField(item?.reason,90,inputItem.reason);
       symbols.add(symbol);
       return {symbol,reason};
     });
     return {scope:report.scope,headline,items};
   });
+  if (!validAiFields) throw new Error("Invalid market brief text: no usable AI fields");
+  return explanations;
 }
 
 function reuseNarration(report: MarketBriefSnapshot, previous: MarketBriefSnapshot | undefined) {
