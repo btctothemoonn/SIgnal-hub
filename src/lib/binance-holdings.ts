@@ -966,8 +966,10 @@ function addMarketWarning(
 
 let preferredFuturesAccountMode: BinanceHoldingSnapshot["accountMode"] | null =
   null;
+let runtimeHintsGeneration = 0;
 
 export function resetBinanceHoldingRuntimeHints() {
+  runtimeHintsGeneration += 1;
   preferredFuturesAccountMode = null;
 }
 
@@ -1042,6 +1044,7 @@ export async function getBinanceHoldingSnapshot({
   fetcher?: typeof fetch;
   now?: () => number;
 } = {}): Promise<BinanceHoldingSnapshot> {
+  const requestGeneration = runtimeHintsGeneration;
   const config = await getBinanceConfig(env);
   const signedNow = await createBinanceSyncedNow({ config, fetcher, now });
   const [spotAccountResult, spotTickerResult] = await Promise.allSettled([
@@ -1060,6 +1063,7 @@ export async function getBinanceHoldingSnapshot({
     }),
   ]);
   const standardFuturesResults =
+    requestGeneration === runtimeHintsGeneration &&
     preferredFuturesAccountMode === "portfolioMargin"
       ? null
       : await requestStandardFuturesResults({ config, fetcher, signedNow });
@@ -1111,7 +1115,9 @@ export async function getBinanceHoldingSnapshot({
     isFulfilledResult(futuresAccountResult) &&
     isFulfilledResult(futuresRiskResult)
   ) {
-    preferredFuturesAccountMode = "standard";
+    if (requestGeneration === runtimeHintsGeneration) {
+      preferredFuturesAccountMode = "standard";
+    }
     const futuresAccount = futuresAccountResult.value;
     const futuresRiskPositions = futuresRiskResult.value;
     futuresPositions = normalizeFuturesPositions(
@@ -1134,7 +1140,9 @@ export async function getBinanceHoldingSnapshot({
       isFulfilledResult(portfolioResults.account) &&
       isFulfilledResult(portfolioResults.risk)
     ) {
-      preferredFuturesAccountMode = "portfolioMargin";
+      if (requestGeneration === runtimeHintsGeneration) {
+        preferredFuturesAccountMode = "portfolioMargin";
+      }
       accountMode = "portfolioMargin";
       futuresPositions = normalizeFuturesPositions(portfolioResults.risk.value);
       summary = buildPortfolioMarginSummary({

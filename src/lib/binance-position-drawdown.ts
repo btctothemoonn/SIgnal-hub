@@ -426,7 +426,7 @@ export type BinancePositionPeakTrackingCache = {
     snapshot: BinanceHoldingSnapshot,
     options?: { force?: boolean },
   ) => Promise<BinancePositionPeakTracking[]>;
-  invalidate: () => void;
+  invalidate: (clear?: () => Promise<void>) => Promise<void>;
 };
 
 export function createBinancePositionPeakTrackingCache({
@@ -448,30 +448,43 @@ export function createBinancePositionPeakTrackingCache({
   let value: BinancePositionPeakTracking[] | null = null;
   let fetchedAt = 0;
   let pending: Promise<BinancePositionPeakTracking[]> | null = null;
+  let generation = 0;
+  let persistence: Promise<void> = Promise.resolve();
+  let resetPromise: Promise<void> | null = null;
 
   const refreshValue = (
     snapshot: BinanceHoldingSnapshot,
     previous: BinancePositionPeakTracking[],
   ) => {
     if (pending) return pending;
-    pending = refresh(snapshot, previous).then(
+    const requestGeneration = generation;
+    const request = refresh(snapshot, previous).then(
       async (next) => {
+        if (requestGeneration !== generation) return [];
         value = next;
         fetchedAt = now();
-        pending = null;
-        await write(next);
-        return next;
+        const persisted = persistence.then(async () => {
+          if (requestGeneration === generation) await write(next);
+        });
+        persistence = persisted.catch(() => undefined);
+        await persisted;
+        return requestGeneration === generation ? next : [];
       },
       (error) => {
-        pending = null;
         throw error;
       },
-    );
+    ).finally(() => {
+      if (pending === request) pending = null;
+    });
+    pending = request;
     return pending;
   };
 
   return {
     async get(snapshot, { force = false } = {}) {
+      // A caller may still hold the previous account's snapshot during a switch.
+      if (resetPromise) return [];
+      const requestGeneration = generation;
       if (force) {
         return await refreshValue(snapshot, value ?? []);
       }
@@ -484,6 +497,7 @@ export function createBinancePositionPeakTrackingCache({
       }
 
       const persisted = await read();
+      if (requestGeneration !== generation) return [];
       if (persisted !== null) {
         value = persisted;
         fetchedAt = now();
@@ -492,9 +506,19 @@ export function createBinancePositionPeakTrackingCache({
 
       return await refreshValue(snapshot, []);
     },
-    invalidate() {
+    invalidate(clear) {
+      generation += 1;
       value = null;
       fetchedAt = 0;
+      pending = null;
+      const reset = (resetPromise ?? Promise.resolve())
+        .then(() => persistence)
+        .then(clear)
+        .finally(() => {
+          if (resetPromise === reset) resetPromise = null;
+        });
+      resetPromise = reset;
+      return reset;
     },
   };
 }
@@ -598,8 +622,11 @@ export function getCachedBinancePositionPeakTrackings(
 }
 
 export async function clearPersistedBinancePositionPeakTrackings() {
-  sharedBinancePositionPeakTrackingCache.invalidate();
-  await unlink(
-    /* turbopackIgnore: true */ BINANCE_POSITION_PEAK_TRACKING_PATH,
-  ).catch(() => undefined);
+  await sharedBinancePositionPeakTrackingCache.invalidate(async () => {
+    await unlink(
+      /* turbopackIgnore: true */ BINANCE_POSITION_PEAK_TRACKING_PATH,
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  });
 }

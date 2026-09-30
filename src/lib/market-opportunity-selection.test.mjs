@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import test from "node:test";
 
 const {
   buildMarketOpportunityFingerprint,
@@ -199,3 +200,31 @@ assert.equal(fingerprintA, fingerprintB, "small metric noise in the same bands m
 assert.notEqual(fingerprintA, fingerprintChanged);
 
 console.log("ok - market opportunity Top 5 remains stable across scans");
+
+test("a skipped scan cannot confirm a first-scan candidate", () => {
+  const firstOnly = transitionMarketOpportunityCandidates([], [decision("MISSINGUSDT", 90)], start);
+  const missingSecond = transitionMarketOpportunityCandidates(firstOnly.states, [decision("OTHERUSDT", 82)], start + 60_000);
+  assert.equal(missingSecond.selected.length, 0, "a skipped second scan cannot confirm a first-scan candidate");
+  assert.equal(missingSecond.states.find(item => item.symbol === "MISSINGUSDT").entryStreak, 0);
+});
+
+test("three missing scans remove a selected candidate without reentry", () => {
+  let missingSelected = { states: [selectedState("MISSINGUSDT", 90, 1)] };
+  for (let scan = 1; scan <= 3; scan += 1) {
+    missingSelected = transitionMarketOpportunityCandidates(missingSelected.states, [], start + scan * 60_000);
+  }
+  assert.equal(missingSelected.selected.length, 0, "three missing scans must remove a candidate without same-cycle reentry");
+});
+
+test("stale results cannot create new entry confirmations", () => {
+  const staleFirst = transitionMarketOpportunityCandidates([], [decision("STALEUSDT", 90, { metrics: { stale: true } })], start);
+  const staleSecond = transitionMarketOpportunityCandidates(staleFirst.states, [decision("STALEUSDT", 90, { metrics: { stale: true } })], start + 60_000);
+  assert.equal(staleSecond.selected.length, 0, "stale cached results cannot create new confirmations");
+});
+
+test("an actionable label expires without a current confirmation", () => {
+  const oldAction = transitionMarketOpportunityCandidates([selectedState("OLDUSDT", 90, 1, {
+    lastConfirmedAt: new Date(start - 3 * 60 * 60_000).toISOString(),
+  })], [], start);
+  assert.equal(oldAction.selected[0].decision, "等待确认", "an old actionable label must expire without a current confirmation");
+});

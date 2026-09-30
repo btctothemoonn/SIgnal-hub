@@ -3,6 +3,8 @@ import {
   BinanceConfigError,
   BinanceNetworkError,
   BinanceUpstreamError,
+  getBinanceConfig,
+  resolveBinanceConfig,
   resetBinanceHoldingRuntimeHints,
   saveStoredBinanceCredentials,
 } from "@/lib/binance-holdings";
@@ -19,6 +21,8 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+let credentialUpdates: Promise<void> = Promise.resolve();
 
 export async function GET(request: Request) {
   try {
@@ -98,10 +102,27 @@ export async function POST(request: Request) {
       );
     }
 
-    await saveStoredBinanceCredentials({ apiKey, apiSecret });
-    resetBinanceHoldingRuntimeHints();
-    invalidateCachedBinanceHoldingSnapshot();
-    await clearPersistedBinancePositionPeakTrackings();
+    const update = credentialUpdates.then(async () => {
+      const previousConfig = await getBinanceConfig().catch((error) => {
+        if (error instanceof BinanceConfigError) return null;
+        throw error;
+      });
+      const currentConfig = resolveBinanceConfig({
+        storedCredentials: { apiKey, apiSecret },
+      });
+      if (previousConfig?.apiKey !== currentConfig.apiKey) {
+        await invalidateCachedBinanceHoldingSnapshot(async () => {
+          await clearPersistedBinancePositionPeakTrackings();
+          await saveStoredBinanceCredentials({ apiKey, apiSecret });
+          resetBinanceHoldingRuntimeHints();
+        });
+      } else {
+        await saveStoredBinanceCredentials({ apiKey, apiSecret });
+        resetBinanceHoldingRuntimeHints();
+      }
+    });
+    credentialUpdates = update.catch(() => undefined);
+    await update;
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof BinanceConfigError) {

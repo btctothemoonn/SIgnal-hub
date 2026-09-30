@@ -10,6 +10,10 @@ npm run dev
 
 浏览器打开 [http://localhost:3000](http://localhost:3000)。
 
+登录限流默认忽略客户端传入的 IP 头，使用共享的失败次数限制。若服务仅能通过可信反向代理访问，并且代理使用 `proxy_set_header X-Real-IP $remote_addr;` 覆盖该头，可设置 `ADMIN_LOGIN_TRUST_PROXY=true` 启用按 IP 限流。不要在 Next.js 端口直接暴露或代理保留客户端 IP 头时启用；应用不会使用 `X-Forwarded-For` 的首个地址。
+
+通过持仓面板切换 Binance API Key 时，旧账户快照和净值历史会保存在 `.signal-hub/binance-account-archive/`，新账户从独立的净值记录开始。同一个 Key 的重复保存或 Secret 更新会保留现有历史。
+
 ## 接入 6551 的 X 数据
 
 1. 到 [6551 MCP](https://6551.io/mcp) 申请 `TWITTER_TOKEN`

@@ -55,8 +55,7 @@ function downgradeExpiredConfirmation(
   const confirmedAt = timestamp(state.lastConfirmedAt);
   if (
     confirmedAt === null ||
-    nowMs - confirmedAt <= MARKET_OPPORTUNITY_RULES.confirmationFreshMs ||
-    isActionable(decision)
+    nowMs - confirmedAt <= MARKET_OPPORTUNITY_RULES.confirmationFreshMs
   ) {
     return decision;
   }
@@ -93,6 +92,8 @@ export function transitionMarketOpportunityCandidates(
       enteredAt !== null && nowMs - enteredAt > MARKET_OPPORTUNITY_RULES.maxLifetimeMs;
     const hardInvalidated = nextDecision.hardInvalidated;
     const qualifies =
+      incomingBySymbol.has(symbol) &&
+      !nextDecision.metrics.stale &&
       !hardInvalidated &&
       nextDecision.score >= MARKET_OPPORTUNITY_RULES.observeScore;
     const belowExit =

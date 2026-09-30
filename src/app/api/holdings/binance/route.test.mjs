@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import test from "node:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,9 +20,30 @@ export class BinanceNetworkError extends Error {}
 export class BinanceUpstreamError extends Error {}
 
 export function resetBinanceHoldingRuntimeHints() {}
-export async function saveStoredBinanceCredentials() {}
-export function invalidateCachedBinanceHoldingSnapshot() {}
-export async function clearPersistedBinancePositionPeakTrackings() {}
+export const accountEvents = [];
+export let accountKey = "old-key";
+export let archiveFails = false;
+let archiveBarrier = null;
+export function blockNextArchive() {
+  let release;
+  archiveBarrier = new Promise(resolve => { release = resolve; });
+  return release;
+}
+export function setArchiveFailure(value) { archiveFails = value; }
+export function setAccountKey(value) { accountKey = value; }
+export async function getBinanceConfig() { return { apiKey: accountKey }; }
+export function resolveBinanceConfig({storedCredentials}) { return storedCredentials; }
+export async function saveStoredBinanceCredentials(credentials) { accountKey = credentials.apiKey; accountEvents.push("save"); }
+export async function invalidateCachedBinanceHoldingSnapshot(updateAccount) {
+  await new Promise(resolve => setImmediate(resolve));
+  if (archiveFails) throw new Error("EACCES: cannot archive");
+  accountEvents.push("archive");
+  const barrier = archiveBarrier;
+  archiveBarrier = null;
+  if (barrier) await barrier;
+  if (updateAccount) await updateAccount();
+}
+export async function clearPersistedBinancePositionPeakTrackings() { accountEvents.push("clear-peaks"); }
 
 export async function getCachedBinanceHoldingSnapshot() {
   return {
@@ -101,7 +123,7 @@ export function attachBinancePositionPeakTrackings(snapshot, trackings) {
     .replace('from "next/server";', 'from "next/server.js";');
   writeFileSync(temporaryRoutePath, routeOutput, "utf8");
 
-  const { GET } = await import(
+  const { GET, POST } = await import(
     `${pathToFileURL(temporaryRoutePath).href}?run=${Date.now()}`
   );
   const response = await GET(
@@ -122,6 +144,69 @@ export function attachBinancePositionPeakTrackings(snapshot, trackings) {
   );
 
   console.log("ok - Binance holdings route enriches positions with peak drawdown");
+  const stubs = await import(pathToFileURL(temporaryStubsPath).href);
+  await test("saving a new account waits for history archival before reporting success", async () => {
+    stubs.accountEvents.length = 0;
+    const saved = await POST(new Request("http://localhost/api/holdings/binance", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "new-key", apiSecret: "new-secret" }),
+    }));
+    assert.equal(saved.status, 200);
+    assert.deepEqual(stubs.accountEvents, ["archive", "clear-peaks", "save"]);
+    await new Promise(resolve => setImmediate(resolve));
+  });
+  await test("archive failure keeps the previous account credentials active", async () => {
+    stubs.setArchiveFailure(true);
+    stubs.accountEvents.length = 0;
+    try {
+      const failed = await POST(new Request("http://localhost/api/holdings/binance", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "failed-key", apiSecret: "failed-secret" }),
+      }));
+      assert.equal(failed.status, 500);
+      assert.equal((await stubs.getBinanceConfig()).apiKey, "new-key");
+      assert.deepEqual(stubs.accountEvents, []);
+    } finally {
+      stubs.setArchiveFailure(false);
+      stubs.setAccountKey("new-key");
+    }
+  });
+  await test("saving the same account again preserves its existing history", async () => {
+    await new Promise(resolve => setImmediate(resolve));
+    stubs.accountEvents.length = 0;
+    await POST(new Request("http://localhost/api/holdings/binance", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "new-key", apiSecret: "rotated-secret" }),
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(stubs.accountEvents, ["save"]);
+  });
+  await test("concurrent credential saves compare against the completed account transition", async () => {
+    stubs.setAccountKey("account-a");
+    stubs.accountEvents.length = 0;
+    const release = stubs.blockNextArchive();
+    const save = apiKey => POST(new Request("http://localhost/api/holdings/binance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, apiSecret: "secret" }),
+    }));
+    const first = save("account-b");
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    const second = save("account-a");
+    await new Promise(resolve => setImmediate(resolve));
+    try {
+      assert.equal(stubs.accountEvents.includes("save"), false,
+        "the second save must not bypass the first transition");
+    } finally {
+      release();
+      assert.equal((await first).status, 200);
+      assert.equal((await second).status, 200);
+    }
+    assert.equal(stubs.accountKey, "account-a");
+    assert.deepEqual(stubs.accountEvents,
+      ["archive", "clear-peaks", "save", "archive", "clear-peaks", "save"]);
+  });
 } finally {
   rmSync(temporaryRoutePath, { force: true });
   rmSync(temporaryStubsPath, { force: true });

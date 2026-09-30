@@ -21,6 +21,7 @@ export type MarketOpportunityAction =
   | "禁止追单";
 
 export type MarketOpportunityMetrics = {
+  enrichmentVersion?: 2;
   symbol: string;
   observedAt: string;
   stale: boolean;

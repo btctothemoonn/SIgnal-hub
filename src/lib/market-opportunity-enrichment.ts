@@ -76,13 +76,28 @@ function extreme(rows: KlineRow[], reader: (row: KlineRow) => number | null, mod
   return mode === "max" ? Math.max(...values) : Math.min(...values);
 }
 
-function openInterestMetrics(rows: JsonRecord[], price: number | null) {
-  const values = rows
-    .map((row) => numberValue(row.sumOpenInterestValue) ?? numberValue(row.sumOpenInterest))
-    .filter((item): item is number => item !== null);
-  if (values.length < 2) return { growth: null, notional: null };
-  const growth = percent(values.at(-1) ?? null, values[0]);
-  const latest = rows.at(-1);
+function openInterestMetrics(
+  rows: JsonRecord[],
+  price: number | null,
+  nowMs: number,
+) {
+  const samples = rows
+    .filter((row) => {
+      const at = numberValue(row.timestamp);
+      return at !== null && at <= nowMs;
+    })
+    .sort((left, right) => Number(left.timestamp) - Number(right.timestamp));
+  const latest = samples.at(-1);
+  if (!latest || nowMs - Number(latest.timestamp) > 5 * 60_000) {
+    return { growth: null, notional: null };
+  }
+  const prior = samples.find(
+    (row) => Number(row.timestamp) === Number(latest.timestamp) - 15 * 60_000,
+  );
+  const growth = percent(
+    numberValue(latest.sumOpenInterestValue) ?? numberValue(latest.sumOpenInterest),
+    numberValue(prior?.sumOpenInterestValue) ?? numberValue(prior?.sumOpenInterest),
+  );
   const directNotional = numberValue(latest?.sumOpenInterestValue);
   const quantity = numberValue(latest?.sumOpenInterest);
   return {
@@ -91,10 +106,6 @@ function openInterestMetrics(rows: JsonRecord[], price: number | null) {
       directNotional ??
       (quantity !== null && price !== null ? quantity * price : null),
   };
-}
-
-function optionalMetric(source: Record<string, unknown> | null, key: string) {
-  return numberValue(source?.[key]);
 }
 
 function completedCandles(rows: KlineRow[], nowMs: number) {
@@ -180,8 +191,7 @@ export function deriveOpportunityMetrics(input: {
   const shortSupport = extreme(input.futures5m.slice(-13, -1), low, "min");
   const previousStructureHigh = extreme(input.futures5m.slice(-7, -4), high, "max");
   const latestStructureHigh = extreme(input.futures5m.slice(-4), high, "max");
-  const oi = openInterestMetrics(input.openInterest, latestPrice);
-  const squeeze = input.seed.squeezeMetrics;
+  const oi = openInterestMetrics(input.openInterest, latestPrice, Date.parse(input.observedAt));
   const markPrice = numberValue(input.premium?.markPrice);
   const indexPrice = numberValue(input.premium?.indexPrice);
   const derivedBasis = percent(markPrice, indexPrice);
@@ -192,31 +202,24 @@ export function deriveOpportunityMetrics(input: {
   const priorRunUp = percent(recentHigh, recentLow);
 
   return {
+    enrichmentVersion: 2,
     symbol: input.seed.symbol,
     observedAt: input.observedAt,
     stale: input.stale ?? false,
     pct1m: changeForIntervals(input.futures1m, 1),
     pct5m: changeForIntervals(input.futures5m, 1),
-    pct15m: optionalMetric(squeeze, "priceChange15m") ?? futures15m,
+    pct15m: futures15m,
     pct1h: changeForIntervals(input.futures5m, 12),
     pct24h: input.seed.pct24h,
     volumeRatio1m: volumeRatio(input.futures1m, 1, 20),
-    volumeRatio5m:
-      optionalMetric(squeeze, "volRatio") ?? volumeRatio(input.futures5m, 3, 24),
-    oiGrowth15m: optionalMetric(squeeze, "oiGrowth15m") ?? oi.growth,
-    oiNotional: optionalMetric(squeeze, "oiNotional") ?? oi.notional,
-    funding:
-      optionalMetric(squeeze, "funding") ??
-      numberValue(input.premium?.lastFundingRate),
-    basis: optionalMetric(squeeze, "basis") ?? derivedBasis,
-    globalLongShortRatio:
-      optionalMetric(squeeze, "globalLongShortRatio") ??
-      input.globalLongShortRatio,
-    topTraderLongShortRatio:
-      optionalMetric(squeeze, "topTraderLongShortRatio") ??
-      input.topTraderLongShortRatio,
-    takerBuySellRatio:
-      optionalMetric(squeeze, "takerBuySellRatio") ?? input.takerBuySellRatio,
+    volumeRatio5m: volumeRatio(input.futures5m, 3, 24),
+    oiGrowth15m: oi.growth,
+    oiNotional: oi.notional,
+    funding: numberValue(input.premium?.lastFundingRate),
+    basis: derivedBasis,
+    globalLongShortRatio: input.globalLongShortRatio,
+    topTraderLongShortRatio: input.topTraderLongShortRatio,
+    takerBuySellRatio: input.takerBuySellRatio,
     spotAvailable: Boolean(input.spot5m?.length),
     spotChange15m: spot15m,
     spotVolumeRatio5m: input.spot5m ? volumeRatio(input.spot5m, 3, 24) : null,
@@ -232,7 +235,6 @@ export function deriveOpportunityMetrics(input: {
       latestStructureHigh < previousStructureHigh &&
       (changeForIntervals(input.futures5m, 3) ?? 0) < 0,
     breakout20:
-      Boolean(optionalMetric(squeeze, "breakout20")) ||
       (latestPrice !== null &&
         extreme(prior20, high, "max") !== null &&
         latestPrice > Number(extreme(prior20, high, "max"))),
@@ -267,10 +269,6 @@ async function mapLimit<T, R>(
   );
   await Promise.all(workers);
   return results;
-}
-
-function hasMetric(source: Record<string, unknown> | null, key: string) {
-  return optionalMetric(source, key) !== null;
 }
 
 function emptyMetrics(seed: MarketOpportunitySeed, observedAt: string) {
@@ -325,7 +323,9 @@ export async function enrichOpportunitySeeds(input: {
       const cachedAt = Date.parse(cached?.fetchedAt ?? "");
       if (
         cached &&
+        cached.metrics.enrichmentVersion === 2 &&
         Number.isFinite(cachedAt) &&
+        nowMs >= cachedAt &&
         nowMs - cachedAt <= MARKET_OPPORTUNITY_RULES.enrichmentFreshMs
       ) {
         return {
@@ -349,39 +349,26 @@ export async function enrichOpportunitySeeds(input: {
             errors.push(safeError(error));
             return [];
           });
-        const squeeze = seed.squeezeMetrics;
-        const premium =
-          hasMetric(squeeze, "funding") && hasMetric(squeeze, "basis")
-            ? null
-            : await premiumForSymbol(seed.symbol).catch((error) => {
-                errors.push(safeError(error));
-                return null;
-              });
-        const openInterest =
-          hasMetric(squeeze, "oiGrowth15m") && hasMetric(squeeze, "oiNotional")
-            ? []
-            : await input.client.getOpenInterestHistory?.(seed.symbol).catch((error) => {
-                errors.push(safeError(error));
-                return [];
-              }) ?? [];
-        const globalLongShortRatio = hasMetric(squeeze, "globalLongShortRatio")
-          ? null
-          : await input.client.getGlobalLongShortRatio?.(seed.symbol).catch((error) => {
-              errors.push(safeError(error));
-              return null;
-            }) ?? null;
-        const topTraderLongShortRatio = hasMetric(squeeze, "topTraderLongShortRatio")
-          ? null
-          : await input.client.getTopTraderPositionRatio?.(seed.symbol).catch((error) => {
-              errors.push(safeError(error));
-              return null;
-            }) ?? null;
-        const takerBuySellRatio = hasMetric(squeeze, "takerBuySellRatio")
-          ? null
-          : await input.client.getTakerBuySellRatio?.(seed.symbol).catch((error) => {
-              errors.push(safeError(error));
-              return null;
-            }) ?? null;
+        const premium = await premiumForSymbol(seed.symbol).catch((error) => {
+          errors.push(safeError(error));
+          return null;
+        });
+        const openInterest = await input.client.getOpenInterestHistory?.(seed.symbol).catch((error) => {
+          errors.push(safeError(error));
+          return [];
+        }) ?? [];
+        const globalLongShortRatio = await input.client.getGlobalLongShortRatio?.(seed.symbol).catch((error) => {
+          errors.push(safeError(error));
+          return null;
+        }) ?? null;
+        const topTraderLongShortRatio = await input.client.getTopTraderPositionRatio?.(seed.symbol).catch((error) => {
+          errors.push(safeError(error));
+          return null;
+        }) ?? null;
+        const takerBuySellRatio = await input.client.getTakerBuySellRatio?.(seed.symbol).catch((error) => {
+          errors.push(safeError(error));
+          return null;
+        }) ?? null;
         const spot = await input.client.getSpotContext?.(seed.symbol).catch(() => null) ?? null;
         const metrics = deriveOpportunityMetrics({
           seed,
