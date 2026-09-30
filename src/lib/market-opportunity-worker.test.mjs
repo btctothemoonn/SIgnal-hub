@@ -129,8 +129,8 @@ try {
       lastFundingRate: "0.0001",
     })),
     getOpenInterestHistory: async () => [
-      { sumOpenInterest: "70000" },
-      { sumOpenInterest: "77000" },
+      { timestamp: nowMs - 900_000, sumOpenInterest: "70000" },
+      { timestamp: nowMs, sumOpenInterest: "77000" },
     ],
     getGlobalLongShortRatio: async () => 1.02,
     getTopTraderPositionRatio: async () => 1.04,

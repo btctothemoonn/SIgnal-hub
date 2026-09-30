@@ -77,9 +77,10 @@ const derived = deriveOpportunityMetrics({
   spot5m: spot5m(),
   premium: { markPrice: "106", indexPrice: "106.2", lastFundingRate: "-0.0007" },
   openInterest: [
-    { sumOpenInterest: "70000" },
-    { sumOpenInterest: "73500" },
-    { sumOpenInterest: "77000" },
+    { timestamp: nowMs - 900_000, sumOpenInterest: "70000" },
+    { timestamp: nowMs - 600_000, sumOpenInterest: "73500" },
+    { timestamp: nowMs - 300_000, sumOpenInterest: "75000" },
+    { timestamp: nowMs, sumOpenInterest: "77000" },
   ],
   globalLongShortRatio: 0.82,
   topTraderLongShortRatio: 0.88,
@@ -145,8 +146,8 @@ const seededWatch = watchMetrics(watchInputs, {
 });
 assert.deepEqual(seededWatch.watchlist, withIncomplete.watchlist,
   "old squeeze-trigger data never overrides completed-candle context");
-assert.equal(seededWatch.pct15m, 99, "existing squeeze metrics stay backward compatible");
-assert.equal(seededWatch.volumeRatio5m, 99);
+assert.equal(seededWatch.pct15m, withIncomplete.pct15m, "historical alerts do not replace current momentum");
+assert.equal(seededWatch.volumeRatio5m, withIncomplete.volumeRatio5m);
 
 const invalidTimeRows = [
   [nowMs - 299_999, "1", "1", "1", "1", "0.001", "invalid", "1"],
@@ -268,8 +269,8 @@ const baseClient = {
     { symbol: "TESTUSDT", markPrice: "106", indexPrice: "106.2", lastFundingRate: "-0.0007" },
   ],
   getOpenInterestHistory: async () => [
-    { sumOpenInterest: "70000" },
-    { sumOpenInterest: "77000" },
+    { timestamp: nowMs - 900_000, sumOpenInterest: "70000" },
+    { timestamp: nowMs, sumOpenInterest: "77000" },
   ],
   getGlobalLongShortRatio: async () => 0.82,
   getTopTraderPositionRatio: async () => 0.88,
@@ -313,8 +314,8 @@ const reused = await enrichOpportunitySeeds({
   },
   nowMs,
 });
-assert.equal(reused[0].metrics.funding, -0.0012);
-assert.deepEqual(reusedCalls, { premium: 0, oi: 0, global: 0, top: 0, taker: 0 });
+assert.equal(reused[0].metrics.funding, null, "unavailable current data never reuses historical alert metrics");
+assert.deepEqual(reusedCalls, { premium: 1, oi: 1, global: 1, top: 1, taker: 1 });
 
 const limitedSymbols = new Set();
 await enrichOpportunitySeeds({

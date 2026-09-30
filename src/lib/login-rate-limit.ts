@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 export const LOGIN_FAILURE_LIMIT = 5;
 export const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
 
@@ -37,16 +39,14 @@ function ensureCapacity(key: string) {
   if (oldestKey) failures.delete(oldestKey);
 }
 
-function cleanClientAddress(value: string | null): string {
-  const clean = value?.trim().replace(/[\u0000-\u001f\u007f]/g, "") ?? "";
-  return clean ? clean.slice(0, 128) : "unknown";
-}
-
-export function getLoginClientKey(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  const forwardedClient = forwarded?.split(",", 1)[0] ?? null;
-  const address = forwardedClient || request.headers.get("x-real-ip");
-  return `ip:${cleanClientAddress(address)}`;
+export function getLoginClientKey(
+  request: Request,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  // Enable only when an exclusive reverse proxy overwrites X-Real-IP.
+  if (env.ADMIN_LOGIN_TRUST_PROXY !== "true") return "ip:unknown";
+  const address = request.headers.get("x-real-ip")?.trim() ?? "";
+  return `ip:${isIP(address) ? address.toLowerCase() : "unknown"}`;
 }
 
 export function checkLoginRateLimit(

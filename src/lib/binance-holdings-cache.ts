@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import {
   getBinanceHoldingSnapshot,
   type BinanceFuturesEquityPoint,
@@ -29,7 +30,7 @@ type PersistedBinanceFuturesEquityHistory = {
 
 export type BinanceHoldingSnapshotCache = {
   get: (options?: { force?: boolean }) => Promise<BinanceHoldingSnapshot>;
-  invalidate: () => void;
+  invalidate: (updateAccount?: () => Promise<void>) => Promise<void>;
 };
 
 export function getBinanceHoldingSnapshotCacheTtlMs(
@@ -57,6 +58,7 @@ export function createBinanceHoldingSnapshotCache({
   readSnapshot = readPersistedBinanceHoldingSnapshot,
   writeSnapshot = writePersistedBinanceHoldingSnapshot,
   writeEquityPoint = writePersistedBinanceFuturesEquityPoint,
+  archiveSnapshot = archivePersistedBinanceHoldingAccountData,
 }: {
   fetcher: () => Promise<BinanceHoldingSnapshot>;
   ttlMs: number;
@@ -64,28 +66,43 @@ export function createBinanceHoldingSnapshotCache({
   readSnapshot?: () => Promise<BinanceHoldingSnapshot | null>;
   writeSnapshot?: (snapshot: BinanceHoldingSnapshot) => Promise<void>;
   writeEquityPoint?: (snapshot: BinanceHoldingSnapshot) => Promise<void>;
+  archiveSnapshot?: () => Promise<void>;
 }): BinanceHoldingSnapshotCache {
   let value: BinanceHoldingSnapshot | null = null;
   let fetchedAt = 0;
   let pending: Promise<BinanceHoldingSnapshot> | null = null;
+  let generation = 0;
+  let persistence: Promise<void> = Promise.resolve();
+  let resetPromise: Promise<void> | null = null;
 
   const refresh = () => {
     if (pending) return pending;
 
-    pending = fetcher().then(
+    const requestGeneration = generation;
+    const request = fetcher().then(
       async (next) => {
+        if (requestGeneration !== generation) return get({ force: true });
         value = next;
         fetchedAt = now();
-        pending = null;
-        await writeSnapshot(next);
-        await writeEquityPoint(next).catch(() => undefined);
+        const write = persistence.then(async () => {
+          if (requestGeneration !== generation) return;
+          await writeSnapshot(next);
+          if (requestGeneration === generation) {
+            await writeEquityPoint(next).catch(() => undefined);
+          }
+        });
+        persistence = write.catch(() => undefined);
+        await write;
+        if (requestGeneration !== generation) return get({ force: true });
         return next;
       },
       (error) => {
-        pending = null;
         throw error;
       },
-    );
+    ).finally(() => {
+      if (pending === request) pending = null;
+    });
+    pending = request;
     return pending;
   };
 
@@ -93,33 +110,50 @@ export function createBinanceHoldingSnapshotCache({
     void refresh().catch(() => undefined);
   };
 
-  return {
-    async get({ force = false }: { force?: boolean } = {}) {
-      if (force) {
-        value = null;
-        fetchedAt = 0;
-        return await refresh();
-      }
-
-      if (value !== null) {
-        if (now() - fetchedAt < ttlMs) return value;
-        refreshInBackground();
-        return value;
-      }
-
-      const persisted = await readSnapshot();
-      if (persisted) {
-        value = persisted;
-        fetchedAt = 0;
-        refreshInBackground();
-        return persisted;
-      }
-
-      return await refresh();
-    },
-    invalidate() {
+  async function get(
+    { force = false }: { force?: boolean } = {},
+  ): Promise<BinanceHoldingSnapshot> {
+    while (resetPromise) await resetPromise;
+    if (force) {
       value = null;
       fetchedAt = 0;
+      return await refresh();
+    }
+
+    if (value !== null) {
+      if (now() - fetchedAt < ttlMs) return value;
+      refreshInBackground();
+      return value;
+    }
+
+    const readGeneration = generation;
+    const persisted = await readSnapshot();
+    if (readGeneration !== generation) return get({ force });
+    if (persisted) {
+      value = persisted;
+      fetchedAt = 0;
+      refreshInBackground();
+      return persisted;
+    }
+
+    return await refresh();
+  }
+  return {
+    get,
+    invalidate(updateAccount) {
+      generation += 1;
+      value = null;
+      fetchedAt = 0;
+      pending = null;
+      const reset = (resetPromise ?? Promise.resolve())
+        .then(() => persistence)
+        .then(archiveSnapshot)
+        .then(updateAccount)
+        .finally(() => {
+          if (resetPromise === reset) resetPromise = null;
+        });
+      resetPromise = reset;
+      return reset;
     },
   };
 }
@@ -276,6 +310,27 @@ export function getCachedBinanceHoldingSnapshot(options?: {
   return sharedBinanceHoldingSnapshotCache.get(options);
 }
 
-export function invalidateCachedBinanceHoldingSnapshot() {
-  sharedBinanceHoldingSnapshotCache.invalidate();
+async function archivePersistedBinanceHoldingAccountData(): Promise<void> {
+  const archiveDir = resolve(
+    dirname(BINANCE_HOLDINGS_SNAPSHOT_CACHE_PATH),
+    "binance-account-archive",
+    `${Date.now()}-${randomUUID()}`,
+  );
+  await mkdir(archiveDir, { recursive: true });
+  for (const path of [
+    BINANCE_HOLDINGS_SNAPSHOT_CACHE_PATH,
+    BINANCE_FUTURES_EQUITY_HISTORY_PATH,
+  ]) {
+    try {
+      await rename(path, resolve(archiveDir, basename(path)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+}
+
+export function invalidateCachedBinanceHoldingSnapshot(
+  updateAccount?: () => Promise<void>,
+): Promise<void> {
+  return sharedBinanceHoldingSnapshotCache.invalidate(updateAccount);
 }

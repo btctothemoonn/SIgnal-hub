@@ -45,13 +45,14 @@ assert.equal(
       headers: { "x-forwarded-for": "203.0.113.9, 127.0.0.1" },
     }),
   ),
-  "ip:203.0.113.9",
+  "ip:unknown",
 );
 assert.equal(
   getLoginClientKey(
     new Request("https://holdrich.online/api/login", {
       headers: { "x-real-ip": "198.51.100.8" },
     }),
+    { ADMIN_LOGIN_TRUST_PROXY: "true" },
   ),
   "ip:198.51.100.8",
 );
