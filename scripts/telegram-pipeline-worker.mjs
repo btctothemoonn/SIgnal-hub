@@ -26,6 +26,7 @@ import {
   getTelegramPipelineMessageMediaPreview,
   markTelegramPipelineBackfill,
   setTelegramPipelineMessageTranslation,
+  setTelegramPipelineQuotedTranslation,
   setTelegramPipelineHealth,
   upsertTelegramPipelineChannel,
   upsertTelegramPipelineMessage,
@@ -330,26 +331,47 @@ async function toTranslatedMessageInput(client, entity, message, channel, origin
   const quotedMessage = await resolveQuotedMessage(client, entity, message, channel);
   const input = toMessageInput(message, channel, origin, media, quotedMessage);
   if (!input) return null;
+  if (quotedMessage?.text) {
+    quotedMessage.translation = await translateTelegramText(quotedMessage.text);
+  }
   return {
     ...input,
     translation: await translateTelegramText(input.text),
   };
 }
 
+let translationBackfillOffset = 0;
+let translationBackfillRunning = false;
 async function backfillMissingTranslations(limit = translationBackfillLimit()) {
-  const candidates = listTelegramPipelineTranslationCandidates(limit);
-  let translated = 0;
-  for (const candidate of candidates) {
-    const translation = await translateTelegramText(candidate.text);
-    if (!translation) continue;
-    setTelegramPipelineMessageTranslation(candidate.id, translation);
-    translated += 1;
-  }
-  if (translated > 0) {
-    log("telegram_translation_backfilled", {
-      checked: candidates.length,
-      translated,
-    });
+  if (translationBackfillRunning) return;
+  translationBackfillRunning = true;
+  try {
+    let candidates = listTelegramPipelineTranslationCandidates(limit, undefined, translationBackfillOffset);
+    if (candidates.length === 0 && translationBackfillOffset > 0) {
+      translationBackfillOffset = 0;
+      candidates = listTelegramPipelineTranslationCandidates(limit);
+    }
+    let translated = 0;
+    for (const candidate of candidates) {
+      const translation = await translateTelegramText(candidate.text);
+      if (!translation) continue;
+      if (candidate.kind === "quoted") {
+        setTelegramPipelineQuotedTranslation(candidate.id, candidate.text, translation);
+      } else {
+        setTelegramPipelineMessageTranslation(candidate.id, translation, undefined, candidate.text);
+      }
+      translated += 1;
+    }
+    // Successful rows leave the queue; skip retained failures before the next pass.
+    translationBackfillOffset += candidates.length - translated;
+    if (translated > 0) {
+      log("telegram_translation_backfilled", {
+        checked: candidates.length,
+        translated,
+      });
+    }
+  } finally {
+    translationBackfillRunning = false;
   }
 }
 

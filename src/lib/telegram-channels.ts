@@ -210,6 +210,7 @@ export type TelegramQuotedMessage = {
   channelUsername: string;
   messageUrl: string;
   media: TelegramMediaPreview | null;
+  translation?: TranslationNote | null;
 };
 
 export type TelegramFeedItem = {

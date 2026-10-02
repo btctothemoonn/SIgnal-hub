@@ -46,6 +46,9 @@ async function transpileToTemp() {
   ).replace(
     'from "./telegram-x-source-channels.ts"',
     'from "./telegram-x-source-channels.mjs"',
+  ).replace(
+    'from "./translation-quality.ts"',
+    'from "./translation-quality.mjs"',
   );
 
   const compilerOptions = {
@@ -53,6 +56,10 @@ async function transpileToTemp() {
     target: ts.ScriptTarget.ES2022,
     verbatimModuleSyntax: false,
   };
+  await writeFile(join(dir, "translation-quality.mjs"), ts.transpileModule(
+    await readFile(new URL("./translation-quality.ts", import.meta.url), "utf8"),
+    { compilerOptions },
+  ).outputText);
   await writeFile(
     join(dir, "runtime-storage.mjs"),
     ts.transpileModule(runtimeStorageSource, { compilerOptions }).outputText,
@@ -89,6 +96,7 @@ const {
   getTelegramPipelineMessageMediaPreview,
   getTelegramPipelineSnapshot,
   listTelegramPipelineTranslationCandidates,
+  setTelegramPipelineQuotedTranslation,
   setTelegramPipelineHealth,
   setTelegramPipelineMessageTranslation,
 } = await transpileToTemp();
@@ -271,6 +279,26 @@ assert.equal(
 );
 assert.deepEqual(listTelegramPipelineTranslationCandidates(10, db), [
   { id: "2955560057:124", text: "newer rolling-window message" },
+  { id: "2955560057:123", text: "Don't forget our VW insider info.", kind: "quoted" },
+]);
+const quotedTranslation = {
+  provider: "mymemory", sourceLanguage: "en", targetLanguage: "zh-CN",
+  text: "别忘了我们的内部消息。",
+};
+db.prepare("update telegram_messages set text = ? where id = ?")
+  .run("这是一条无需翻译的中文消息", "2955560057:124");
+assert.deepEqual(listTelegramPipelineTranslationCandidates(1, db), [
+  { id: "2955560057:123", text: "Don't forget our VW insider info.", kind: "quoted" },
+], "untranslatable newer messages must not starve historical quote backfill");
+assert.deepEqual(listTelegramPipelineTranslationCandidates(1, db, 1), [], "backfill cursor can advance past failed candidates");
+db.prepare("update telegram_messages set text = ? where id = ?")
+  .run("newer rolling-window message", "2955560057:124");
+setTelegramPipelineQuotedTranslation("2955560057:123", "stale quote", quotedTranslation, db);
+assert.equal(getTelegramPipelineSnapshot(100, db).feed.find((m) => m.id === "2955560057:123")?.quotedMessage?.translation, null);
+setTelegramPipelineQuotedTranslation("2955560057:123", "Don't forget our VW insider info.", quotedTranslation, db);
+assert.deepEqual(getTelegramPipelineSnapshot(100, db).feed.find((m) => m.id === "2955560057:123")?.quotedMessage?.translation, quotedTranslation);
+assert.deepEqual(listTelegramPipelineTranslationCandidates(10, db), [
+  { id: "2955560057:124", text: "newer rolling-window message" },
 ]);
 setTelegramPipelineMessageTranslation("2955560057:123", {
   provider: "mymemory",
@@ -278,6 +306,7 @@ setTelegramPipelineMessageTranslation("2955560057:123", {
   targetLanguage: "zh-CN",
   text: "更新翻译",
 }, db);
+setTelegramPipelineMessageTranslation("2955560057:123", quotedTranslation, db, "stale body");
 assert.equal(
   getTelegramPipelineSnapshot(100, db).feed.find((message) => message.id === "2955560057:123")
     ?.translation?.text,
@@ -305,3 +334,14 @@ assert.deepEqual(getTelegramPipelineSnapshot(100, db, { updatedSince: "2026-09-0
 db.prepare("update telegram_health set updated_at = ?").run(new Date().toISOString());
 assert.equal(getTelegramPipelineSnapshot(100, db, { updatedSince: "2099-01-01T00:00:00.000Z" }).status, "live",
   "an empty incremental batch must not downgrade a healthy collector");
+
+const stored = getTelegramPipelineSnapshot(100, db).feed.find((m) => m.id === "2955560057:123");
+const reingested = { ...stored, messageId: 123, origin: "history", raw: {}, translation: null,
+  quotedMessage: { ...stored.quotedMessage, translation: null } };
+upsertTelegramPipelineMessage(reingested, db);
+assert.deepEqual(getTelegramPipelineSnapshot(100, db).feed.find((m) => m.id === stored.id).quotedMessage.translation, quotedTranslation,
+  "a provider failure during repeat ingestion preserves a translation of the same quote");
+upsertTelegramPipelineMessage({ ...reingested, text: "Edited body text", quotedMessage: { ...reingested.quotedMessage, text: "Edited quoted text" } }, db);
+const edited = getTelegramPipelineSnapshot(100, db).feed.find((m) => m.id === stored.id);
+assert.equal(edited.translation, null, "a changed body must not retain an old translation");
+assert.equal(edited.quotedMessage.translation, null, "a changed quote must not retain an old translation");

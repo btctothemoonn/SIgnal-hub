@@ -368,7 +368,14 @@ function toUnifiedTelegramItems(
               : null,
           link: quoted.messageUrl || "#",
           media: quoted.media,
-          translation: null,
+          translation:
+            !shouldSkipTelegramChannelTranslation({
+              channelUsername: quoted.channelUsername || message.channelUsername,
+              channelTitle: quoted.channelTitle || message.channelTitle,
+              channelRef: message.channelRef,
+            }) && isUsefulTranslation(quoted.text, quoted.translation)
+              ? quoted.translation ?? null
+              : null,
           avatar,
         }
       : null,

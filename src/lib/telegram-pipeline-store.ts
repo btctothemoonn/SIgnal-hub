@@ -11,6 +11,7 @@ import type {
 import type { TranslationNote } from "@/lib/translate";
 import { getTelegramPipelineConfig } from "./telegram-pipeline-config.ts";
 import { shouldSkipTelegramChannelTranslation } from "./telegram-translation-policy.ts";
+import { shouldTranslateText } from "./translation-quality.ts";
 import { isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
 
 type DbValue = string | number | null;
@@ -180,6 +181,7 @@ function parseQuotedMessage(raw: unknown): TelegramQuotedMessage | null {
     channelUsername: stringValue(quoted.channelUsername),
     messageUrl,
     media: parseMediaPreview(quoted.media),
+    translation: parseTranslation(jsonString(quoted.translation)),
   };
 }
 
@@ -450,8 +452,18 @@ export function upsertTelegramPipelineMessage(
         media_label = coalesce(excluded.media_label, telegram_messages.media_label),
         media_width = coalesce(excluded.media_width, telegram_messages.media_width),
         media_height = coalesce(excluded.media_height, telegram_messages.media_height),
-        translation_json = coalesce(excluded.translation_json, telegram_messages.translation_json),
-        quoted_message_json = coalesce(excluded.quoted_message_json, telegram_messages.quoted_message_json),
+        translation_json = case when excluded.text = telegram_messages.text
+          then coalesce(excluded.translation_json, telegram_messages.translation_json)
+          else excluded.translation_json end,
+        quoted_message_json = case
+          when excluded.quoted_message_json is null then telegram_messages.quoted_message_json
+          when json_extract(excluded.quoted_message_json, '$.id') = json_extract(telegram_messages.quoted_message_json, '$.id')
+            and json_extract(excluded.quoted_message_json, '$.text') = json_extract(telegram_messages.quoted_message_json, '$.text')
+            and json_extract(excluded.quoted_message_json, '$.translation.text') is null
+            and json_extract(telegram_messages.quoted_message_json, '$.translation.text') is not null
+          then json_set(excluded.quoted_message_json, '$.translation',
+            json_extract(telegram_messages.quoted_message_json, '$.translation'))
+          else excluded.quoted_message_json end,
         raw_json = excluded.raw_json,
         updated_at = excluded.updated_at
     `),
@@ -511,47 +523,76 @@ export function upsertTelegramPipelineMessage(
 export function listTelegramPipelineTranslationCandidates(
   limit = 20,
   db = getTelegramPipelineDb(),
+  offset = 0,
 ) {
   return db
     .prepare(
       `
-      select id, text, channel_ref, channel_title, channel_username
+      select id, text, channel_ref, channel_title, channel_username, kind from (
+      select id, text, channel_ref, channel_title, channel_username, null as kind,
+        created_at, message_id
       from telegram_messages
       where translation_json is null
         and trim(text) != ''
-      order by created_at desc, message_id desc
-      limit ?
+      union all
+      select id, json_extract(quoted_message_json, '$.text') as text,
+        channel_ref, channel_title, channel_username, 'quoted' as kind,
+        created_at, message_id
+      from telegram_messages
+      where quoted_message_json is not null
+        and trim(coalesce(json_extract(quoted_message_json, '$.text'), '')) != ''
+        and json_extract(quoted_message_json, '$.translation.text') is null
+      ) order by created_at desc, message_id desc
     `,
     )
-    .all(limit)
+    .all()
     .filter(
       (row) =>
-        !shouldSkipTelegramChannelTranslation({
+        shouldTranslateText(stringValue(row.text)) && !shouldSkipTelegramChannelTranslation({
           channelUsername: stringValue(row.channel_username),
           channelRef: stringValue(row.channel_ref),
           channelTitle: stringValue(row.channel_title),
         }),
     )
+    .slice(offset, offset + limit)
     .map((row) => ({
       id: stringValue(row.id),
       text: stringValue(row.text),
+      ...(row.kind === "quoted" ? { kind: "quoted" as const } : {}),
     }));
+}
+
+export function setTelegramPipelineQuotedTranslation(
+  id: string,
+  sourceText: string,
+  translation: TranslationNote,
+  db = getTelegramPipelineDb(),
+) {
+  run(db.prepare(`
+    update telegram_messages
+    set quoted_message_json = json_set(quoted_message_json, '$.translation', json(?)),
+        updated_at = ?
+    where id = ? and json_extract(quoted_message_json, '$.text') = ?
+  `), jsonString(translation), nowIso(), id, sourceText);
 }
 
 export function setTelegramPipelineMessageTranslation(
   id: string,
   translation: TranslationNote | null,
   db = getTelegramPipelineDb(),
+  sourceText?: string,
 ) {
   run(
     db.prepare(`
       update telegram_messages
       set translation_json = ?, updated_at = ?
-      where id = ?
+      where id = ? and (? is null or text = ?)
     `),
     translation ? jsonString(translation) : null,
     nowIso(),
     id,
+    sourceText ?? null,
+    sourceText ?? null,
   );
 }
 

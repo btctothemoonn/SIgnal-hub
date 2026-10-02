@@ -10,6 +10,7 @@ async function transpileToTemp() {
     "runtime-storage.ts",
     "telegram-pipeline-config.ts",
     "telegram-translation-policy.ts",
+    "translation-quality.ts",
     "telegram-x-source-channels.ts",
     "telegram-pipeline-store.ts",
   ];
@@ -25,6 +26,7 @@ async function transpileToTemp() {
       .replace('from "./telegram-pipeline-config.ts"', 'from "./telegram-pipeline-config.mjs"')
       .replace('from "./runtime-storage.ts"', 'from "./runtime-storage.mjs"')
       .replace('from "./telegram-translation-policy.ts"', 'from "./telegram-translation-policy.mjs"')
+      .replace('from "./translation-quality.ts"', 'from "./translation-quality.mjs"')
       .replace('from "./telegram-x-source-channels.ts"', 'from "./telegram-x-source-channels.mjs"');
     await writeFile(
       join(dir, file.replace(/\.ts$/, ".mjs")),
