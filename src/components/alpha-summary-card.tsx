@@ -187,7 +187,7 @@ function AlphaSummaryScopeResult({
               </h2>
             </div>
 
-            {signalEvents ? <SignalSummaryEvents events={signalEvents} timeZone={snapshot?.period.timeZone ?? "Asia/Shanghai"} /> : <div className={insightGridClass}>
+            {signalEvents ? <SignalSummaryEvents events={signalEvents} history={snapshot?.summary?.eventHistory} timeZone={snapshot?.period.timeZone ?? "Asia/Shanghai"} /> : <div className={insightGridClass}>
               {summary.consensus.length > 0 ? (
                 <section className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
                   <p className="text-[11px] font-semibold uppercase text-muted">

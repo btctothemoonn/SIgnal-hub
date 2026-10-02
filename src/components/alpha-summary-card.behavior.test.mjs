@@ -62,6 +62,64 @@ function markup(value, audience = "signals") {
   return renderToStaticMarkup(React.createElement(AlphaSummaryScopeResult, { audience, compact: true, scope: "12h", snapshot: value, manualMessage: null }));
 }
 
+function tracking(state, id, overrides = {}) {
+  return {
+    id, state, firstSeenAt: "2026-10-01T03:00:00Z", lastSeenAt: "2026-10-02T04:00:00Z",
+    lastChangedAt: "2026-10-02T04:00:00Z", previousGeneratedAt: "2026-10-01T04:15:00Z",
+    newSourceIds: [], note: "本轮没有可核实的新进展，继续观察。", ...overrides,
+  };
+}
+
+test("Signal continuity displays changed events first and retains each event's stable identity", () => {
+  const value = snapshot();
+  value.summary.events = [
+    event({ title: "持续观察的旧事件", tracking: tracking("continuing", "event-old") }),
+    event({ title: "本轮新增事件", tracking: tracking("new", "event-new") }),
+    event({ title: "有进展的旧事件", tracking: tracking("updated", "event-updated") }),
+    event({ title: "被来源撤回的事件", tracking: tracking("invalidated", "event-invalid", { note: "团队撤回了原定计划。" }) }),
+  ];
+  const html = markup(value);
+  for (const state of ["新增", "有新进展", "继续观察", "失效"]) assert.ok(html.includes(state), state);
+  assert.ok(html.indexOf("本轮新增事件") < html.indexOf("持续观察的旧事件"));
+  assert.ok(html.indexOf("有进展的旧事件") < html.indexOf("持续观察的旧事件"));
+  assert.ok(html.indexOf("被来源撤回的事件") < html.indexOf("持续观察的旧事件"));
+  assert.match(html, /data-signal-event-id="event-updated"/);
+  assert.match(html, /团队撤回了原定计划/);
+  assert.match(html, /首次跟踪[：:]\s*2026\/10\/01 11:00/);
+});
+
+test("Signal progress distinguishes newly cited originals while keeping earlier evidence", () => {
+  const value = snapshot();
+  value.summary.events = [event({
+    tracking: tracking("updated", "event-upgrade", { newSourceIds: ["x-new"], note: "团队发布了首轮测试结果。" }),
+    sourceIds: ["tg-1", "x-new"],
+    sources: [
+      event().sources[0],
+      { id: "x-new", source: "X", author: "@maintainer", createdAt: "2026-10-02T03:00:00Z", link: "https://x.com/maintainer/status/456" },
+    ],
+  })];
+  const html = markup(value);
+  assert.match(html, /团队发布了首轮测试结果/);
+  assert.match(html, /href="https:\/\/t\.me\/research\/123"/);
+  assert.match(html, /href="https:\/\/x\.com\/maintainer\/status\/456"/);
+  assert.equal((html.match(/data-signal-new-evidence/g) ?? []).length, 1);
+});
+
+test("Signal events omitted from the current selection remain accessible as history without being labelled invalidated", () => {
+  const value = snapshot();
+  value.summary.events = [event({ title: "当前事件", tracking: tracking("new", "active") })];
+  value.summary.eventHistory = [
+    value.summary.events[0],
+    event({ title: "此前仍在观察的事件", tracking: tracking("continuing", "history") }),
+  ];
+  const html = markup(value);
+  assert.match(html, /data-signal-event-history/);
+  assert.match(html, /此前仍在观察的事件/);
+  assert.equal((html.match(/data-signal-event-id="active"/g) ?? []).length, 1);
+  const history = html.slice(html.indexOf("data-signal-event-history"));
+  assert.doesNotMatch(history, /失效|<details[^>]*\sopen(?:=|>)/);
+});
+
 test("Signal events show their evidence class, observation conditions, and original sources", () => {
   const html = markup(snapshot());
   assert.match(html, /协议升级进入测试阶段/);

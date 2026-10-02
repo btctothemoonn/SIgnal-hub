@@ -55,6 +55,13 @@ import {
   signalFeedRenderCountForTarget,
 } from "@/lib/signal-feed-render-window";
 import { classifyXFeedSource } from "@/lib/x-feed-source";
+import {
+  aggregateSignalFeed,
+  resolveSignalFeedRowId,
+  signalFeedUnreadMemberCount,
+  telegramOriginalAction,
+  type SignalFeedGroup,
+} from "@/lib/signal-feed-aggregation";
 import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
 import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
 import {
@@ -344,8 +351,7 @@ function toUnifiedTelegramItems(
       }) && isUsefulTranslation(message.text, message.translation)
         ? message.translation
         : null,
-    link: message.channelLink,
-    linkLabel: "查看频道",
+    ...telegramOriginalAction(message),
     media: message.media,
     quotedTweet: quoted
       ? {
@@ -671,7 +677,7 @@ export function UnifiedNewsPanel({
   const authorMenuRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
-  const filteredFeedRef = useRef<UnifiedNewsItem[]>([]);
+  const filteredFeedRef = useRef<SignalFeedGroup<UnifiedNewsItem>[]>([]);
   const feedRenderWindowKeyRef = useRef("");
   const pendingFeedNavigationRef = useRef<PendingFeedNavigation | null>(null);
   const stagedReadingPositionRef = useRef<SignalFeedReadingAnchor | null>(null);
@@ -700,9 +706,10 @@ export function UnifiedNewsPanel({
     const timeline = timelineRef.current;
     if (!timeline) return null;
 
+    const rowId = resolveSignalFeedRowId(filteredFeedRef.current, itemId);
     return (
       [...timeline.querySelectorAll<HTMLElement>("[data-signal-feed-item-id]")].find(
-        (item) => item.dataset.signalFeedItemId === itemId,
+        (item) => item.dataset.signalFeedItemId === rowId,
       ) || null
     );
   }, []);
@@ -881,13 +888,14 @@ export function UnifiedNewsPanel({
     const item = findTimelineItem(anchor.itemId);
     if (!item) {
       const allItems = filteredFeedRef.current;
+      const rowId = resolveSignalFeedRowId(allItems, anchor.itemId);
       const requiredCount = signalFeedRenderCountForTarget(
         allItems,
-        anchor.itemId,
+        rowId,
         timelineRef.current?.querySelectorAll("[data-signal-feed-item-id]")
           .length ?? 0,
       );
-      if (requiredCount > 0 && allItems[requiredCount - 1]?.id === anchor.itemId) {
+      if (requiredCount > 0 && allItems[requiredCount - 1]?.id === rowId) {
         pendingFeedNavigationRef.current = { type: "saved", anchor };
         setFeedRenderWindow({
           key: feedRenderWindowKeyRef.current,
@@ -1119,6 +1127,18 @@ export function UnifiedNewsPanel({
     feedRange,
   ]);
 
+  // Keep a group's representative when snapshots add older or newer copies.
+  // Derive this state synchronously so there is no intermediate ungrouped paint.
+  const [feedAggregation, setFeedAggregation] = useState(() => ({
+    input: filteredFeed,
+    rows: aggregateSignalFeed(filteredFeed),
+  }));
+  let groupedFeed = feedAggregation.rows;
+  if (feedAggregation.input !== filteredFeed) {
+    groupedFeed = aggregateSignalFeed(filteredFeed, feedAggregation.rows);
+    setFeedAggregation({ input: filteredFeed, rows: groupedFeed });
+  }
+
   const feedRenderWindowKey = [
     activeTab,
     feedRange,
@@ -1127,38 +1147,38 @@ export function UnifiedNewsPanel({
   ].join("\u0000");
   const baseRenderedFeedCount =
     feedRenderWindow.key === feedRenderWindowKey
-      ? Math.min(feedRenderWindow.count, filteredFeed.length)
-      : initialSignalFeedRenderCount(filteredFeed.length);
+      ? Math.min(feedRenderWindow.count, groupedFeed.length)
+      : initialSignalFeedRenderCount(groupedFeed.length);
   const renderedFeedCount = stagedRenderTargetId
     ? signalFeedRenderCountForTarget(
-        filteredFeed,
-        stagedRenderTargetId,
+        groupedFeed,
+        resolveSignalFeedRowId(groupedFeed, stagedRenderTargetId),
         baseRenderedFeedCount,
       )
     : baseRenderedFeedCount;
   const deferredFeed = useMemo(
-    () => filteredFeed.slice(0, renderedFeedCount),
-    [filteredFeed, renderedFeedCount],
+    () => groupedFeed.slice(0, renderedFeedCount),
+    [groupedFeed, renderedFeedCount],
   );
-  const hasMoreFeedItems = deferredFeed.length < filteredFeed.length;
+  const hasMoreFeedItems = deferredFeed.length < groupedFeed.length;
 
   useLayoutEffect(() => {
-    filteredFeedRef.current = filteredFeed;
+    filteredFeedRef.current = groupedFeed;
     feedRenderWindowKeyRef.current = feedRenderWindowKey;
-  }, [feedRenderWindowKey, filteredFeed]);
+  }, [feedRenderWindowKey, groupedFeed]);
 
   const loadMoreFeed = useCallback(() => {
     setFeedRenderWindow((current) => {
       const currentCount =
         current.key === feedRenderWindowKey
           ? current.count
-          : initialSignalFeedRenderCount(filteredFeed.length);
+          : initialSignalFeedRenderCount(groupedFeed.length);
       return {
         key: feedRenderWindowKey,
-        count: nextSignalFeedRenderCount(currentCount, filteredFeed.length),
+        count: nextSignalFeedRenderCount(currentCount, groupedFeed.length),
       };
     });
-  }, [feedRenderWindowKey, filteredFeed.length]);
+  }, [feedRenderWindowKey, groupedFeed.length]);
 
   useEffect(() => {
     const sentinel = loadMoreSentinelRef.current;
@@ -1748,6 +1768,7 @@ export function UnifiedNewsPanel({
               <h2 className="text-lg font-semibold text-foreground">Signal Flow</h2>
               <p className="mt-0.5 text-[11px] text-muted">
                 {filteredFeed.length} / {unifiedFeed.length} 条信号
+                {groupedFeed.length < filteredFeed.length ? ` · 按原文归并为 ${groupedFeed.length} 组` : ""}
               </p>
             </div>
 
@@ -2118,7 +2139,8 @@ export function UnifiedNewsPanel({
           <>
           {deferredFeed.map((item) => {
             const mediaViewport = getMediaViewport(item.media);
-            const isRead = readItems.has(item.id);
+            const unreadMemberCount = signalFeedUnreadMemberCount(item, readItems);
+            const isRead = unreadMemberCount === 0;
             const icon = SOURCE_ICON[item.source] || SOURCE_ICON.alert;
             const sourceBadge = getXSourceBadge(item.source);
             const pinStateEventLabel = getPinStateEventLabel(item.eventType);
@@ -2134,6 +2156,8 @@ export function UnifiedNewsPanel({
               <article
                 key={item.id}
                 data-signal-feed-item-id={item.id}
+                data-signal-feed-member-ids={JSON.stringify(item.aliases)}
+                data-signal-feed-unread-count={unreadMemberCount}
                 style={{
                   contentVisibility: "auto",
                   containIntrinsicSize: "0 420px",
@@ -2145,17 +2169,18 @@ export function UnifiedNewsPanel({
                   persistVisibleReadingAnchor();
                   setReadItems((current) => {
                     const next = new Set(current);
-                    next.add(item.id);
+                    for (const member of item.members) next.add(member.id);
                     return next;
                   });
                 }}
                 onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     persistVisibleReadingAnchor();
                     setReadItems((current) => {
                       const next = new Set(current);
-                      next.add(item.id);
+                      for (const member of item.members) next.add(member.id);
                       return next;
                     });
                   }
@@ -2376,6 +2401,81 @@ export function UnifiedNewsPanel({
                   ) : null}
 
                   {/* Chips row */}
+                  {item.members.length > 1 ? (
+                    <details
+                      data-signal-feed-group
+                      className="mt-2 rounded-[6px] border border-workspace-line-strong bg-workspace-canvas px-2.5 py-2"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <summary
+                        className="cursor-pointer text-xs font-medium text-accent"
+                        onClick={persistVisibleReadingAnchor}
+                      >
+                        同一原文 · {item.members.length} 条来源与评论
+                        {unreadMemberCount > 0 && item.members.some((member) => readItems.has(member.id)) ? (
+                          <span className="ml-2 rounded bg-success/15 px-1.5 py-0.5 text-[10px] text-success">
+                            新增 {unreadMemberCount} 条未读
+                          </span>
+                        ) : null}
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {item.members.map((member) => (
+                          <section
+                            key={member.id}
+                            data-signal-feed-group-member={member.id}
+                            className="min-w-0 rounded border border-workspace-line-strong bg-workspace-surface px-2.5 py-2"
+                          >
+                            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-5 text-muted">
+                              <span className="font-medium">{member.sourceLabel}</span>
+                              <a href={member.titleUrl} target="_blank" rel="noreferrer" className="font-semibold text-foreground hover:underline">{member.title}</a>
+                              {member.subtitle ? <span>{member.subtitle}</span> : null}
+                              <time dateTime={member.createdAt}>{formatDisplayTime(member.createdAt)}</time>
+                              {getPinStateEventLabel(member.eventType) ? <span>{getPinStateEventLabel(member.eventType)}</span> : null}
+                              <button
+                                type="button"
+                                className="ml-auto shrink-0 text-accent"
+                                disabled={readItems.has(member.id)}
+                                onClick={() => setReadItems((current) => new Set([...current, member.id]))}
+                              >
+                                {readItems.has(member.id) ? "已读" : "标记已读"}
+                              </button>
+                            </div>
+                            <p className="selectable-text mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{renderTextWithLinks(member.text)}</p>
+                            {member.translation ? (
+                              <div className="mt-1.5 rounded border border-info/20 bg-info-soft/45 px-2 py-1.5">
+                                <p className="text-[10px] text-muted">{formatLanguageTag(member.translation.sourceLanguage)} → {member.translation.targetLanguage}</p>
+                                <p className="selectable-text whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{renderTextWithLinks(member.translation.text)}</p>
+                              </div>
+                            ) : null}
+                            {member.quotedTweet ? (
+                              <div className="mt-1.5 rounded border border-accent/25 bg-accent/5 px-2 py-1.5">
+                                <p className="text-[11px] text-muted">
+                                  {member.quotedTweet.relation === "reply" ? "回复上文" : "引用"} · <a href={member.quotedTweet.link} target="_blank" rel="noreferrer" className="text-accent hover:underline">{member.quotedTweet.title}</a>
+                                </p>
+                                <p className="selectable-text whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{renderTextWithLinks(member.quotedTweet.text)}</p>
+                                {member.quotedTweet.translation ? <p className="selectable-text mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{renderTextWithLinks(member.quotedTweet.translation.text)}</p> : null}
+                              </div>
+                            ) : null}
+                            {[member.media, member.quotedTweet?.media].map((media, mediaIndex) => media ? (
+                              <button
+                                key={mediaIndex}
+                                type="button"
+                                onClick={() => setLightboxMedia(media)}
+                                className="mt-1.5 block w-full overflow-hidden rounded border border-workspace-line-strong"
+                                aria-label={`查看${media.label || "图片"}大图`}
+                              >
+                                <Image src={media.previewUrl} alt={media.label} {...getMediaViewport(media)} unoptimized className="block max-h-[12rem] w-full object-contain" />
+                              </button>
+                            ) : null)}
+                            <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted">
+                              {member.link !== "#" ? <a href={member.link} target="_blank" rel="noreferrer" className="text-accent hover:underline">{member.linkLabel}</a> : null}
+                              <CopyButton text={`${member.text}${member.translation ? `\n\n${member.translation.text}` : ""}${member.quotedTweet ? `\n\n引用 ${member.quotedTweet.title}: ${member.quotedTweet.text}` : ""}`} />
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
                   {(item.chips.length > 0 || item.metrics.length > 0) && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {item.chips.map((chip) => (
@@ -2432,7 +2532,7 @@ export function UnifiedNewsPanel({
                 onClick={loadMoreFeed}
                 className="h-9 rounded-md border border-workspace-line-strong bg-workspace-surface px-4 text-xs font-semibold text-muted transition-colors hover:border-accent/40 hover:bg-accent-soft hover:text-foreground"
               >
-                继续加载（已显示 {deferredFeed.length} / {filteredFeed.length}）
+                继续加载（已显示 {deferredFeed.length} / {groupedFeed.length}）
               </button>
             </div>
           ) : null}

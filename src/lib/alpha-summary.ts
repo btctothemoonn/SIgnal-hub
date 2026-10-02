@@ -35,6 +35,10 @@ import {
   parseSignalSummaryEvents,
   type SignalSummaryEvent,
 } from "./signal-summary-events.ts";
+import {
+  prepareSignalSummaryPreviousEvents,
+  reconcileSignalSummaryContinuity,
+} from "./signal-summary-continuity.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -82,6 +86,7 @@ export type AlphaSummaryContent = {
   risks: string[];
   watchlist: string[];
   events?: SignalSummaryEvent[];
+  eventHistory?: SignalSummaryEvent[];
 };
 
 export type AlphaSummaryCoverage = {
@@ -119,7 +124,7 @@ const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
-const SIGNAL_SUMMARY_CONTENT_VERSION = 1;
+const SIGNAL_SUMMARY_CONTENT_VERSION = 2;
 const DEFAULT_REFRESH_INTERVALS_MS: Record<AlphaSummaryScope, number> = {
   "12h": DEFAULT_REFRESH_INTERVAL_MS,
   today: 60 * 60 * 1000,
@@ -239,13 +244,14 @@ function parseAlphaSummaryAuthors(value: unknown): AlphaSummaryAuthor[] {
 
 function normalizeAlphaSummaryRecord(
   parsed: Record<string, unknown>,
+  cached = false,
 ): AlphaSummaryContent | null {
   if (!Array.isArray(parsed.authors)) {
     return null;
   }
 
   const events = Array.isArray(parsed.events)
-    ? parseSignalSummaryEvents(parsed.events)
+    ? parseSignalSummaryEvents(parsed.events, { includeTracking: cached, includeHints: !cached })
     : undefined;
   if (Array.isArray(parsed.events) && parsed.events.length > 0 && !events?.length) {
     return null;
@@ -257,6 +263,9 @@ function normalizeAlphaSummaryRecord(
     risks: parseStringArray(parsed.risks),
     watchlist: parseStringArray(parsed.watchlist),
     ...(events === undefined ? {} : { events }),
+    ...(cached && Array.isArray(parsed.eventHistory) ? {
+      eventHistory: parseSignalSummaryEvents(parsed.eventHistory, { maxEvents: 10, includeHints: false }),
+    } : {}),
   };
 }
 
@@ -823,7 +832,7 @@ function readCachedSummary(
   const sourceCounts = parseJsonObject(row.source_counts_json);
   const summaryRecord = parseJsonObject(row.summary_json);
   const summary = summaryRecord
-    ? normalizeAlphaSummaryRecord(summaryRecord)
+    ? normalizeAlphaSummaryRecord(summaryRecord, true)
     : null;
   if (!periodRecord) return null;
   if (summaryRecord && !summary) return null;
@@ -1159,12 +1168,16 @@ function stockResearchUniverseText() {
 export function buildAlphaSummaryPrompt({
   period,
   items,
+  previousEvents,
+  previousGeneratedAt,
 }: {
   period: AlphaSummaryPeriod;
   items: AlphaSummarySourceItem[];
+  previousEvents?: readonly SignalSummaryEvent[];
+  previousGeneratedAt?: string | null;
 }) {
   if (period.audience === "signals") {
-    return buildSignalSummaryPrompt({ period, items });
+    return buildSignalSummaryPrompt({ period, items, previousEvents, previousGeneratedAt });
   }
   const sourceText = items
     .map((item, index) => {
@@ -1409,6 +1422,7 @@ async function getOrCreateAlphaSummaryInternal({
       const previous = db.prepare(`
         select period_key from alpha_summary_cache
         where summary_json is not null and json_extract(period_json, '$.scope') = ?
+          and coalesce(json_extract(period_json, '$.audience'), 'signals') = 'signals'
         order by updated_at desc limit 1
       `).get(normalizedScope) as DbRow | undefined;
       if (previous) cached = readCachedSummary(stringValue(previous.period_key), db) ?? cached;
@@ -1471,7 +1485,12 @@ async function getOrCreateAlphaSummaryInternal({
 
     try {
       const { summary, provider } = await requestAiSummary({
-        prompt: buildAlphaSummaryPrompt({ period, items }),
+        prompt: buildAlphaSummaryPrompt({ period, items,
+          ...(isSignals ? {
+            previousEvents: prepareSignalSummaryPreviousEvents({ period, previous: cached }),
+            previousGeneratedAt: cached?.generatedAt ?? null,
+          } : {}),
+        }),
         env,
         ...(isSignals ? { validateSummary: (result: AlphaSummaryContent) => {
           if (!Array.isArray(result.events)) throw new Error("Signal summary must return event tracking cards");
@@ -1483,6 +1502,10 @@ async function getOrCreateAlphaSummaryInternal({
         } } : {}),
       });
       const completedAt = new Date().toISOString();
+      const completedSummary = isSignals ? {
+        ...summary,
+        ...reconcileSignalSummaryContinuity({ events: summary.events ?? [], items, period, previous: cached, generatedAt: completedAt }),
+      } : summary;
       const snapshot: AlphaSummarySnapshot = {
         success: true,
         status: "generated",
@@ -1492,7 +1515,7 @@ async function getOrCreateAlphaSummaryInternal({
         model: provider.model,
         itemCount: items.length,
         sourceCounts,
-        summary,
+        summary: completedSummary,
         error: null,
         ...(isSignals ? { lastAttemptAt: completedAt, coverage } : {}),
       };
