@@ -81,12 +81,19 @@ export type AlphaSummaryAuthor = {
 
 export type AlphaSummaryContent = {
   headline: string;
+  stocks?: AlphaSummaryTarget[];
+  crypto?: AlphaSummaryTarget[];
   authors: AlphaSummaryAuthor[];
   consensus: string[];
   risks: string[];
   watchlist: string[];
   events?: SignalSummaryEvent[];
   eventHistory?: SignalSummaryEvent[];
+};
+
+export type AlphaSummaryTarget = {
+  target: string;
+  opinions: { author: string; view: string }[];
 };
 
 export type AlphaSummaryCoverage = {
@@ -246,7 +253,8 @@ function normalizeAlphaSummaryRecord(
   parsed: Record<string, unknown>,
   cached = false,
 ): AlphaSummaryContent | null {
-  if (!Array.isArray(parsed.authors)) {
+  const hasTargetGroups = hasAlphaSummaryTargetGroups(parsed);
+  if (!hasTargetGroups && !Array.isArray(parsed.authors)) {
     return null;
   }
 
@@ -257,7 +265,11 @@ function normalizeAlphaSummaryRecord(
     return null;
   }
   return {
-    headline: stringValue(parsed.headline).slice(0, 240),
+    headline: stringValue(parsed.headline).slice(0, 600),
+    ...(hasTargetGroups ? {
+      stocks: parseAlphaSummaryTargets(parsed.stocks),
+      crypto: parseAlphaSummaryTargets(parsed.crypto),
+    } : {}),
     authors: parseAlphaSummaryAuthors(parsed.authors),
     consensus: parseStringArray(parsed.consensus),
     risks: parseStringArray(parsed.risks),
@@ -267,6 +279,35 @@ function normalizeAlphaSummaryRecord(
       eventHistory: parseSignalSummaryEvents(parsed.eventHistory, { maxEvents: 10, includeHints: false }),
     } : {}),
   };
+}
+
+function hasAlphaSummaryTargetGroups(value: AlphaSummaryContent | Record<string, unknown> | null): boolean {
+  return Boolean(value && Array.isArray(value.stocks) && Array.isArray(value.crypto));
+}
+
+function parseAlphaSummaryTargets(value: unknown): AlphaSummaryTarget[] {
+  if (!Array.isArray(value)) return [];
+  const targets = new Map<string, AlphaSummaryTarget>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const target = stringValue(item.target).trim().slice(0, 100);
+    if (!target || !Array.isArray(item.opinions)) continue;
+    const group = targets.get(target) ?? { target, opinions: [] };
+    for (const opinion of item.opinions) {
+      if (!opinion || typeof opinion !== "object" || Array.isArray(opinion)) continue;
+      const author = stringValue(opinion.author).trim().slice(0, 120);
+      const view = stringValue(opinion.view).trim().slice(0, 600);
+      if (!author || !view) continue;
+      const existing = group.opinions.find((entry) => entry.author === author);
+      if (existing) {
+        if (existing.view !== view) existing.view = `${existing.view}；${view}`.slice(0, 1200);
+      } else {
+        group.opinions.push({ author, view });
+      }
+    }
+    if (group.opinions.length) targets.set(target, group);
+  }
+  return [...targets.values()];
 }
 
 function clampText(text: string, maxChars = MAX_TEXT_CHARS) {
@@ -1200,33 +1241,23 @@ ${stockResearchUniverseText()}
 要求:
 - 这是 STOCKS 美股观察池专用投研总结；Stocks 外部数据优先，Telegram/X 只作为补充信号。美股普通消息也要一起总结，包括美股、ADR、美股行业链、财报、评级、盘前盘后、机构观点、宏观对美股的影响。
 - 重点覆盖观察池股票和产业链：半导体、光通信、云/SaaS/软件、数据中心基础设施、数据存储，以及相关 AI 算力链公司。
-- 普通消息如果只影响大盘、行业或美股风险偏好，也可以纳入 consensus / risks / watchlist；不要强行映射到观察池 ticker。
-- 忽略币圈、链上、代币、空投、DeFi、合约等内容；除非消息明确直接影响美股上市公司，否则不要纳入。
+- 普通消息如果只影响大盘、行业或美股风险偏好，纳入 headline 总结；不要强行映射到观察池 ticker。
+- 忽略币圈、链上、代币、空投、DeFi、合约等内容；除非消息明确直接影响美股上市公司，否则不要纳入。crypto 返回空数组。
 - ${alphaSummaryScopeInstruction(period.scope)}
 - 只返回 JSON，不要 Markdown。
-- headline: 一句话总结本周期最核心的美股投研结论。
-- authors: 按博主/频道分类；X 使用 @username，Telegram 使用频道名。同一作者多条消息必须合并。
-- 每个作者块说明 coreView、alpha、watch；alpha 字段是兼容字段，请填入“投研要点”，不要在文字里使用 Alpha 命名。
-- consensus: 跨多个作者共同提到或相互印证的共识。
-- risks: 0 到 4 条风险或噪音提示。
-- watchlist: 0 到 12 个需要关注的股票、板块、公司、事件或账号，不要输出币种或代币。
-- 不要编造消息中不存在的事实；如果证据不足，明确写“证据不足”。
+- headline: 用一段简短中文概括本周期最核心的美股投研观点。
+- stocks: 按股票名称或代码分组，同一标的只出现一次；每个标的只有 target 和 opinions。
+- opinions: 每条只包含 author 和 view。author 是实际发表该看法的博主或来源，view 只写与该标的相关的看法；X 使用 @username，Telegram 使用频道名。
+- 同一博主对同一标的的多条消息合并；一个博主涉及多个标的时分别归类，保留不同博主的分歧。
+- 外部行情、财报和新闻只归属于其实际来源，不要假称为博主观点；保留引用对象和语境，不把转发或引用自动当成作者认可。
+- 不额外输出共识、风险、观察清单、作者简介或消息数量等模块；没有标的观点时 stocks 为 []。
+- 不要编造消息中不存在的事实或博主观点；如果证据不足，明确写“证据不足”。
 
 JSON 结构:
 {
-  "headline": "string",
-  "authors": [
-    {
-      "name": "@username or channel",
-      "sourceCount": 1,
-      "coreView": "string",
-      "alpha": ["string"],
-      "watch": ["string"]
-    }
-  ],
-  "consensus": ["string"],
-  "risks": ["string"],
-  "watchlist": ["string"]
+  "headline": "一段总结",
+  "stocks": [{ "target": "股票名称或代码", "opinions": [{ "author": "@username or channel", "view": "看法" }] }],
+  "crypto": []
 }
 
 消息:
@@ -1289,9 +1320,12 @@ export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
   } catch {
     parsed = JSON.parse(repairCommonAiJsonIssues(cleaned)) as Record<string, unknown>;
   }
+  if (!hasAlphaSummaryTargetGroups(parsed)) {
+    throw new Error("AI summary missing target groups");
+  }
   const normalized = normalizeAlphaSummaryRecord(parsed);
   if (!normalized) {
-    throw new Error("AI summary missing author groups");
+    throw new Error("AI summary contains invalid target groups or events");
   }
   return normalized;
 }
@@ -1356,8 +1390,8 @@ export async function requestAiSummary({
         messages.push(
           { role: "assistant", content: content.slice(0, 32_000) },
           { role: "user", content: validateSummary
-            ? "The response did not satisfy the requested schema or source validation. Return the complete corrected JSON object including authors and events with exact sourceIds from the supplied messages. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts or sources."
-            : "The response could not be parsed. Return the complete corrected JSON object using the requested schema, including authors. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts." },
+            ? "The response did not satisfy the requested schema or source validation. Return the complete corrected JSON object including headline, stocks and crypto with target and opinions (author, view), and internal events with exact sourceIds from the supplied messages. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts or sources."
+            : "The response could not be parsed. Return the complete corrected JSON object using the requested schema, including headline, stocks and crypto with target and opinions (author, view). Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts." },
         );
       }
       }
@@ -1431,6 +1465,7 @@ async function getOrCreateAlphaSummaryInternal({
       cached &&
       cached.period.key === period.key &&
       (!isSignals || cached.period.signalContentVersion === SIGNAL_SUMMARY_CONTENT_VERSION) &&
+      (hasAlphaSummaryTargetGroups(cached.summary) || cached.status === "error") &&
       !force &&
       (cached.model === model || (isSignals && cached.status === "error")) &&
       shouldReuseCachedAlphaSummary({

@@ -35,7 +35,7 @@ globalThis.fetch = async (_url, request) => {
   calls += 1;
   if (fail) throw new Error("fixture outage");
   lastPrompt = JSON.parse(request.body).messages[1].content;
-  return Response.json({ choices: [{ message: { content: JSON.stringify({ headline: "Track protocol testing", authors: [], consensus: [], risks: [], watchlist: [], events,
+  return Response.json({ choices: [{ message: { content: JSON.stringify({ headline: "Track protocol testing", stocks: [], crypto: [{ target: "Acme", opinions: [{ author: "Research", view: "Track protocol testing" }] }], events,
     eventHistory: [{ ...card, tracking: { id: "injected:history", state: "invalidated" } }],
   }) } }] });
 };
@@ -114,6 +114,56 @@ try {
   assert.equal(refreshed.summary.events[0].tracking.id, id);
   assert.equal(refreshed.summary.events[0].tracking.state, "continuing");
   assert.equal(getAlphaSummaryPeriod({ now: nextNow, audience: "stocks" }).signalContentVersion, undefined);
+
+  // New display fields invalidate only reuse, not evidence or continuity baselines.
+  const legacySummary = { ...refreshed.summary, authors: [], consensus: [], risks: [], watchlist: [] };
+  delete legacySummary.stocks;
+  delete legacySummary.crypto;
+  const migrationDb = new DatabaseSync(env.SIGNAL_SUMMARY_DB);
+  migrationDb.prepare("update alpha_summary_cache set summary_json = ? where period_key = ?").run(JSON.stringify(legacySummary), refreshed.period.key);
+  migrationDb.close();
+  fail = true;
+  const callsBeforeMigration = calls;
+  const migrationFailure = await getOrCreateAlphaSummary({ now: nextNow, env });
+  assert.equal(migrationFailure.status, "error", "legacy successful content must be refreshed instead of being reused as a target summary");
+  assert.equal(calls, callsBeforeMigration + 1);
+  assert.equal(migrationFailure.summary.stocks, undefined, "a legacy fallback must not pretend the stock category was empty");
+  assert.equal(migrationFailure.summary.crypto, undefined, "a legacy fallback must not pretend the crypto category was empty");
+  assert.deepEqual(migrationFailure.summary.events, refreshed.summary.events);
+  assert.deepEqual(migrationFailure.summary.eventHistory, refreshed.summary.eventHistory);
+  assert.deepEqual(migrationFailure.coverage, refreshed.coverage);
+  assert.equal(migrationFailure.generatedAt, refreshed.generatedAt);
+  const callsBeforeMigrationBackoff = calls;
+  const migrationBackoff = await getOrCreateAlphaSummary({ now: nextNow, env });
+  assert.equal(migrationBackoff.status, "error");
+  assert.equal(calls, callsBeforeMigrationBackoff, "a legacy fallback still needs failed-attempt backoff");
+  const expiryDb = new DatabaseSync(env.SIGNAL_SUMMARY_DB);
+  expiryDb.prepare("update alpha_summary_cache set last_attempt_at = ? where period_key = ?").run(
+    new Date(nextNow.getTime() - 5 * 60_000 - 1).toISOString(), refreshed.period.key,
+  );
+  expiryDb.close();
+  fail = false;
+  const migrated = await getOrCreateAlphaSummary({ now: nextNow, env });
+  assert.equal(migrated.status, "generated");
+  assert.equal(calls, callsBeforeMigrationBackoff + 1);
+  assert.match(lastPrompt, new RegExp(id));
+  assert.equal(migrated.summary.events[0].tracking.id, id);
+  assert.equal(migrated.summary.events[0].tracking.state, "continuing");
+  assert.deepEqual(migrated.summary.crypto, [{ target: "Acme", opinions: [{ author: "Research", view: "Track protocol testing" }] }]);
+  const callsBeforeMigratedRead = calls;
+  await getOrCreateAlphaSummary({ now: nextNow, env });
+  assert.equal(calls, callsBeforeMigratedRead, "the migrated target summary is reusable");
+
+  const partialDb = new DatabaseSync(env.SIGNAL_SUMMARY_DB);
+  const partialSummary = { ...migrated.summary };
+  delete partialSummary.crypto;
+  partialDb.prepare("update alpha_summary_cache set summary_json = ? where period_key = ?").run(JSON.stringify(partialSummary), migrated.period.key);
+  partialDb.close();
+  const callsBeforePartial = calls;
+  const completeCategories = await getOrCreateAlphaSummary({ now: nextNow, env });
+  assert.equal(completeCategories.status, "generated");
+  assert.equal(calls, callsBeforePartial + 1, "a missing category must trigger refresh rather than be filled with an empty array");
+  assert.equal(completeCategories.summary.events[0].tracking.id, id);
   console.log("ok - signal continuity SQLite, period/version rollover, failure retention and scope isolation");
 } finally {
   globalThis.fetch = originalFetch;

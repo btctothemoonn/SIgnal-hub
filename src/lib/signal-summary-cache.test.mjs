@@ -35,7 +35,8 @@ const message = (id) => ({
 });
 const summary = {
   headline: "A protocol release deserves follow-up",
-  authors: [], consensus: [], risks: [], watchlist: [],
+  stocks: [],
+  crypto: [{ target: "Protocol", opinions: [{ author: "Research", view: "The testing milestone deserves follow-up" }] }],
   events: [{
     title: "Protocol release", change: "A release was announced",
     whyTrack: "The testing milestone is observable", evidenceType: "reported",
@@ -62,6 +63,7 @@ try {
   assert.equal(first.status, "generated");
   assert.equal(first.lastAttemptAt, first.generatedAt, "a successful attempt identifies its actual completion time");
   assert.equal(first.summary.events[0].sources[0].link, "https://t.me/research/1");
+  assert.deepEqual(first.summary.crypto, [{ target: "Protocol", opinions: [{ author: "Research", view: "The testing milestone deserves follow-up" }] }]);
   assert.equal(first.coverage.selectedCount, 1);
   assert.equal(first.coverage.startAt, "2026-10-02T03:01:00.000Z");
   const persisted = await getOrCreateAlphaSummary({ now, env });
@@ -141,6 +143,20 @@ try {
   assert.equal(legacyFailure.summary.headline, "Legacy retained content");
   assert.equal(legacyFailure.generatedAt, null, "legacy failed-attempt timestamps cannot establish a successful generation time");
   assert.ok(legacyFailure.lastAttemptAt);
+
+  // A format migration must not bypass the Stocks audience's existing error-cache policy.
+  const stockPeriod = getAlphaSummaryPeriod({ now, audience: "stocks" });
+  const stockLegacyDb = new DatabaseSync(legacyPath);
+  stockLegacyDb.prepare("update alpha_summary_cache set period_key = ?, period_json = ?, generated_at = ?").run(
+    stockPeriod.key, JSON.stringify(stockPeriod), now.toISOString(),
+  );
+  stockLegacyDb.close();
+  const callsBeforeStockFallback = calls;
+  const stockFallback = await getOrCreateAlphaSummary({ now, audience: "stocks", env: { ...env, STOCKS_SUMMARY_DB: legacyPath } });
+  assert.equal(stockFallback.status, "error", "a retained Stocks error still observes its existing cache interval during migration");
+  assert.equal(stockFallback.summary.headline, "Legacy retained content");
+  assert.equal(stockFallback.summary.stocks, undefined);
+  assert.equal(calls, callsBeforeStockFallback, "a legacy Stocks error must not trigger a provider request before its cache interval expires");
   console.log("ok - signal summary keeps successful evidence and honest cache freshness on failure");
 } finally {
   globalThis.fetch = originalFetch;

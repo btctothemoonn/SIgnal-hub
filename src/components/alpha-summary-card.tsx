@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatSignalSummaryTime, SignalSummaryEvents, SignalSummaryFreshness } from "./signal-summary-events";
+import { formatSignalSummaryTime, SignalSummaryFreshness } from "./signal-summary-events";
 import type {
   AlphaSummaryAudience,
   AlphaSummaryScope,
@@ -139,23 +139,6 @@ function AlphaSummaryScopeResult({
   const insightGridClass = compact
     ? "grid gap-3"
     : "grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]";
-  const authorsGridClass = compact ? "grid gap-3" : "grid gap-4 2xl:grid-cols-2";
-  const signalEvents = audience === "signals" ? summary?.events : undefined;
-  const authorCards = summary ? (
-    <div className={authorsGridClass}>
-      {summary.authors.map((author) => (
-        <article key={`${author.name}-${author.coreView}`} className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="min-w-0 break-words text-sm font-semibold text-foreground">{author.name}</h3>
-            <span className="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">{author.sourceCount} 条</span>
-          </div>
-          <p className="mt-2 break-words text-sm leading-6 text-foreground">{author.coreView}</p>
-          {author.alpha.length > 0 ? <div className="mt-3 space-y-1.5">{author.alpha.map((item) => <p key={item} className="break-words text-sm leading-6 text-muted">{item}</p>)}</div> : null}
-          {author.watch.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{author.watch.map((item) => <span key={item} className="rounded-md bg-info-soft px-2 py-0.5 text-[11px] font-medium text-info">{item}</span>)}</div> : null}
-        </article>
-      ))}
-    </div>
-  ) : null;
 
   return (
     <div className="px-4 py-4 sm:px-5">
@@ -176,7 +159,7 @@ function AlphaSummaryScopeResult({
           <div className="space-y-5">
             <div className="border-l-2 border-accent pl-3">
               <p className="text-xs font-semibold uppercase text-muted">
-                {activeScopeTitle}
+                总结
               </p>
               <h2
                 className={`mt-2 break-words font-semibold text-foreground [overflow-wrap:anywhere] ${
@@ -187,84 +170,34 @@ function AlphaSummaryScopeResult({
               </h2>
             </div>
 
-            {signalEvents ? <SignalSummaryEvents events={signalEvents} history={snapshot?.summary?.eventHistory} timeZone={snapshot?.period.timeZone ?? "Asia/Shanghai"} /> : <div className={insightGridClass}>
-              {summary.consensus.length > 0 ? (
-                <section className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
-                  <p className="text-[11px] font-semibold uppercase text-muted">
-                    核心共识
-                  </p>
-                  <div className="mt-2 space-y-2">
-                    {summary.consensus.map((item) => (
-                      <p
-                        key={item}
-                        className="break-words text-sm leading-6 text-foreground"
-                      >
-                        {item}
-                      </p>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
-
-              {summary.watchlist.length > 0 || summary.risks.length > 0 ? (
-                <section className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
-                  {summary.watchlist.length > 0 ? (
-                    <>
-                      <p className="text-[11px] font-semibold uppercase text-muted">
-                        Watchlist
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {summary.watchlist.map((item) => (
-                          <span
-                            key={item}
-                            className="rounded-md bg-accent-soft px-2 py-1 text-xs font-medium text-accent"
-                          >
-                            {item}
-                          </span>
+            <div className={insightGridClass}>
+              {[
+                { label: "股票", targets: summary.stocks },
+                { label: "币圈", targets: summary.crypto },
+              ].map(({ label, targets }) => (
+                <section key={label} aria-label={label} className="min-w-0 rounded-lg border border-line/60 bg-panel-strong/90 p-4">
+                  <h3 className="text-sm font-semibold text-foreground">{label}</h3>
+                  {targets ? (
+                    targets.length > 0 ? (
+                      <div className="mt-3 space-y-4">
+                        {targets.map((target) => (
+                          <article key={target.target}>
+                            <h4 className="break-words text-sm font-semibold text-accent">{target.target}</h4>
+                            <ul className="mt-2 space-y-2">
+                              {target.opinions.map((opinion) => (
+                                <li key={`${opinion.author}-${opinion.view}`} className="break-words text-sm leading-6 text-foreground [overflow-wrap:anywhere]">
+                                  <span className="font-medium">{opinion.author}：</span>{opinion.view}
+                                </li>
+                              ))}
+                            </ul>
+                          </article>
                         ))}
                       </div>
-                    </>
-                  ) : null}
-
-                  {summary.risks.length > 0 ? (
-                    <div className={summary.watchlist.length > 0 ? "mt-4" : ""}>
-                      <p className="text-[11px] font-semibold uppercase text-muted">
-                        风险
-                      </p>
-                      <div className="mt-2 space-y-1.5">
-                        {summary.risks.map((risk) => (
-                          <p
-                            key={risk}
-                            className="break-words text-sm leading-6 text-warning"
-                          >
-                            {risk}
-                          </p>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
+                    ) : <p className="mt-2 text-sm text-muted">本期暂无相关标的观点。</p>
+                  ) : <p className="mt-2 text-sm text-muted">旧版总结正在更新标的分类。</p>}
                 </section>
-              ) : null}
-            </div>}
-
-            {summary.authors.length > 0 ? (
-              audience === "signals" ? (
-                <details className="group">
-                  <summary className="cursor-pointer text-xs font-semibold leading-6 text-muted hover:text-foreground">来源观点 · {summary.authors.length} 个信号源</summary>
-                  <div className="mt-2">{authorCards}</div>
-                </details>
-              ) : <section>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase text-muted">
-                    来源观点
-                  </p>
-                  <span className="text-xs text-muted">
-                    {summary.authors.length} 个信号源
-                  </span>
-                </div>
-                {authorCards}
-              </section>
-            ) : null}
+              ))}
+            </div>
           </div>
         ) : (
           <div className="space-y-3">

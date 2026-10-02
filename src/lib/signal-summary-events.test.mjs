@@ -252,14 +252,16 @@ test("prompt carries the complete source window and full original quote context"
   });
 });
 
-test("prompt requests event output with exact-ID provenance and empty legacy collections", () => {
+test("prompt requests categorized target opinions alongside internal events with exact-ID provenance", () => {
   const prompt = buildSignalSummaryPrompt({ period: sourcePeriod, items: [originalMessage] });
   const shape = promptJsonBlock(prompt, "OUTPUT_SCHEMA_JSON");
   assert.equal(typeof shape.headline, "string");
-  assert.deepEqual(shape.authors, []);
-  assert.deepEqual(shape.consensus, []);
-  assert.deepEqual(shape.risks, []);
-  assert.deepEqual(shape.watchlist, []);
+  for (const category of ["stocks", "crypto"]) {
+    assert.ok(Array.isArray(shape[category]), `${category} must group target opinions`);
+    assert.equal(typeof shape[category][0].target, "string");
+    assert.deepEqual(Object.keys(shape[category][0].opinions[0]).sort(), ["author", "view"]);
+  }
+  for (const field of ["authors", "consensus", "risks", "watchlist"]) assert.equal(field in shape, false);
   assert.deepEqual(Object.keys(shape.events[0]).sort(), [
     "change", "evidenceType", "invalidate", "sourceIds", "title", "watch", "whyTrack",
   ]);

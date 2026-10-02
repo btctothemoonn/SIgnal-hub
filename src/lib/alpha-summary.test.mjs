@@ -80,37 +80,36 @@ assert.notEqual(
 );
 const repairedSummary = parseAlphaSummaryContent(`{
   "headline": "summary",
-  "authors": [{
-    "name": "@analyst",
-    "sourceCount": 2,
-    "coreView": "view",
-    "alpha": ["first"
-      "second"],
-    "watch": []
+  "stocks": [{
+    "target": "NVDA"
+    "opinions": [{
+      "author": "@analyst"
+      "view": "first"
+    }, {
+      "author": "@other",
+      "view": "second"
+    }]
   }],
-  "consensus": [],
-  "risks": [],
-  "watchlist": [],
+  "crypto": [],
 }`);
-assert.deepEqual(repairedSummary.authors[0].alpha, ["first", "second"]);
+assert.equal(repairedSummary.stocks[0].target, "NVDA");
+assert.deepEqual(repairedSummary.stocks[0].opinions, [
+  { author: "@analyst", view: "first" },
+  { author: "@other", view: "second" },
+]);
 
 const wrappedSummary = parseAlphaSummaryContent(`<think>drafting</think>
 {
   "headline": "wrapped",
-  "authors": [{
-    "name": "@analyst",
-    "sourceCount": 1,
-    "coreView": "view",
-    "alpha": [],
-    "watch": []
+  "stocks": [{
+    "target": "NVDA",
+    "opinions": [{ "author": "@analyst", "view": "view" }]
   }],
-  "consensus": [],
-  "risks": [],
-  "watchlist": []
+  "crypto": []
 }
 extra diagnostic {"ignored": true}`);
 assert.equal(wrappedSummary.headline, "wrapped");
-assert.equal(wrappedSummary.authors[0].name, "@analyst");
+assert.equal(wrappedSummary.stocks[0].opinions[0].author, "@analyst");
 
 const reusableCachePeriod = getAlphaSummaryPeriod({ now });
 assert.equal(

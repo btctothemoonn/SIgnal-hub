@@ -281,11 +281,9 @@ export function buildSignalSummaryPrompt({ period, items, previousEvents = [], p
     })),
   };
   const outputShape = {
-    headline: "本周期最值得继续跟踪的变化；无有效事件时如实说明原因",
-    authors: [],
-    consensus: [],
-    risks: [],
-    watchlist: [],
+    headline: "一段简短中文总结本周期主要股票、币圈观点与具体变化",
+    stocks: [{ target: "股票名称或代码", opinions: [{ author: "实际发表意见的 @username 或频道名", view: "该来源对这个标的的看法" }] }],
+    crypto: [{ target: "币种或项目名称", opinions: [{ author: "实际发表意见的 @username 或频道名", view: "该来源对这个标的的看法" }] }],
     events: [{
       title: "事件或主题名称",
       change: "发生了什么变化，并注明是谁报道、表达观点或作出推断",
@@ -304,9 +302,13 @@ export function buildSignalSummaryPrompt({ period, items, previousEvents = [], p
     ? "按原消息 createdAt 梳理早期判断、后续更新和最新状态；保留这几天内的观点转向、进展与分歧，不把过期预期写成最新状态。"
     : "突出本窗口内新出现的事件和变化；重复旧消息须说明本次是否真的有新进展。";
 
-  return `你是一个中文 Signal 事件跟踪摘要助手。基于 ${period.label}（${period.timeZone}）内提供的原消息，提炼有原文依据、值得继续跟踪的事件卡片。
+  return `你是一个中文市场消息总结助手。基于 ${period.label}（${period.timeZone}）内提供的原消息，总结股票和币圈的标的观点，并提炼有原文依据的内部跟踪事件。
 
 要求：
+- stocks 为股票观点，crypto 为币圈观点；分别按标的名称或代码分组，同一标的只出现一次。每个标的包含 target 和 opinions，每条 opinions 只包含 author 和 view。
+- author 必须是实际发表该看法的博主或来源；X 使用 @username，Telegram 使用频道名。view 只写该来源对本标的的看法。同一博主对同一标的的多条消息合并，一个博主涉及多个标的时分别归类，保留不同博主的分歧。
+- 保留被引用观点的真实发言者和引用语境，不把转发、引用、新闻播报自动当成发布者认可的观点；原文没有可归属的标的看法时不要编造博主意见。无相关标的观点的分类返回 []；仅宏观或行业看法而无具体标的时放入 headline，不要强行归属。
+- events 只用于内部来源证据和连续性跟踪，不是额外的展示模块；标的观点与事件分别据原文提炼，不能为了填写事件而删掉已有的标的观点。
 - 按事件或主题合并相关消息，优先选取 3–5 项有具体变化且值得跟踪的内容，最多 5 项。不足 3 项时按实际数量输出；没有有意义且可追溯的信号时 events 为 []。
 - ${temporalInstruction}
 - title 点明事件；change 说明具体变化和陈述主体；whyTrack 解释需要继续跟踪的原因。watch 和 invalidate 写可观察的后续条件与判断失效条件，避免泛泛的市场情绪评论。
@@ -319,8 +321,8 @@ export function buildSignalSummaryPrompt({ period, items, previousEvents = [], p
 - 每项 sourceIds 必须逐字使用下方 messages 中支持该项陈述的精确 id，至少引用 1 条具有有效 HTTP(S) 原文链接的消息。不要创造 id、拼接链接、输出 sources 或自行提供证据 URL。
 - 不给买卖指令，不编造输入中没有的目标价；如原文包含目标价，须归属于作者观点并引用对应原消息。潜在影响须表述为条件或推断，不承诺收益。
 - title 最多 120 字符，change 与 whyTrack 各最多 600 字符；watch、invalidate 各须至少 1 项非空具体条件，最多 4 项，每项最多 240 字符；sourceIds 去重后最多 16 项。
-- headline 简洁概括本周期的具体变化。events 为 [] 时，headline 如实说明未发现足够具体且有原文依据的跟踪事件，以及来源不足或消息重复等实际原因；不要填充通用行情评论。
-- 只返回 JSON。兼容字段 authors、consensus、risks、watchlist 均为 []，事件内容放在 events。下面的结构仅为字段示例，不能当作原消息证据。
+- headline 用一段简短中文概括本周期主要观点和具体变化，最多 600 字符。events 为 [] 时仍可概括有依据的标的、宏观或行业观点；内容或证据不足时如实说明实际原因，不要填充通用行情评论。
+- 只返回 JSON，不额外输出共识、风险、观察清单、作者简介或消息数量等展示模块。下面的结构仅为字段示例，不能当作原消息证据。
 
 OUTPUT_SCHEMA_JSON:
 ${JSON.stringify(outputShape, null, 2)}
