@@ -1105,7 +1105,9 @@ export function UnifiedNewsPanel({
       return (
         item.title.toLowerCase().includes(needle) ||
         item.text.toLowerCase().includes(needle) ||
-        item.quotedTweet?.text.toLowerCase().includes(needle) === true
+        item.translation?.text.toLowerCase().includes(needle) === true ||
+        item.quotedTweet?.text.toLowerCase().includes(needle) === true ||
+        item.quotedTweet?.translation?.text.toLowerCase().includes(needle) === true
       );
     });
     return limitNewsItems(matching, feedLimitForTab(activeTab, feedRange));

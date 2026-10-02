@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatSignalSummaryTime, SignalSummaryEvents, SignalSummaryFreshness } from "./signal-summary-events";
 import type {
   AlphaSummaryAudience,
   AlphaSummaryScope,
@@ -139,9 +140,26 @@ function AlphaSummaryScopeResult({
     ? "grid gap-3"
     : "grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(20rem,0.85fr)]";
   const authorsGridClass = compact ? "grid gap-3" : "grid gap-4 2xl:grid-cols-2";
+  const signalEvents = audience === "signals" ? summary?.events : undefined;
+  const authorCards = summary ? (
+    <div className={authorsGridClass}>
+      {summary.authors.map((author) => (
+        <article key={`${author.name}-${author.coreView}`} className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="min-w-0 break-words text-sm font-semibold text-foreground">{author.name}</h3>
+            <span className="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">{author.sourceCount} 条</span>
+          </div>
+          <p className="mt-2 break-words text-sm leading-6 text-foreground">{author.coreView}</p>
+          {author.alpha.length > 0 ? <div className="mt-3 space-y-1.5">{author.alpha.map((item) => <p key={item} className="break-words text-sm leading-6 text-muted">{item}</p>)}</div> : null}
+          {author.watch.length > 0 ? <div className="mt-3 flex flex-wrap gap-1.5">{author.watch.map((item) => <span key={item} className="rounded-md bg-info-soft px-2 py-0.5 text-[11px] font-medium text-info">{item}</span>)}</div> : null}
+        </article>
+      ))}
+    </div>
+  ) : null;
 
   return (
     <div className="px-4 py-4 sm:px-5">
+        {audience === "signals" ? <SignalSummaryFreshness snapshot={snapshot} /> : null}
         {manualMessage ? (
           <p
             className={`mb-4 rounded-lg border px-3 py-2 text-xs leading-5 ${
@@ -169,7 +187,7 @@ function AlphaSummaryScopeResult({
               </h2>
             </div>
 
-            <div className={insightGridClass}>
+            {signalEvents ? <SignalSummaryEvents events={signalEvents} timeZone={snapshot?.period.timeZone ?? "Asia/Shanghai"} /> : <div className={insightGridClass}>
               {summary.consensus.length > 0 ? (
                 <section className="rounded-lg border border-line/60 bg-panel-strong/90 p-4">
                   <p className="text-[11px] font-semibold uppercase text-muted">
@@ -227,10 +245,15 @@ function AlphaSummaryScopeResult({
                   ) : null}
                 </section>
               ) : null}
-            </div>
+            </div>}
 
             {summary.authors.length > 0 ? (
-              <section>
+              audience === "signals" ? (
+                <details className="group">
+                  <summary className="cursor-pointer text-xs font-semibold leading-6 text-muted hover:text-foreground">来源观点 · {summary.authors.length} 个信号源</summary>
+                  <div className="mt-2">{authorCards}</div>
+                </details>
+              ) : <section>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold uppercase text-muted">
                     来源观点
@@ -239,50 +262,7 @@ function AlphaSummaryScopeResult({
                     {summary.authors.length} 个信号源
                   </span>
                 </div>
-                <div className={authorsGridClass}>
-                  {summary.authors.map((author) => (
-                    <article
-                      key={`${author.name}-${author.coreView}`}
-                      className="rounded-lg border border-line/60 bg-panel-strong/90 p-4"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <h3 className="min-w-0 break-words text-sm font-semibold text-foreground">
-                          {author.name}
-                        </h3>
-                        <span className="shrink-0 rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">
-                          {author.sourceCount} 条
-                        </span>
-                      </div>
-                      <p className="mt-2 break-words text-sm leading-6 text-foreground">
-                        {author.coreView}
-                      </p>
-                      {author.alpha.length > 0 ? (
-                        <div className="mt-3 space-y-1.5">
-                          {author.alpha.map((item) => (
-                            <p
-                              key={item}
-                              className="break-words text-sm leading-6 text-muted"
-                            >
-                              {item}
-                            </p>
-                          ))}
-                        </div>
-                      ) : null}
-                      {author.watch.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          {author.watch.map((item) => (
-                            <span
-                              key={item}
-                              className="rounded-md bg-info-soft px-2 py-0.5 text-[11px] font-medium text-info"
-                            >
-                              {item}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
+                {authorCards}
               </section>
             ) : null}
           </div>
@@ -351,7 +331,12 @@ export function AlphaSummaryCard({
               ? `${snapshot.itemCount} 条 · Stocks ${snapshot.sourceCounts.stocks ?? 0} / TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`
               : `${snapshot.itemCount} 条 · TG ${snapshot.sourceCounts.telegram} / X ${snapshot.sourceCounts.x}`,
         },
-        { label: "更新", value: formatTime(snapshot.generatedAt) },
+        {
+          label: audience === "signals" ? "成功" : "更新",
+          value: audience === "signals"
+            ? formatSignalSummaryTime(snapshot.generatedAt, snapshot.period.timeZone)
+            : formatTime(snapshot.generatedAt),
+        },
       ]
     : [
         { label: "窗口", value: activeScope.emptyWindow },

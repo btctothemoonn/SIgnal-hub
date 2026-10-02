@@ -28,6 +28,13 @@ import { cleanTranslationText } from "./translate.ts";
 import { getXPipelineConfig } from "./x-pipeline-config.ts";
 import { getTelegramXSourceChannelKeys, isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
+import { collectSignalSummaryInput } from "./signal-summary-input.ts";
+import {
+  bindSignalSummaryEvidence,
+  buildSignalSummaryPrompt,
+  parseSignalSummaryEvents,
+  type SignalSummaryEvent,
+} from "./signal-summary-events.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -43,6 +50,7 @@ export type AlphaSummaryPeriod = {
   scope: AlphaSummaryScope;
   audience: AlphaSummaryAudience;
   inputBudgetVersion: number;
+  signalContentVersion?: number;
   label: string;
   startAt: string;
   endAt: string;
@@ -73,6 +81,14 @@ export type AlphaSummaryContent = {
   consensus: string[];
   risks: string[];
   watchlist: string[];
+  events?: SignalSummaryEvent[];
+};
+
+export type AlphaSummaryCoverage = {
+  candidateCount: number;
+  selectedCount: number;
+  startAt: string | null;
+  endAt: string | null;
 };
 
 export type AlphaSummarySnapshot = {
@@ -81,6 +97,8 @@ export type AlphaSummarySnapshot = {
   configured: boolean;
   period: AlphaSummaryPeriod;
   generatedAt: string | null;
+  lastAttemptAt?: string | null;
+  coverage?: AlphaSummaryCoverage;
   model: string;
   itemCount: number;
   sourceCounts: {
@@ -101,6 +119,7 @@ const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
+const SIGNAL_SUMMARY_CONTENT_VERSION = 1;
 const DEFAULT_REFRESH_INTERVALS_MS: Record<AlphaSummaryScope, number> = {
   "12h": DEFAULT_REFRESH_INTERVAL_MS,
   today: 60 * 60 * 1000,
@@ -225,12 +244,19 @@ function normalizeAlphaSummaryRecord(
     return null;
   }
 
+  const events = Array.isArray(parsed.events)
+    ? parseSignalSummaryEvents(parsed.events)
+    : undefined;
+  if (Array.isArray(parsed.events) && parsed.events.length > 0 && !events?.length) {
+    return null;
+  }
   return {
     headline: stringValue(parsed.headline).slice(0, 240),
     authors: parseAlphaSummaryAuthors(parsed.authors),
     consensus: parseStringArray(parsed.consensus),
     risks: parseStringArray(parsed.risks),
     watchlist: parseStringArray(parsed.watchlist),
+    ...(events === undefined ? {} : { events }),
   };
 }
 
@@ -634,6 +660,11 @@ export function shouldReuseCachedAlphaSummary({
   env: EnvLike;
   scope: AlphaSummaryScope;
 }) {
+  if (snapshot.period.audience === "signals" && snapshot.status === "error" && snapshot.lastAttemptAt) {
+    const attemptedAt = timeValue(snapshot.lastAttemptAt);
+    return attemptedAt > 0 &&
+      now.getTime() - attemptedAt < Math.min(5 * 60_000, getAlphaSummaryRefreshIntervalMs(env, scope));
+  }
   if (!isCachedSummaryFresh({ snapshot, now, env, scope })) return false;
   return snapshot.success || Boolean(snapshot.summary);
 }
@@ -673,6 +704,9 @@ export function getAlphaSummaryPeriod({
   const normalizedScope = normalizeAlphaSummaryScope(scope);
   const normalizedAudience = normalizeAlphaSummaryAudience(audience);
   const timeZone = getAlphaSummaryTimeZone(env);
+  const signalMetadata = normalizedAudience === "signals"
+    ? { signalContentVersion: SIGNAL_SUMMARY_CONTENT_VERSION }
+    : {};
   const parts = getShanghaiLocalParts(now);
   const dateKey = `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
 
@@ -683,6 +717,7 @@ export function getAlphaSummaryPeriod({
       scope: normalizedScope,
       audience: normalizedAudience,
       inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
+      ...signalMetadata,
       label: "最近 24 小时",
       startAt: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
       endAt: now.toISOString(),
@@ -698,6 +733,7 @@ export function getAlphaSummaryPeriod({
       scope: normalizedScope,
       audience: normalizedAudience,
       inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
+      ...signalMetadata,
       label: "近 3 天",
       startAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString(),
       endAt: now.toISOString(),
@@ -712,6 +748,7 @@ export function getAlphaSummaryPeriod({
       scope: normalizedScope,
       audience: normalizedAudience,
       inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
+      ...signalMetadata,
       label: "近 7 天",
       startAt: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
       endAt: now.toISOString(),
@@ -726,6 +763,7 @@ export function getAlphaSummaryPeriod({
     scope: normalizedScope,
     audience: normalizedAudience,
     inputBudgetVersion: AI_SUMMARY_INPUT_BUDGET_VERSION,
+    ...signalMetadata,
     label: "最近 12 小时",
     startAt: new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString(),
     endAt: now.toISOString(),
@@ -733,7 +771,10 @@ export function getAlphaSummaryPeriod({
   };
 }
 
-function openAlphaSummaryDb(path = getAlphaSummaryDbPath()) {
+function openAlphaSummaryDb(
+  path = getAlphaSummaryDbPath(),
+  audience: AlphaSummaryAudience = "signals",
+) {
   if (path !== ":memory:") {
     mkdirSync(dirname(path), { recursive: true });
   }
@@ -756,6 +797,17 @@ function openAlphaSummaryDb(path = getAlphaSummaryDbPath()) {
       updated_at text not null
     )
   `);
+  if (audience === "signals") {
+    for (const column of ["last_attempt_at", "coverage_json"]) {
+      const columns = db.prepare("pragma table_info(alpha_summary_cache)").all() as DbRow[];
+      if (columns.some((entry) => entry.name === column)) continue;
+      try {
+        db.exec(`alter table alpha_summary_cache add column ${column} text`);
+      } catch (error) {
+        if (!(error instanceof Error) || !/duplicate column/i.test(error.message)) throw error;
+      }
+    }
+  }
   return db;
 }
 
@@ -783,12 +835,25 @@ function readCachedSummary(
     scope: normalizeAlphaSummaryScope(periodRecord.scope),
     audience: normalizeAlphaSummaryAudience(periodRecord.audience),
   } as AlphaSummaryPeriod;
+  const isSignals = period.audience === "signals";
+  const legacyFailure = isSignals && stringValue(row.status) === "error" && !row.last_attempt_at;
+  const coverageRecord = isSignals ? parseJsonObject(row.coverage_json) : null;
   return {
     success: stringValue(row.status) !== "error",
     status: stringValue(row.status) === "error" ? "error" : "cached",
     configured: true,
     period,
-    generatedAt: stringValue(row.generated_at),
+    generatedAt: legacyFailure ? null : nullableString(row.generated_at),
+    ...(isSignals ? {
+      lastAttemptAt: nullableString(row.last_attempt_at) ??
+        (legacyFailure ? nullableString(row.generated_at) : null),
+      ...(coverageRecord ? { coverage: {
+        candidateCount: Math.max(0, numberValue(coverageRecord.candidateCount)),
+        selectedCount: Math.max(0, numberValue(coverageRecord.selectedCount)),
+        startAt: nullableString(coverageRecord.startAt),
+        endAt: nullableString(coverageRecord.endAt),
+      } } : {}),
+    } : {}),
     model: stringValue(row.model),
     itemCount: Number(row.item_count || 0),
     sourceCounts: {
@@ -807,6 +872,32 @@ function writeCachedSummary(
   db: DatabaseSync,
 ) {
   const at = new Date().toISOString();
+  if (snapshot.period.audience === "signals") {
+    db.prepare(`
+      insert into alpha_summary_cache(
+        period_key, period_json, model, input_hash, item_count,
+        source_counts_json, summary_json, status, error, generated_at, updated_at,
+        last_attempt_at, coverage_json
+      )
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict(period_key) do update set
+        period_json = excluded.period_json, model = excluded.model,
+        input_hash = excluded.input_hash, item_count = excluded.item_count,
+        source_counts_json = excluded.source_counts_json,
+        summary_json = excluded.summary_json, status = excluded.status,
+        error = excluded.error, generated_at = excluded.generated_at,
+        updated_at = excluded.updated_at, last_attempt_at = excluded.last_attempt_at,
+        coverage_json = excluded.coverage_json
+    `).run(
+      snapshot.period.key, JSON.stringify(snapshot.period), snapshot.model, inputHash,
+      snapshot.itemCount, JSON.stringify(snapshot.sourceCounts),
+      snapshot.summary ? JSON.stringify(snapshot.summary) : null,
+      snapshot.status, snapshot.error, snapshot.generatedAt ?? "", at,
+      snapshot.lastAttemptAt ?? null,
+      snapshot.coverage ? JSON.stringify(snapshot.coverage) : null,
+    );
+    return;
+  }
   db.prepare(`
     insert into alpha_summary_cache(
       period_key, period_json, model, input_hash, item_count,
@@ -1011,6 +1102,9 @@ async function collectAlphaSummaryItems(
   period: AlphaSummaryPeriod,
   env: EnvLike,
 ) {
+  if (period.audience === "signals") {
+    return collectSignalSummaryInput(period, env);
+  }
   const telegram = filterItemsForAudience(
     readTelegramItems(period),
     period.audience,
@@ -1018,6 +1112,7 @@ async function collectAlphaSummaryItems(
   const x = filterItemsForAudience(readXItems(period), period.audience);
   const stocks = await readStocksExternalSummaryItems(period, env);
   return {
+    coverage: undefined as AlphaSummaryCoverage | undefined,
     items: [...stocks, ...telegram, ...x]
       .sort(
         (left, right) =>
@@ -1068,6 +1163,9 @@ export function buildAlphaSummaryPrompt({
   period: AlphaSummaryPeriod;
   items: AlphaSummarySourceItem[];
 }) {
+  if (period.audience === "signals") {
+    return buildSignalSummaryPrompt({ period, items });
+  }
   const sourceText = items
     .map((item, index) => {
       const translation = item.translation ? `\n中文翻译: ${item.translation}` : "";
@@ -1123,42 +1221,7 @@ ${sourceText}
 `.trim();
   }
 
-  return `
-你是一个加密市场与美股科技方向的 Alpha 研究助手。
-请基于下面 ${period.label} (${period.timeZone}) 的 Telegram 和 X 消息，按博主/频道分类提炼可交易、可跟踪的信息。
-
-要求:
-- ${alphaSummaryScopeInstruction(period.scope)}
-- 只返回 JSON，不要 Markdown。
-- headline: 一句话总结本周期最核心的 Alpha。
-- authors: 按博主/频道分类；X 使用 @username，Telegram 使用频道名。同一作者多条消息必须合并。
-- 每个作者块说明 coreView、alpha、watch；alpha 要写清事件、潜在影响、需要跟踪的变量。
-- consensus: 跨多个作者共同提到或相互印证的共识。
-- risks: 0 到 4 条风险或噪音提示。
-- watchlist: 0 到 12 个需要关注的币种、股票、项目或账户。
-- 不要编造消息中不存在的事实。
-- 如果证据不足，明确写“证据不足”。
-
-JSON 结构:
-{
-  "headline": "string",
-  "authors": [
-    {
-      "name": "@username or channel",
-      "sourceCount": 1,
-      "coreView": "string",
-      "alpha": ["string"],
-      "watch": ["string"]
-    }
-  ],
-  "consensus": ["string"],
-  "risks": ["string"],
-  "watchlist": ["string"]
-}
-
-消息:
-${sourceText}
-`.trim();
+  throw new Error("Unsupported summary audience");
 }
 
 function repairCommonAiJsonIssues(content: string) {
@@ -1223,9 +1286,11 @@ export function parseAlphaSummaryContent(content: string): AlphaSummaryContent {
 export async function requestAiSummary({
   prompt,
   env,
+  validateSummary,
 }: {
   prompt: string;
   env: EnvLike;
+  validateSummary?: (summary: AlphaSummaryContent) => AlphaSummaryContent;
 }): Promise<{ summary: AlphaSummaryContent; provider: AiProviderConfig }> {
   const result = await runWithAiProviderFallback({
     providers: getAlphaSummaryProviderCandidates(env),
@@ -1271,12 +1336,15 @@ export async function requestAiSummary({
       const content = typeof message?.content === "string" ? message.content : "";
       try {
         if (!content) throw new Error("AI summary returned empty content");
-        return parseAlphaSummaryContent(content);
+        const parsed = parseAlphaSummaryContent(content);
+        return validateSummary ? validateSummary(parsed) : parsed;
       } catch (error) {
         if (attempt === 1) throw error;
         messages.push(
           { role: "assistant", content: content.slice(0, 32_000) },
-          { role: "user", content: "The response could not be parsed. Return the complete corrected JSON object using the requested schema, including authors. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts." },
+          { role: "user", content: validateSummary
+            ? "The response did not satisfy the requested schema or source validation. Return the complete corrected JSON object including authors and events with exact sourceIds from the supplied messages. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts or sources."
+            : "The response could not be parsed. Return the complete corrected JSON object using the requested schema, including authors. Escape quotes inside strings, include required commas, and omit reasoning and Markdown. Do not add new facts." },
         );
       }
       }
@@ -1333,13 +1401,24 @@ async function getOrCreateAlphaSummaryInternal({
   });
   const providers = getAlphaSummaryProviderCandidates(env);
   const model = getPreferredAlphaSummaryProvider(env)?.model ?? getAlphaSummaryModel(env);
-  const db = openAlphaSummaryDb(getAlphaSummaryDbPath(env, normalizedAudience));
+  const db = openAlphaSummaryDb(getAlphaSummaryDbPath(env, normalizedAudience), normalizedAudience);
   try {
-    const cached = readCachedSummary(period.key, db);
+    const isSignals = normalizedAudience === "signals";
+    let cached = readCachedSummary(period.key, db);
+    if (isSignals && !cached?.summary) {
+      const previous = db.prepare(`
+        select period_key from alpha_summary_cache
+        where summary_json is not null and json_extract(period_json, '$.scope') = ?
+        order by updated_at desc limit 1
+      `).get(normalizedScope) as DbRow | undefined;
+      if (previous) cached = readCachedSummary(stringValue(previous.period_key), db) ?? cached;
+    }
     if (
       cached &&
+      cached.period.key === period.key &&
+      (!isSignals || cached.period.signalContentVersion === SIGNAL_SUMMARY_CONTENT_VERSION) &&
       !force &&
-      cached.model === model &&
+      (cached.model === model || (isSignals && cached.status === "error")) &&
       shouldReuseCachedAlphaSummary({
         snapshot: cached,
         now,
@@ -1350,7 +1429,7 @@ async function getOrCreateAlphaSummaryInternal({
       return cached;
     }
 
-    const { items, sourceCounts } = await collectAlphaSummaryItems(period, env);
+    const { items, sourceCounts, coverage } = await collectAlphaSummaryItems(period, env);
     const inputHash = inputHashForItems(items);
     if (items.length === 0) {
       return {
@@ -1364,6 +1443,7 @@ async function getOrCreateAlphaSummaryInternal({
         sourceCounts,
         summary: null,
         error: null,
+        ...(isSignals ? { lastAttemptAt: null, coverage } : {}),
       };
     }
 
@@ -1380,6 +1460,12 @@ async function getOrCreateAlphaSummaryInternal({
         summary: cached?.summary ?? null,
         error:
           "DEEPSEEK_API_KEY, MINIMAX_API_KEY, AI_SUMMARY_API_KEY, or OPENAI_API_KEY is required",
+        ...(isSignals ? {
+          lastAttemptAt: null,
+          coverage: cached?.summary ? cached.coverage : coverage,
+          itemCount: cached?.summary ? cached.itemCount : items.length,
+          sourceCounts: cached?.summary ? cached.sourceCounts : sourceCounts,
+        } : {}),
       };
     }
 
@@ -1387,18 +1473,28 @@ async function getOrCreateAlphaSummaryInternal({
       const { summary, provider } = await requestAiSummary({
         prompt: buildAlphaSummaryPrompt({ period, items }),
         env,
+        ...(isSignals ? { validateSummary: (result: AlphaSummaryContent) => {
+          if (!Array.isArray(result.events)) throw new Error("Signal summary must return event tracking cards");
+          const events = bindSignalSummaryEvidence(result.events, items);
+          if (result.events.length > 0 && events.length === 0) {
+            throw new Error("Signal summary events do not cite supplied original messages");
+          }
+          return { ...result, events };
+        } } : {}),
       });
+      const completedAt = new Date().toISOString();
       const snapshot: AlphaSummarySnapshot = {
         success: true,
         status: "generated",
         configured: true,
         period,
-        generatedAt: new Date().toISOString(),
+        generatedAt: completedAt,
         model: provider.model,
         itemCount: items.length,
         sourceCounts,
         summary,
         error: null,
+        ...(isSignals ? { lastAttemptAt: completedAt, coverage } : {}),
       };
       writeCachedSummary(snapshot, inputHash, db);
       return snapshot;
@@ -1414,6 +1510,14 @@ async function getOrCreateAlphaSummaryInternal({
         sourceCounts,
         summary: cached?.summary ?? null,
         error: error instanceof Error ? error.message : String(error),
+        ...(isSignals ? {
+          generatedAt: cached?.generatedAt ?? null,
+          lastAttemptAt: new Date().toISOString(),
+          model: cached?.summary ? cached.model : model,
+          itemCount: cached?.summary ? cached.itemCount : items.length,
+          sourceCounts: cached?.summary ? cached.sourceCounts : sourceCounts,
+          coverage: cached?.summary ? cached.coverage : coverage,
+        } : {}),
       };
       writeCachedSummary(snapshot, inputHash, db);
       return snapshot;
