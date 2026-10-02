@@ -15,6 +15,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { DeploymentUpdateNotice } from "@/components/deployment-update-notice";
 import { primaryMobileNavItems } from "@/lib/app-shell-navigation";
 
 export type AppShellNavKey =
@@ -272,6 +273,7 @@ export function AppShell({
                 </form>
               </div>
             </div>
+            <DeploymentUpdateNotice />
           </header>
 
           <main className={mainClassName}>{children}</main>
