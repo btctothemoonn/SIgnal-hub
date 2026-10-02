@@ -28,6 +28,27 @@ if [[ "$latest" == "$active" ]]; then
   echo "Up to date: $latest (no build)"
   exit 0
 fi
+# A manually published VPS release may include private commits newer than main.
+# Compare histories before marking an attempt or invoking the deployment script.
+if ! git cat-file -e "$latest^{commit}" 2>/dev/null; then
+  timeout 45 git fetch --no-tags origin refs/heads/main
+fi
+if ! git cat-file -e "$latest^{commit}" 2>/dev/null; then
+  echo "Latest GitHub commit unavailable: $latest; skipped" >&2
+  exit 1
+fi
+if ! git cat-file -e "$active^{commit}" 2>/dev/null; then
+  echo "Active release commit unavailable: $active; skipped" >&2
+  exit 1
+fi
+if git merge-base --is-ancestor "$latest" "$active"; then
+  echo "VPS release ahead of GitHub: $active includes $latest (no build)"
+  exit 0
+fi
+if ! git merge-base --is-ancestor "$active" "$latest"; then
+  echo "VPS release and GitHub main have diverged: $active / $latest; skipped" >&2
+  exit 1
+fi
 if [[ -f "$ATTEMPT" && "$(<"$ATTEMPT")" == "$latest" ]]; then
   echo "Previously failed or interrupted revision $latest; waiting for a new commit"
   exit 0
