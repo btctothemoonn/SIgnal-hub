@@ -8,6 +8,7 @@ let work;
 handlers.get('push')({ data: { json: () => ({ title: 'Important', body: 'body', episodeId: 'shared', target: 'https://evil.test/x' }) }, waitUntil: promise => { work = promise; } }); await work;
 assert.equal(notices[0].options.tag, 'signal-hub:shared'); assert.equal(notices[0].options.data.target, 'https://hub.example.com/settings');
 assert.ok(readFileSync(new URL('../../public' + notices[0].options.icon, import.meta.url)).length);
+assert.ok(readFileSync(new URL('../../public' + notices[0].options.badge, import.meta.url)).length);
 handlers.get('notificationclick')({ notification: { data: { target: '/alerts?symbol=BTCUSDT#market-push-BTCUSDT' }, close() {} }, waitUntil: promise => { work = promise; } }); await work;
 assert.deepEqual(navigation, ['https://hub.example.com/alerts?symbol=BTCUSDT#market-push-BTCUSDT', 'focus']);
 handlers.get('push')({ data: { json: () => { throw new Error('invalid json'); } }, waitUntil: promise => { work = promise; } }); await work;

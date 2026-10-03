@@ -17,13 +17,13 @@ assert.equal(appManifest.background_color, "#0f1115");
 assert.equal(appManifest.theme_color, "#0f1115");
 assert.deepEqual(appManifest.icons, [
   {
-    src: "/icon-192x192.png",
+    src: "/brand/signal-purple-192.png",
     sizes: "192x192",
     type: "image/png",
     purpose: "maskable",
   },
   {
-    src: "/icon-512x512.png",
+    src: "/brand/signal-purple-512.png",
     sizes: "512x512",
     type: "image/png",
     purpose: "maskable",

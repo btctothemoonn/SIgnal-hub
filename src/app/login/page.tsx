@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { normalizeAdminNextPath } from "@/lib/admin-auth";
 import { LoginForm } from "./login-form";
+import { SignalLogo } from "@/components/signal-logo";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main data-login-workspace className="min-h-screen bg-background px-4 py-8 text-foreground sm:px-6">
       <section className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-sm flex-col justify-center">
         <div className="mb-6 border-b border-line/70 pb-5">
-          <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-[6px] bg-foreground text-sm font-bold text-background">
-            SH
-          </div>
+          <SignalLogo className="mb-4 h-10 w-10" />
           <h1 className="text-2xl font-semibold leading-tight">
             Signal Hub
           </h1>

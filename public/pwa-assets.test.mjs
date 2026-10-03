@@ -23,4 +23,16 @@ assert.deepEqual(readPngSize("./apple-touch-icon.png"), {
   height: 180,
 });
 
-console.log("ok - pwa png assets");
+// Next.js' ICO decoder requires embedded PNG frames to have an RGBA color type.
+const favicon = readFileSync(new URL("../src/app/favicon.ico", import.meta.url));
+assert.equal(favicon.readUInt16LE(2), 1, "favicon must be an ICO image");
+for (let index = 0; index < favicon.readUInt16LE(4); index += 1) {
+  const entry = 6 + index * 16;
+  const offset = favicon.readUInt32LE(entry + 12);
+  const frame = favicon.subarray(offset, offset + favicon.readUInt32LE(entry + 8));
+  if (frame.subarray(1, 4).toString() === "PNG") {
+    assert.equal(frame[25], 6, "ICO PNG frames must be RGBA for Next.js decoding");
+  }
+}
+
+console.log("ok - pwa png assets and Next.js-compatible favicon");

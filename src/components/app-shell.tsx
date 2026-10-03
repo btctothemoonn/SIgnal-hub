@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DeploymentUpdateNotice } from "@/components/deployment-update-notice";
+import { SignalLogo } from "@/components/signal-logo";
 import { primaryMobileNavItems } from "@/lib/app-shell-navigation";
 import { getPushLogoutFields } from "@/lib/web-push-client";
 
@@ -189,9 +190,7 @@ export function AppShell({
       <div className="flex min-h-screen">
         <aside className="hidden w-[13.5rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-3 py-4 shadow-[8px_0_28px_-24px_rgba(15,23,42,0.28)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>
           <div className="mb-5 flex w-full items-center gap-2 rounded-lg border border-line/70 bg-workspace-surface px-2.5 py-2 shadow-sm">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-accent/35 bg-accent-soft font-mono text-xs font-bold text-accent">
-              SH
-            </div>
+            <SignalLogo className="h-8 w-8" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold leading-tight text-foreground">
                 Signal Hub
@@ -231,9 +230,7 @@ export function AppShell({
           >
             <div className="flex min-h-14 items-center justify-between gap-2 px-3 py-2 sm:min-h-[4.25rem] sm:px-5 lg:min-h-[4.75rem] lg:py-3">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent-soft font-mono text-[11px] font-bold text-accent shadow-sm lg:hidden">
-                  SH
-                </div>
+                <SignalLogo className="h-9 w-9 lg:hidden" />
                 <div className="min-w-0">
                   <h1 className="text-lg font-semibold leading-tight text-foreground">
                     Signal Hub

@@ -1,0 +1,13 @@
+{
+  "brand": "Signal Hub",
+  "selectedStyle": "purple ribbon",
+  "selectedOn": "2026-10-03",
+  "generator": "Built-in image_gen tool for the approved logo and app-icon master; native SVG for the monochrome system badge.",
+  "source": "signal-purple-source.png",
+  "masterPrompt": "Edit target: the referenced user-approved lavender-to-pink ribbon S logo for SIGNAL. Prepare exactly ONE finished square app-icon master. Preserve the precise silhouette, open loop shapes, ribbon folds, proportions and lavender-to-rose gradient of the S symbol. Remove the entire SIGNAL wordmark and all lettering below it. Recenter the existing S alone both horizontally and vertically. Keep the entire S within the central circle of radius 40% of the square canvas so OS maskable icon crops cannot cut the mark. The S should occupy approximately 56% of the canvas width and 64% of its height, with generous even margins. Use an opaque, clean, uniform deep plum #20132B background across the complete square canvas. No text, no extra elements, no new symbol, no glow, no dots, no mockup, no watermark. This is a faithful export of the approved design for website nav, favicon, iPhone home screen and notification icons.",
+  "palette": {
+    "plum": "#20132B",
+    "lavender": "#C9A6FF",
+    "rose": "#FF6DAC"
+  }
+}

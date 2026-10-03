@@ -8,7 +8,7 @@ assert.match(source, /appleWebApp:\s*{/);
 assert.match(source, /capable:\s*true/);
 assert.match(source, /title:\s*"Signal Hub"/);
 assert.match(source, /statusBarStyle:\s*"black-translucent"/);
-assert.match(source, /apple:\s*"\/apple-touch-icon\.png"/);
+assert.match(source, /apple:\s*"\/brand\/signal-purple-180\.png"/);
 assert.match(source, /shortcut:\s*"\/favicon\.ico"/);
 
 console.log("ok - pwa layout metadata");

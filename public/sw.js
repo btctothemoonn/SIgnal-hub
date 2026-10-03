@@ -14,7 +14,7 @@ self.addEventListener('push', event => {
   const title = typeof data?.title === 'string' && data.title.trim() ? data.title.slice(0, 120) : 'Signal Hub';
   const body = typeof data?.body === 'string' ? data.body.slice(0, 320) : '收到一条重要提醒，请打开网站查看。';
   const episode = typeof data?.episodeId === 'string' ? data.episodeId.slice(0, 180) : 'important';
-  event.waitUntil(self.registration.showNotification(title, { body, tag: `signal-hub:${episode}`, icon: '/icon-192x192.png', badge: '/icon-192x192.png', data: { target: safeTarget(data?.target) } }));
+  event.waitUntil(self.registration.showNotification(title, { body, tag: `signal-hub:${episode}`, icon: '/brand/signal-purple-192.png', badge: '/brand/signal-purple-badge.png', data: { target: safeTarget(data?.target) } }));
 });
 self.addEventListener('notificationclick', event => {
   event.notification.close();
