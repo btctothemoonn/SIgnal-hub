@@ -179,7 +179,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
               {items.map((item) => isTracking && item.tracking ? (
                 <li key={item.symbol} data-market-brief-symbol={item.symbol} className="min-w-0 py-3">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <strong className="min-w-0 break-all font-mono text-[13px] text-foreground">{item.symbol}</strong>
+                    <strong className="min-w-0 break-all font-mono text-lg leading-6 text-foreground">{item.symbol}</strong>
                     {item.tracking.trend || item.tracking.confirmation ? (
                       <>
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.tracking.trend === "strong_up" ? "bg-success/10 text-success" : item.tracking.trend === "strong_down" ? "bg-danger/10 text-danger" : "bg-workspace-surface text-muted"}`}>
@@ -232,7 +232,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
                   data-market-brief-symbol={item.symbol}
                   className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.5fr)]"
                 >
-                  <strong className="order-1 min-w-0 break-all font-mono text-[13px] text-foreground">{item.symbol}</strong>
+                  <strong className="order-1 min-w-0 break-all font-mono text-lg leading-6 text-foreground">{item.symbol}</strong>
                   <div className="order-3 col-span-full flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[11px] sm:order-2 sm:col-auto">
                     <AlertCounts counts={item} />
                     <span className="text-muted">共 {item.total}</span>
