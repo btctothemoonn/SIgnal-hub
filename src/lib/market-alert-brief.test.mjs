@@ -5,7 +5,26 @@ import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 const {openMarketAlertsStore}=await import('./market-alerts-store.ts');
 const {marketBriefReportFingerprint}=await import('./market-alert-brief-store.ts');
+const {marketBriefTemplateKeys,renderMarketBriefTemplate}=await import('./market-alert-brief-types.ts');
 const {deriveOpportunityMetrics}=await import('./market-opportunity-enrichment.ts');
+// Real template rendering must format only declared live measurements, never
+// leave missing or malformed placeholders on the user-facing report.
+assert.equal(renderMarketBriefTemplate('短线 {fast}，长线 {slow}，量比 {vol}，小时 {hour}，距高点 {dist}，持仓 {oi}',{fast:1.234,slow:-2.345,vol:2.4,hour:6.95,dist:-.7,oi:0}),'短线 +1.23%，长线 -2.35%，量比 2.40倍，小时 +6.95%，距高点 0.70%，持仓 +0.00%');
+assert.equal(renderMarketBriefTemplate('等待量价配合。',undefined),'等待量价配合。');
+assert.deepEqual(marketBriefTemplateKeys('{fast} 和 {vol} 再看 {fast}'),['fast','vol']);
+for(const [template,figures] of [
+  ['小时 {hour}',{fast:1}],
+  ['短线 {fast}',{fast:null}],
+  ['短线 {fast}',{fast:NaN}],
+  ['短线 {fast}',{fast:Infinity}],
+  ['短线 {fast}',Object.create({fast:1})],
+  ['未知 {price}',{price:2}],
+  ['量比 {volatility}',{volatility:2}],
+  ['短线 {fast',{fast:1}],
+  ['短线 fast}',{fast:1}],
+  ['短线 {fast-pct}',{fast:1}],
+  ['短线 {{fast}}',{fast:1}],
+]) assert.equal(renderMarketBriefTemplate(template,figures),null,`unavailable or malformed template: ${template}`);
 const dir=mkdtempSync(join(tmpdir(),'market-brief-'));
 const path=join(dir,'alerts.sqlite');
 let store=openMarketAlertsStore(path);
@@ -36,8 +55,25 @@ try {
   assert.equal(input['3h'].items[0].tracking.state,'new');
   assert.equal(input['3h'].items[1].tracking.state,'waiting');
   assert.equal(input['3h'].items[0].tracking.evidence.length,2);
+  assert.deepEqual(input['3h'].items[0].figures,{fast:2,slow:4,vol:2,oi:3},'legacy impulse measurements keep distinct fast and slow values; hourly and distance require closed-candle context');
+  assert.ok(input['24h'].items.every(item=>item.figures===undefined),'historical review cannot expose live tracking measurements');
   assert.match(input['3h'].items[0].tracking.evidence.join(' '),/2\.00/);
   assert.match(input['3h'].items[0].tracking.nextWatch,/5.*15/);
+  const reversed=structuredClone(input['3h']);
+  reversed.items.reverse();
+  assert.equal(marketBriefReportFingerprint(input['3h']),marketBriefReportFingerprint(reversed),'AI priority order must not make unchanged current-list facts look new');
+  assert.deepEqual(reversed.items.map(item=>item.symbol),['FADEUSDT','FRESHUSDT'],'fingerprinting must not replace the user-visible AI order');
+  const newFigures=structuredClone(input['3h']);
+  newFigures.items[0].figures={fast:2.05,slow:4.05,vol:2.05,oi:3.05};
+  newFigures.items[0].reasonTemplate='短线 {fast}，量比 {vol}。';
+  newFigures.items[0].reason='短线 +2.05%，量比 2.05倍。';
+  assert.equal(marketBriefReportFingerprint(input['3h']),marketBriefReportFingerprint(newFigures),'live figures and narration must not invalidate reusable categorical facts');
+  const changedSignal=structuredClone(input['3h']);
+  changedSignal.items[0].tracking.signalKey+='changed';
+  assert.notEqual(marketBriefReportFingerprint(input['3h']),marketBriefReportFingerprint(changedSignal),'a changed tracking fact must still refresh narration');
+  const historyReversed=structuredClone(input['24h']);
+  historyReversed.items.reverse();
+  assert.notEqual(marketBriefReportFingerprint(input['24h']),marketBriefReportFingerprint(historyReversed),'historical review retains its rule priority order');
   assert.ok(input['3h'].items[0].tracking.dropIf);
   assert.deepEqual(input['3h'].changes.added,['FRESHUSDT','FADEUSDT']);
   assert.equal(store.claimMarketBriefCheck(now),true);
@@ -91,6 +127,8 @@ try {
   enrich('SQUSDT',{pct1m:.2,pct5m:.8,pct15m:100,volumeRatio1m:1.1,volumeRatio5m:50});
   const directions=store.getMarketBriefInput(now)['3h'];
   assert.equal(directions.items.find(x=>x.symbol==='DOWNUSDT').direction,'down');
+  assert.deepEqual(directions.items.find(x=>x.symbol==='DOWNUSDT').figures,{fast:-2,slow:-4,vol:2,oi:3},'downside figures retain measured signs');
+  assert.deepEqual(directions.items.find(x=>x.symbol==='SQUSDT').figures,{fast:.2,slow:.8,vol:1.1},'squeeze impulse uses the existing one-minute/five-minute values and cannot expose OI');
   const squeeze=directions.items.find(x=>x.symbol==='SQUSDT').tracking;
   assert.equal(squeeze.state,'waiting','squeeze trigger metrics must not masquerade as fresh confirmation');
   assert.match(squeeze.evidence[0],/1m \/ 5m/);
@@ -104,6 +142,7 @@ try {
   const sui=trendInput['3h'].items.find(item=>item.symbol==='SUIUSDT');
   assert.ok(sui,'hourly strength with intact consolidation stays tracked beyond a single impulse, using complete candles');
   assert.equal(sui.tracking.trend,'strong_up');
+  assert.deepEqual(sui.figures,{fast:-.2,slow:.3,vol:.6,hour:6.95,dist:-.7,oi:3},'all live figures come from the same complete-candle context used by tracking evidence');
   assert.equal(sui.tracking.confirmation,'consolidating');
   assert.match(sui.reason,/小时.*强势.*整理/);
   assert.match(sui.tracking.evidence.join(' '),/6\.95%/);
@@ -132,14 +171,20 @@ try {
   enrich('SQTRUSDT',{pct1m:-2,pct5m:-2,pct15m:100,volumeRatio5m:50,watchlist:closed});
   const sqTrend=store.getMarketBriefInput(now)['3h'].items.find(item=>item.symbol==='SQTRUSDT');
   assert.equal(sqTrend.tracking.trend,'strong_up','complete candles also support squeeze candidates without old trigger values');
+  assert.deepEqual(sqTrend.figures,{fast:-.2,slow:.3,vol:.6,hour:6.95,dist:-.7},'squeeze with complete candles uses context instead of squeeze trigger values and still omits OI');
   assert.doesNotMatch(sqTrend.tracking.evidence.join(' '),/100\.00|50\.00/);
   store.insertMarketAlertEvent(event('trend-down','WEAKUSDT',minute,'SHORT'));
   enrich('WEAKUSDT',{watchlist:{...closed,pct1h:-7,pct5m:.2,pct15m:-.3,distanceFromLowPct:.7,distanceFromHighPct:-8,supportBreak:true,lowerStructure:true,breakout20:false}});
   const downTrend=store.getMarketBriefInput(now)['3h'].items.find(item=>item.symbol==='WEAKUSDT');
   assert.equal(downTrend.tracking.trend,'strong_down','weak hourly structure has symmetric tracking');
+  assert.deepEqual(downTrend.figures,{fast:.2,slow:-.3,vol:.6,hour:-7,dist:.7,oi:3},'downside distance comes from the low rather than high');
   assert.equal(downTrend.tracking.confirmation,'consolidating');
   enrich('WEAKUSDT',{watchlist:{...closed,pct1h:-7,distanceFromLowPct:.7,breakout20:true}});
   assert.ok(!store.getMarketBriefInput(now)['3h'].items.some(item=>item.symbol==='WEAKUSDT'),'upward breakout invalidates the sustained down route');
+  store.close();store=openMarketAlertsStore(join(dir,'optional-figures.sqlite'));
+  store.insertMarketAlertEvent(event('optional','OPTIONALUSDT',minute));
+  enrich('OPTIONALUSDT',{oiGrowth15m:null,watchlist:{...closed,pct5m:2,pct15m:4,volumeRatio5m:2,pct1h:null,distanceFromHighPct:null,distanceFromLowPct:null}});
+  assert.deepEqual(store.getMarketBriefInput(now)['3h'].items[0].figures,{fast:2,slow:4,vol:2},'unavailable optional values must be absent rather than invalid template inputs');
   store.close();store=openMarketAlertsStore(join(dir,'incomplete-structure.sqlite'));
   for (const [symbol,side,price,missingField] of [['NOLOWUSDT','LONG',106,3],['NOHIGHUSDT','SHORT',94,2]]) {
     const candles=Array.from({length:288},(_,index)=>{

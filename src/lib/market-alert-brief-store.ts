@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { MarketOpportunityMetrics } from "./market-opportunity-core.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { MARKET_BRIEF_INTERVAL_MS, MARKET_BRIEF_STALE_AFTER_MS } from "./market-alert-brief-types.ts";
-import type { MarketBriefItem, MarketBriefScope, MarketBriefSnapshot } from "./market-alert-brief-types.ts";
+import type { MarketBriefFigures, MarketBriefItem, MarketBriefScope, MarketBriefSnapshot } from "./market-alert-brief-types.ts";
 
 export { MARKET_BRIEF_INTERVAL_MS } from "./market-alert-brief-types.ts";
 export type MarketBriefReports = Record<MarketBriefScope, MarketBriefSnapshot>;
@@ -85,6 +85,12 @@ function trackItem(item: MarketBriefItem, row: Row | undefined, previous: Market
     oiBand === "up" ? "未平仓合约增加，但不能推断主力方向" : oiBand === "down" ? "未平仓合约减少，但不能单独判断资金方向" : oiBand === "flat" ? "未平仓合约变化不明显" : "缺少可用的持仓变化依据",
     context && finite(context.spotChange15m) ? sign*context.spotChange15m >= .1 ? "现货短周期同向" : sign*context.spotChange15m <= -.1 ? "现货短周期反向" : "现货短周期变化不明显" : !context && metrics.spotAvailable ? "有现货数据，但不据此推断现货同向" : "缺少现货佐证",
   ];
+  // Figures are re-read on every check; only their names reach the AI, so prose
+  // referencing them stays correct even when the values move.
+  const figures: MarketBriefFigures = { fast, slow, vol: volume };
+  if (context && finite(context.pct1h)) figures.hour = context.pct1h;
+  if (finite(distance)) figures.dist = distance;
+  if (!squeeze && finite(metrics.oiGrowth15m)) figures.oi = metrics.oiGrowth15m;
   const tracking: NonNullable<MarketBriefItem["tracking"]> = {
     state,trend,confirmation,expiresAt:new Date(Math.min(observed+20*minutes,fetched+20*minutes,closedAt+20*minutes,alertAt+(sustained ? 120 : 60)*minutes)).toISOString(),
     observedAt:new Date(closedAt).toISOString(),evidence,nextWatch,dropIf,strength,bands,narrativeFacts,
@@ -93,7 +99,7 @@ function trackItem(item: MarketBriefItem, row: Row | undefined, previous: Market
   const reason = sustained ? `小时级保持${sign > 0 ? "强势" : "弱势"}，${aligned ? "短线量价同向确认，继续观察延续性" : mixed ? "短线预警反复，等待方向重新一致" : "短线整理，等待量价确认"}。`
     : aligned ? "短周期价格与成交量同向，值得继续观察延续性。" : mixed ? "方向出现反复，需等待量价重新一致。" : "仍有方向性变化，但短周期动量或量能尚未确认。";
   // Count is only a final tie-breaker, never the main qualification criterion.
-  return { item:{...item,reason,tracking}, rank:(sustained ? 160 : 0)+(aligned ? 100 : 0)+strength*5+(nowMs-alertAt<=15*minutes ? 3 : 0)+(metrics.spotAvailable ? 1 : 0) };
+  return { item:{...item,reason,figures,tracking}, rank:(sustained ? 160 : 0)+(aligned ? 100 : 0)+strength*5+(nowMs-alertAt<=15*minutes ? 3 : 0)+(metrics.spotAvailable ? 1 : 0) };
 }
 
 export function createMarketBriefStore(db: DatabaseSync) {
@@ -197,7 +203,7 @@ export function createMarketBriefStore(db: DatabaseSync) {
 
 export function marketBriefReportFingerprint(report: MarketBriefSnapshot) {
   const relevant = report.scope === "3h"
-    ? {scope:report.scope,version:2,items:report.items.map(item=>({symbol:item.symbol,signalKey:item.tracking?.signalKey}))}
+    ? {scope:report.scope,version:2,items:report.items.map(item=>({symbol:item.symbol,signalKey:item.tracking?.signalKey})).sort((a,b)=>a.symbol.localeCompare(b.symbol))}
     : {scope:report.scope,totals:report.totals,items:report.items.map(({symbol,pump,crash,squeeze,total,direction,maxLevel})=>({symbol,pump,crash,squeeze,total,direction,maxLevel}))};
   return createHash("sha256").update(JSON.stringify(relevant)).digest("hex");
 }
