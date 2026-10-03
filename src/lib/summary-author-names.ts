@@ -9,7 +9,8 @@ const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const usernameKey = (value: string) => value.trim().replace(/^@+/, "").toLowerCase();
 
 export function xSummaryAuthorName(username: string, ...names: unknown[]): string {
-  const name = names.map(text).find((name) => name && usernameKey(name) !== usernameKey(username));
+  const candidates = names.map(text).filter(Boolean);
+  const name = candidates.find((name) => usernameKey(name) !== usernameKey(username)) || candidates.at(-1);
   return name || `@${username.replace(/^@+/, "").trim()}`;
 }
 
@@ -55,6 +56,7 @@ function readXNames(wanted: string[], env: EnvLike): Map<string, string> {
     const columns = (table: string) => new Set((db!.prepare(`pragma table_info(${table})`).all() as Row[]).map((row) => row.name));
     const accounts = columns("x_accounts");
     const feed = columns("x_feed");
+    const quotes = columns("x_quoted_tweets");
     const knownDisplayHandles = new Set(accounts.has("name")
       ? (db.prepare("select username, name from x_accounts").all() as Row[])
         .filter((row) => /^@[A-Za-z0-9_]{1,15}$/.test(text(row.name)) && usernameKey(text(row.name)) !== usernameKey(text(row.username)))
@@ -64,15 +66,28 @@ function readXNames(wanted: string[], env: EnvLike): Map<string, string> {
       // An actual display name may itself look like somebody else's handle.
       if (knownDisplayHandles.has(key)) continue;
       const account = accounts.has("name") ? db.prepare("select name from x_accounts where username_key = ?").get(key) as Row | undefined : undefined;
-      const accountName = xSummaryAuthorName(key, account?.name);
-      if (!accountName.startsWith("@") || usernameKey(accountName) !== key) {
-        names.set(key, accountName);
+      if (text(account?.name) && usernameKey(text(account?.name)) !== key) {
+        names.set(key, text(account?.name));
         continue;
       }
-      if (!feed.has("display_name")) continue;
-      const rows = db.prepare("select display_name from x_feed where account_username_key = ? order by created_at desc limit 25").all(key) as Row[];
-      const feedName = xSummaryAuthorName(key, ...rows.map((row) => row.display_name));
-      if (feedName !== `@${key}`) names.set(key, feedName);
+      const feedName = feed.has("display_name") ? db.prepare(`
+        select display_name from x_feed where account_username_key = ?
+          and trim(display_name) != '' and lower(ltrim(trim(display_name), '@')) != ?
+        order by created_at desc limit 1
+      `).get(key, key) as Row | undefined : undefined;
+      if (text(feedName?.display_name)) {
+        names.set(key, text(feedName?.display_name));
+        continue;
+      }
+      const quoteName = quotes.has("quoted_tweet_json") ? db.prepare(`
+        select json_extract(quoted_tweet_json, '$.displayName') as name from x_quoted_tweets
+        where json_valid(quoted_tweet_json)
+          and lower(ltrim(json_extract(quoted_tweet_json, '$.username'), '@')) = ?
+          and trim(coalesce(json_extract(quoted_tweet_json, '$.displayName'), '')) != ''
+        order by rowid desc limit 1
+      `).get(key) as Row | undefined : undefined;
+      const name = xSummaryAuthorName(key, quoteName?.name, account?.name);
+      if (name !== `@${key}`) names.set(key, name);
     }
   } catch {
     // A missing/legacy pipeline database must not hide a valid cached summary.

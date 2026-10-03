@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { collectSignalSummaryInput, selectSignalSummaryItems } from "./signal-summary-input.ts";
 import { getOrCreateAlphaSummary, getAlphaSummaryPeriod, parseAlphaSummaryContent } from "./alpha-summary.ts";
 import { withSummaryAuthorNames } from "./summary-author-names.ts";
+import { xSummaryAuthorName } from "./summary-author-names.ts";
 import { openXPipelineDb, upsertXPipelineAccount } from "./x-pipeline-store.ts";
 import { DatabaseSync } from "node:sqlite";
 
@@ -71,4 +72,16 @@ test("a real display name resembling another account handle keeps its speaker", 
 test("distinct opinions from same-name authors are not combined by display name alone", () => {
   const summary = parseAlphaSummaryContent(JSON.stringify({ headline: "分歧", stocks: [{ target: "NVDA", opinions: [{ author: "同名博主", view: "看好需求" }, { author: "同名博主", view: "估值过高" }] }], crypto: [] }));
   assert.deepEqual(summary.stocks[0].opinions, [{ author: "同名博主", view: "看好需求" }, { author: "同名博主", view: "估值过高" }]);
+});
+
+test("a Twitter display name equal to its username keeps the stored display spelling", () => {
+  assert.equal(xSummaryAuthorName("lookonchain", "Lookonchain"), "Lookonchain");
+  assert.equal(xSummaryAuthorName("lookonchain", "lookonchain", "Lookonchain"), "Lookonchain");
+});
+
+test("cached opinions by a quoted author resolve from quoted Twitter profiles", (t) => {
+  const { env, x } = fixture(t);
+  x.prepare("insert into x_quoted_tweets values (?,?,?,?)").run("dylan-tweet", JSON.stringify({ id: "dylan-tweet", username: "dylan522p", displayName: "Dylan Patel" }), "2026-10-02", "2026-10-02");
+  const snapshot = { summary: { headline: "观点", stocks: [{ target: "NVDA", opinions: [{ author: "@dylan522p", view: "算力需求" }] }], crypto: [], authors: [] } };
+  assert.equal(withSummaryAuthorNames(snapshot, env).summary.stocks[0].opinions[0].author, "Dylan Patel");
 });
