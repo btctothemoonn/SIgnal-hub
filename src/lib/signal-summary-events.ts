@@ -276,14 +276,14 @@ export function buildSignalSummaryPrompt({ period, items, previousEvents = [], p
       endAt: period.endAt,
       timeZone: period.timeZone,
     },
-    messages: items.map(({ id, source, author, createdAt, text, translation, link }) => ({
-      id, source, author, createdAt, text, translation, link,
+    messages: items.map(({ id, source, author, authorUsername, createdAt, text, translation, link }) => ({
+      id, source, author, ...(authorUsername ? { authorUsername } : {}), createdAt, text, translation, link,
     })),
   };
   const outputShape = {
     headline: "一段简短中文总结本周期主要股票、币圈观点与具体变化",
-    stocks: [{ target: "股票名称或代码", opinions: [{ author: "实际发表意见的 @username 或频道名", view: "该来源对这个标的的看法" }] }],
-    crypto: [{ target: "币种或项目名称", opinions: [{ author: "实际发表意见的 @username 或频道名", view: "该来源对这个标的的看法" }] }],
+    stocks: [{ target: "股票名称或代码", opinions: [{ author: "实际发表意见的推特显示名称或频道名", view: "该来源对这个标的的看法" }] }],
+    crypto: [{ target: "币种或项目名称", opinions: [{ author: "实际发表意见的推特显示名称或频道名", view: "该来源对这个标的的看法" }] }],
     events: [{
       title: "事件或主题名称",
       change: "发生了什么变化，并注明是谁报道、表达观点或作出推断",
@@ -306,7 +306,8 @@ export function buildSignalSummaryPrompt({ period, items, previousEvents = [], p
 
 要求：
 - stocks 为股票观点，crypto 为币圈观点；分别按标的名称或代码分组，同一标的只出现一次。每个标的包含 target 和 opinions，每条 opinions 只包含 author 和 view。
-- author 必须是实际发表该看法的博主或来源；X 使用 @username，Telegram 使用频道名。view 只写该来源对本标的的看法。同一博主对同一标的的多条消息合并，一个博主涉及多个标的时分别归类，保留不同博主的分歧。
+- author 必须是实际发表该看法的博主或来源；X 使用消息 author 或引用语境提供的推特显示名称，不使用账号 ID 或链接中的 @username，Telegram 使用频道名。view 只写该来源对本标的的看法。同一博主对同一标的的多条消息合并，一个博主涉及多个标的时分别归类，保留不同博主的分歧。
+- 依据 authorUsername 或来源链接判断是否同一博主；显示名称相同的不同账号分别保留观点。
 - 保留被引用观点的真实发言者和引用语境，不把转发、引用、新闻播报自动当成发布者认可的观点；原文没有可归属的标的看法时不要编造博主意见。无相关标的观点的分类返回 []；仅宏观或行业看法而无具体标的时放入 headline，不要强行归属。
 - events 只用于内部来源证据和连续性跟踪，不是额外的展示模块；标的观点与事件分别据原文提炼，不能为了填写事件而删掉已有的标的观点。
 - 按事件或主题合并相关消息，优先选取 3–5 项有具体变化且值得跟踪的内容，最多 5 项。不足 3 项时按实际数量输出；没有有意义且可追溯的信号时 events 为 []。

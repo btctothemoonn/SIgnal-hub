@@ -27,7 +27,7 @@ const merged = parseAlphaSummaryContent(JSON.stringify({
   ],
   crypto: [],
 }));
-assert.deepEqual(merged.stocks, [{ target: "NVDA", opinions: [{ author: "@alice", view: "看好需求；等待财报" }] }]);
+assert.deepEqual(merged.stocks, [{ target: "NVDA", opinions: [{ author: "@alice", view: "看好需求" }, { author: "@alice", view: "等待财报" }] }]);
 assert.throws(() => parseAlphaSummaryContent('{"headline":"invalid"}'));
 const legacy = {
   headline: "旧结构包含作者观点",

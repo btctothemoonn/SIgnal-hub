@@ -12,8 +12,8 @@ const snapshot = {
     headline: "算力需求与加密资产观点继续分化。",
     authors: [{ name: "旧版作者", coreView: "旧版作者核心观点", sourceCount: 1, alpha: [], watch: [] }],
     consensus: ["旧版核心共识"], risks: ["旧版风险提示"], watchlist: ["旧版观察列表"],
-    stocks: [{ target: "NVDA", opinions: [{ author: "@alice", view: "看好算力需求。" }, { author: "@bob", view: "估值仍需观察。" }] }],
-    crypto: [{ target: "ETH", opinions: [{ author: "@carol", view: "关注生态资金流入。" }] }],
+    stocks: [{ target: "NVDA", opinions: [{ author: "爱丽丝研究", view: "看好算力需求。" }, { author: "鲍勃观察", view: "估值仍需观察。" }] }],
+    crypto: [{ target: "ETH", opinions: [{ author: "卡罗尔", view: "关注生态资金流入。" }] }],
     events: [{ title: "协议发布后的测试进度", change: "来源宣布协议发布", whyTrack: "测试结果可以用于检验发布进度",
       evidenceType: "reported", watch: ["观察下一次公开测试结果"], invalidate: ["发布被撤回或测试暂停"],
       sourceIds: ["x:fixture"], sources: [{ id: "x:fixture", source: "X", author: "@research", createdAt: "2026-10-02T02:00:00.000Z", link: "https://x.com/research/status/fixture" }] }],
@@ -55,10 +55,10 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     const stocks = pane.getByRole("region", { name: "股票", exact: true });
     const crypto = pane.getByRole("region", { name: "币圈", exact: true });
     await expect(stocks.getByRole("heading", { name: "NVDA", exact: true })).toBeVisible();
-    await expect(stocks.getByText("@alice：看好算力需求。", { exact: true })).toBeVisible();
-    await expect(stocks.getByText("@bob：估值仍需观察。", { exact: true })).toBeVisible();
+    await expect(stocks.getByText("爱丽丝研究：看好算力需求。", { exact: true })).toBeVisible();
+    await expect(stocks.getByText("鲍勃观察：估值仍需观察。", { exact: true })).toBeVisible();
     await expect(crypto.getByRole("heading", { name: "ETH", exact: true })).toBeVisible();
-    await expect(crypto.getByText("@carol：关注生态资金流入。", { exact: true })).toBeVisible();
+    await expect(crypto.getByText("卡罗尔：关注生态资金流入。", { exact: true })).toBeVisible();
     await expect(stocks.getByRole("heading", { name: "ETH", exact: true })).toHaveCount(0);
     await expect(crypto.getByRole("heading", { name: "NVDA", exact: true })).toHaveCount(0);
     await expect(pane.locator("[data-signal-event-id], [data-signal-event-history], [data-signal-new-evidence]")).toHaveCount(0);

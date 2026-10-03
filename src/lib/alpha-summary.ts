@@ -29,6 +29,7 @@ import { getXPipelineConfig } from "./x-pipeline-config.ts";
 import { getTelegramXSourceChannelKeys, isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 import { collectSignalSummaryInput } from "./signal-summary-input.ts";
+import { withSummaryAuthorNames, xSummaryAuthorName } from "./summary-author-names.ts";
 import {
   bindSignalSummaryEvidence,
   buildSignalSummaryPrompt,
@@ -65,6 +66,7 @@ export type AlphaSummarySourceItem = {
   id: string;
   source: "Telegram" | "X" | "Stocks";
   author: string;
+  authorUsername?: string;
   createdAt: string;
   text: string;
   translation: string | null;
@@ -298,10 +300,8 @@ function parseAlphaSummaryTargets(value: unknown): AlphaSummaryTarget[] {
       const author = stringValue(opinion.author).trim().slice(0, 120);
       const view = stringValue(opinion.view).trim().slice(0, 600);
       if (!author || !view) continue;
-      const existing = group.opinions.find((entry) => entry.author === author);
-      if (existing) {
-        if (existing.view !== view) existing.view = `${existing.view}；${view}`.slice(0, 1200);
-      } else {
+      // Display names are not unique account identities. Only remove exact copies.
+      if (!group.opinions.some((entry) => entry.author === author && entry.view === view)) {
         group.opinions.push({ author, view });
       }
     }
@@ -1045,7 +1045,7 @@ function readXItems(period: AlphaSummaryPeriod): AlphaSummarySourceItem[] {
     const maxTextChars = maxTextCharsForScope(period.scope);
 
     return (db.prepare(`
-      select f.*
+      select f.*, a.name as account_name
       from x_feed f
       inner join x_accounts a on a.username_key = f.account_username_key
       where a.enabled = 1
@@ -1065,7 +1065,8 @@ function readXItems(period: AlphaSummaryPeriod): AlphaSummarySourceItem[] {
         return {
           id: `x:${stringValue(row.id)}`,
           source: "X" as const,
-          author: `@${stringValue(row.username)}`,
+          author: xSummaryAuthorName(stringValue(row.username), row.display_name, row.account_name),
+          authorUsername: stringValue(row.username),
           createdAt: stringValue(row.created_at),
           text: clampText(stringValue(row.text), maxTextChars),
           translation: nullableClampedTranslation(translation?.text, maxTextChars),
@@ -1225,6 +1226,7 @@ export function buildAlphaSummaryPrompt({
       const translation = item.translation ? `\n中文翻译: ${item.translation}` : "";
       return [
         `[${index + 1}] ${item.source} ${item.author} ${item.createdAt}`,
+        ...(item.authorUsername ? [`来源账号（仅用于区分同名博主）: ${item.authorUsername}`] : []),
         `链接: ${item.link || "n/a"}`,
         `内容: ${item.text}${translation}`,
       ].join("\n");
@@ -1247,8 +1249,9 @@ ${stockResearchUniverseText()}
 - 只返回 JSON，不要 Markdown。
 - headline: 用一段简短中文概括本周期最核心的美股投研观点。
 - stocks: 按股票名称或代码分组，同一标的只出现一次；每个标的只有 target 和 opinions。
-- opinions: 每条只包含 author 和 view。author 是实际发表该看法的博主或来源，view 只写与该标的相关的看法；X 使用 @username，Telegram 使用频道名。
+- opinions: 每条只包含 author 和 view。author 是实际发表该看法的博主或来源，view 只写与该标的相关的看法；X 使用消息 author 提供的推特显示名称，不使用账号 ID 或链接中的 @username，Telegram 使用频道名。
 - 同一博主对同一标的的多条消息合并；一个博主涉及多个标的时分别归类，保留不同博主的分歧。
+- 依据来源账号或链接判断是否同一博主；显示名称相同的不同账号分别保留观点。
 - 外部行情、财报和新闻只归属于其实际来源，不要假称为博主观点；保留引用对象和语境，不把转发或引用自动当成作者认可。
 - 不额外输出共识、风险、观察清单、作者简介或消息数量等模块；没有标的观点时 stocks 为 []。
 - 不要编造消息中不存在的事实或博主观点；如果证据不足，明确写“证据不足”。
@@ -1256,7 +1259,7 @@ ${stockResearchUniverseText()}
 JSON 结构:
 {
   "headline": "一段总结",
-  "stocks": [{ "target": "股票名称或代码", "opinions": [{ "author": "@username or channel", "view": "看法" }] }],
+  "stocks": [{ "target": "股票名称或代码", "opinions": [{ "author": "推特显示名称或频道名", "view": "看法" }] }],
   "crypto": []
 }
 
@@ -1592,5 +1595,5 @@ export function getOrCreateAlphaSummary(
   const audience = normalizeAlphaSummaryAudience(request.audience);
   return runAlphaSummarySingleFlight(`${audience}:${scope}`, () =>
     getOrCreateAlphaSummaryInternal({ ...request, scope, audience }),
-  );
+  ).then((snapshot) => withSummaryAuthorNames(snapshot, request.env ?? process.env));
 }

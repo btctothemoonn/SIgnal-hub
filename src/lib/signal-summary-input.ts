@@ -5,6 +5,7 @@ import { getTelegramPipelineConfig } from "./telegram-pipeline-config.ts";
 import { getXPipelineConfig } from "./x-pipeline-config.ts";
 import { getTelegramXSourceChannelKeys, isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
 import { cleanTranslationText } from "./translate.ts";
+import { xSummaryAuthorName } from "./summary-author-names.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -85,7 +86,7 @@ function sourceText(textValue: unknown, quoteValue: unknown, source: "Telegram" 
     : stringValue(quoted?.id) || stringValue(quoted?.messageUrl);
   if (!hasReference || !usableText(quoteText)) return ownText;
   const author = source === "X"
-    ? (stringValue(quoted?.username) ? `@${stringValue(quoted?.username).replace(/^@+/, "")}` : stringValue(quoted?.displayName))
+    ? (stringValue(quoted?.username) ? xSummaryAuthorName(stringValue(quoted?.username), quoted?.displayName) : stringValue(quoted?.displayName))
     : stringValue(quoted?.channelTitle) || stringValue(quoted?.channelUsername);
   const relation = quoted?.relation === "reply" ? "Reply to" : "Quote";
   const context = `[${relation}${author ? ` ${author}` : ""}] ${quoteText}`;
@@ -122,6 +123,7 @@ function readSourceItems(source: "Telegram" | "X", period: AlphaSummaryPeriod, e
     const table = telegram ? "telegram_messages" : "x_feed";
     const quoteColumn = telegram ? "quoted_message_json" : "quoted_tweet_json";
     const columns = db.prepare(`pragma table_info(${table})`).all() as DbRow[];
+    const accountColumns = telegram ? [] : db.prepare("pragma table_info(x_accounts)").all() as DbRow[];
     const quote = columns.some((column) => column.name === quoteColumn) ? `f.${quoteColumn}` : "null";
     const author = telegram ? "f.channel_id" : "f.account_username_key";
     const join = telegram
@@ -129,7 +131,7 @@ function readSourceItems(source: "Telegram" | "X", period: AlphaSummaryPeriod, e
       : "inner join x_accounts a on a.username_key = f.account_username_key";
     const metadataColumns = telegram
       ? "f.channel_id, f.channel_title, f.channel_username, f.message_id, f.message_url"
-      : "f.username, f.tweet_url";
+      : `f.username, f.tweet_url, ${columns.some((column) => column.name === "display_name") ? "f.display_name" : "null"} as display_name, ${accountColumns.some((column) => column.name === "name") ? "a.name" : "null"} as account_name`;
     const functionDb = db as SqliteWithFunctions;
     if (typeof functionDb.function !== "function") {
       return readLegacySourceItems(db, source, period, keys, { table, join, quote, metadataColumns });
@@ -191,7 +193,8 @@ function sourceItemFromRow(row: DbRow, source: "Telegram" | "X"): AlphaSummarySo
   return {
     id: telegram ? `telegram:${stringValue(row.channel_id)}:${String(row.message_id ?? "")}` : `x:${stringValue(row.id)}`,
     source,
-    author: telegram ? stringValue(row.channel_title) || stringValue(row.channel_username) : `@${stringValue(row.username).replace(/^@+/, "")}`,
+    author: telegram ? stringValue(row.channel_title) || stringValue(row.channel_username) : xSummaryAuthorName(stringValue(row.username), row.display_name, row.account_name),
+    ...(!telegram ? { authorUsername: stringValue(row.username) } : {}),
     createdAt: new Date(Number(row.signal_at)).toISOString(),
     text: stringValue(row.signal_text),
     translation: translation ? normalizedText(cleanTranslationText(translation)) || null : null,
@@ -289,7 +292,7 @@ function uniqueCandidates(items: AlphaSummarySourceItem[], period: AlphaSummaryP
 }
 
 function authorKey(item: AlphaSummarySourceItem) {
-  return `${item.source}:${item.author.normalize("NFKC").trim().replace(/^@+/, "").toLowerCase()}`;
+  return `${item.source}:${(item.authorUsername || item.author).normalize("NFKC").trim().replace(/^@+/, "").toLowerCase()}`;
 }
 
 // Alternate the earliest and latest observations so a busy author's queue covers
