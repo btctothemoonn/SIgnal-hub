@@ -37,12 +37,28 @@ export function isStableOrFiatBase(base: unknown) {
   return STABLE_OR_FIAT_BASES.has(String(base ?? "").trim().toUpperCase());
 }
 
-export function signalLevel(strength: unknown) {
+export function signalLevel(strength: unknown, rules: VolatilityRules = DEFAULT_VOLATILITY_RULES) {
   const value = Math.abs(Number(strength) || 0);
-  if (value >= 20) return 3;
-  if (value >= 12) return 2;
+  if (value >= rules.level3MinPct) return 3;
+  if (value >= rules.level2MinPct) return 2;
   return 1;
 }
+
+// Tunable thresholds for pump/crash alerts. Defaults reproduce the original
+// hardcoded behaviour exactly, so nothing changes until an env var is set.
+export type VolatilityRules = {
+  level2MinPct: number;
+  level3MinPct: number;
+  pumpMinPct: number;
+  crashMinPct: number;
+};
+
+export const DEFAULT_VOLATILITY_RULES: VolatilityRules = {
+  level2MinPct: 12,
+  level3MinPct: 20,
+  pumpMinPct: 6,
+  crashMinPct: -6,
+};
 
 export function fastMoveDirectionOk(
   side: VolatilitySide,
@@ -148,8 +164,9 @@ function buildVolatilitySignal(
   input: VolatilityInput,
   side: VolatilitySide,
   flags: { a: boolean; b: boolean; c: boolean; d?: boolean },
-  options: { bWindow?: "1m" | "5m" } = {},
+  options: { bWindow?: "1m" | "5m"; rules?: VolatilityRules } = {},
 ): VolatilitySignal {
+  const rules = options.rules ?? DEFAULT_VOLATILITY_RULES;
   const rolling = Number(input.pct25m ?? input.pct5m) || 0;
   const bWindow = options.bWindow ?? "1m";
   const bFast =
@@ -169,12 +186,13 @@ function buildVolatilitySignal(
     bWindow,
   });
   const direction = side === "LONG" ? "暴涨" : "暴跌";
+  const level = signalLevel(strength, rules);
   return {
     type: "volatility",
     symbol: input.symbol,
     side,
-    level: signalLevel(strength),
-    stage: `${direction}${signalLevel(strength) > 1 ? "升级" : "预警"}`,
+    level,
+    stage: `${direction}${level > 1 ? "升级" : "预警"}`,
     trigger: status.trigger,
     statusText: status.statusText,
     price: input.price,
@@ -201,10 +219,13 @@ function buildVolatilitySignal(
 
 export function evaluateWsVolatilitySignal(
   input: VolatilityInput,
+  rules: VolatilityRules = DEFAULT_VOLATILITY_RULES,
 ): VolatilitySignal | null {
   const rolling = Number(input.pct25m ?? input.pct5m) || 0;
-  const pumpA = rolling >= 6 && input.streakGreen >= 3 && input.volRatio5m >= 2;
-  const crashA = rolling <= -6 && input.streakRed >= 2 && input.volRatio5m >= 3;
+  const pumpA =
+    rolling >= rules.pumpMinPct && input.streakGreen >= 3 && input.volRatio5m >= 2;
+  const crashA =
+    rolling <= rules.crashMinPct && input.streakRed >= 2 && input.volRatio5m >= 3;
   const pumpB =
     input.pct1m >= 5 &&
     fastMoveDirectionOk("LONG", input.pct1m, rolling) &&
@@ -217,21 +238,24 @@ export function evaluateWsVolatilitySignal(
   const crashC = input.streakRed >= 2 && input.pct5m <= -5.5 && input.volRatio5m >= 5;
 
   if (pumpA || pumpB || pumpC) {
-    return buildVolatilitySignal(input, "LONG", { a: pumpA, b: pumpB, c: pumpC });
+    return buildVolatilitySignal(input, "LONG", { a: pumpA, b: pumpB, c: pumpC }, { rules });
   }
   if (crashA || crashB || crashC) {
-    return buildVolatilitySignal(input, "SHORT", { a: crashA, b: crashB, c: crashC });
+    return buildVolatilitySignal(input, "SHORT", { a: crashA, b: crashB, c: crashC }, { rules });
   }
   return null;
 }
 
 export function evaluateRestVolatilitySignal(
   input: VolatilityInput,
+  rules: VolatilityRules = DEFAULT_VOLATILITY_RULES,
 ): VolatilitySignal | null {
   const rolling = Number(input.pct25m ?? input.pct5m) || 0;
   const candle5m = Number(input.candle5mPct ?? input.pct5m) || 0;
-  const pumpA = rolling >= 6 && input.streakGreen >= 3 && input.volRatio5m >= 2;
-  const crashA = rolling <= -6 && input.streakRed >= 2 && input.volRatio5m >= 3;
+  const pumpA =
+    rolling >= rules.pumpMinPct && input.streakGreen >= 3 && input.volRatio5m >= 2;
+  const crashA =
+    rolling <= rules.crashMinPct && input.streakRed >= 2 && input.volRatio5m >= 3;
   const pumpB =
     candle5m >= 5 && fastMoveDirectionOk("LONG", candle5m, rolling) && input.volRatio5m >= 2;
   const crashB =
@@ -246,14 +270,14 @@ export function evaluateRestVolatilitySignal(
       b: pumpB,
       c: pumpC,
       d: pumpD,
-    }, { bWindow: "5m" });
+    }, { bWindow: "5m", rules });
   }
   if (crashA || crashB || crashC) {
     return buildVolatilitySignal(
       input,
       "SHORT",
       { a: crashA, b: crashB, c: crashC },
-      { bWindow: "5m" },
+      { bWindow: "5m", rules },
     );
   }
   return null;
@@ -269,6 +293,7 @@ export interface VolatilitySignalState {
 export function transitionVolatilityState(
   previous: VolatilitySignalState | null,
   event: { triggered: boolean; strength: number; recovered: boolean; now: number },
+  rules: VolatilityRules = DEFAULT_VOLATILITY_RULES,
 ) {
   if (!event.triggered) {
     return event.recovered
@@ -276,7 +301,7 @@ export function transitionVolatilityState(
       : { send: false, next: previous };
   }
   const strength = Math.abs(Number(event.strength) || 0);
-  const level = signalLevel(strength);
+  const level = signalLevel(strength, rules);
   if (!previous) {
     return {
       send: true,

@@ -275,7 +275,7 @@ try {
     client,
     store,
     nowMs: TEST_NOW_MS,
-    config: { restTopN: 2, restCoreN: 2, minFdvUsd: 10_000_000 },
+    config: { restTopN: 2, restCoreN: 2, minFdvUsd: 10_000_000, minQuoteVolumeUsd: 0 },
     writeChart: async (input) => {
       chartWrites.push(input);
       return {
@@ -315,6 +315,41 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 
+// Liquidity gate: the same BTC pump (fixture 24h turnover 7,000 USDT) must be
+// skipped below the minimum quote volume and alert once the floor is met.
+for (const [minQuoteVolumeUsd, expectedAlerts] of [[10_000_000, 0], [5_000, 1]]) {
+  const liquidityDirectory = mkdtempSync(join(tmpdir(), "market-alerts-liquidity-"));
+  let liquidityStore;
+  try {
+    liquidityStore = openMarketAlertsStore(join(liquidityDirectory, "alerts.sqlite"));
+    let deliveries = 0;
+    const result = await runVolatilityRestScan({
+      client: {
+        getExchangeInfo: async () => exchangeInfo,
+        getTickers24h: async () => tickers.filter((ticker) => ticker.symbol === "BTCUSDT"),
+        getKlines: async (_symbol, interval) => interval === "5m" ? pumpKlines5m() : pump1m,
+        getFullyDilutedValuation: async () => 20_000_000,
+      },
+      store: liquidityStore,
+      nowMs: TEST_NOW_MS,
+      config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000, minQuoteVolumeUsd },
+      deliverAlert: async () => {
+        deliveries += 1;
+        return { status: "sent", messageId: 7 };
+      },
+    });
+    assert.equal(result.alerts, expectedAlerts, `min quote volume ${minQuoteVolumeUsd}`);
+    assert.equal(deliveries, expectedAlerts, "a liquidity-blocked pump must not be delivered");
+    const events = liquidityStore.getMarketAlertsSnapshot({
+      now: new Date(TEST_NOW_MS).toISOString(),
+    }).events;
+    assert.equal(events.length, expectedAlerts, "a liquidity-blocked pump must not be stored");
+  } finally {
+    liquidityStore?.close();
+    rmSync(liquidityDirectory, { recursive: true, force: true });
+  }
+}
+
 const chartOrderingDirectory = mkdtempSync(join(tmpdir(), "market-alerts-chart-order-"));
 let chartOrderingStore;
 try {
@@ -340,7 +375,7 @@ try {
     },
     store: chartOrderingStore,
     nowMs: TEST_NOW_MS,
-    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000 },
+    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000, minQuoteVolumeUsd: 0 },
     deliverAlert: async () => {
       deliveries += 1;
       return { status: "sent", messageId: 41 };
@@ -385,7 +420,7 @@ try {
     },
     store: chartFailureStore,
     nowMs: TEST_NOW_MS,
-    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000 },
+    config: { restTopN: 1, restCoreN: 1, minFdvUsd: 10_000_000, minQuoteVolumeUsd: 0 },
     writeChart: async (input) => {
       chartAttempts += 1;
       if (chartAttempts === 1) throw new Error("chart disk unavailable");
@@ -572,6 +607,7 @@ try {
       restTopN: 1,
       restCoreN: 1,
       restExtendedIntervalMin: 1,
+      minQuoteVolumeUsd: 0,
     },
   });
   assert.equal(result.universe, 2);
@@ -727,7 +763,7 @@ function websocketClient() {
       },
       store: earlySocketStore,
       once: true,
-      config: { wsTopN: 1, wsFirstMessageTimeoutMs: 100, wsRankRefreshMs: 1_000 },
+      config: { wsTopN: 1, wsFirstMessageTimeoutMs: 100, wsRankRefreshMs: 1_000, minQuoteVolumeUsd: 0 },
       createWebSocket: () => {
         markSocketCreated();
         return new FakeWebSocket(JSON.stringify({
@@ -760,6 +796,7 @@ try {
       wsTopN: 1,
       wsFirstMessageTimeoutMs: 100,
       wsRankRefreshMs: 10,
+      minQuoteVolumeUsd: 0,
     },
     createWebSocket: () =>
       new ReasonlessCloseWebSocket(
@@ -779,6 +816,7 @@ try {
       wsTopN: 1,
       wsFirstMessageTimeoutMs: 100,
       wsRankRefreshMs: 1_000,
+      minQuoteVolumeUsd: 0,
     },
     createWebSocket: () =>
       new FakeWebSocket(
@@ -864,6 +902,7 @@ try {
       wsFirstMessageTimeoutMs: 100,
       wsRankRefreshMs: 1_000,
       minFdvUsd: 10_000_000,
+      minQuoteVolumeUsd: 0,
     },
     writeChart: async (input) => {
       burstChartWrites.push(input);
@@ -913,6 +952,7 @@ try {
         wsTopN: 1,
         wsFirstMessageTimeoutMs: 5,
         wsRankRefreshMs: 1_000,
+        minQuoteVolumeUsd: 0,
       },
       createWebSocket: () => new FakeWebSocket(null),
     }),
@@ -969,6 +1009,7 @@ try {
       wsTopN: 1,
       wsFirstMessageTimeoutMs: 200,
       wsRankRefreshMs: 1_000,
+      minQuoteVolumeUsd: 0,
     },
     writeChart: async (input) => {
       chartWrites.push(input);

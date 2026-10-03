@@ -583,7 +583,17 @@ async function isFdvEligible(
   market: SelectedMarket,
   client: BinanceMarketClient,
   minFdvUsd: number,
+  minQuoteVolumeUsd = 0,
 ) {
+  // A thin contract can spike on a single taker order; require real 24h
+  // turnover before FDV/CMC checks so low-liquidity wicks never alert.
+  if (
+    minQuoteVolumeUsd > 0 &&
+    Number.isFinite(market.quoteVolume) &&
+    market.quoteVolume < minQuoteVolumeUsd
+  ) {
+    return false;
+  }
   if (isTradFiContract(market.meta) || !client.getFullyDilutedValuation) return true;
   const fdv = await client.getFullyDilutedValuation(market.symbol, market.price);
   return fdv === null || !Number.isFinite(fdv) || fdv <= 0 || fdv >= minFdvUsd;
@@ -881,7 +891,7 @@ export async function runVolatilityRestScan(input: {
           ticker: tickers.find((ticker) => stringValue(ticker.symbol) === market.symbol),
           nowMs,
         });
-        const signal = evaluateRestVolatilitySignal(metrics);
+        const signal = evaluateRestVolatilitySignal(metrics, config.volatilityRules);
         const recoveryCalm = isVolatilityRecoveryCalm(metrics);
         if (signal?.side !== "LONG" && recoveryCalm) {
           store.recoverVolatilityAlert(`LONG:${market.symbol}`, nowMs);
@@ -905,7 +915,13 @@ export async function runVolatilityRestScan(input: {
           onDeliveryError: (error) => {
             latestError = safeError(error);
           },
-          isEligible: () => isFdvEligible(market, client, config.minFdvUsd),
+          isEligible: () =>
+            isFdvEligible(
+              market,
+              client,
+              config.minFdvUsd,
+              config.minQuoteVolumeUsd,
+            ),
         });
       } catch (error) {
         latestError = safeError(error);
@@ -1401,7 +1417,12 @@ export async function startVolatilityWebSocketWorker(input: {
       const nowMs = Date.now();
       const cached = fdvCache.get(market.symbol);
       if (cached && cached.expiresAt > nowMs) return cached.eligible;
-      const eligible = await isFdvEligible(market, client, config.minFdvUsd);
+      const eligible = await isFdvEligible(
+        market,
+        client,
+        config.minFdvUsd,
+        config.minQuoteVolumeUsd,
+      );
       fdvCache.set(market.symbol, {
         eligible,
         expiresAt: nowMs + 10 * 60 * 1000,
@@ -1508,7 +1529,7 @@ export async function startVolatilityWebSocketWorker(input: {
             ticker: item.ticker,
             nowMs,
           });
-          const signal = evaluateWsVolatilitySignal(metrics);
+          const signal = evaluateWsVolatilitySignal(metrics, config.volatilityRules);
           const recoveryCalm = isVolatilityRecoveryCalm(metrics);
           if (signal?.side !== "LONG" && recoveryCalm) {
             store.recoverVolatilityAlert(`LONG:${symbol}`, nowMs);

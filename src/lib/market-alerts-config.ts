@@ -62,10 +62,20 @@ export function getMarketAlertsConfig(env: EnvLike = process.env) {
     ),
     squeezeWorkers: positiveInteger(env.MARKET_ALERTS_SQUEEZE_WORKERS, 12),
     minFdvUsd: positiveNumber(env.MARKET_ALERTS_MIN_FDV_USD, 10_000_000),
+    minQuoteVolumeUsd: positiveNumber(
+      env.MARKET_ALERTS_MIN_QUOTE_VOLUME_USD,
+      10_000_000,
+    ),
     minOiNotional: positiveNumber(
       env.MARKET_ALERTS_SQUEEZE_MIN_OI_USD,
       2_000_000,
     ),
+    volatilityRules: {
+      level2MinPct: positiveNumber(env.MARKET_ALERTS_VOLATILITY_LEVEL2_PCT, 12),
+      level3MinPct: positiveNumber(env.MARKET_ALERTS_VOLATILITY_LEVEL3_PCT, 20),
+      pumpMinPct: positiveNumber(env.MARKET_ALERTS_VOLATILITY_PUMP_PCT, 6),
+      crashMinPct: -positiveNumber(env.MARKET_ALERTS_VOLATILITY_CRASH_PCT, 6),
+    },
     requestTimeoutMs: positiveInteger(env.MARKET_ALERTS_REQUEST_TIMEOUT_MS, 15_000),
     requestSpacingMs: nonNegativeInteger(
       env.MARKET_ALERTS_BINANCE_REQUEST_SPACING_MS,

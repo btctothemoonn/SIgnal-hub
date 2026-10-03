@@ -8,6 +8,13 @@ assert.equal(defaults.restTopN, 200);
 assert.equal(defaults.restCoreN, 50);
 assert.equal(defaults.squeezeTopN, 120);
 assert.equal(defaults.minFdvUsd, 10_000_000);
+assert.equal(defaults.minQuoteVolumeUsd, 10_000_000);
+assert.deepEqual(defaults.volatilityRules, {
+  level2MinPct: 12,
+  level3MinPct: 20,
+  pumpMinPct: 6,
+  crashMinPct: -6,
+});
 assert.equal(defaults.wsFirstMessageTimeoutMs, 20_000);
 assert.equal(defaults.wsBaseUrl, "wss://fstream.binance.com/market");
 assert.equal(defaults.requestSpacingMs, 100);
@@ -26,6 +33,11 @@ const configured = getMarketAlertsConfig({
   MARKET_ALERTS_BINANCE_RETRY_BASE_MS: "1500",
   MARKET_ALERTS_CHART_BACKFILL_PER_SCAN: "6",
   MARKET_ALERTS_CHART_BACKFILL_HOURS: "72",
+  MARKET_ALERTS_MIN_QUOTE_VOLUME_USD: "30000000",
+  MARKET_ALERTS_VOLATILITY_LEVEL2_PCT: "8",
+  MARKET_ALERTS_VOLATILITY_LEVEL3_PCT: "15",
+  MARKET_ALERTS_VOLATILITY_PUMP_PCT: "4.5",
+  MARKET_ALERTS_VOLATILITY_CRASH_PCT: "3.5",
 });
 assert.equal(configured.enabled, false);
 assert.equal(configured.restTopN, 80);
@@ -37,6 +49,14 @@ assert.equal(configured.requestSpacingMs, 125);
 assert.equal(configured.requestRetryBaseMs, 1500);
 assert.equal(configured.chartBackfillPerScan, 6);
 assert.equal(configured.chartBackfillHours, 72);
+assert.equal(configured.minQuoteVolumeUsd, 30_000_000);
+// Crash is configured as a positive magnitude and stored negated.
+assert.deepEqual(configured.volatilityRules, {
+  level2MinPct: 8,
+  level3MinPct: 15,
+  pumpMinPct: 4.5,
+  crashMinPct: -3.5,
+});
 
 assert.equal(
   getMarketAlertsConfig({

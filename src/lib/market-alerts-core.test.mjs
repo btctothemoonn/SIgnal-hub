@@ -38,6 +38,9 @@ assert.equal(isStableOrFiatBase("BTC"), false);
 assert.equal(signalLevel(6), 1);
 assert.equal(signalLevel(12), 2);
 assert.equal(signalLevel(20), 3);
+// Volatility thresholds are tunable; defaults must reproduce the original cutoffs.
+assert.equal(signalLevel(6, { level2MinPct: 4, level3MinPct: 8 }), 2);
+assert.equal(signalLevel(9, { level2MinPct: 4, level3MinPct: 8 }), 3);
 assert.equal(fastMoveDirectionOk("LONG", 6, -1), false);
 assert.equal(fastMoveDirectionOk("SHORT", -6, -1), true);
 assert.equal(isVolatilityRecoveryCalm({ pct1m: 1.8, pct25m: -1.9 }), true);
@@ -62,6 +65,52 @@ assert.match(wsPump?.trigger ?? "", /A趋势/);
 assert.match(wsPump?.trigger ?? "", /B加速/);
 assert.equal(wsPump?.level, 1);
 assert.equal(wsPump?.chartInterval, "5m");
+
+// A stricter pump floor suppresses the same input; a looser one lets a quieter
+// symbol through, proving the env-tunable rules actually drive the decision.
+const quieterPump = {
+  symbol: "BTCUSDT",
+  price: 100,
+  pct1m: 4.2,
+  pct5m: 4.4,
+  pct24h: 7,
+  streakGreen: 3,
+  streakRed: 0,
+  volRatio1m: 2.3,
+  volRatio5m: 2.1,
+  k1Closed: false,
+  k5Closed: true,
+};
+assert.equal(evaluateWsVolatilitySignal(quieterPump), null, "defaults ignore a 4.4% move");
+assert.equal(
+  evaluateWsVolatilitySignal(quieterPump, { level2MinPct: 12, level3MinPct: 20, pumpMinPct: 8, crashMinPct: -8 }),
+  null,
+  "raising the pump floor must suppress an otherwise eligible move",
+);
+assert.equal(
+  evaluateWsVolatilitySignal(quieterPump, { level2MinPct: 12, level3MinPct: 20, pumpMinPct: 4, crashMinPct: -4 })?.side,
+  "LONG",
+  "lowering the pump floor must admit a quieter move",
+);
+// The crash floor gates the trend channel (crashA). The 1m acceleration channel
+// (crashB) is intentionally floor-independent, so assert on the trend path: the
+// same drop is reported with the default floor and suppressed when raised.
+const crashTrendInput = { ...quieterPump, pct1m: -1, pct5m: -7, streakGreen: 0, streakRed: 2, volRatio1m: 1, volRatio5m: 3.2 };
+assert.equal(
+  evaluateWsVolatilitySignal(crashTrendInput)?.side,
+  "SHORT",
+  "default floor reports a 7% drop with a red streak and volume",
+);
+assert.equal(
+  evaluateWsVolatilitySignal(crashTrendInput, { level2MinPct: 12, level3MinPct: 20, pumpMinPct: 6, crashMinPct: -8 }),
+  null,
+  "raising the crash floor must suppress a drop that defaults would report",
+);
+assert.equal(
+  evaluateWsVolatilitySignal(crashTrendInput, { level2MinPct: 4, level3MinPct: 8, pumpMinPct: 6, crashMinPct: -4 })?.level,
+  2,
+  "lowering the level tiers must upgrade the same drop",
+);
 
 const wsAcceleration = evaluateWsVolatilitySignal({
   symbol: "BULLAUSDT",
