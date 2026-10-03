@@ -14,6 +14,8 @@ import {
 import { getDailyBriefGroup } from "./daily-brief-display.ts";
 import { collectIndependentDailyBriefCandidates } from "./daily-brief-independent-sources.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
+import { createImportantNewsPushStore, canonicalNewsPushUrl, isTrustedNewsPushUrl, normalizePushAssessment, normalizedNewsPushTitle } from "./important-news-push.ts";
+import type { SourceTimeBasis, PushAssessment, ValidatedNewsSource } from "./important-news-push.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type DbRow = Record<string, unknown>;
@@ -52,6 +54,7 @@ export type DailyBriefCandidate = {
   summary?: string | null;
   url: string;
   publishedAt: string;
+  publicationTimeBasis?: SourceTimeBasis;
   imageUrl: string | null;
   language: string | null;
   country: string | null;
@@ -63,6 +66,10 @@ export type DailyBriefItem = {
   title: string;
   topic: DailyBriefTopic | string;
   candidateIndexes?: number[];
+  pushAssessment?: PushAssessment;
+  validatedSources?: ValidatedNewsSource[];
+  pushAssessedAt?: string;
+  pushEventId?: string;
   sourceNames: string[];
   sourceUrls: string[];
   imageUrl: string | null;
@@ -470,6 +477,7 @@ function normalizeGdeltArticles(
         title,
         url,
         publishedAt: parseGdeltSeenDate(record.seendate, now),
+        publicationTimeBasis: /^\d{8}T?\d{6}Z?$/.test(stringValue(record.seendate).trim()) ? "discovery" : "fallback",
         imageUrl: safeHttpUrl(record.socialimage),
         language: nullableString(record.language),
         country: nullableString(record.sourcecountry),
@@ -539,9 +547,8 @@ export async function collectDailyBriefCandidates({
       byUrl.set(candidate.id, candidate);
       continue;
     }
-    if (!existing.imageUrl && candidate.imageUrl) {
-      byUrl.set(candidate.id, { ...existing, imageUrl: candidate.imageUrl });
-    }
+    const preferred = candidate.publicationTimeBasis === "publication" && existing.publicationTimeBasis !== "publication" ? candidate : existing;
+    byUrl.set(candidate.id, { ...preferred, imageUrl: preferred.imageUrl ?? existing.imageUrl ?? candidate.imageUrl });
   }
 
   const byRecency = (left: DailyBriefCandidate, right: DailyBriefCandidate) =>
@@ -629,6 +636,8 @@ export function buildDailyBriefPrompt({
 - 每条都要有: 标题、配图、发生了什么、投资影响、后续关注什么。
 - 每条必须用 candidateIndexes 引用候选新闻前的编号；不要改写编号，不要编造链接。系统会按编号回填真实来源。
 - 当天现有简报没有本轮 candidateIndexes；不要为旧条目猜编号，只能给本轮候选新闻填写本轮编号。
+- 对非常重要的新事实填写 pushAssessment：只有“已公布的重大政策决定”“系统性市场或基础设施风险”“已证实的重大安全事故”“关键公司的重大正式公告”可 exceptional=true，且 importance 必须 high。普通评论、预测、例行更新和证据不足均为 false。
+- pushAssessment.fact 和 impact 必须来自实际候选素材，给出简短已证实事实、重大影响及本轮 candidateIndexes；不得填写来源时间、validatedSources 或为旧条目重新猜引用。
 - 输出中文，直接返回 JSON，不要 Markdown。
 
 JSON 结构:
@@ -642,6 +651,7 @@ JSON 结构:
       "title": "string",
       "topic": "${DAILY_BRIEF_TOPICS[0]}",
       "candidateIndexes": [1],
+      "pushAssessment": {"exceptional": false, "category": null, "fact": "已证实的新事实", "impact": "重大影响", "candidateIndexes": [1]},
       "sourceNames": ["Reuters"],
       "sourceUrls": [],
       "imageUrl": "https://... or null",
@@ -786,6 +796,7 @@ function normalizeDailyBriefRecord(
         return {
           rank: Math.max(1, Math.round(Number(record.rank) || index + 1)),
           importance: normalizeImportance(record.importance),
+          pushAssessment: normalizePushAssessment(record.pushAssessment),
           title,
           topic: clampText(record.topic, 80) || DAILY_BRIEF_TOPICS[0],
           candidateIndexes: Array.isArray(record.candidateIndexes)
@@ -847,6 +858,7 @@ function sanitizeBriefForCandidates(
   brief: DailyBriefContent,
   candidates: DailyBriefCandidate[],
   maxItemsPerGroup = DEFAULT_MAX_ITEMS_PER_GROUP,
+  options: { assessedAt: string; env: EnvLike; previous: DailyBriefContent | null } = { assessedAt: "", env: {}, previous: null },
 ): DailyBriefContent {
   const candidateByCanonicalUrl = new Map(
     candidates.map((candidate) => [candidate.id, candidate] as const),
@@ -873,12 +885,29 @@ function sanitizeBriefForCandidates(
       );
       if (matchedCandidates.length === 0) return null;
 
+      const assessment = normalizePushAssessment(item.pushAssessment);
+      const assessmentCandidates = (assessment?.candidateIndexes ?? []).map(index => candidates[index - 1]);
+      const trustedDomains = [...getAllowedDailyBriefDomains(options.env), "theblockbeats.info", "theblockbeats.news"];
+      const validReferences = assessmentCandidates.length > 0 && assessmentCandidates.every(candidate => candidate &&
+        matchedCandidates.some(match => match.id === candidate.id) && isTrustedNewsPushUrl(candidate.url, trustedDomains));
+      const fabricatedUrls = item.sourceUrls.some(url => !candidates.some(candidate => canonicalUrl(candidate.url) === canonicalUrl(url)));
+      const previousMatch = options.previous?.items.find(previous => normalizedNewsPushTitle(previous.title) === normalizedNewsPushTitle(item.title));
+      const unrelatedOldTitle = previousMatch && !previousMatch.sourceUrls.some(url => matchedCandidates.some(candidate => canonicalNewsPushUrl(candidate.url) === canonicalNewsPushUrl(url)));
+      const validatedSources: ValidatedNewsSource[] = validReferences ? assessmentCandidates.map(candidate => ({
+        sourceId: candidate.id, canonicalUrl: canonicalNewsPushUrl(candidate.url)!, source: candidate.source,
+        publishedAt: candidate.publicationTimeBasis === "publication" && Number.isFinite(Date.parse(candidate.publishedAt)) ? candidate.publishedAt : null,
+        timeBasis: candidate.publicationTimeBasis ?? "fallback",
+      })) : [];
+
       const imageUrl =
         matchedCandidates.find((candidate) => candidate.imageUrl)?.imageUrl ??
         null;
 
       return {
         ...item,
+        pushAssessment: assessment ? { ...assessment, exceptional: assessment.exceptional && validReferences && !fabricatedUrls && !unrelatedOldTitle } : undefined,
+        validatedSources,
+        pushAssessedAt: options.assessedAt,
         sourceNames: uniqueStrings(
           matchedCandidates.map((candidate) => candidate.source),
         ),
@@ -1022,6 +1051,7 @@ function openDailyBriefDb(path = getDailyBriefDbPath()) {
   const db = new DatabaseSync(path);
   db.exec("pragma journal_mode = wal");
   db.exec("pragma synchronous = normal");
+  db.exec("pragma busy_timeout = 10000");
   db.exec(`
     create table if not exists daily_brief_cache (
       date_key text primary key,
@@ -1032,6 +1062,7 @@ function openDailyBriefDb(path = getDailyBriefDbPath()) {
       updated_at text not null
     )
   `);
+  createImportantNewsPushStore(db);
   return db;
 }
 
@@ -1100,6 +1131,40 @@ function writeCachedBrief(snapshot: DailyBriefSnapshot, inputHash: string, db: D
     snapshot.generatedAt,
     now,
   );
+}
+
+function commitGeneratedDailyBrief(snapshot: DailyBriefSnapshot, inputHash: string, db: DatabaseSync, nowMs: number) {
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const augmented = createImportantNewsPushStore(db).appendGeneratedBrief(snapshot, nowMs).snapshot;
+    writeCachedBrief(augmented, inputHash, db);
+    db.exec("COMMIT;");
+    return augmented;
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+export function readDailyBriefPushOutboxAfter(sequence: number, limit: number, env: EnvLike = process.env) {
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try { return createImportantNewsPushStore(db).readAfter(sequence, limit); } finally { db.close(); }
+}
+export function getDailyBriefPushBaseline(env: EnvLike = process.env) {
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try { return createImportantNewsPushStore(db).getBaseline(); } finally { db.close(); }
+}
+export function readDailyBriefPushEvidence(eventId: string, env: EnvLike = process.env) {
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try { return createImportantNewsPushStore(db).readEvidence(eventId); } finally { db.close(); }
+}
+export function getDailyInvestmentBriefForPush(eventId: string, env: EnvLike = process.env): DailyBriefSnapshot | null {
+  if (!/^news:[a-f0-9]{32}$/.test(eventId)) return null;
+  const db = openDailyBriefDb(getDailyBriefDbPath(env));
+  try {
+    const snapshot = createImportantNewsPushStore(db).readSnapshot(eventId);
+    return snapshot?.success && snapshot.brief ? { ...snapshot, status: 'cached' } : null;
+  } finally { db.close(); }
 }
 
 function writeFailedDailyBriefAttempt({
@@ -1212,6 +1277,8 @@ async function runDailyBriefAi({
   env,
   maxItemsPerGroup,
   requestBrief,
+  assessedAt,
+  existingBrief,
 }: {
   prompt: string;
   period: DailyBriefPeriod;
@@ -1219,6 +1286,8 @@ async function runDailyBriefAi({
   env: EnvLike;
   maxItemsPerGroup: number;
   requestBrief?: DailyBriefRequestDeps["requestBrief"];
+  assessedAt: string;
+  existingBrief: DailyBriefContent | null;
 }) {
   const providers = getAlphaSummaryProviderCandidates(env);
   const result = await runWithAiProviderFallback({
@@ -1245,6 +1314,7 @@ async function runDailyBriefAi({
       result.value,
       candidates,
       maxItemsPerGroup,
+      { assessedAt, env, previous: existingBrief },
     ),
     provider: result.provider,
   };
@@ -1455,6 +1525,8 @@ export async function getOrCreateDailyInvestmentBrief({
         env,
         maxItemsPerGroup,
         requestBrief,
+        assessedAt: now.toISOString(),
+        existingBrief: cachedSameDayBrief,
       });
       const consolidatedBrief = mergeDailyBriefContent(
         brief,
@@ -1475,8 +1547,7 @@ export async function getOrCreateDailyInvestmentBrief({
         lastAttemptAt: now.toISOString(),
         error: null,
       };
-      writeCachedBrief(snapshot, inputHash, db);
-      return snapshot;
+      return commitGeneratedDailyBrief(snapshot, inputHash, db, now.getTime());
     } catch (error) {
       const snapshot: DailyBriefSnapshot = {
         success: false,

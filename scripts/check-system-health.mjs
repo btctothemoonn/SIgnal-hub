@@ -5,7 +5,7 @@ import {
   getSystemHealthSnapshot,
   systemHealthStatusRank,
 } from "../src/lib/system-health.ts";
-import { SIGNAL_HUB_SYSTEMD_SERVICES } from "../src/lib/signal-hub-services.ts";
+import { getEnabledSignalHubSystemdServices } from "../src/lib/signal-hub-services.ts";
 
 const args = new Set(process.argv.slice(2));
 const strict = args.has("--strict");
@@ -28,7 +28,7 @@ function systemctlIsActive({ label, name }) {
 
 async function readSystemdServiceStates() {
   if (process.platform !== "linux") return [];
-  return Promise.all(SIGNAL_HUB_SYSTEMD_SERVICES.map(systemctlIsActive));
+  return Promise.all(getEnabledSignalHubSystemdServices().map(systemctlIsActive));
 }
 
 function lineForItem(item) {

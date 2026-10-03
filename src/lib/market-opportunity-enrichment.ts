@@ -1,6 +1,7 @@
 import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
 import type { MarketOpportunityMetrics } from "./market-opportunity-core.ts";
 import type { BinanceMarketClient } from "./market-alerts-binance.ts";
+import { buildPushCandleWindow, pushSourceTime, type OpportunityPushEvidence, type PushCandleWindow } from "./market-push-freshness.ts";
 import type {
   MarketOpportunitySeed,
   StoredOpportunityEnrichment,
@@ -89,7 +90,7 @@ function openInterestMetrics(
     .sort((left, right) => Number(left.timestamp) - Number(right.timestamp));
   const latest = samples.at(-1);
   if (!latest || nowMs - Number(latest.timestamp) > 5 * 60_000) {
-    return { growth: null, notional: null };
+    return { growth: null, notional: null, observedAt: pushSourceTime(latest?.timestamp) };
   }
   const prior = samples.find(
     (row) => Number(row.timestamp) === Number(latest.timestamp) - 15 * 60_000,
@@ -102,6 +103,7 @@ function openInterestMetrics(
   const quantity = numberValue(latest?.sumOpenInterest);
   return {
     growth,
+    observedAt: pushSourceTime(latest.timestamp),
     notional:
       directNotional ??
       (quantity !== null && price !== null ? quantity * price : null),
@@ -183,6 +185,7 @@ export function deriveOpportunityMetrics(input: {
   takerBuySellRatio: number | null;
   observedAt: string;
   stale?: boolean;
+  pushEvidence?: OpportunityPushEvidence;
 }): MarketOpportunityMetrics {
   const latestPrice = close(input.futures5m.at(-1)) ?? input.seed.price;
   const prior20 = input.futures5m.slice(-21, -1);
@@ -206,6 +209,7 @@ export function deriveOpportunityMetrics(input: {
     symbol: input.seed.symbol,
     observedAt: input.observedAt,
     stale: input.stale ?? false,
+    pushEvidence: input.pushEvidence,
     pct1m: changeForIntervals(input.futures1m, 1),
     pct5m: changeForIntervals(input.futures5m, 1),
     pct15m: futures15m,
@@ -357,19 +361,40 @@ export async function enrichOpportunitySeeds(input: {
           errors.push(safeError(error));
           return [];
         }) ?? [];
-        const globalLongShortRatio = await input.client.getGlobalLongShortRatio?.(seed.symbol).catch((error) => {
+        const positioning = input.client.getSqueezePositioning
+          ? await input.client.getSqueezePositioning(seed.symbol).catch((error) => {
+              errors.push(safeError(error));
+              return null;
+            }) : null;
+        const globalLongShortRatio = positioning ? positioning.global.value : await input.client.getGlobalLongShortRatio?.(seed.symbol).catch((error) => {
           errors.push(safeError(error));
           return null;
         }) ?? null;
-        const topTraderLongShortRatio = await input.client.getTopTraderPositionRatio?.(seed.symbol).catch((error) => {
+        const topTraderLongShortRatio = positioning ? positioning.top.value : await input.client.getTopTraderPositionRatio?.(seed.symbol).catch((error) => {
           errors.push(safeError(error));
           return null;
         }) ?? null;
-        const takerBuySellRatio = await input.client.getTakerBuySellRatio?.(seed.symbol).catch((error) => {
+        const takerBuySellRatio = positioning ? positioning.taker.value : await input.client.getTakerBuySellRatio?.(seed.symbol).catch((error) => {
           errors.push(safeError(error));
           return null;
         }) ?? null;
         const spot = await input.client.getSpotContext?.(seed.symbol).catch(() => null) ?? null;
+        const currentOi = openInterestMetrics(openInterest, close(fiveMinuteResult.at(-1)) ?? seed.price, nowMs);
+        const sourceTimes: Record<string, string | null> = { futures5m: observedAt, futures1m: observedAt };
+        const sources: Array<[string, string | null, number | null]> = [
+          ['funding', pushSourceTime(premium?.time), numberValue(premium?.lastFundingRate)],
+          ['basis', pushSourceTime(premium?.time), percent(numberValue(premium?.markPrice), numberValue(premium?.indexPrice))],
+          ['oiGrowth15m', currentOi.observedAt, currentOi.growth],
+          ['oiNotional', currentOi.observedAt, currentOi.notional],
+          ['globalLongShortRatio', positioning?.global.observedAt ?? null, globalLongShortRatio],
+          ['topTraderLongShortRatio', positioning?.top.observedAt ?? null, topTraderLongShortRatio],
+          ['takerBuySellRatio', positioning?.taker.observedAt ?? null, takerBuySellRatio],
+        ];
+        for (const [field, fetchedTime, value] of sources) {
+          if (value !== null) sourceTimes[field] = fetchedTime;
+        }
+        const candles: PushCandleWindow[] = [buildPushCandleWindow(fiveMinuteResult, 300000, 27), buildPushCandleWindow(oneMinuteResult, 60000, 21)];
+        if (spot?.klines5m?.length) { sourceTimes.spot5m = observedAt; candles.push(buildPushCandleWindow(spot.klines5m, 300000, 27)); }
         const metrics = deriveOpportunityMetrics({
           seed,
           futures5m: fiveMinuteResult,
@@ -381,6 +406,7 @@ export async function enrichOpportunitySeeds(input: {
           topTraderLongShortRatio,
           takerBuySellRatio,
           observedAt,
+          pushEvidence: { sourceTimes, candles },
         });
         return {
           symbol: seed.symbol,

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { SystemHealthPanel } from "@/components/system-health-panel";
+import { ImportantPushSettings } from "@/components/important-push-settings";
 
 type WatchItem = { ref: string; tags: string[] };
 
@@ -114,8 +115,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-type Kind = "telegram" | "twitter" | "douyin" | "ai" | "health" | "general";
-type WatchKind = Exclude<Kind, "ai" | "health" | "general">;
+type Kind = "telegram" | "twitter" | "douyin" | "ai" | "health" | "general" | "notifications";
+type WatchKind = Exclude<Kind, "ai" | "health" | "general" | "notifications">;
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -185,6 +186,7 @@ export default function SettingsPage() {
     { kind: "douyin", title: "抖音博主", count: douyinItems.length },
     { kind: "ai", title: "AI 配置" },
     { kind: "health", title: "信息健康" },
+    { kind: "notifications", title: "重要通知" },
     { kind: "general", title: "通用" },
   ];
 
@@ -257,6 +259,8 @@ export default function SettingsPage() {
               <div className="rounded-lg border border-line/70 bg-panel-strong p-6 text-sm text-muted shadow-sm">
                 加载中...
               </div>
+            ) : activeKind === "notifications" ? (
+              <ImportantPushSettings />
             ) : activeKind === "health" ? (
               <SystemHealthPanel />
             ) : activeKind === "ai" ? (

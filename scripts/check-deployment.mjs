@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
 import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../src/lib/admin-auth.ts";
+import { webPushHealthItem } from "../src/lib/system-health.ts";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
 const base = "http://127.0.0.1:3000";
@@ -16,6 +17,7 @@ for (let attempt = 0; attempt < 15; attempt += 1) {
     if (!Array.isArray(payload.feed)) throw new Error("readiness response missing feed");
     const login = await fetch(`${base}/login`, { signal: AbortSignal.timeout(5000) });
     if (!login.ok) throw new Error(`login HTTP ${login.status}`);
+    if (process.env.WEB_PUSH_ENABLED === "true" && webPushHealthItem().status !== "ok") throw new Error("push_readiness_failed");
     console.log("Deployment ready: authenticated feed and login page respond successfully.");
     process.exit(0);
   } catch (error) {

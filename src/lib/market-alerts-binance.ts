@@ -11,12 +11,17 @@ import {
   squeezeRecoveryDecision,
 } from "./market-alerts-core.ts";
 import type { VolatilitySignal } from "./market-alerts-core.ts";
+import { qualifySqueeze, qualifySqueezeRecovery } from "./important-push-policy.ts";
+import { buildPushCandleWindow } from "./market-push-freshness.ts";
+import type { MarketPushObservation } from "./important-push-types.ts";
 import { isUncertainMarketAlertDeliveryError } from "./market-alerts-delivery.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 
 type Store = ReturnType<typeof openMarketAlertsStore>;
 type JsonRecord = Record<string, unknown>;
 type KlineRow = unknown[];
+type TimedSqueezeRatio = { value: number | null; observedAt: string | null };
+export type SqueezePositioning = { global: TimedSqueezeRatio; top: TimedSqueezeRatio; taker: TimedSqueezeRatio };
 
 export type MarketValuation = {
   symbol: string;
@@ -40,6 +45,7 @@ export interface BinanceMarketClient {
   getGlobalLongShortRatio?(symbol: string): Promise<number | null>;
   getTopTraderPositionRatio?(symbol: string): Promise<number | null>;
   getTakerBuySellRatio?(symbol: string): Promise<number | null>;
+  getSqueezePositioning?(symbol: string): Promise<SqueezePositioning>;
   getSpotContext?(symbol: string): Promise<{
     ticker: JsonRecord | null;
     klines5m: KlineRow[];
@@ -307,6 +313,19 @@ export function createBinanceFuturesClient(
         period: "5m",
         limit: 5,
       }) as Promise<JsonRecord[]>,
+    async getSqueezePositioning(symbol) {
+      const read = async (path: string, field: string): Promise<TimedSqueezeRatio> => {
+        const rows = await requestJson(path, { symbol, period: "5m", limit: 2 }) as JsonRecord[];
+        const latest = rows.at(-1);
+        return { value: nullableNumber(latest?.[field]), observedAt: sourceTimestampIso(latest?.timestamp) };
+      };
+      const [global, top, taker] = await Promise.all([
+        read("/futures/data/globalLongShortAccountRatio", "longShortRatio"),
+        read("/futures/data/topLongShortPositionRatio", "longShortRatio"),
+        read("/futures/data/takerlongshortRatio", "buySellRatio"),
+      ]);
+      return { global, top, taker };
+    },
     async getGlobalLongShortRatio(symbol) {
       const rows = (await requestJson("/futures/data/globalLongShortAccountRatio", {
         symbol,
@@ -927,6 +946,17 @@ export async function runVolatilityRestScan(input: {
   }
 }
 
+function sourceTimestampIso(value: unknown): string | null {
+  const timestamp = nullableNumber(value);
+  if (timestamp === null || timestamp <= 0 || timestamp > 8.64e15) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function oldestCompleteSourceTime(values: Array<string | null>): string {
+  if (values.some(value => !value || !Number.isFinite(Date.parse(value)))) return "";
+  return new Date(Math.min(...values.map(value => Date.parse(value!)))).toISOString();
+}
+
 function openInterestMetrics(rows: JsonRecord[]) {
   if (!Array.isArray(rows) || rows.length < 4) return null;
   const latest = nullableNumber(rows.at(-1)?.sumOpenInterestValue);
@@ -935,6 +965,7 @@ function openInterestMetrics(rows: JsonRecord[]) {
   return {
     oiNotional: latest,
     oiGrowth15m: ((latest / prior) - 1) * 100,
+    observedAt: sourceTimestampIso(rows.at(-1)?.timestamp),
   };
 }
 
@@ -945,22 +976,26 @@ async function enrichSqueezeMetrics(
     basis: number;
     oiNotional: number;
     oiGrowth15m: number;
+    premiumAt: string | null;
+    openInterestAt: string | null;
   },
   client: BinanceMarketClient,
 ) {
-  if (
+  if (!client.getSqueezePositioning && (
     !client.getGlobalLongShortRatio ||
     !client.getTopTraderPositionRatio ||
     !client.getTakerBuySellRatio
-  ) {
+  )) {
     return null;
   }
-  const [klines, globalLongShortRatio, topTraderLongShortRatio, takerBuySellRatio] =
+  const [klines, positioning] =
     await Promise.all([
       client.getKlines(symbol, "5m", 25),
-      client.getGlobalLongShortRatio(symbol),
-      client.getTopTraderPositionRatio(symbol),
-      client.getTakerBuySellRatio(symbol),
+      client.getSqueezePositioning ? client.getSqueezePositioning(symbol) : Promise.all([
+        client.getGlobalLongShortRatio!(symbol), client.getTopTraderPositionRatio!(symbol), client.getTakerBuySellRatio!(symbol),
+      ]).then(([global, top, taker]): SqueezePositioning => ({
+        global: { value: global, observedAt: null }, top: { value: top, observedAt: null }, taker: { value: taker, observedAt: null },
+      })),
     ]);
   if (klines.length < 22) return null;
   const latest = klines.at(-1)!;
@@ -976,9 +1011,15 @@ async function enrichSqueezeMetrics(
       ? klineQuoteVolume(klines.at(-2)!) / averageQuoteVolume
       : 0,
     breakout20: klineClose(latest) > priorHigh,
-    globalLongShortRatio,
-    topTraderLongShortRatio,
-    takerBuySellRatio,
+    globalLongShortRatio: positioning.global.value,
+    topTraderLongShortRatio: positioning.top.value,
+    takerBuySellRatio: positioning.taker.value,
+    observedAt: oldestCompleteSourceTime([base.premiumAt, base.openInterestAt, positioning.global.observedAt, positioning.top.observedAt, positioning.taker.observedAt]),
+    candleWindow: buildPushCandleWindow(klines, 300000, 22),
+    sourceTimes: { premiumAt: base.premiumAt, openInterestAt: base.openInterestAt,
+      globalPositionAt: positioning.global.observedAt, topPositionAt: positioning.top.observedAt, takerAt: positioning.taker.observedAt,
+      priceCandleOpenAt: sourceTimestampIso(latest[0]), priceCandleCloseAt: sourceTimestampIso(latest[6]),
+      volumeCandleCloseAt: sourceTimestampIso(klines.at(-2)?.[6]) },
   };
 }
 
@@ -986,6 +1027,7 @@ export async function runSqueezeScan(input: {
   client?: BinanceMarketClient;
   store?: Store;
   nowMs?: number;
+  now?: () => number;
   config?: Partial<MarketAlertsConfig>;
   deliverAlert?: DeliverAlert;
   writeChart?: MarketAlertChartWriter;
@@ -994,7 +1036,8 @@ export async function runSqueezeScan(input: {
   const store = input.store ?? openMarketAlertsStore();
   const client = input.client ?? createBinanceFuturesClient(config, { rateLimitStore: store });
   const ownsStore = !input.store;
-  const nowMs = input.nowMs ?? Date.now();
+  const clock = input.now ?? Date.now;
+  const nowMs = input.nowMs ?? clock();
   const scanIso = new Date(nowMs).toISOString();
   const chartQueue = createMarketAlertChartQueue({
     client,
@@ -1047,7 +1090,7 @@ export async function runSqueezeScan(input: {
     }
     const coarse = new Map<
       string,
-      { funding: number; basis: number; oiNotional: number; oiGrowth15m: number }
+      { funding: number; basis: number; oiNotional: number; oiGrowth15m: number; premiumAt: string | null; openInterestAt: string | null }
     >();
     const candidates: SelectedMarket[] = [];
     for (const item of oiRows) {
@@ -1062,6 +1105,8 @@ export async function runSqueezeScan(input: {
         basis: (mark / index) - 1,
         oiNotional: item.oi.oiNotional,
         oiGrowth15m: item.oi.oiGrowth15m,
+        premiumAt: sourceTimestampIso(premium?.time),
+        openInterestAt: item.oi.observedAt,
       };
       coarse.set(item.market.symbol, base);
       if (
@@ -1098,6 +1143,26 @@ export async function runSqueezeScan(input: {
         }),
       }))
       .sort((left, right) => right.result.score - left.result.score);
+
+    const completedAtMs = clock();
+    const fetchedAt = new Date(completedAtMs).toISOString();
+    const detailedBySymbol = new Map(scored.map(item => [item.market.symbol, item]));
+    const pushObservations: MarketPushObservation[] = [];
+    for (const [symbol, base] of coarse) {
+      const item = detailedBySymbol.get(symbol);
+      let observation = item ? qualifySqueeze({ symbol, metrics: item.metrics, minOiNotional: config.minOiNotional,
+        observedAt: item.metrics.observedAt, fetchedAt, scanId: `squeeze:${nowMs}`, recovered: false, candleWindow: item.metrics.candleWindow }, completedAtMs) : null;
+      if (observation?.classification !== "qualified") {
+        const recovery = qualifySqueezeRecovery({ symbol, funding: base.funding, oiGrowth15m: base.oiGrowth15m,
+          observedAt: oldestCompleteSourceTime([base.premiumAt, base.openInterestAt]), fetchedAt,
+          sampleId: base.openInterestAt ?? "", scanId: `squeeze:${nowMs}` }, completedAtMs);
+        observation = { ...recovery, ...observation, classification: recovery.classification, recoveryEvidence: recovery.recoveryEvidence,
+          squeezeMetrics: item?.metrics, minOiNotional: config.minOiNotional };
+      }
+      observation.sourceTimes = item?.metrics.sourceTimes ?? { premiumAt: base.premiumAt, openInterestAt: base.openInterestAt };
+      pushObservations.push(observation);
+    }
+    store.commitSqueezePushScan({ pushObservations, scannedAt: fetchedAt });
 
     const eligibleSymbols = new Set(
       scored.filter((item) => item.result.eligible).map((item) => item.market.symbol),
@@ -1151,6 +1216,9 @@ export async function runSqueezeScan(input: {
             globalLongShortRatio: item.metrics.globalLongShortRatio,
             topTraderLongShortRatio: item.metrics.topTraderLongShortRatio,
             takerBuySellRatio: item.metrics.takerBuySellRatio,
+            observedAt: item.metrics.observedAt,
+            sourceTimes: item.metrics.sourceTimes,
+            candleWindow: item.metrics.candleWindow,
             pct24h: item.market.pct24h,
             quoteVolume: item.market.quoteVolume,
           },

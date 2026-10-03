@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { createECDH, randomBytes } from 'node:crypto';
+import { getWebPushConfig, validatePushSubscription } from './web-push-config.ts';
+const ec = createECDH('prime256v1'); ec.generateKeys();
+const keys = { p256dh: ec.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
+const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/example', keys };
+assert.equal(validatePushSubscription(subscription).endpoint, subscription.endpoint);
+for (const endpoint of ['http://fcm.googleapis.com/x', 'https://fcm.googleapis.com.evil.test/x', 'https://user@fcm.googleapis.com/x', 'https://web.push.apple.com:444/x', 'https://fcm.googleapis.com/x#fragment', 'https://127.0.0.1/x']) assert.throws(() => validatePushSubscription({ ...subscription, endpoint }));
+assert.throws(() => validatePushSubscription({ ...subscription, keys: { ...keys, auth: 'bad' } }));
+assert.throws(() => validatePushSubscription({ ...subscription, keys: { ...keys, p256dh: Buffer.alloc(65).toString('base64url') } }));
+assert.equal(getWebPushConfig({}).enabled, false);
+const env = { WEB_PUSH_ENABLED: 'true', WEB_PUSH_VAPID_PUBLIC_KEY: keys.p256dh, WEB_PUSH_VAPID_PRIVATE_KEY: ec.getPrivateKey().toString('base64url'), WEB_PUSH_VAPID_SUBJECT: 'mailto:ops@example.com', SIGNAL_HUB_PUBLIC_ORIGIN: 'https://hub.example.com' };
+assert.equal(getWebPushConfig(env).configured, true);
+assert.equal(getWebPushConfig({ ...env, SIGNAL_HUB_PUBLIC_ORIGIN: 'http://hub.example.com' }).configured, false);
+assert.equal(getWebPushConfig({ ...env, NODE_ENV: 'production', SIGNAL_HUB_PUBLIC_ORIGIN: 'http://localhost:3107' }).configured, false);
+assert.equal(getWebPushConfig({ ...env, WEB_PUSH_VAPID_PRIVATE_KEY: randomBytes(32).toString('base64url') }).configured, false);
+console.log('web push configuration tests passed');

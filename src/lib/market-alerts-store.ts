@@ -21,6 +21,8 @@ import type {
 } from "./market-opportunity-core.ts";
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
+import { createImportantPushOutbox } from "./important-push-outbox.ts";
+import type { MarketPushObservation } from "./important-push-types.ts";
 
 type DbValue = string | number | null;
 type DbRow = Record<string, unknown>;
@@ -250,6 +252,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   db.exec("PRAGMA journal_mode=WAL;");
   db.exec("PRAGMA synchronous=NORMAL;");
   const briefStore = createMarketBriefStore(db);
+  const pushOutbox = createImportantPushOutbox(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_volatility_state (
       key TEXT PRIMARY KEY,
@@ -1475,6 +1478,30 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     });
   }
 
+  function commitOpportunityScan(input: {
+    states: MarketOpportunityCandidateState[]; pushObservations: MarketPushObservation[]; scannedAt: string;
+  }): void {
+    transaction(() => {
+      run(opportunityCandidateDeleteAll);
+      for (const state of input.states) {
+        run(opportunityCandidateInsert, state.symbol.trim().toUpperCase(), JSON.stringify(state), state.updatedAt);
+      }
+      pushOutbox.applyMarketObservations(input.pushObservations, Date.parse(input.scannedAt), {
+        suppressEvents: !pushOutbox.isProducerInitialized("opportunity"),
+      });
+      pushOutbox.markProducerInitialized("opportunity");
+    });
+  }
+
+  function commitSqueezePushScan(input: { pushObservations: MarketPushObservation[]; scannedAt: string }): void {
+    transaction(() => {
+      pushOutbox.applyMarketObservations(input.pushObservations, Date.parse(input.scannedAt), {
+        suppressEvents: !pushOutbox.isProducerInitialized("squeeze"),
+      });
+      pushOutbox.markProducerInitialized("squeeze");
+    });
+  }
+
   function saveOpportunitySelection(input: {
     selected: MarketOpportunityDecision[];
     fingerprint: string;
@@ -1872,6 +1899,12 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     upsertOpportunityEnrichment,
     getOpportunityCandidateStates,
     replaceOpportunityCandidateStates,
+    commitOpportunityScan,
+    commitSqueezePushScan,
+    readMarketPushOutboxAfter: pushOutbox.readAfter,
+    getMarketPushBaseline: pushOutbox.getBaseline,
+    readMarketPushEvaluation: pushOutbox.readLatestEvaluation,
+    readMarketPushEpisode: pushOutbox.readEpisode,
     saveOpportunitySelection,
     getOpportunityAiPolicy,
     recordOpportunityAiAttempt,

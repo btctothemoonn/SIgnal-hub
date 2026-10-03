@@ -1,6 +1,8 @@
 import { createBinanceFuturesClient } from "./market-alerts-binance.ts";
 import type { BinanceMarketClient } from "./market-alerts-binance.ts";
 import type { AiProviderConfig } from "./ai-provider-fallback.ts";
+import { qualifyOpportunity } from "./important-push-policy.ts";
+import type { MarketPushObservation } from "./important-push-types.ts";
 import { explainMarketOpportunities } from "./market-opportunity-ai.ts";
 import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
 import {
@@ -61,6 +63,7 @@ function seedFromCandidate(
             globalLongShortRatio: metrics.globalLongShortRatio,
             topTraderLongShortRatio: metrics.topTraderLongShortRatio,
             takerBuySellRatio: metrics.takerBuySellRatio,
+            pushEvidence: metrics.pushEvidence,
           }
         : null,
     preliminaryScore: state.decision.score,
@@ -99,6 +102,7 @@ export async function runMarketOpportunityScan(input: {
   env?: Record<string, string | undefined>;
 } = {}) {
   const nowMs = input.nowMs ?? Date.now();
+  const startedAtMs = Date.now();
   const now = new Date(nowMs).toISOString();
   const ownsStore = !input.store;
   const store = input.store ?? openMarketAlertsStore();
@@ -138,12 +142,18 @@ export async function runMarketOpportunityScan(input: {
       });
     }
 
+    const completedAtMs = nowMs + Date.now() - startedAtMs;
+    const pushObservations: MarketPushObservation[] = [];
     const decisions = enrichment.flatMap((item) => {
-      const chosen = chooseMarketOpportunityDecision([
+      const scored = [
         scoreCapitalDrivenLong(item.metrics),
         scoreDistributionShort(item.metrics),
         scoreSqueezeLong(item.metrics),
-      ]);
+      ];
+      for (const decision of scored) {
+        pushObservations.push(qualifyOpportunity({ decision, enrichment: item, scanId: `opportunity:${nowMs}` }, completedAtMs));
+      }
+      const chosen = chooseMarketOpportunityDecision(scored);
       return chosen ? [chosen] : [];
     });
     const transitioned = transitionMarketOpportunityCandidates(
@@ -152,7 +162,7 @@ export async function runMarketOpportunityScan(input: {
       nowMs,
     );
     const fingerprint = buildMarketOpportunityFingerprint(transitioned.selected);
-    store.replaceOpportunityCandidateStates(transitioned.states);
+    store.commitOpportunityScan({ states: transitioned.states, pushObservations, scannedAt: new Date(completedAtMs).toISOString() });
     store.saveOpportunitySelection({
       selected: transitioned.selected,
       fingerprint,

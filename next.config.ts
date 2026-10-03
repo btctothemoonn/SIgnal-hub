@@ -14,6 +14,7 @@ function releaseVersion(): string {
 }
 
 const nextConfig: NextConfig = {
+  turbopack: { root: process.cwd() },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   // Freeze the same version into the browser bundle and the version API.
   // Reading the first API reply as a baseline would miss an already-stale tab.

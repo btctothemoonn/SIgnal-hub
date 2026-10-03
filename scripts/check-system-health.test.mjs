@@ -10,7 +10,7 @@ const packageJson = JSON.parse(
 );
 
 assert.match(script, /getSystemHealthSnapshot/);
-assert.match(script, /SIGNAL_HUB_SYSTEMD_SERVICES/);
+assert.match(script, /getEnabledSignalHubSystemdServices/);
 assert.match(script, /--strict/);
 assert.match(script, /process\.exitCode = 1/);
 assert.match(packageJson.scripts["health:check"], /check-system-health\.mjs/);

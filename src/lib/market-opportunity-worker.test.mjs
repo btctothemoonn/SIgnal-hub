@@ -149,6 +149,10 @@ try {
   assert.equal(first.enrichedCount, 12);
   assert.equal(first.selectedCount, 0, "first qualifying scan only primes entry counters");
   assert.equal(fetchedSymbols.size, 12);
+  for (const model of ["capital_long", "distribution_short", "short_squeeze"]) {
+    assert.ok(store.readMarketPushEvaluation("T00USDT", `opportunity:${model}`), "push preserves all models regardless of chosen decision");
+  }
+  assert.equal(store.readMarketPushOutboxAfter(0, 100).length, 0, "first existing confirmations only establish producer baseline");
 
   const second = await runMarketOpportunityScan({
     store,

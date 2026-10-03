@@ -82,6 +82,7 @@ assert.deepEqual(
   ],
 );
 assert.equal(candidates.length, 30);
+assert.equal(candidates[0].publicationTimeBasis, "publication", "valid RSS pubDate is publication evidence");
 assert.equal(
   candidates.filter((candidate) => candidate.title.startsWith("SEC 批准")).length,
   20,

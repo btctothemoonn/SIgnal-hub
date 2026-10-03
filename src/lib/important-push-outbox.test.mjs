@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { opportunityDecision, squeezeMetrics, pushNow, pushNowMs, pushCandleWindow } from "./important-push-test-fixtures.mjs";
+import { qualifyOpportunity, qualifySqueeze } from "./important-push-policy.ts";
+const { createImportantPushOutbox } = await import("./important-push-outbox.ts");
+const db = new DatabaseSync(":memory:");
+try {
+  const outbox = createImportantPushOutbox(db);
+  const observations = Array.from({ length: 8 }, (_, i) => qualifyOpportunity({ decision: opportunityDecision({ symbol: `T${i}USDT` }), enrichment: { fetchedAt: pushNow, stale: false, error: null }, scanId: "scan-1" }, pushNowMs));
+  assert.equal(outbox.applyMarketObservations(observations, pushNowMs).length, 8);
+  assert.equal(outbox.readAfter(0, 100).length, 8, "all simultaneous events survive beyond page top five");
+  assert.deepEqual(outbox.readAfter(0, 100).map(row => row.sequence), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal(outbox.applyMarketObservations(observations, pushNowMs).length, 0);
+  const raw = qualifySqueeze({ symbol: "T0USDT", metrics: squeezeMetrics(), observedAt: pushNow, fetchedAt: pushNow, scanId: "raw-1", minOiNotional: 2_000_000, recovered: false, candleWindow: pushCandleWindow }, pushNowMs);
+  assert.equal(outbox.applyMarketObservations([raw], pushNowMs).length, 1);
+  assert.equal(outbox.readLatestEvaluation("T0USDT", "squeeze:short_squeeze").squeezeMetrics.breakout20, true);
+  assert.equal(outbox.readLatestEvaluation("T0USDT", "opportunity:capital_long").opportunityDecision.score, 100);
+  const baseline = outbox.getBaseline();
+  assert.equal(baseline.lastSequence, 9);
+  assert.equal(baseline.episodes[0].highestStage, "squeeze_acceleration");
+  db.exec("CREATE TRIGGER fail_push BEFORE INSERT ON important_push_outbox BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END;");
+  const extra = { ...observations[0], symbol: "NEWUSDT", scanId: "new" };
+  assert.throws(() => outbox.applyMarketObservations([extra], pushNowMs), /injected/);
+  assert.equal(outbox.readLatestEvaluation("NEWUSDT", "opportunity:capital_long"), null);
+  assert.equal(outbox.getBaseline().episodes.length, 8);
+  db.exec("DROP TRIGGER fail_push;");
+  assert.equal(outbox.applyMarketObservations([extra], pushNowMs).length, 1);
+  assert.equal(outbox.readAfter(9, 10)[0].sequence, 10);
+} finally { db.close(); }
+console.log("important push transactional outbox tests passed");

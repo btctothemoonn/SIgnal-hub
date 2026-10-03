@@ -15,7 +15,9 @@ import {
   getXPipelineLatestUpdatedAt,
   getXPipelineSnapshot,
 } from "./x-pipeline-store.ts";
-import { getSignalHubSystemdServiceLabel } from "./signal-hub-services.ts";
+import { getSignalHubSystemdServiceLabel, isSignalHubServiceEnabled } from "./signal-hub-services.ts";
+import { getWebPushConfig } from "./web-push-config.ts";
+import type { WorkerHealth } from "./web-push-store.ts";
 import { getAlphaSummaryPeriod, getAlphaSummaryRefreshIntervalMs } from "./alpha-summary.ts";
 import { getAlphaSummaryPrewarmIntervalMs } from "./alpha-summary-prewarm.ts";
 import { getStocksPrewarmIntervalMs } from "./stocks-prewarm.ts";
@@ -545,6 +547,29 @@ function tigerHealthItem(env: EnvLike, now: Date): SystemHealthItem {
   };
 }
 
+export function webPushHealthItem(env: EnvLike = process.env, now = new Date()): SystemHealthItem {
+  const config = getWebPushConfig(env);
+  const base = { id: "web-push", label: "重要通知", updatedAt: null, stale: false };
+  if (!config.enabled) return { ...base, status: "ok", detail: "未启用", meta: { enabled: false } };
+  if (!config.configured) return { ...base, status: "error", detail: "通知服务配置不完整", meta: { enabled: true, errorCode: config.errorCode } };
+  const path = getRuntimeDataPath(env, "web-push.sqlite");
+  if (!existsSync(path)) return { ...base, status: "warning", stale: true, detail: "等待通知进程心跳" };
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(path, { readOnly: true });
+    const row = db.prepare("SELECT health_json FROM push_worker_health WHERE id=1").get() as { health_json: string } | undefined;
+    const health = row ? JSON.parse(row.health_json) as WorkerHealth : null;
+    if (!health) return { ...base, status: "warning", stale: true, detail: "等待通知进程心跳" };
+    const time = Date.parse(health.updatedAt); const stale = !Number.isFinite(time) || now.getTime() - time > 30000 || time > now.getTime() + 1000;
+    const meta: Record<string, string | number | boolean | null> = { enabled: true };
+    for (const key of ['pending', 'sending', 'retry', 'sent', 'expired']) if (Number.isFinite(health.counts[key])) meta[key] = health.counts[key];
+    const errorCode = health.errorCode && /^push_[a-z_]+$/.test(health.errorCode) ? health.errorCode : null;
+    if (errorCode) meta.errorCode = errorCode;
+    return { ...base, updatedAt: health.updatedAt, stale, status: health.status === 'error' ? 'error' : stale || health.status !== 'live' ? 'warning' : 'ok', detail: health.status === 'error' ? '通知发送异常，请检查服务器配置' : stale ? '通知进程心跳已过期' : health.status === 'live' ? '通知进程运行中' : '等待通知进程就绪', meta };
+  } catch { return { ...base, status: "error", detail: "无法读取通知进程状态" }; }
+  finally { db?.close(); }
+}
+
 export async function getSystemHealthSnapshot({
   env = process.env,
   now = new Date(),
@@ -592,7 +617,8 @@ export async function getSystemHealthSnapshot({
     summaryHealthItem({ audience: "stocks", label: "AI 总结(Stocks)", env, now }),
     tigerHealthItem(env, now),
     ...marketAlertItems,
-    ...serviceStates.map(summarizeServiceState),
+    webPushHealthItem(env, now),
+    ...serviceStates.filter(service => isSignalHubServiceEnabled(service.name, env)).map(summarizeServiceState),
   ];
 
   return buildSystemHealthSnapshot({

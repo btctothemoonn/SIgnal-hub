@@ -1,0 +1,64 @@
+import assert from 'node:assert/strict';
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openWebPushStore } from './web-push-store.ts';
+const dir = mkdtempSync(join(tmpdir(), 'push-store-')); const path = join(dir, 'push.sqlite');
+const nowMs = Date.parse('2026-10-02T02:00:00Z');
+const ec = createECDH('prime256v1'); ec.generateKeys();
+const keys = { p256dh: ec.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
+const device = () => ({ deviceId: randomUUID(), deviceKey: randomBytes(32).toString('base64url') });
+const baseline = { sources: { market: 2, news: 0 }, marketEpisodes: [{ episodeId: 'old', highestStage: 'confirmed' }], enabledAt: new Date(nowMs).toISOString() };
+const event = (id, overrides = {}) => ({ id, source: 'market', episodeId: id, stage: 'confirmed', priority: 0, title: 'important', body: 'confirmed', target: '/alerts', occurredAt: new Date(nowMs + 1).toISOString(), expiresAt: new Date(nowMs + 120000).toISOString(), sourcePublishedAt: null, ruleVersion: 'v1', evidence: [], ...overrides });
+let store = openWebPushStore(path);
+try {
+  const firstInput = { device: device(), subscription: { endpoint: 'https://fcm.googleapis.com/first', keys }, baseline, nowMs };
+  const first = store.enrollDevice(firstInput);
+  const second = store.enrollDevice({ ...firstInput, device: device(), subscription: { endpoint: 'https://web.push.apple.com/second', keys } });
+  assert.equal(store.enrollDevice(firstInput).epoch, 1);
+  assert.equal(store.getDeviceStatus(first.deviceId, 'wrong-key'), null);
+  assert.throws(() => store.enrollDevice({ ...firstInput, device: device() }));
+  const batch = Array.from({ length: 10 }, (_, i) => ({ sequence: i + 1, event: event(`e${i}`) }));
+  assert.equal(store.ingestSourceEventsAndAdvanceCursor('market', batch, 0, nowMs).enqueued, 16);
+  assert.equal(store.readSourceCursor('market'), 10);
+  assert.equal(store.ingestSourceEventsAndAdvanceCursor('market', batch, 0, nowMs).enqueued, 0);
+  assert.equal(store.readDeliveryCounts().pending, 16, 'no notification count quota');
+  const { DatabaseSync } = await import('node:sqlite');
+  const injector = new DatabaseSync(path);
+  injector.exec("CREATE TRIGGER fail_fanout BEFORE INSERT ON push_deliveries BEGIN SELECT RAISE(ABORT,'injected fanout failure'); END;");
+  assert.throws(() => store.ingestSourceEventsAndAdvanceCursor('market', [{ sequence: 11, event: event('atomic') }], 10, nowMs), /injected/);
+  assert.equal(store.readSourceCursor('market'), 10);
+  assert.equal(store.readDeliveryCounts().pending, 16);
+  injector.exec('DROP TRIGGER fail_fanout'); injector.close();
+  assert.equal(store.claimDeliveries({ kind: 'market', limit: 100, leaseOwner: 'early', leaseMs: 30000, nowMs }).length, 0);
+  const claimed = store.claimDeliveries({ kind: 'market', limit: 100, leaseOwner: 'one', leaseMs: 30000, nowMs: nowMs + 6000 });
+  assert.equal(claimed.length, 3, 'three concurrent market leases, not a lifetime cap');
+  assert.equal(store.claimDeliveries({ kind: 'market', limit: 100, leaseOwner: 'two', leaseMs: 30000, nowMs: nowMs + 6000 }).length, 0);
+  store.revokeDevice(first.deviceId, first.deviceKey, nowMs + 7000);
+  assert.equal(store.getDeviceStatus(second.deviceId, second.deviceKey).enabled, true);
+  for (const job of claimed.filter(x => x.deviceId === first.deviceId)) assert.equal(store.finishDelivery({ ...job, nowMs: nowMs + 7001 }), false);
+  const restarted = store.enrollDevice({ ...firstInput, baseline: { ...baseline, sources: { market: 10, news: 0 } }, nowMs: nowMs + 8000 });
+  assert.equal(restarted.epoch, 3);
+  assert.equal(store.invalidateSubscription({ deviceId: first.deviceId, epoch: 1, nowMs: nowMs + 9000 }), false);
+  store.close(); store = openWebPushStore(path);
+  assert.equal(store.claimDeliveries({ kind: 'market', limit: 100, leaseOwner: 'restart', leaseMs: 30000, nowMs: nowMs + 40000 }).length, 3);
+  store.setWorkerHealth({ status: 'live', updatedAt: new Date(nowMs).toISOString(), errorCode: null, counts: { sent: 2 } });
+  assert.equal(store.readWorkerHealth().counts.sent, 2);
+  assert.equal(store.consumeControlBudget({ key: 'test', limit: 1, windowMs: 60000, nowMs }), true);
+  assert.equal(store.consumeControlBudget({ key: 'test', limit: 1, windowMs: 60000, nowMs }), false);
+} finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+// Fanout and cursor rollback, same episode coalescing and immutable stage tombstones.
+store = openWebPushStore(':memory:');
+try {
+ store.enrollDevice({ device: device(), subscription: { endpoint: 'https://fcm.googleapis.com/a', keys }, baseline: { ...baseline, sources: { market: 0, news: 0 }, marketEpisodes: [] }, nowMs });
+ store.ingestSourceEventsAndAdvanceCursor('market', [{ sequence: 1, event: event('confirmation', { episodeId: 'same' }) }], 0, nowMs);
+ store.ingestSourceEventsAndAdvanceCursor('market', [{ sequence: 2, event: event('acceleration', { episodeId: 'same', stage: 'squeeze_acceleration' }) }], 1, nowMs + 2000);
+ const jobs = store.claimDeliveries({ kind: 'market', limit: 3, leaseOwner: 'coalesce', leaseMs: 30000, nowMs: nowMs + 5000 });
+ assert.equal(jobs.length, 1); assert.equal(jobs[0].event.stage, 'squeeze_acceleration');
+ assert.equal(store.finishDelivery({ ...jobs[0], nowMs: nowMs + 6000 }), true);
+ assert.equal(store.finishDelivery({ ...jobs[0], leaseOwner: 'wrong', nowMs: nowMs + 6000 }), false);
+ store.ingestSourceEventsAndAdvanceCursor('market', [{ sequence: 3, event: event('again', { episodeId: 'same' }) }], 2, nowMs + 7000);
+ assert.equal(store.claimDeliveries({ kind: 'market', limit: 3, leaseOwner: 'again', leaseMs: 30000, nowMs: nowMs + 15000 }).length, 0);
+} finally { store.close(); }
+console.log('persistent web push device and queue tests passed');

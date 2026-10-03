@@ -449,6 +449,14 @@ export function MarketAlertsPanel({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedChart, setSelectedChart] = useState<SelectedChart | null>(null);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [pushSymbol, setPushSymbol] = useState<string | null>(null);
+  useEffect(() => {
+    const symbol = new URLSearchParams(window.location?.search ?? "").get("symbol");
+    if (symbol && /^[A-Z0-9]{2,40}$/.test(symbol)) queueMicrotask(() => setPushSymbol(symbol));
+  }, []);
+  useEffect(() => {
+    if (pushSymbol && typeof document !== "undefined") document.getElementById(`market-push-${pushSymbol}`)?.scrollIntoView({ block: "start" });
+  }, [pushSymbol]);
   const toggleEvent = useCallback((eventId: string) => {
     setExpandedEventId((current) => current === eventId ? null : eventId);
   }, []);
@@ -518,6 +526,7 @@ export function MarketAlertsPanel({
 
   return (
     <div className="space-y-3">
+      {pushSymbol ? <div id={`market-push-${pushSymbol}`} className="rounded-lg border border-accent/30 bg-accent-soft p-3 text-sm text-foreground">通知关联币种：<strong className="font-mono">{pushSymbol}</strong>。当前列表可能已更新，币种不在列表中时仍保留这条通知引用。</div> : null}
       <div className="flex flex-col gap-3 rounded-lg border border-workspace-line-strong bg-workspace-toolbar px-3 py-2.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

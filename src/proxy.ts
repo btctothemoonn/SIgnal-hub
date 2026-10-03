@@ -56,7 +56,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: "Unauthorized", success: false },
-      { status: 401, headers: pathname.startsWith("/api/wecom/") ? { "Cache-Control": "private, no-store" } : undefined },
+      { status: 401, headers: pathname.startsWith("/api/wecom/") || pathname.startsWith("/api/push/") ? { "Cache-Control": "private, no-store" } : undefined },
     );
   }
 

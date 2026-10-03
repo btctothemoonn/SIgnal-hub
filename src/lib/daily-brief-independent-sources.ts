@@ -1,4 +1,6 @@
 import { getProviderApiKeys } from "./provider-api-keys.ts";
+import { newsPublicationTimeBasis } from "./important-news-push.ts";
+import type { SourceTimeBasis } from "./important-news-push.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -11,6 +13,7 @@ export type IndependentDailyBriefCandidate = {
   summary: string | null;
   url: string;
   publishedAt: string;
+  publicationTimeBasis?: SourceTimeBasis;
   imageUrl: string | null;
   language: string | null;
   country: string | null;
@@ -204,6 +207,7 @@ async function collectReutersApRssCandidates({
                   : null,
               url,
               publishedAt: seenAt,
+              publicationTimeBasis: newsPublicationTimeBasis(xmlTag(block, "pubDate")),
               imageUrl: null,
               language: "English",
               country: null,
@@ -283,6 +287,7 @@ async function collectMiniMaxCandidates({
           summary: clampText(hit.snippet, 1_200) || null,
           url,
           publishedAt: seenAt,
+          publicationTimeBasis: newsPublicationTimeBasis(hit.date) === "fallback" ? "fallback" : "discovery",
           imageUrl: null,
           language: null,
           country: null,
@@ -410,6 +415,7 @@ function parseBlockBeatsXmlCandidates({
         summary: description && description !== title ? description : null,
         url,
         publishedAt: seenAt,
+        publicationTimeBasis: newsPublicationTimeBasis(xmlTag(block, "pubDate")),
         imageUrl: null,
         language: "zh-CN",
         country: "CN",
@@ -539,6 +545,7 @@ async function collectFmpCandidates({
           summary: clampText(item.text ?? item.content, 1_200) || null,
           url: articleUrl,
           publishedAt: seenAt,
+          publicationTimeBasis: newsPublicationTimeBasis(item.publishedDate ?? item.date),
           imageUrl: safeHttpUrl(item.image),
           language: null,
           country: null,
@@ -605,6 +612,7 @@ async function collectFinnhubCandidates({
           summary: clampText(item.summary, 1_200) || null,
           url: articleUrl,
           publishedAt: seenAt,
+          publicationTimeBasis: newsPublicationTimeBasis(item.datetime ?? item.date),
           imageUrl: safeHttpUrl(item.image),
           language: null,
           country: null,

@@ -1,4 +1,5 @@
 import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
+import type { OpportunityPushEvidence } from "./market-push-freshness.ts";
 
 export type MarketOpportunityModel =
   | "capital_long"
@@ -25,6 +26,7 @@ export type MarketOpportunityMetrics = {
   symbol: string;
   observedAt: string;
   stale: boolean;
+  pushEvidence?: OpportunityPushEvidence;
   pct1m: number | null;
   pct5m: number | null;
   pct15m: number | null;

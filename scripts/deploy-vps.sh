@@ -79,6 +79,13 @@ if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(proce
   scripts+=(wecom-receiver.mjs)
 fi
 
+push_enabled=0
+if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(process.env.WEB_PUSH_ENABLED === "true" ? 0 : 1)'; then
+  push_enabled=1
+  services+=(signal-hub-web-push)
+  scripts+=(web-push-worker.mjs)
+fi
+
 activate() {
   local target="$1"
   local pending_link="${CURRENT_LINK}.pending-$$"
@@ -91,11 +98,25 @@ rollback() {
   trap - ERR
   if [[ -n "$previous_release" ]]; then
     echo "Deployment failed; restoring $previous_release" >&2
+    local -a rollback_services=(signal-hub-web)
+    local index service
+    for index in "${!services[@]}"; do
+      service="${services[$index]}"
+      if [[ "$service" == "signal-hub-web" ]]; then continue; fi
+      if [[ -f "$previous_release/scripts/${scripts[$index]}" ]]; then
+        rollback_services+=("$service")
+      else
+        sudo systemctl disable --now "$service" || true
+      fi
+    done
+    if [[ ! -f "$previous_release/scripts/web-push-worker.mjs" ]]; then
+      sudo systemctl disable --now signal-hub-web-push || true
+    fi
     activate "$previous_release"
     sudo systemctl daemon-reload
-    sudo systemctl restart "${services[@]}" || true
+    sudo systemctl restart "${rollback_services[@]}" || true
     if [[ ! -f "$previous_release/scripts/wecom-receiver.mjs" ]]; then
-      sudo systemctl stop signal-hub-wecom-receiver || true
+      sudo systemctl disable --now signal-hub-wecom-receiver || true
     fi
   fi
   exit "$result"
@@ -159,6 +180,9 @@ sudo systemctl enable "${services[@]}" >/dev/null
 sudo systemctl restart "${services[@]}"
 if [[ "$wecom_enabled" == "0" ]] && systemctl cat signal-hub-wecom-receiver >/dev/null 2>&1; then
   sudo systemctl stop signal-hub-wecom-receiver
+fi
+if [[ "$push_enabled" == "0" ]] && systemctl cat signal-hub-web-push >/dev/null 2>&1; then
+  sudo systemctl disable --now signal-hub-web-push
 fi
 "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
 wait_for_services() {

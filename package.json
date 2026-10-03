@@ -6,6 +6,8 @@
     "node": ">=22.5.0"
   },
   "scripts": {
+    "push:worker": "node --experimental-strip-types --experimental-transform-types scripts/web-push-worker.mjs",
+    "push:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/web-push-worker.mjs --once",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -57,7 +59,8 @@
     "next": "16.2.12",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "telegram": "^2.26.22"
+    "telegram": "^2.26.22",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -65,6 +68,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "react-test-renderer": "19.2.4",

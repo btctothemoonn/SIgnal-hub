@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { pushNow, pushNowMs } from "./important-push-test-fixtures.mjs";
+import { getOrCreateDailyInvestmentBrief, readDailyBriefPushOutboxAfter } from "./daily-investment-brief.ts";
+const { qualifyImportantNews, createImportantNewsPushStore, normalizePushAssessment, newsPublicationTimeBasis } = await import("./important-news-push.ts");
+const assessment = { exceptional: true, category: "已公布的重大政策决定", fact: "正式公布了重大政策决定。", impact: "显著改变市场资金成本。", candidateIndexes: [1] };
+const item = { rank: 1, importance: "high", title: "重大政策正式公布", topic: "宏观 / 地缘政治 / 原油", candidateIndexes: [1], sourceNames: ["Reuters"], sourceUrls: ["https://www.reuters.com/world/policy"], imageUrl: null, whatHappened: assessment.fact, investmentImpact: assessment.impact, watchNext: "后续实施", pushAssessment: assessment, pushAssessedAt: pushNow, validatedSources: [{ sourceId: "policy-1", canonicalUrl: "https://www.reuters.com/world/policy", source: "Reuters", publishedAt: pushNow, timeBasis: "publication" }] };
+const qualify = (overrides = {}, generatedAt = pushNow) => qualifyImportantNews({ item: { ...item, ...overrides }, generatedAt }, pushNowMs);
+assert.equal(qualify().priority, 1);
+assert.equal(qualify({ pushAssessment: undefined }), null);
+assert.equal(qualify({ importance: "medium" }), null);
+assert.equal(qualify({ pushAssessment: { ...assessment, category: "普通评论" } }), null);
+assert.equal(qualify({ validatedSources: [{ ...item.validatedSources[0], timeBasis: "discovery", publishedAt: null }] }), null);
+assert.equal(qualify({ validatedSources: [{ ...item.validatedSources[0], timeBasis: "fallback", publishedAt: pushNow }] }), null);
+assert.equal(qualify({ validatedSources: [{ ...item.validatedSources[0], publishedAt: new Date(pushNowMs + 1).toISOString() }] }), null);
+assert.equal(qualify({}, new Date(pushNowMs - 12 * 3600_000 - 1).toISOString()), null);
+assert.equal(normalizePushAssessment({ ...assessment, candidateIndexes: [1.5] }).exceptional, false, "fractional references cannot be rounded into real evidence");
+assert.equal(newsPublicationTimeBasis("invalid"), "fallback");
+assert.equal(newsPublicationTimeBasis("2026-10-02"), "discovery", "date-only search metadata is not a publication instant");
+assert.equal(newsPublicationTimeBasis("2026-10-02 10:00:00"), "discovery", "unspecified timezone cannot prove a publication instant");
+const db = new DatabaseSync(":memory:");
+try {
+  const news = createImportantNewsPushStore(db);
+  const snapshot = { success: true, status: "generated", generatedAt: pushNow, error: null, brief: { title: "简报", marketPulse: "", items: [item], watchVariables: [], priorityLine: "" } };
+  const first = news.appendGeneratedBrief(snapshot, pushNowMs);
+  assert.equal(first.events.length, 1);
+  assert.equal(first.snapshot.brief.items[0].pushEventId, first.events[0].id);
+  assert.equal(news.appendGeneratedBrief({ ...snapshot, brief: { ...snapshot.brief, items: [{ ...item, title: "政策改写标题" }] } }, pushNowMs).events.length, 0);
+  assert.equal(news.appendGeneratedBrief({ ...snapshot, brief: { ...snapshot.brief, items: [{ ...item, sourceUrls: ["https://apnews.com/policy"], validatedSources: [{ ...item.validatedSources[0], canonicalUrl: "https://apnews.com/policy" }] }] } }, pushNowMs).events.length, 0, "normalized title aliases merge source rewrites");
+  assert.equal(news.appendGeneratedBrief({ ...snapshot, status: "cached" }, pushNowMs).events.length, 0);
+  assert.equal(news.getBaseline().lastSequence, 1);
+} finally { db.close(); }
+
+const dir = mkdtempSync(join(tmpdir(), "news-push-integration-"));
+const env = { DAILY_BRIEF_DB: join(dir, "brief.sqlite"), MINIMAX_API_KEY: "fixture-key" };
+const candidate = { id: "https://www.reuters.com/world/policy", source: "Reuters", title: item.title, summary: assessment.fact, url: item.sourceUrls[0], publishedAt: pushNow, publicationTimeBasis: "publication", imageUrl: null, language: "English", country: "US" };
+let calls = 0;
+const generate = async (request) => { calls++; return { brief: { title: "简报", marketPulse: "", items: [{ ...item, validatedSources: undefined, pushAssessedAt: undefined }], watchVariables: [], priorityLine: "" }, provider: request.provider }; };
+try {
+  const result = await getOrCreateDailyInvestmentBrief({ now: new Date(pushNowMs), env, collectCandidates: async () => [candidate], requestBrief: generate });
+  assert.equal(result.status, "generated");
+  assert.equal(result.brief.items[0].validatedSources[0].timeBasis, "publication");
+  assert.equal(readDailyBriefPushOutboxAfter(0, 100, env).length, 1);
+  assert.ok(result.brief.items[0].pushEventId);
+  await getOrCreateDailyInvestmentBrief({ now: new Date(pushNowMs), env, collectCandidates: async () => [candidate], requestBrief: generate });
+  assert.equal(calls, 1, "push assessment shares existing generation request");
+  assert.equal(readDailyBriefPushOutboxAfter(0, 100, env).length, 1);
+  const nextCandidate = { ...candidate, id: "https://apnews.com/new-fact", url: "https://apnews.com/new-fact", source: "AP News", title: "新的独立事件" };
+  await getOrCreateDailyInvestmentBrief({ force: true, now: new Date(pushNowMs + 1_000), env, collectCandidates: async () => [nextCandidate], requestBrief: generate });
+  assert.equal(readDailyBriefPushOutboxAfter(0, 100, env).length, 1, "old title with unrelated current index cannot become a new event");
+  const injector = new DatabaseSync(env.DAILY_BRIEF_DB);
+  const before = injector.prepare("SELECT snapshot_json FROM daily_brief_cache").get().snapshot_json;
+  injector.exec("CREATE TRIGGER fail_cache BEFORE UPDATE ON daily_brief_cache BEGIN SELECT RAISE(ABORT, 'cache write failed'); END;");
+  await assert.rejects(getOrCreateDailyInvestmentBrief({ force: true, now: new Date(pushNowMs + 2_000), env, collectCandidates: async () => [nextCandidate], requestBrief: async request => ({ brief: { title: "新简报", items: [{ ...item, title: nextCandidate.title, sourceUrls: [], validatedSources: undefined, pushAssessedAt: undefined }], marketPulse: "", priorityLine: "", watchVariables: [] }, provider: request.provider }) }), /cache write failed/);
+  assert.equal(injector.prepare("SELECT snapshot_json FROM daily_brief_cache").get().snapshot_json, before);
+  assert.equal(readDailyBriefPushOutboxAfter(0, 100, env).length, 1, "failed cache transaction rolls back news aliases and outbox");
+  injector.exec("DROP TRIGGER fail_cache;"); injector.close();
+} finally { rmSync(dir, { recursive: true, force: true }); }
+console.log("important news assessment, provenance and outbox tests passed");

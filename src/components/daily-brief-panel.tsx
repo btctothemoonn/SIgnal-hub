@@ -11,9 +11,10 @@ import {
   LoaderCircle,
   RefreshCw,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   groupDailyBriefItems,
+  getDailyBriefGroup,
   type DailyBriefGroupId,
 } from "@/lib/daily-brief-display";
 import type {
@@ -129,6 +130,7 @@ function BriefItemCard({ item }: { item: DailyBriefItem }) {
 
   return (
     <article
+      id={item.pushEventId ? `news-push-${item.pushEventId}` : undefined}
       data-daily-brief-card
       className={[
         "min-w-0 overflow-hidden rounded-lg border border-l-2 border-workspace-line-strong bg-workspace-surface shadow-sm",
@@ -200,9 +202,11 @@ function BriefItemCard({ item }: { item: DailyBriefItem }) {
 export function DailyBriefPanel({
   initialSnapshot,
   initialHistory,
+  initialPushEventId,
 }: {
   initialSnapshot: DailyBriefSnapshot;
   initialHistory: DailyBriefHistoryEntry[];
+  initialPushEventId?: string;
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [history, setHistory] = useState(initialHistory);
@@ -215,7 +219,11 @@ export function DailyBriefPanel({
   const [historyPendingDate, setHistoryPendingDate] = useState<string | null>(
     null,
   );
-  const [activeGroup, setActiveGroup] = useState<DailyBriefGroupId>("ai");
+  const [activeGroup, setActiveGroup] = useState<DailyBriefGroupId>(() => {
+    const target = initialPushEventId ? initialSnapshot.brief?.items.find(item => item.pushEventId === initialPushEventId) : undefined;
+    return target ? getDailyBriefGroup(target) : 'ai';
+  });
+  const scrolledPush = useRef<string | null>(null);
   const [marketContextExpanded, setMarketContextExpanded] = useState(false);
   const [pending, setPending] = useState(false);
   const [uiError, setUiError] = useState<string | null>(null);
@@ -223,6 +231,12 @@ export function DailyBriefPanel({
     () => groupDailyBriefItems(snapshot.brief?.items ?? []),
     [snapshot.brief?.items],
   );
+  useEffect(() => {
+    if (!initialPushEventId || scrolledPush.current === initialPushEventId ||
+      !groupedItems[activeGroup].some(item => item.pushEventId === initialPushEventId)) return;
+    const target = document.getElementById(`news-push-${initialPushEventId}`);
+    if (target) { target.scrollIntoView({ block: 'center' }); scrolledPush.current = initialPushEventId; }
+  }, [activeGroup, groupedItems, initialPushEventId]);
 
   const regenerate = async () => {
     setPending(true);

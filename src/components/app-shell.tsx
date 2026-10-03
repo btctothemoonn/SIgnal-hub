@@ -17,6 +17,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DeploymentUpdateNotice } from "@/components/deployment-update-notice";
 import { primaryMobileNavItems } from "@/lib/app-shell-navigation";
+import { getPushLogoutFields } from "@/lib/web-push-client";
 
 export type AppShellNavKey =
   | "signals"
@@ -261,7 +262,15 @@ export function AppShell({
                 >
                   <Settings aria-hidden className="h-4 w-4" />
                 </Link>
-                <form action="/api/logout" method="post" className="contents">
+                <form action="/api/logout" method="post" className="contents" onSubmit={(event) => {
+                  const fields = getPushLogoutFields();
+                  for (const [name, value] of Object.entries(fields)) {
+                    const field = event.currentTarget.elements.namedItem(name);
+                    if (field instanceof HTMLInputElement) field.value = value ?? "";
+                  }
+                }}>
+                  <input type="hidden" name="pushDeviceId" defaultValue="" />
+                  <input type="hidden" name="pushDeviceKey" defaultValue="" />
                   <button
                     type="submit"
                     title="Sign out"
