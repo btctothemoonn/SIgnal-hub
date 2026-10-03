@@ -17,6 +17,16 @@ import { isTelegramXSourceChannel } from "./telegram-x-source-channels.ts";
 type DbValue = string | number | null;
 type DbRow = Record<string, unknown>;
 
+// @types/node 20 predates DatabaseSync.function; Node >=22.5 (the runtime this
+// app requires) provides it. Keep the cast local instead of bumping types.
+type SqliteUserFunctionCapable = DatabaseSync & {
+  function(
+    name: string,
+    options: { deterministic?: boolean },
+    fn: (...args: unknown[]) => unknown,
+  ): void;
+};
+
 export type PipelineChannelInput = {
   ref: string;
   title: string;
@@ -236,6 +246,14 @@ export function closeTelegramPipelineDb() {
 }
 
 export function initTelegramPipelineDb(db: DatabaseSync) {
+  // Push the exact translation predicate into SQLite so backfill can terminate
+  // early instead of materializing every untranslated row in JS. Node >=22.5
+  // (enforced by scripts/deploy-vps.sh) ships DatabaseSync.function.
+  (db as SqliteUserFunctionCapable).function(
+    "should_translate",
+    { deterministic: true },
+    (text: unknown) => (typeof text === "string" && shouldTranslateText(text) ? 1 : 0),
+  );
   db.exec(`
     create table if not exists telegram_channels (
       ref text primary key,
@@ -534,6 +552,7 @@ export function listTelegramPipelineTranslationCandidates(
       from telegram_messages
       where translation_json is null
         and trim(text) != ''
+        and should_translate(text) = 1
       union all
       select id, json_extract(quoted_message_json, '$.text') as text,
         channel_ref, channel_title, channel_username, 'quoted' as kind,
@@ -542,13 +561,14 @@ export function listTelegramPipelineTranslationCandidates(
       where quoted_message_json is not null
         and trim(coalesce(json_extract(quoted_message_json, '$.text'), '')) != ''
         and json_extract(quoted_message_json, '$.translation.text') is null
+        and should_translate(json_extract(quoted_message_json, '$.text')) = 1
       ) order by created_at desc, message_id desc
     `,
     )
     .all()
     .filter(
       (row) =>
-        shouldTranslateText(stringValue(row.text)) && !shouldSkipTelegramChannelTranslation({
+        !shouldSkipTelegramChannelTranslation({
           channelUsername: stringValue(row.channel_username),
           channelRef: stringValue(row.channel_ref),
           channelTitle: stringValue(row.channel_title),
