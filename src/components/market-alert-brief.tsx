@@ -197,7 +197,14 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
                     <span className="text-[10px] text-muted">指标观测 <SnapshotTime value={item.tracking.observedAt} /></span>
                   </div>
                   {item.reason ? <p className="mt-1 break-words text-xs leading-5 text-foreground [overflow-wrap:anywhere]">{item.reason}</p> : null}
-                  <dl data-market-brief-tracking={true} className="mt-2 grid min-w-0 gap-x-5 gap-y-2 text-xs leading-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  {/* Reference detail stays in the document but collapsed, so the
+                      list reads as one line per symbol and expands on demand. */}
+                  <details data-market-brief-details={true} className="group mt-1.5 min-w-0">
+                    <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+                      <span className="transition-transform group-open:rotate-90" aria-hidden>▸</span>
+                      依据与观察条件
+                    </summary>
+                  <dl data-market-brief-tracking={true} className="mt-1 grid min-w-0 gap-x-5 gap-y-2 text-xs leading-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                     <div className="min-w-0 lg:row-span-2">
                       <dt className="font-medium text-muted">入选理由</dt>
                       <dd className="mt-0.5 min-w-0 text-foreground">
@@ -217,6 +224,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
                       <dd className="mt-0.5 break-words text-muted [overflow-wrap:anywhere]">{item.tracking.dropIf}</dd>
                     </div>
                   </dl>
+                  </details>
                 </li>
               ) : (
                 <li

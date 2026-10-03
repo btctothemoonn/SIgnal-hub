@@ -205,12 +205,22 @@ export function MarketAlertBrief() {
   assert.ok(sidebar.findByProps({
     "data-market-ranking-symbol": "BTCUSDT",
   }));
+  // Ranking stays visible; active signals and worker health start collapsed.
+  const more = sidebar.findByProps({ "data-market-alert-more": true });
+  assert.equal(more.type, "details");
+  assert.notEqual(more.props.open, true, "secondary sidebar sections must start collapsed");
+  assert.match(renderedText(more), /活跃信号/);
+  assert.match(renderedText(more), /Worker 状态/);
   assert.equal(renderer.root.findAll((node) => node.props["data-market-alert-row"]).length, 100);
-  const xrpRowText = renderedText(renderer.root.findByProps({
-    "data-market-alert-row": "XRPUSDT",
-  }));
-  assert.match(xrpRowText, /n\/a/);
+  const xrpRow = renderer.root.findByProps({ "data-market-alert-row": "XRPUSDT" });
+  const xrpRowText = renderedText(xrpRow);
   assert.doesNotMatch(xrpRowText, /\+0\.00%/);
+  // A collapsed row carries only symbol, triggering move and time. Valuation,
+  // price and 24h detail are deferred to the expanded panel so the list stays
+  // scannable; missing metrics must not leak an "n/a" placeholder into it.
+  assert.doesNotMatch(xrpRowText, /n\/a/, "collapsed rows must not show placeholder metrics");
+  assert.doesNotMatch(xrpRowText, /流通市值|FDV/, "collapsed rows must defer valuation to the expanded panel");
+  assert.doesNotMatch(xrpRowText, /\$\d/, "collapsed rows must not print a price amount");
 
   assert.equal(
     renderer.root.findAllByProps({ alt: "BTCUSDT 最新 15 分钟 K 线图" }).length,
@@ -221,21 +231,25 @@ export function MarketAlertBrief() {
   const expandBtc = renderer.root.findByProps({
     "data-market-alert-toggle": "volatility:LONG:BTCUSDT:fixture",
   });
-  assert.match(renderedText(expandBtc), /\$120M/);
-  assert.match(renderedText(expandBtc), /\$140M/);
-  assert.match(renderedText(expandBtc), /25m 价格/);
-  assert.doesNotMatch(renderedText(expandBtc), /暴涨预警|A趋势|REST/);
+  const btcSummary = renderedText(expandBtc);
+  assert.match(btcSummary, /25m 价格/);
+  assert.doesNotMatch(btcSummary, /暴涨预警|A趋势|REST/);
+  assert.doesNotMatch(btcSummary, /\$120M|\$140M/, "valuation belongs to the expanded detail");
   const ethSummary = renderedText(renderer.root.findByProps({
     "data-market-alert-toggle": "volatility:SHORT:ETHUSDT:fixture",
   }));
-  assert.match(ethSummary, /\$450M/);
-  assert.match(ethSummary, /n\/a/);
+  assert.doesNotMatch(ethSummary, /\$450M/);
   assert.match(renderedText(renderer.root.findByProps({
     "data-market-alert-toggle": "short_squeeze:LONG:SQUEEZEUSDT:fixture",
   })), /\+7\.50%15m OI/);
   await act(async () => {
     expandBtc.props.onClick();
   });
+  const btcDetail = renderedText(renderer.root.findByProps({
+    "data-market-alert-detail": "BTCUSDT",
+  }));
+  assert.match(btcDetail, /\$120M/, "expanded detail must keep the market cap");
+  assert.match(btcDetail, /\$140M/, "expanded detail must keep the FDV");
   const preview = renderer.root.findByProps({
     alt: "BTCUSDT 最新 15 分钟 K 线图",
   });

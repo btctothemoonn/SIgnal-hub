@@ -320,7 +320,13 @@ test("tracking evidence and invalidation remain readable without truncation", as
       assert.doesNotMatch(node.props.className, /line-clamp|truncate|whitespace-nowrap/);
     }
     assert.match(renderedText(details), /15 分钟涨幅转负/);
-    assert.equal(renderer.root.findAllByType("details").length, 0);
+    // Reference detail is collapsed by default (one block per row) but never
+    // truncated, so expanding always reveals the complete text.
+    const collapsible = row.findAllByType("details");
+    assert.equal(collapsible.length, 1, "each tracked row has exactly one collapsible detail block");
+    assert.notEqual(collapsible[0].props.open, true, "detail must start collapsed");
+    assert.ok(collapsible[0].findByProps({ "data-market-brief-tracking": true }), "tracking detail lives inside the collapsible block");
+    assert.match(renderedText(row), /依据与观察条件/);
   } finally { if (renderer) await act(async () => renderer.unmount()); }
 });
 
