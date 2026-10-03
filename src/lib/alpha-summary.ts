@@ -131,6 +131,7 @@ const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_AI_SUMMARY_TIMEOUT_MS = 240_000;
 const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
 const SIGNAL_SUMMARY_CONTENT_VERSION = 2;
@@ -1342,6 +1343,14 @@ export async function requestAiSummary({
   env: EnvLike;
   validateSummary?: (summary: AlphaSummaryContent) => AlphaSummaryContent;
 }): Promise<{ summary: AlphaSummaryContent; provider: AiProviderConfig }> {
+  // JSON repair and provider fallback share one deadline for this generation.
+  const timeoutMs = positiveInt(env.AI_SUMMARY_TIMEOUT_MS, DEFAULT_AI_SUMMARY_TIMEOUT_MS);
+  const deadlineAt = Date.now() + timeoutMs;
+  const timeoutError = (provider: AiProviderConfig) => {
+    const error = new Error(`AI 总结生成超时（模型：${provider.model}，本次生成等待上限 ${timeoutMs / 1000} 秒）。模型服务未及时返回完整结果，请稍后重试。`);
+    error.name = "TimeoutError";
+    return error;
+  };
   const result = await runWithAiProviderFallback({
     providers: getAlphaSummaryProviderCandidates(env),
     cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
@@ -1351,27 +1360,41 @@ export async function requestAiSummary({
         { role: "user", content: prompt },
       ];
       for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${provider.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: provider.model,
-          messages,
-          temperature: 0.2,
-          ...(isMiniMaxBaseUrl(provider.baseUrl)
-            ? {}
-            : { response_format: { type: "json_object" } }),
-        }),
-        signal: AbortSignal.timeout(positiveInt(env.AI_SUMMARY_TIMEOUT_MS, 60_000)),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) throw timeoutError(provider);
+      const requestSignal = AbortSignal.timeout(remainingMs);
+      let response: Response;
+      let payload: Record<string, unknown>;
+      try {
+        response = await fetch(`${provider.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${provider.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: provider.model,
+            messages,
+            temperature: 0.2,
+            ...(isDeepSeekBaseUrl(provider.baseUrl)
+              ? { thinking: { type: "disabled" }, max_tokens: 16_384 }
+              : {}),
+            ...(isMiniMaxBaseUrl(provider.baseUrl)
+              ? {}
+              : { response_format: { type: "json_object" } }),
+          }),
+          signal: requestSignal,
+        });
+        payload = (await response.json().catch((error: unknown) => {
+          // A partial response that timed out is not malformed model output.
+          if (requestSignal.aborted || (error instanceof Error && error.name === "TimeoutError")) throw error;
+          return {};
+        })) as Record<string, unknown>;
+        if (requestSignal.aborted || Date.now() >= deadlineAt) throw timeoutError(provider);
+      } catch (error) {
+        if (requestSignal.aborted || (error instanceof Error && error.name === "TimeoutError")) throw timeoutError(provider);
+        throw error;
+      }
       if (!response.ok) {
         const message =
           typeof payload.error === "object" && payload.error && "message" in payload.error
