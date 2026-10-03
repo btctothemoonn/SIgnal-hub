@@ -294,7 +294,103 @@ test("MiniMax keeps its existing payload without thinking or response_format", a
   assertSummary(result);
   assert.equal(requests.length, 1);
   assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
   assert.equal(Object.hasOwn(requests[0], "response_format"), false);
+});
+
+test("official MiniMax-M3 requests disable thinking and bound completion tokens", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, payload: JSON.parse(init.body) });
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: { MINIMAX_API_KEY: "test-only-key", AI_SUMMARY_MODEL: "MiniMax-M3" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://api.minimaxi.com/v1/chat/completions");
+  assert.equal(requests[0].payload.model, "MiniMax-M3");
+  assert.deepEqual(requests[0].payload.thinking, { type: "disabled" });
+  assert.equal(requests[0].payload.reasoning_split, true);
+  assert.equal(requests[0].payload.max_completion_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[0].payload, "response_format"), false);
+});
+
+test("configured MiniMax-M3 fallback applies controls to the final provider", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, payload: JSON.parse(init.body) });
+    return requests.length === 1
+      ? Response.json({ error: { message: "quota exceeded" } }, { status: 429 })
+      : completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: {
+      DEEPSEEK_API_KEY: "test-only-key",
+      DEEPSEEK_MODEL: "deepseek-v4-flash",
+      AI_SUMMARY_FALLBACK_API_KEY: "test-only-fallback-key",
+      AI_SUMMARY_FALLBACK_BASE_URL: "https://api.minimax.io/v1",
+      AI_SUMMARY_FALLBACK_MODEL: "MiniMax-M3",
+    },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map((request) => request.url), [
+    "https://api.deepseek.com/chat/completions",
+    "https://api.minimax.io/v1/chat/completions",
+  ]);
+  assert.deepEqual(requests[0].payload.thinking, { type: "disabled" });
+  assert.equal(requests[0].payload.max_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[0].payload, "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0].payload, "max_completion_tokens"), false);
+  assert.equal(requests[1].payload.model, "MiniMax-M3");
+  assert.deepEqual(requests[1].payload.thinking, { type: "disabled" });
+  assert.equal(requests[1].payload.reasoning_split, true);
+  assert.equal(requests[1].payload.max_completion_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[1].payload, "response_format"), false);
+});
+
+test("MiniMax-M3.1-Flash-Preview does not receive M3-only thinking controls", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: { MINIMAX_API_KEY: "test-only-key", AI_SUMMARY_MODEL: "MiniMax-M3.1-Flash-Preview" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3.1-Flash-Preview");
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
+  assert.equal(Object.hasOwn(requests[0], "response_format"), false);
+});
+
+test("a non-MiniMax proxy named MiniMax-M3 receives no provider-specific controls", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test", env: { ...primaryEnv, AI_SUMMARY_MODEL: "MiniMax-M3" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
+  assert.deepEqual(requests[0].response_format, { type: "json_object" });
 });
 
 test("existing quota fallback still succeeds within the shared budget", async (t) => {

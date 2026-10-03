@@ -1355,6 +1355,8 @@ export async function requestAiSummary({
     providers: getAlphaSummaryProviderCandidates(env),
     cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
     request: async (provider) => {
+      const useMiniMaxM3FastMode = provider.model === "MiniMax-M3" &&
+        ["api.minimax.io", "api.minimaxi.com"].includes(new URL(provider.baseUrl).hostname);
       const messages = [
         { role: "system", content: "You produce concise Chinese market intelligence summaries from supplied messages only. Return valid JSON only." },
         { role: "user", content: prompt },
@@ -1378,6 +1380,9 @@ export async function requestAiSummary({
             temperature: 0.2,
             ...(isDeepSeekBaseUrl(provider.baseUrl)
               ? { thinking: { type: "disabled" }, max_tokens: 16_384 }
+              : {}),
+            ...(useMiniMaxM3FastMode
+              ? { thinking: { type: "disabled" }, reasoning_split: true, max_completion_tokens: 16_384 }
               : {}),
             ...(isMiniMaxBaseUrl(provider.baseUrl)
               ? {}
