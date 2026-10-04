@@ -11,9 +11,13 @@ export async function GET(request: Request) {
     pollMs: 3000,
     signal: request.signal,
     getRevision: getTelegramPipelineLatestUpdatedAt,
-    getSnapshot: (updatedSince) => prepareTelegramSnapshotForClient(
-      getTelegramPipelineSnapshot(updatedSince ? 10_000 : undefined, undefined, { updatedSince }),
-    ),
+    getSnapshot: (updatedSince) => {
+      const feedLimit = updatedSince ? 10_000 : undefined;
+      return prepareTelegramSnapshotForClient(
+        getTelegramPipelineSnapshot(feedLimit, undefined, { updatedSince }),
+        { feedLimit },
+      );
+    },
   });
   return new Response(stream, {
     headers: {

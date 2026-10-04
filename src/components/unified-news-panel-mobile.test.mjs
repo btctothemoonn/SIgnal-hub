@@ -49,7 +49,7 @@ assert.match(source, /active:scale-\[0\.995\]/);
 assert.match(source, /border-l-2 border-l-accent\/50/);
 assert.doesNotMatch(source, /border-l-success|focus:ring-success/);
 assert.match(source, /data-telegram-fault-alert/);
-assert.match(source, /requestTelegramSnapshot\(\{ range: feedRange \}\),\s*requestXSnapshot\(\{ range: feedRange \}\),/s);
+assert.match(source, /requestTelegramSnapshot\(\{\s*range:\s*feedRange\b[^}]*\}\),\s*requestXSnapshot\(\{\s*range:\s*feedRange\b[^}]*\}\),/s);
 assert.doesNotMatch(source, /refreshSourceLabel\(telegramRefresh\?\.source\)/);
 assert.doesNotMatch(source, /telegramRefresh\.cacheFetchedAt/);
 assert.doesNotMatch(source, /telegramSnapshot\.channels\.length[^\n]*频道/);

@@ -263,7 +263,15 @@ function mergeTelegramSnapshot(
   current: TelegramDashboardSnapshot,
   incoming: TelegramDashboardSnapshot,
   limit = MAX_TELEGRAM_NEWS_ITEMS,
+  streamUpdates?: Map<string, TelegramDashboardSnapshot["feed"][number]>,
 ): TelegramDashboardSnapshot {
+  if (streamUpdates?.size) {
+    const merged = mergeTelegramSnapshot(current, incoming, limit);
+    return {
+      ...mergeTelegramSnapshot(incoming, current, limit),
+      feed: mergeFeeds(merged.feed, [...streamUpdates.values()], limit),
+    };
+  }
   const mergedFeed = mergeFeeds(
     current.feed,
     incoming.feed,
@@ -287,7 +295,15 @@ function mergeTwitterSnapshot(
   current: TwitterDashboardSnapshot,
   incoming: TwitterDashboardSnapshot,
   limit = MAX_X_NEWS_ITEMS,
+  streamUpdates?: Map<string, TwitterDashboardSnapshot["feed"][number]>,
 ): TwitterDashboardSnapshot {
+  if (streamUpdates?.size) {
+    const merged = mergeTwitterSnapshot(current, incoming, limit);
+    return {
+      ...mergeTwitterSnapshot(incoming, current, limit),
+      feed: mergeFeeds(merged.feed, [...streamUpdates.values()], limit),
+    };
+  }
   const mergedFeed = mergeFeeds(current.feed, incoming.feed, limit);
 
   return {
@@ -301,6 +317,13 @@ function mergeTwitterSnapshot(
       incoming.watchAccounts,
     ),
     feed: mergedFeed,
+  };
+}
+
+function createSignalSnapshotUpdates() {
+  return {
+    telegram: new Map<string, TelegramDashboardSnapshot["feed"][number]>(),
+    x: new Map<string, TwitterDashboardSnapshot["feed"][number]>(),
   };
 }
 
@@ -659,6 +682,12 @@ export function UnifiedNewsPanel({
   const pendingFeedNavigationRef = useRef<PendingFeedNavigation | null>(null);
   const stagedReadingPositionRef = useRef<SignalFeedReadingAnchor | null>(null);
   const readingAnchorFrameRef = useRef<number | null>(null);
+  const feedEntryFrameRef = useRef<number | null>(null);
+  const enteringLatestFeedRef = useRef(false);
+  const feedNavigationEpochRef = useRef(0);
+  const pendingSnapshotUpdatesRef = useRef(
+    new Set<ReturnType<typeof createSignalSnapshotUpdates>>(),
+  );
   const [readingPositionStatus, setReadingPositionStatus] = useState<string | null>(
     null,
   );
@@ -699,30 +728,35 @@ export function UnifiedNewsPanel({
     );
   }, []);
 
-  const updateReadingNavigationState = useCallback(() => {
+  const readingPositionIsAwayFromLatest = useCallback(() => {
     const timeline = timelineRef.current;
-    if (!timeline) return;
+    if (!timeline) return false;
 
     if (timelineUsesInternalScroll()) {
-      setHasScrolledAwayFromLatest(timeline.scrollTop > 24);
-      return;
+      return timeline.scrollTop > 24;
     }
 
     const first = timeline.querySelector<HTMLElement>(
       "[data-signal-feed-item-id]",
     );
-    setHasScrolledAwayFromLatest(
-      first ? first.getBoundingClientRect().top < 0 : false,
-    );
+    return first ? first.getBoundingClientRect().top < 0 : false;
   }, [timelineUsesInternalScroll]);
 
+  const updateReadingNavigationState = useCallback(() => {
+    setHasScrolledAwayFromLatest(readingPositionIsAwayFromLatest());
+  }, [readingPositionIsAwayFromLatest]);
+
   const scrollToLatestSignal = useCallback(() => {
+    feedNavigationEpochRef.current += 1;
+    pendingFeedNavigationRef.current = null;
+    stagedReadingPositionRef.current = null;
+    setStagedRenderTargetId(null);
     const first = timelineRef.current?.querySelector<HTMLElement>(
       "[data-signal-feed-item-id]",
     );
     if (!first) return;
 
-    first.scrollIntoView({ behavior: "smooth", block: "start" });
+    first.scrollIntoView({ behavior: "instant", block: "start" });
     setHasScrolledAwayFromLatest(false);
   }, []);
 
@@ -778,6 +812,11 @@ export function UnifiedNewsPanel({
   }, [timelineUsesInternalScroll]);
 
   const persistVisibleReadingAnchor = useCallback(() => {
+    // Opening the feed or receiving messages at the top must not overwrite
+    // the last place the user deliberately scrolled down to read.
+    if (enteringLatestFeedRef.current || !readingPositionIsAwayFromLatest()) {
+      return null;
+    }
     const anchor = captureVisibleReadingAnchor();
     if (!anchor) return null;
 
@@ -790,15 +829,20 @@ export function UnifiedNewsPanel({
       return null;
     }
     return anchor;
-  }, [captureVisibleReadingAnchor]);
+  }, [captureVisibleReadingAnchor, readingPositionIsAwayFromLatest]);
 
   const stageReadingPositionCompensation = useCallback(() => {
+    if (enteringLatestFeedRef.current || !readingPositionIsAwayFromLatest()) {
+      stagedReadingPositionRef.current = null;
+      setStagedRenderTargetId(null);
+      return;
+    }
     const anchor = persistVisibleReadingAnchor();
     if (anchor) {
       stagedReadingPositionRef.current = anchor;
       setStagedRenderTargetId(anchor.itemId);
     }
-  }, [persistVisibleReadingAnchor]);
+  }, [persistVisibleReadingAnchor, readingPositionIsAwayFromLatest]);
 
   const scrollReadingViewportBy = useCallback(
     (top: number) => {
@@ -885,6 +929,48 @@ export function UnifiedNewsPanel({
     item.scrollIntoView({ behavior: "smooth", block: "center" });
     setReadingPositionStatus("已返回上次阅读位置");
   }, [findTimelineItem]);
+
+  const enterLatestFeed = useCallback(() => {
+    enteringLatestFeedRef.current = true;
+    feedNavigationEpochRef.current += 1;
+    pendingFeedNavigationRef.current = null;
+    stagedReadingPositionRef.current = null;
+    if (feedEntryFrameRef.current !== null) {
+      window.cancelAnimationFrame(feedEntryFrameRef.current);
+    }
+    const resetViewport = () => {
+      timelineRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      window.scrollTo({ top: 0, behavior: "auto" });
+    };
+    resetViewport();
+    // Browser history can restore scroll after pageshow/layout effects.
+    feedEntryFrameRef.current = window.requestAnimationFrame(() => {
+      resetViewport();
+      setStagedRenderTargetId(null);
+      setHasScrolledAwayFromLatest(false);
+      feedEntryFrameRef.current = null;
+      enteringLatestFeedRef.current = false;
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    enterLatestFeed();
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) enterLatestFeed();
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+      feedNavigationEpochRef.current += 1;
+      stagedReadingPositionRef.current = null;
+      pendingFeedNavigationRef.current = null;
+      if (feedEntryFrameRef.current !== null) {
+        window.cancelAnimationFrame(feedEntryFrameRef.current);
+        feedEntryFrameRef.current = null;
+      }
+      enteringLatestFeedRef.current = false;
+    };
+  }, [enterLatestFeed]);
 
   useEffect(() => {
     if (!lightboxMedia) return;
@@ -1195,7 +1281,9 @@ export function UnifiedNewsPanel({
         : findTimelineItem(pending.anchor.itemId);
     if (!target) return;
     pendingFeedNavigationRef.current = null;
+    const navigationEpoch = feedNavigationEpochRef.current;
     window.requestAnimationFrame(() => {
+      if (feedNavigationEpochRef.current !== navigationEpoch) return;
       target.scrollIntoView({
         behavior: "smooth",
         block: pending.type === "oldest" ? "end" : "center",
@@ -1233,11 +1321,12 @@ export function UnifiedNewsPanel({
   }, [persistVisibleReadingAnchor, updateReadingNavigationState]);
 
   const lastRefreshAtRef = useRef(0);
-  const refreshInFlightRef = useRef(false);
   const signalRefreshRangeRef = useRef<SignalFeedRange | null>(null);
 
   useEffect(() => {
     let isActive = true;
+    let refreshInFlight = false;
+    const refreshAbort = new AbortController();
 
     const refreshSources = async ({
       ignoreThrottle = false,
@@ -1246,29 +1335,34 @@ export function UnifiedNewsPanel({
       ignoreThrottle?: boolean;
       replace?: boolean;
     } = {}) => {
-      if (refreshInFlightRef.current) {
+      if (refreshInFlight) {
         return;
       }
       if (!ignoreThrottle && Date.now() - lastRefreshAtRef.current < 15000) {
         return;
       }
-      refreshInFlightRef.current = true;
+      refreshInFlight = true;
       lastRefreshAtRef.current = Date.now();
+      // Keep only messages received during this request, so a late REST
+      // response cannot undo SSE edits while unrelated REST edits still apply.
+      const streamUpdates = createSignalSnapshotUpdates();
+      pendingSnapshotUpdatesRef.current.add(streamUpdates);
       let results: [
         PromiseSettledResult<TelegramDashboardSnapshot>,
         PromiseSettledResult<TwitterDashboardSnapshot> | null,
       ];
       try {
         const settled = await Promise.allSettled([
-          requestTelegramSnapshot({ range: feedRange }),
-          requestXSnapshot({ range: feedRange }),
+          requestTelegramSnapshot({ range: feedRange, signal: refreshAbort.signal }),
+          requestXSnapshot({ range: feedRange, signal: refreshAbort.signal }),
         ]);
         results = [
           settled[0] as PromiseSettledResult<TelegramDashboardSnapshot>,
           settled[1] as PromiseSettledResult<TwitterDashboardSnapshot>,
         ];
       } finally {
-        refreshInFlightRef.current = false;
+        refreshInFlight = false;
+        pendingSnapshotUpdatesRef.current.delete(streamUpdates);
       }
 
       if (!isActive) {
@@ -1279,26 +1373,18 @@ export function UnifiedNewsPanel({
       startTransition(() => {
         const [telegramResult, xResult] = results;
         if (telegramResult.status === "fulfilled") {
-          setTelegramSnapshot((current) =>
-            replace
-              ? telegramResult.value
-              : mergeTelegramSnapshot(
-                  current,
-                  telegramResult.value,
-                  getSignalFeedRangeLimit(feedRange, "telegram"),
-                ),
-          );
+          setTelegramSnapshot((current) => {
+            if (replace) return telegramResult.value;
+            const limit = getSignalFeedRangeLimit(feedRange, "telegram");
+            return mergeTelegramSnapshot(current, telegramResult.value, limit, streamUpdates.telegram);
+          });
         }
         if (xResult?.status === "fulfilled") {
-          setXSnapshot((current) =>
-            replace
-              ? xResult.value
-              : mergeTwitterSnapshot(
-                  current,
-                  xResult.value,
-                  getSignalFeedRangeLimit(feedRange, "x"),
-                ),
-          );
+          setXSnapshot((current) => {
+            if (replace) return xResult.value;
+            const limit = getSignalFeedRangeLimit(feedRange, "x");
+            return mergeTwitterSnapshot(current, xResult.value, limit, streamUpdates.x);
+          });
         }
       });
     };
@@ -1357,6 +1443,9 @@ export function UnifiedNewsPanel({
           return;
         }
 
+        for (const updates of pendingSnapshotUpdatesRef.current) {
+          for (const item of payload.feed) updates.x.set(item.id, item);
+        }
         stageReadingPositionCompensation();
         startTransition(() => {
           setXSnapshot((current) =>
@@ -1401,6 +1490,9 @@ export function UnifiedNewsPanel({
         return;
       }
 
+      for (const updates of pendingSnapshotUpdatesRef.current) {
+        for (const item of payload.feed) updates.telegram.set(item.id, item);
+      }
       stageReadingPositionCompensation();
       startTransition(() => {
         setTelegramSnapshot((current) =>
@@ -1457,12 +1549,15 @@ export function UnifiedNewsPanel({
     const previousRange = signalRefreshRangeRef.current;
     signalRefreshRangeRef.current = feedRange;
     if (shouldRefreshSignalSnapshotsOnEffect(previousRange, feedRange)) {
-      void refreshSources({ ignoreThrottle: true, replace: true });
+      // The first REST response may be older than a snapshot already received
+      // over SSE. Only a deliberate range change replaces the current feed.
+      void refreshSources({ ignoreThrottle: true, replace: previousRange !== null });
     } else if (previousRange === null) {
       lastRefreshAtRef.current = Date.now();
     }
     return () => {
       isActive = false;
+      refreshAbort.abort();
       window.clearInterval(refreshTimer);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -1512,13 +1607,15 @@ export function UnifiedNewsPanel({
   async function refreshTelegramNow() {
     setTelegramRefreshBusy(true);
     setTelegramManualStatus("TG 刷新中...");
+    const streamUpdates = createSignalSnapshotUpdates();
+    pendingSnapshotUpdatesRef.current.add(streamUpdates);
     try {
       const snapshot = await requestTelegramSnapshot({ range: feedRange });
       stageReadingPositionCompensation();
       startTransition(() => {
         setTelegramSnapshot((current) =>
           feedRange === DEFAULT_SIGNAL_FEED_RANGE
-            ? mergeTelegramSnapshot(current, snapshot)
+            ? mergeTelegramSnapshot(current, snapshot, MAX_TELEGRAM_NEWS_ITEMS, streamUpdates.telegram)
             : snapshot,
         );
       });
@@ -1535,6 +1632,7 @@ export function UnifiedNewsPanel({
         `TG 刷新失败：${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
+      pendingSnapshotUpdatesRef.current.delete(streamUpdates);
       setTelegramRefreshBusy(false);
     }
   }
@@ -1542,6 +1640,8 @@ export function UnifiedNewsPanel({
   async function refreshMonitor985Latest() {
     setMonitor985RefreshBusy(true);
     setXCatchupStatus("刷新 985 中...");
+    const streamUpdates = createSignalSnapshotUpdates();
+    pendingSnapshotUpdatesRef.current.add(streamUpdates);
     try {
       const response = await fetch("/api/x/catchup", {
         method: "POST",
@@ -1559,7 +1659,7 @@ export function UnifiedNewsPanel({
         setXSnapshot((current) => {
           const merged =
             feedRange === DEFAULT_SIGNAL_FEED_RANGE
-              ? mergeTwitterSnapshot(current, snapshot)
+              ? mergeTwitterSnapshot(current, snapshot, MAX_X_NEWS_ITEMS, streamUpdates.x)
               : snapshot;
           return payload.usage
             ? {
@@ -1578,6 +1678,7 @@ export function UnifiedNewsPanel({
     } catch (error) {
       setXCatchupStatus(error instanceof Error ? error.message : String(error));
     } finally {
+      pendingSnapshotUpdatesRef.current.delete(streamUpdates);
       setMonitor985RefreshBusy(false);
     }
   }
@@ -1935,6 +2036,7 @@ export function UnifiedNewsPanel({
       <div
         ref={timelineRef}
         data-signal-feed-timeline
+        style={{ overflowAnchor: hasScrolledAwayFromLatest ? "auto" : "none" }}
         className={`min-h-0 space-y-1.5 bg-workspace-canvas p-1.5 sm:p-2 ${
           rail ? "lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" : ""
         }`}
