@@ -6,6 +6,7 @@ import {
   onRuntimeConfigChange,
 } from "./runtime-config.ts";
 import { createSnapshotCache } from "./snapshot-cache.ts";
+import { isXPipelineEnabled } from "./x-pipeline-config.ts";
 import {
   deletePersistedTwitterSnapshot,
   mergePersistedRealtimeTwitterUpdate,
@@ -183,7 +184,7 @@ export type TwitterFeedItem = {
 };
 
 export type TwitterDashboardSnapshot = {
-  provider: "6551";
+  provider: "6551" | "x-pipeline";
   baseUrl: string;
   isConfigured: boolean;
   isConnected: boolean;
@@ -269,12 +270,7 @@ function getTwitterBaseUrl(): string {
 }
 
 export function is6551TwitterConnectorEnabled(): boolean {
-  const raw = process.env.TWITTER_CONNECTOR_ENABLED?.trim().toLowerCase();
-  if (!raw) {
-    return true;
-  }
-
-  return !["0", "false", "no", "off", "paused"].includes(raw);
+  return isXPipelineEnabled();
 }
 
 function isTwitterTranslationEnabled(): boolean {
@@ -975,6 +971,9 @@ async function request6551<T>(
   path: string,
   body: JsonRecord,
 ): Promise<ApiEnvelope<T>> {
+  if (!is6551TwitterConnectorEnabled()) {
+    throw new Error("6551 采集已停用。");
+  }
   const token = getTwitterToken();
   if (!token) {
     throw new Error(

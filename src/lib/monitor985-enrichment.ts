@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { TwitterFeedItem, TwitterRealtimeUpdate } from "./6551-twitter.ts";
 import { isFullTweetByIdCacheHit } from "./x-hybrid-tweet-cache.ts";
 import { guardedTweetByIdFetch } from "./x-hybrid-tweet-fetch.ts";
+import { isXPipelineEnabled } from "./x-pipeline-config.ts";
 
 function isMonitor985Item(feedItem: TwitterFeedItem): boolean {
   return /^985monitor\b/i.test(feedItem.queryLabel || "");
@@ -68,6 +69,10 @@ export async function resolveMonitor985FullTweet(
     });
     return cachedTweet;
   }
+
+  // Retired 6551 may still have useful cached full text; do not reserve points
+  // or issue a paid request to fill a truncated 985 event while it is disabled.
+  if (!isXPipelineEnabled()) return null;
 
   const fetchResult = await guardedTweetByIdFetch({
     tweetId: feedItem.id,

@@ -18,7 +18,7 @@ import {
 } from "@/lib/x-hybrid-telegram";
 import { runMonitor985ManualCatchup } from "@/lib/monitor985-catchup";
 import { confirmXHybridPrimaryMisses } from "@/lib/x-hybrid-primary-refresh";
-import { getXPipelineConfig } from "@/lib/x-pipeline-config";
+import { getXPipelineConfig, isXHybridEnabled } from "@/lib/x-pipeline-config";
 import {
   getXHybridSourceStatus,
   getXPipelineHealth,
@@ -193,6 +193,9 @@ function enabledAccountKeys() {
 }
 
 export async function POST(request: Request) {
+  if (!isXHybridEnabled()) {
+    return NextResponse.json({ success: false, error: "6551 补缺已停用。" }, { status: 410 });
+  }
   const input = await readBody(request);
   const lookbackHours = resolveXHybridBackfillLookbackHours(input);
   const lookbackMs = resolveXHybridBackfillLookbackMs(input);

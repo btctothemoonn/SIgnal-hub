@@ -9,7 +9,7 @@ if (process.platform !== "linux") {
   process.exit(0);
 }
 const source = readFileSync(new URL("./deploy-vps.sh", import.meta.url), "utf8");
-for (const [failure, wecomEnabled, pushEnabled, oldPush] of [["none", "1", "1", false], ["none", "0", "0", false], ["build", "1", "1", false], ["readiness", "1", "1", false], ["readiness", "1", "1", true], ["transient-service", "1", "1", false], ["failed-service", "1", "1", false]]) {
+for (const [failure, wecomEnabled, pushEnabled, oldPush, hybridEnabled = "1"] of [["none", "1", "1", false], ["none", "0", "0", false, "0"], ["build", "1", "1", false], ["readiness", "1", "1", false], ["readiness", "1", "1", true], ["transient-service", "1", "1", false], ["failed-service", "1", "1", false]]) {
   const root = mkdtempSync(join(tmpdir(), "signal-release-test-"));
   try {
     const app = join(root, "app");
@@ -49,6 +49,8 @@ fi`);
 case "$*" in
   *"WECOM_SYNC_ENABLED"*) [[ "$TEST_WECOM_ENABLED" == "1" ]] || exit 1 ;;
   *"WEB_PUSH_ENABLED"*) [[ "$TEST_PUSH_ENABLED" == "1" ]] || exit 1 ;;
+  *"X_HYBRID_ENABLED"*) [[ "$TEST_HYBRID_ENABLED" == "1" ]] || exit 1 ;;
+  *"TWITTER_CONNECTOR_ENABLED"*) [[ "$TEST_HYBRID_ENABLED" == "1" ]] || exit 1 ;;
   *"next build"*)
     [[ "$(readlink -f "$SIGNAL_HUB_CURRENT_LINK")" == "$TEST_OLD_RELEASE" ]]
     [[ ! -L .signal-hub ]] || exit 32
@@ -59,13 +61,15 @@ case "$*" in
 esac`);
     mkdirSync(join(root, 'enabled'));
     writeFileSync(join(root, 'enabled/signal-hub-web-push'), oldPush ? '1' : '0');
+    writeFileSync(join(root, 'enabled/signal-hub-x-hybrid'), '1');
+    writeFileSync(join(root, 'enabled/signal-hub-x-pipeline'), '1');
     const result = spawnSync("bash", [join(app, "scripts/deploy-vps.sh")], {
       cwd: app, encoding: "utf8", timeout: 30_000,
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SIGNAL_HUB_APP_DIR: app,
         SIGNAL_HUB_RELEASES_DIR: join(root, "releases"), SIGNAL_HUB_CURRENT_LINK: current,
         SIGNAL_HUB_NODE_BIN: join(bin, "node"), SIGNAL_HUB_PNPM_BIN: join(bin, "pnpm"),
         SIGNAL_HUB_DEPLOY_REEXEC: "1", TEST_FAILURE: failure, TEST_OLD_RELEASE: old,
-        TEST_WECOM_ENABLED: wecomEnabled, TEST_PUSH_ENABLED: pushEnabled, TEST_ENABLED_DIR: join(root, 'enabled'), TEST_SERVICES_LOG: join(root,"services.log"), TEST_UNITS_LOG: join(root,"units.log") },
+        TEST_WECOM_ENABLED: wecomEnabled, TEST_PUSH_ENABLED: pushEnabled, TEST_HYBRID_ENABLED: hybridEnabled, TEST_ENABLED_DIR: join(root, 'enabled'), TEST_SERVICES_LOG: join(root,"services.log"), TEST_UNITS_LOG: join(root,"units.log") },
     });
     const success = failure === "none" || failure === "transient-service";
     assert.equal(result.status, success ? 0 : failure === "build" ? 8 : failure === "failed-service" ? 1 : 9, result.stdout + result.stderr);
@@ -78,6 +82,11 @@ esac`);
       assert.equal(/^restart .*signal-hub-web-push/m.test(services), pushEnabled === "1");
       if (pushEnabled === "0") assert.match(services, /disable --now signal-hub-web-push/);
       assert.equal(readFileSync(join(root, 'enabled/signal-hub-web-push'), 'utf8'), pushEnabled);
+      assert.equal(/^restart .*signal-hub-x-hybrid/m.test(services), hybridEnabled === "1");
+      if (hybridEnabled === "0") {
+        assert.equal(readFileSync(join(root, 'enabled/signal-hub-x-hybrid'), 'utf8'), '0');
+        assert.equal(readFileSync(join(root, 'enabled/signal-hub-x-pipeline'), 'utf8'), '0');
+      }
       if (wecomEnabled === "1") {
         assert.match(units, /MemoryMax=192M/);
         assert.match(units, /CPUQuota=25%/);

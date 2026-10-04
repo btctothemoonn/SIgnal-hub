@@ -44,31 +44,26 @@ export function hasXPipelineToken(env: NodeJS.ProcessEnv = process.env): boolean
   );
 }
 
-export function isMonitor985Enabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isMonitor985Enabled(env: Record<string, string | undefined> = process.env): boolean {
   const raw = env.MONITOR985_ENABLED?.trim().toLowerCase();
   return ["1", "true", "yes", "on"].includes(raw || "");
 }
 
-export function isXHybridEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isXHybridEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const raw = env.X_HYBRID_ENABLED?.trim().toLowerCase();
-  if (!raw) return true;
-  return !["0", "false", "no", "off", "paused"].includes(raw);
+  return isXPipelineEnabled(env) && ["1", "true", "yes", "on"].includes(raw || "");
 }
 
 export function hasXPipelineDataSource(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return hasXPipelineToken(env) || isMonitor985Enabled(env) ||
+  return (isXPipelineEnabled(env) && hasXPipelineToken(env)) || isMonitor985Enabled(env) ||
     ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || "");
 }
 
-export function isXPipelineEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isXPipelineEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const raw = env.TWITTER_CONNECTOR_ENABLED?.trim().toLowerCase();
-  if (!raw) {
-    return true;
-  }
-
-  return !["0", "false", "no", "off", "paused"].includes(raw);
+  return ["1", "true", "yes", "on"].includes(raw || "");
 }
 
 export function getXPipelineTrackedKeywords(

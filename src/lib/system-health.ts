@@ -377,7 +377,7 @@ export function summarizeXOwnedReaderCoverage({
     : incompleteCount ? `自有补采检查不完整：${incompleteCount}/${assigned.length} 位`
     : `自有补采试运行：${assigned.length} 位公开主帖与引用检查正常`;
   return {
-    id: "x-owned-reader", label: "X 自有账号补采",
+    id: "x-owned-reader", label: "X VPS 采集",
     status: failedCount ? "error" : staleCount || incompleteCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
     detail: detail + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
     updatedAt: successfulTimes.length === assigned.length ? oldest : null,
@@ -396,7 +396,7 @@ async function ownedReaderHealthItem(env: EnvLike, now: Date) {
     const snapshot = getXAccountCoverageSnapshot(accounts.map(account => account.username), undefined, env, now.getTime());
     return summarizeXOwnedReaderCoverage({ snapshot, now });
   } catch {
-    return { id: "x-owned-reader", label: "X 自有账号补采", status: "error" as const, detail: "无法读取自有补采状态", updatedAt: null, stale: true };
+    return { id: "x-owned-reader", label: "X VPS 采集", status: "error" as const, detail: "无法读取 VPS 采集状态", updatedAt: null, stale: true };
   }
 }
 

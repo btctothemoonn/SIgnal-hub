@@ -60,17 +60,24 @@ ln -s "$APP_DIR/.signal-hub" "$release/.signal-hub"
 
 services=(
   signal-hub-web signal-hub-stocks-cache signal-hub-alpha-summary
-  signal-hub-daily-brief signal-hub-telegram signal-hub-x-hybrid
+  signal-hub-daily-brief signal-hub-telegram
   signal-hub-monitor985 signal-hub-tiger-holdings signal-hub-douyin
   signal-hub-market-volatility-rest signal-hub-market-volatility-ws
   signal-hub-market-squeeze signal-hub-market-opportunity
 )
 scripts=(
   "" stocks-cache-worker.mjs alpha-summary-worker.mjs daily-brief-worker.mjs
-  telegram-pipeline-worker.mjs x-hybrid-worker.mjs monitor985-worker.mjs
+  telegram-pipeline-worker.mjs monitor985-worker.mjs
   tiger-holdings-worker.mjs douyin-worker.mjs market-volatility-rest-worker.mjs
   market-volatility-ws-worker.mjs market-squeeze-worker.mjs market-opportunity-worker.mjs
 )
+
+hybrid_enabled=0
+if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'const enabled=v=>["1","true","yes","on"].includes((v||"").trim().toLowerCase()); process.exit(enabled(process.env.TWITTER_CONNECTOR_ENABLED) && enabled(process.env.X_HYBRID_ENABLED) ? 0 : 1)'; then
+  hybrid_enabled=1
+  services+=(signal-hub-x-hybrid)
+  scripts+=(x-hybrid-worker.mjs)
+fi
 
 wecom_enabled=0
 if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(process.env.WECOM_SYNC_ENABLED === "true" ? 0 : 1)'; then
@@ -201,6 +208,12 @@ done
 deployment_activated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 activate "$release"
 sudo systemctl daemon-reload
+if [[ "$hybrid_enabled" == "0" ]] && systemctl cat signal-hub-x-hybrid >/dev/null 2>&1; then
+  sudo systemctl disable --now signal-hub-x-hybrid
+fi
+if ! "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1","true","yes","on"].includes((process.env.TWITTER_CONNECTOR_ENABLED||"").trim().toLowerCase()) ? 0 : 1)' && systemctl cat signal-hub-x-pipeline >/dev/null 2>&1; then
+  sudo systemctl disable --now signal-hub-x-pipeline
+fi
 sudo systemctl enable "${services[@]}" >/dev/null
 sudo systemctl restart "${services[@]}"
 if [[ "$wecom_enabled" == "0" ]] && systemctl cat signal-hub-wecom-receiver >/dev/null 2>&1; then

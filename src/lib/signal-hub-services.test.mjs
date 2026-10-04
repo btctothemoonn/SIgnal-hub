@@ -38,3 +38,5 @@ console.log("ok - signal hub service registry");
 
 assert.ok(!getEnabledSignalHubSystemdServices({}).some(service => service.name === "signal-hub-x-owned-reader"));
 assert.ok(getEnabledSignalHubSystemdServices({ X_OWNED_READER_ENABLED: "true" }).some(service => service.name === "signal-hub-x-owned-reader"));
+assert.ok(!getEnabledSignalHubSystemdServices({}).some(service => service.name === "signal-hub-x-hybrid"));
+assert.ok(!getEnabledSignalHubSystemdServices({ X_HYBRID_ENABLED: "true", TWITTER_CONNECTOR_ENABLED: "false" }).some(service => service.name === "signal-hub-x-hybrid"));

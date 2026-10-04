@@ -13,6 +13,7 @@ import {
   getXPipelineConfiguredTruthAccounts,
 } from "../src/lib/x-pipeline-accounts.ts";
 import { isMonitor985Enabled } from "../src/lib/x-pipeline-config.ts";
+import { record985RawPayload, record985StreamState } from "../src/lib/x-985-audit.ts";
 import {
   disableXPipelineAccountsExcept,
   getXPipelineFeedItem,
@@ -326,6 +327,7 @@ async function runTranslationBackfill(reason) {
 }
 
 async function ingestRawEvent(rawEvent, allowedAccountKeys) {
+  record985RawPayload(rawEvent);
   let update = normalizeMonitor985Event(rawEvent);
   if (!update) return { accepted: false, reason: "not-normalized" };
   if (!shouldAcceptUpdate(update, allowedAccountKeys)) {
@@ -413,6 +415,7 @@ async function readSseStream(response, allowedAccountKeys) {
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
+    record985StreamState("heartbeat");
     buffer += decoder.decode(value, { stream: true });
 
     let boundary = buffer.search(/\r?\n\r?\n/);
@@ -423,6 +426,7 @@ async function readSseStream(response, allowedAccountKeys) {
 
       const message = parseSseBlock(block);
       if (message.event === "ready") {
+        record985StreamState("connected");
         markHealth("connected", "985monitor SSE connected");
       } else if (SSE_EVENT_TYPES.has(message.event) && message.data) {
         const payload = JSON.parse(message.data);
@@ -443,18 +447,22 @@ async function readSseStream(response, allowedAccountKeys) {
 }
 
 async function connectSse(allowedAccountKeys) {
-  const response = await fetch(requestUrl("/api/events-stream"), {
-    cache: "no-store",
-    headers: {
-      ...requestHeaders(),
-      Accept: "text/event-stream",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`985monitor SSE HTTP ${response.status}`);
+  record985StreamState("disconnected");
+  try {
+    const response = await fetch(requestUrl("/api/events-stream"), {
+      cache: "no-store",
+      headers: {
+        ...requestHeaders(),
+        Accept: "text/event-stream",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`985monitor SSE HTTP ${response.status}`);
+    }
+    return await readSseStream(response, allowedAccountKeys);
+  } finally {
+    record985StreamState("disconnected");
   }
-  markHealth("connected", "985monitor SSE connected");
-  return readSseStream(response, allowedAccountKeys);
 }
 
 async function main() {
@@ -467,6 +475,7 @@ async function main() {
     log("monitor985_disabled");
     return;
   }
+  record985StreamState("disconnected");
 
   const synced = await syncConfiguredAccounts({ force: true });
   markHealth(
@@ -532,6 +541,7 @@ async function main() {
 
 function shutdown() {
   stopRequested = true;
+  if (isMonitor985Enabled()) record985StreamState("disconnected");
   if (accountSyncTimer) clearInterval(accountSyncTimer);
   if (catchupTimer) clearInterval(catchupTimer);
 }

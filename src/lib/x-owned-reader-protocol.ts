@@ -3,7 +3,7 @@ import type { TwitterFeedItem } from "./6551-twitter.ts";
 import { normalizeXOwnedUsername, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { safeXOwnedReason } from "./x-owned-reader-state.ts";
 
-export type XOwnedReaderTaskAccount = {username:string;userId?:string;fromAt:string;throughAt:string};
+export type XOwnedReaderTaskAccount = {username:string;userId?:string;fromAt:string;throughAt:string;purpose?:"audit"};
 export type XOwnedReaderTask = {version:1;runId:string;sessionDbPath:string;cooldownFilePath:string;maxRequests:number;deadlineMs:number;minIntervalMs:number;maxPages:number;accounts:XOwnedReaderTaskAccount[];mode?:"doctor"};
 export type XOwnedReaderEvent = Record<string,unknown> & {version:1;runId:string;type:string;feedItem?:TwitterFeedItem;account?:{username:string;userId:string}};
 const LINE_LIMIT=512*1024;
@@ -25,7 +25,7 @@ export function validateXOwnedReaderEvent(raw:unknown,task:XOwnedReaderTask):XOw
   const event=record(raw);
   requireValid(event.version===1 && event.runId===task.runId && typeof event.type === "string");
   const base={version:1 as const,runId:task.runId,type:event.type};
-  if(event.type==="cycle_complete") return base;
+  if(event.type==="cycle_complete") {requireValid(event.requests===undefined || smallInt(event.requests,task.maxRequests));return {...base,...(event.requests===undefined?{}:{requests:event.requests})};}
   if(event.type==="error") return {...base,reason:safeXOwnedReason(event.reason,"bridge_failed")};
   if(event.type==="paused") { requireValid(event.nextRetryAt===null || iso(event.nextRetryAt)); return {...base,reason:safeXOwnedReason(event.reason,"bridge_failed"),nextRetryAt:event.nextRetryAt}; }
   if(event.type==="doctor") {

@@ -62,8 +62,6 @@ import {
   telegramOriginalAction,
   type SignalFeedGroup,
 } from "@/lib/signal-feed-aggregation";
-import { DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS } from "@/lib/x-hybrid-backfill-options";
-import { formatXHybridBackfillStatus } from "@/lib/x-hybrid-backfill-status";
 import {
   getXSourceBadgeLabel,
   isMergedXSignalSource,
@@ -417,7 +415,7 @@ function toUnifiedTwitterItems(
       createdAt: tweet.createdAt,
       eventType: tweet.eventType ?? null,
       sourceLabel:
-        source === "truth" ? "Truth" : source === "monitor985" ? "X-985" : source === "owned-reader" ? "X · 自有采集" : "X-6551",
+        source === "truth" ? "Truth" : source === "monitor985" ? "X · 985 采集" : source === "owned-reader" ? "X · VPS 采集" : "X · 6551 历史",
       title: tweet.displayName || `@${displayUsername}`,
       titleUrl: tweet.profileUrl,
       subtitle: formatXAuthorSubtitle(displayUsername, tweet.queryLabel),
@@ -544,35 +542,6 @@ type Props = {
   className?: string;
 };
 
-type XUsageResponse = {
-  success: boolean;
-  usage?: NonNullable<TwitterDashboardSnapshot["usage"]>;
-  error?: string;
-};
-
-type XBackfillResponse = {
-  success: boolean;
-  lookbackHours?: number;
-  checked: number;
-  parsed: number;
-  selected: number;
-  enriched: number;
-  failed: number;
-  pointsReserved: number;
-  quotedResolved: number;
-  quotedPointsReserved: number;
-  primaryRefreshes?: number;
-  skippedAfter985Refresh?: number;
-  skippedAlreadyProcessed?: number;
-  skippedAlreadyIn985?: number;
-  pendingGrace?: number;
-  skippedNotConfigured?: number;
-  skippedNoTweetId?: number;
-  dryRun: boolean;
-  usage?: NonNullable<TwitterDashboardSnapshot["usage"]>;
-  error?: string;
-};
-
 type Monitor985RefreshResponse = {
   success: boolean;
   result?: {
@@ -697,10 +666,7 @@ export function UnifiedNewsPanel({
     useState(false);
   const [telegramRefreshBusy, setTelegramRefreshBusy] = useState(false);
   const [telegramManualStatus, setTelegramManualStatus] = useState<string | null>(null);
-  const [xUsageBusy, setXUsageBusy] = useState(false);
   const [monitor985RefreshBusy, setMonitor985RefreshBusy] = useState(false);
-  const [xCatchupBusy, setXCatchupBusy] = useState(false);
-  const [xCatchupRunning, setXCatchupRunning] = useState(false);
   const [xCatchupStatus, setXCatchupStatus] = useState<string | null>(null);
   const [seenIds, setSeenIds] = useState<{
     telegram: Set<string>;
@@ -1542,7 +1508,6 @@ export function UnifiedNewsPanel({
     { id: "truth", label: "Truth", shortLabel: "TS", count: truthFeedCount },
   ];
   const telegramFirstError = telegramSnapshot.errors[0] || null;
-  const xUsage = xSnapshot.usage;
 
   async function refreshTelegramNow() {
     setTelegramRefreshBusy(true);
@@ -1574,33 +1539,8 @@ export function UnifiedNewsPanel({
     }
   }
 
-  async function authorizeXUsageToday() {
-    setXUsageBusy(true);
-    try {
-      const response = await fetch("/api/x/usage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "authorize.today" }),
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as XUsageResponse;
-      if (!response.ok || !payload.success || !payload.usage) {
-        throw new Error(payload.error || `X usage authorization failed (${response.status})`);
-      }
-      startTransition(() => {
-        setXSnapshot((current) => ({
-          ...current,
-          usage: payload.usage,
-        }));
-      });
-    } finally {
-      setXUsageBusy(false);
-    }
-  }
-
   async function refreshMonitor985Latest() {
     setMonitor985RefreshBusy(true);
-    setXCatchupRunning(false);
     setXCatchupStatus("刷新 985 中...");
     try {
       const response = await fetch("/api/x/catchup", {
@@ -1632,8 +1572,8 @@ export function UnifiedNewsPanel({
       const result = payload.result;
       setXCatchupStatus(
         result
-          ? `985 刷新完成：接入 ${result.accepted}/${result.fetched} 条，忽略 ${result.ignored} 条，不扣 points`
-          : "985 刷新完成，不扣 points",
+          ? `985 刷新完成：接入 ${result.accepted}/${result.fetched} 条，忽略 ${result.ignored} 条`
+          : "985 刷新完成",
       );
     } catch (error) {
       setXCatchupStatus(error instanceof Error ? error.message : String(error));
@@ -1641,116 +1581,6 @@ export function UnifiedNewsPanel({
       setMonitor985RefreshBusy(false);
     }
   }
-
-  async function startXManualCatchup() {
-    setXCatchupBusy(true);
-    setXCatchupRunning(false);
-    setXCatchupStatus(
-      `6551 补漏中（${DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS}h）...`,
-    );
-    try {
-      const response = await fetch("/api/x/hybrid-backfill", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lookbackHours: DEFAULT_X_HYBRID_BACKFILL_LOOKBACK_HOURS,
-          limit: 100,
-          retryErrors: true,
-          retryFallback: true,
-          dryRun: false,
-        }),
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as XBackfillResponse;
-      if (!payload.success || !response.ok) {
-        throw new Error(payload.error || `hybrid backfill failed (${response.status})`);
-      }
-      const snapshot = await requestXSnapshot({ range: feedRange });
-      stageReadingPositionCompensation();
-      startTransition(() => {
-        setXSnapshot((current) => {
-          const merged =
-            feedRange === DEFAULT_SIGNAL_FEED_RANGE
-              ? mergeTwitterSnapshot(current, snapshot)
-              : snapshot;
-          return payload.usage
-            ? {
-                ...merged,
-                usage: payload.usage,
-              }
-            : merged;
-        });
-      });
-      setXCatchupRunning(false);
-      setXCatchupStatus(formatXHybridBackfillStatus(payload));
-    } catch (error) {
-      setXCatchupRunning(false);
-      setXCatchupStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setXCatchupBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!xCatchupRunning) return;
-    let isActive = true;
-
-    const refreshStatus = async () => {
-      try {
-        const response = await fetch("/api/x/catchup", {
-          method: "GET",
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as {
-          success: boolean;
-          running: boolean;
-          health?: { detail: string } | null;
-          usage?: NonNullable<TwitterDashboardSnapshot["usage"]>;
-        };
-        if (!isActive || !payload.success) return;
-
-        startTransition(() => {
-          if (payload.usage) {
-            setXSnapshot((current) => ({
-              ...current,
-              usage: payload.usage,
-            }));
-          }
-        });
-        setXCatchupRunning(payload.running);
-        setXCatchupStatus(
-          payload.health?.detail ||
-            (payload.running ? "985 最新流刷新中..." : "985 最新流已结束"),
-        );
-
-        if (!payload.running) {
-          const snapshot = await requestXSnapshot({ range: feedRange });
-          if (!isActive) return;
-          stageReadingPositionCompensation();
-          startTransition(() => {
-            setXSnapshot((current) =>
-              feedRange === DEFAULT_SIGNAL_FEED_RANGE
-                ? mergeTwitterSnapshot(current, snapshot)
-                : snapshot,
-            );
-          });
-        }
-      } catch (error) {
-        if (!isActive) return;
-        setXCatchupStatus(error instanceof Error ? error.message : String(error));
-      }
-    };
-
-    void refreshStatus();
-    const timer = window.setInterval(() => {
-      void refreshStatus();
-    }, 5000);
-
-    return () => {
-      isActive = false;
-      window.clearInterval(timer);
-    };
-  }, [xCatchupRunning, feedRange, stageReadingPositionCompensation]);
 
   return (
     <section
@@ -2052,49 +1882,15 @@ export function UnifiedNewsPanel({
                 {telegramManualStatus}
               </span>
             ) : null}
-            {xUsage ? (
-              <>
-                <span
-                  className={`inline-flex items-center gap-1 rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 font-medium ${
-                    xUsage.blocked
-                      ? "text-danger"
-                      : xUsage.pointsUsed >= xUsage.limit
-                        ? "text-warning"
-                        : "text-muted"
-                  }`}
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  X points {xUsage.pointsUsed}/{xUsage.limit}
-                </span>
-                {xUsage.blocked ? (
-                  <button
-                    type="button"
-                    disabled={xUsageBusy}
-                    onClick={() => void authorizeXUsageToday()}
-                    className="rounded-md border border-danger/50 px-2 py-1 text-[11px] font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-60"
-                  >
-                    {xUsageBusy ? "Authorizing..." : "Authorize X today"}
-                  </button>
-                ) : null}
-              </>
-            ) : null}
             {!pollXSnapshot && xSnapshot.isConfigured ? (
               <>
                 <button
                   type="button"
-                  disabled={monitor985RefreshBusy || xCatchupBusy || xCatchupRunning}
+                  disabled={monitor985RefreshBusy}
                   onClick={() => void refreshMonitor985Latest()}
                   className="order-[-30] rounded-md border border-accent/35 bg-accent/10 px-2 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/15 disabled:opacity-60"
                 >
                   {monitor985RefreshBusy ? "刷新中..." : "刷新 985"}
-                </button>
-                <button
-                  type="button"
-                  disabled={monitor985RefreshBusy || xCatchupBusy || xCatchupRunning}
-                  onClick={() => void startXManualCatchup()}
-                  className="order-[-20] rounded-md border border-workspace-line-strong bg-workspace-surface px-2 py-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground disabled:opacity-60"
-                >
-                  {xCatchupRunning || xCatchupBusy ? "补漏中..." : "6551 补漏"}
                 </button>
               </>
             ) : null}

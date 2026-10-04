@@ -92,6 +92,17 @@ class Parsing(unittest.TestCase):
         self.assertTrue(feed['contentComplete'])
         self.assertEqual(feed['origin'], 'watch')
         self.assertTrue(parsed['complete'])
+    def test_private_quote_context_does_not_reject_public_root(self):
+        root=tweet(); quote=tweet('99',username='Other',user_id='8')
+        quote['core']['user_results']['result']['privacy']={'protected':True}
+        root['quoted_status_result']={'result':quote}
+        parsed=self.parse(page([item(root),cursor('')]))
+        self.assertTrue(parsed['complete'])
+        self.assertEqual([event['feedItem']['id'] for event in parsed['tweets']],['100'])
+    def test_canonical_private_root_cannot_be_public_audit_evidence(self):
+        root=tweet(); root['core']['user_results']['result']['privacy']={'protected':True}
+        with self.assertRaisesRegex(ValueError,'protected_account'):
+            self.c.canonical_tweet(detail(root),'100')
     def test_quote_revision_is_its_own_edit_proof(self):
         root=tweet(); root['edit_control']={'edit_tweet_ids':['98','100']}
         quoted=tweet('99',username='Other',user_id='8'); root['quoted_status_result']={'result':quoted}
@@ -389,6 +400,56 @@ class Scanning(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({result['username'] for result in completed}),7)
         self.assertTrue(all(result['complete'] and not result['replyCoverageComplete'] for result in completed))
         self.assertTrue(all(result['replyReason']=='request_budget_reached' for result in completed))
+    async def test_audit_windows_follow_owned_posts_and_never_scan_replies(self):
+        window={'userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        accounts=[{'username':'Audit',**window,'purpose':'audit'},{'username':'Owned',**window}]
+        operations=[]; completed=[]
+        async def resolve(account): return account
+        async def fetch(account,kind,cur):
+            operations.append((kind,account['username']))
+            return page([item(tweet(str(100+len(operations)),username=account['username'])),cursor('')])
+        await self.c.scan_cycle(accounts,resolve,fetch,on_complete=completed.append)
+        self.assertEqual(operations,[('posts','Owned'),('posts','Audit'),('replies','Owned')])
+        audit=next(result for result in completed if result['username']=='Audit')
+        self.assertTrue(audit['complete']); self.assertEqual(audit['purpose'],'audit')
+        self.assertEqual(audit['pages'],1); self.assertFalse(audit['replyCoverageComplete'])
+    async def test_audit_unknown_structure_remains_incomplete_without_reply_request(self):
+        account={'username':'Alice','userId':'7','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        operations=[]; completed=[]; emitted=[]
+        async def resolve(value): return value
+        async def fetch(value,kind,cur): operations.append(kind); return {'data':{}}
+        await self.c.scan_cycle([account],resolve,fetch,on_tweet=emitted.append,on_complete=completed.append)
+        self.assertEqual(operations,['posts']); self.assertEqual(emitted,[])
+        self.assertFalse(completed[0]['complete'])
+        self.assertEqual(completed[0]['reason'],'timeline_structure_unrecognized')
+    async def test_cached_author_protected_root_keeps_audit_incomplete(self):
+        account={'username':'Alice','userId':'7','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        for privacy_field in ('privacy','legacy'):
+            with self.subTest(privacy_field=privacy_field):
+                root=tweet(); root['core']['user_results']['result'][privacy_field]={'protected':True}
+                operations=[]; emitted=[]; completed=[]
+                async def resolve(value): return value
+                async def fetch(value,kind,cur): operations.append(kind); return page([item(root),cursor('')])
+                await self.c.scan_cycle([account],resolve,fetch,on_tweet=emitted.append,on_complete=completed.append)
+                self.assertEqual(operations,['posts'])
+                self.assertEqual(emitted,[])
+                self.assertFalse(completed[0]['complete'])
+                self.assertEqual(completed[0]['reason'],'protected_account')
+    async def test_audit_reuses_canonical_identity_and_original_window_checks(self):
+        account={'username':'Alice','userId':'7','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        parent=tweet('90','Thu Oct 01 00:00:00 +0000 2026'); root=tweet('100')
+        root['quoted_status_result']={'result':tweet('99',username='Other',user_id='8')}
+        requests=[]; emitted=[]; completed=[]
+        async def resolve(value): return value
+        async def fetch(value,kind,cur):
+            self.assertEqual(kind,'posts')
+            return page([conversation([parent,root]),cursor('')])
+        async def canonical(value,identifier): requests.append(identifier); return detail(root)
+        await self.c.scan_cycle([account],resolve,fetch,on_tweet=emitted.append,on_complete=completed.append,fetch_detail=canonical)
+        self.assertEqual(requests,['100']); self.assertTrue(completed[0]['complete'])
+        self.assertEqual([event['feedItem']['id'] for event in emitted],['100'])
+        self.assertEqual(emitted[0]['feedItem']['createdAt'],'2026-10-04T00:00:00Z')
+        self.assertEqual(emitted[0]['feedItem']['quotedTweet']['id'],'99')
 
 class Protocol(unittest.TestCase):
     def setUp(self): self.c = load_core()
@@ -405,6 +466,18 @@ class Protocol(unittest.TestCase):
         self.assertEqual(events[-1]['type'], 'cycle_complete')
         self.assertNotIn('secret-cookie', result.stdout+result.stderr)
         self.assertEqual(result.returncode,0)
+    def test_up_to_one_hundred_task_accounts_with_optional_audit_role(self):
+        accounts=[{'username':'Author'+str(index),'fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z',**({'purpose':'audit'} if index>=7 else {})} for index in range(100)]
+        task={'version':1,'runId':'r','sessionDbPath':'/private/db','cooldownFilePath':'/private/cooldown','maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':accounts}
+        try: self.c.validate_task(task)
+        except ValueError as error: self.fail('One hundred distinct task authors should be accepted: '+str(error))
+        for invalid in ([],accounts+[{'username':'Extra','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}],accounts+[accounts[0]]):
+            with self.subTest(size=len(invalid)), self.assertRaises(ValueError): self.c.validate_task({**task,'accounts':invalid})
+    def test_unknown_account_purpose_is_rejected(self):
+        account={'username':'Alice','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        task={'version':1,'runId':'r','sessionDbPath':'/private/db','cooldownFilePath':'/private/cooldown','maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':[account]}
+        for invalid in ('owned','probe','',None,False,{},[]):
+            with self.subTest(purpose=invalid), self.assertRaises(ValueError): self.c.validate_task({**task,'accounts':[{**account,'purpose':invalid}]})
     def test_protocol_timestamps_use_bounded_fractional_utc_format(self):
         self.assertRegex(self.c.iso_now(),r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
         self.assertRegex(self.c.RequestGate.to_iso(1791072000.123456),r'^2026-10-04T00:00:00\.123Z$')
@@ -428,6 +501,42 @@ class Protocol(unittest.TestCase):
             self.assertEqual(result.stderr,''); self.assertNotIn('secret-cookie-value',result.stdout)
             events=[json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(events[-1]['type'],'cycle_complete')
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux flock test')
+    def test_busy_session_process_lock_pauses_without_mutating_cooldown_or_doctor(self):
+        import fcntl
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            db=Path(directory)/'private-session.db'; cooldown=Path(directory)/'cooldown.json'
+            with closing(sqlite3.connect(db)) as connection:
+                connection.execute('CREATE TABLE accounts(active INTEGER,locks TEXT)')
+                connection.execute('INSERT INTO accounts VALUES(1,?)',('{}',)); connection.commit()
+            task={'version':1,'runId':'safe-lock-run','sessionDbPath':str(db),'cooldownFilePath':str(cooldown),'maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':[{'username':'Alice','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}]}
+            with Path(str(db)+'.reader.lock').open('a+') as held:
+                fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                result=subprocess.run([sys.executable,str(ROOT/'x-owned-reader-bridge.py')],input=json.dumps(task),text=True,capture_output=True,timeout=10)
+                events=[json.loads(line) for line in result.stdout.splitlines()]
+                pauses=[event for event in events if event['type']=='paused']
+                self.assertEqual(len(pauses),1); self.assertEqual(pauses[0]['reason'],'in_progress')
+                self.assertGreater(self.c.instant(pauses[0]['nextRetryAt']),time.time())
+                self.assertEqual(events[-1]['type'],'cycle_complete'); self.assertEqual(events[-1]['requests'],0)
+                self.assertEqual(result.returncode,0); self.assertEqual(result.stderr,''); self.assertFalse(cooldown.exists())
+                doctor=subprocess.run([sys.executable,str(ROOT/'x-owned-reader-bridge.py')],input=json.dumps({**task,'mode':'doctor'}),text=True,capture_output=True,timeout=10)
+                doctor_events=[json.loads(line) for line in doctor.stdout.splitlines()]
+                self.assertEqual(doctor_events[0]['type'],'doctor'); self.assertTrue(doctor_events[0]['sessionAvailable'])
+                self.assertFalse(any(event['type']=='paused' for event in doctor_events))
+                self.assertFalse(cooldown.exists())
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux flock test')
+    def test_session_process_lock_is_private_and_released_after_failure(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as directory:
+            db=Path(directory)/'private-session.db'; cooldown=Path(directory)/'cooldown.json'
+            task={'version':1,'runId':'safe-lock-run','sessionDbPath':str(db),'cooldownFilePath':str(cooldown),'maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':[{'username':'Alice','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}]}
+            result=subprocess.run([sys.executable,str(ROOT/'x-owned-reader-bridge.py')],input=json.dumps(task),text=True,capture_output=True,timeout=10)
+            events=[json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual(next(event for event in events if event['type']=='paused')['reason'],'session_unavailable')
+            lock=Path(str(db)+'.reader.lock')
+            self.assertTrue(lock.exists()); self.assertEqual(lock.stat().st_mode&0o777,0o600)
+            with lock.open('a+') as held: fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
 
 try:
     import httpx
@@ -547,19 +656,21 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active,0); self.assertEqual(message,'Owned reader authentication check failed')
         locks=json.loads(locks); self.assertEqual(locks['UnrelatedEndpoint'],other)
         self.assertIn('UserTweets',locks)
-    async def bridge_main_first_fixture(self,incomplete=False):
+    async def bridge_main_first_fixture(self,incomplete=False,audit_budget=False,audit_rate_limit=False):
         try: import twscrape
         except ImportError: self.skipTest('requires pinned twscrape Linux venv')
         from unittest.mock import patch
         from types import SimpleNamespace
         bridge=load_bridge(); operations=[]; events=[]
         accounts=[{'username':'Alice'+str(index),'userId':str(7+index),'fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'} for index in range(7)]
-        task={'version':1,'runId':'fixture','sessionDbPath':'offline-unused.db','cooldownFilePath':str(self.path),'maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':accounts}
+        if audit_budget or audit_rate_limit: accounts.append({'username':'Audit','userId':'14','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'})
+        task={'version':1,'runId':'fixture','sessionDbPath':str(Path(self.temp.name)/'offline-unused.db'),'cooldownFilePath':str(self.path),'maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':accounts}
         class FixtureAPI:
             def __init__(self,*args,**kwargs): pass
             async def _gql_item(self,operation,variables):
                 kind='posts' if operation.endswith('/UserTweets') else 'replies'
                 index=int(variables['userId'])-7; operations.append((kind,index))
+                if index==7: raise bridge.core.ReaderStop('rate_limited' if audit_rate_limit else 'request_budget_reached','2026-10-04T02:00:00Z')
                 if kind=='replies': raise bridge.core.ReaderStop('request_budget_reached','2026-10-04T02:00:00Z')
                 body={'data':{}} if incomplete and index==3 else page([item(tweet(str(100+index),username='Alice'+str(index),user_id=str(7+index))),cursor('')])
                 return SimpleNamespace(json=lambda:body)
@@ -582,6 +693,22 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(event['complete'] for event in completions),6)
         pauses=[event for event in events if event['type']=='paused']
         self.assertEqual(len(pauses),1); self.assertEqual(pauses[0]['reason'],'request_budget_reached')
+        self.assertEqual(events[-1]['type'],'cycle_complete')
+    async def test_bridge_audit_budget_does_not_pause_completed_owned_windows(self):
+        operations,events=await self.bridge_main_first_fixture(audit_budget=True)
+        self.assertEqual(operations,[('posts',index) for index in range(8)])
+        completions=[event for event in events if event['type']=='account_complete']
+        owned=[event for event in completions if event.get('purpose')!='audit']
+        self.assertEqual(len(owned),7); self.assertTrue(all(event['complete'] for event in owned))
+        audit=next(event for event in completions if event.get('purpose')=='audit')
+        self.assertFalse(audit['complete']); self.assertEqual(audit['reason'],'request_budget_reached')
+        self.assertFalse(any(event['type']=='paused' for event in events))
+        self.assertEqual(events[-1]['type'],'cycle_complete')
+    async def test_bridge_audit_rate_limit_still_pauses_all_network_requests(self):
+        operations,events=await self.bridge_main_first_fixture(audit_rate_limit=True)
+        self.assertEqual(operations,[('posts',index) for index in range(8)])
+        pauses=[event for event in events if event['type']=='paused']
+        self.assertEqual(len(pauses),1); self.assertEqual(pauses[0]['reason'],'rate_limited')
         self.assertEqual(events[-1]['type'],'cycle_complete')
 
 if __name__ == '__main__': unittest.main(verbosity=2)

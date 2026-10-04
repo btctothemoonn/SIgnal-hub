@@ -32,10 +32,11 @@ def validate_task(task):
         value = task.get(key)
         if type(value) is not int or not low <= value <= high: raise ValueError('invalid_budget')
     accounts = task.get('accounts')
-    if not isinstance(accounts, list) or not 1 <= len(accounts) <= 7: raise ValueError('invalid_accounts')
+    if not isinstance(accounts, list) or not 1 <= len(accounts) <= 100: raise ValueError('invalid_accounts')
     names = set()
     for account in accounts:
         if not isinstance(account, dict) or not USERNAME.fullmatch(account.get('username', '')): raise ValueError('invalid_account')
+        if 'purpose' in account and account['purpose']!='audit': raise ValueError('invalid_account_purpose')
         name = account['username'].lower()
         if name in names: raise ValueError('duplicate_account')
         names.add(name)
@@ -139,6 +140,11 @@ def media_items(result):
 def tweet_feed(result, parents=None, depth=0):
     result = unwrap(result)
     if not result or depth > 3: raise ValueError('unparsed_entry')
+    # A cached profile ID does not prove the author is still public. The root's
+    # own embedded author state supplies this check without another X request.
+    user = nested(result, 'core', 'user_results', 'result')
+    if depth == 0 and (nested(user, 'privacy', 'protected') is True or nested(user, 'legacy', 'protected') is True):
+        raise ValueError('protected_account')
     identifier, author, legacy = str(result.get('rest_id','')), tweet_author(result), result.get('legacy')
     if not IDENTIFIER.fullmatch(identifier) or author is None or not isinstance(legacy,dict): raise ValueError('unparsed_entry')
     if str(legacy.get('id_str',identifier)) != identifier or str(legacy.get('user_id_str',author['userId'])) != author['userId']: raise ValueError('author_mismatch')
@@ -269,7 +275,10 @@ def parse_timeline_page(body, username, user_id, from_at, through_at):
             if legacy.get('retweeted_status_result') or result.get('retweeted_status_result') or legacy.get('retweeted_status_id_str'):
                 continue  # Native repost event semantics are outside this reader's coverage.
             try: feed=tweet_feed(result,parents)
-            except ValueError: output['quarantined']+=1; output['reason']='unparsed_entry'; continue
+            except ValueError as error:
+                output['quarantined']+=1
+                output['reason']='protected_account' if str(error)=='protected_account' else 'unparsed_entry'
+                continue
             if feed['userId']!=str(user_id) or feed['username'].lower()!=username.lower():
                 output['quarantined']+=1; output['reason']='author_mismatch'; continue
             pinned=pin_instruction or nested(item_content,'socialContext','contextType')=='Pin'
@@ -436,7 +445,8 @@ async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_twee
         record_subscriber_exclusions(result,[])
         return result
     try:
-        for requested in accounts:
+        # Collection retains priority even if an audit author appears first in stdin.
+        for requested in sorted(accounts,key=lambda account:account.get('purpose')=='audit'):
             account=await resolve_account(dict(requested))
             cache={}
             async def detail(identifier): return await fetch_detail(account,identifier)
@@ -452,7 +462,7 @@ async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_twee
         for context in contexts:
             account,result,cache=context['account'],context['result'],context['cache']
             remaining=max_pages-result['pages']
-            if not remaining or account.get('_skip_reason'): continue
+            if not remaining or account.get('_skip_reason') or account.get('purpose')=='audit': continue
             async def detail(identifier): return await fetch_detail(account,identifier)
             async def replies(cursor): return await fetch_timeline(account,'replies',cursor)
             try: reply=await scan_account(replies,account,remaining,emit,detail if fetch_detail else None,cache)

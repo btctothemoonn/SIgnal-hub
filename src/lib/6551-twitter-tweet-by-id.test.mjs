@@ -50,6 +50,13 @@ globalThis.fetch = async (url, init) => {
 
 const { get6551TwitterTweetById } = await import("./6551-twitter.ts");
 
+delete process.env.TWITTER_CONNECTOR_ENABLED;
+await assert.rejects(get6551TwitterTweetById("2049724698435735806"), /6551.*停用/);
+assert.equal(requests.length, 0, "a retained token must not make disabled 6551 issue a request");
+process.env.TWITTER_CONNECTOR_ENABLED = "false";
+await assert.rejects(get6551TwitterTweetById("2049724698435735806"), /6551.*停用/);
+assert.equal(requests.length, 0);
+process.env.TWITTER_CONNECTOR_ENABLED = "true";
 const tweet = await get6551TwitterTweetById("2049724698435735806");
 
 assert.equal(requests.length, 1);

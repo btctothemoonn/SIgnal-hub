@@ -53,12 +53,25 @@ try {
       media: [], quotedTweet: null, origin: "watch", queryLabel: "", translation: null, ...overrides,
     };
   }
-  function render(telegram = [], x = []) {
+  function render(telegram = [], x = [], snapshotOverrides = {}) {
     return renderToStaticMarkup(React.createElement(UnifiedNewsPanel, {
       initialTelegramSnapshot: { provider: "telegram", mode: "mtproto", isConfigured: true, isConnected: false, status: "live", channels: [], feed: telegram, note: "", errors: [] },
-      initialXSnapshot: { provider: "6551", baseUrl: "", isConfigured: true, isConnected: false, status: "live", watchAccounts: [], trackedKeywords: [], feed: x, note: "", errors: [] },
+      initialXSnapshot: { provider: "6551", baseUrl: "", isConfigured: true, isConnected: false, status: "live", watchAccounts: [], trackedKeywords: [], feed: x, note: "", errors: [], ...snapshotOverrides },
     }));
   }
+
+  test("retired 6551 controls stay hidden while actual 985, VPS and historical sources remain distinguishable", () => {
+    const html = render([], [
+      tweet({ id: "9011", text: "985 independent source", queryLabel: "985monitor / NEW_TWEET" }),
+      tweet({ id: "9012", text: "VPS independent source", contentSource: "owned-reader", queryLabel: "owned-reader / full" }),
+      tweet({ id: "9013", text: "Archived independent source", queryLabel: "Telegram trigger / full" }),
+    ], { usage: { pointsUsed: 300, limit: 300, blocked: true } });
+    assert.match(html, /985 采集/);
+    assert.match(html, /VPS 采集/);
+    assert.match(html, /6551 历史/);
+    assert.match(html, /刷新 985/);
+    assert.doesNotMatch(html, /6551 补漏|X points|Authorize X today/);
+  });
 
   test("copies of one original render one row with every author's commentary and permalink retained", () => {
     const html = render([telegramMessage()], [tweet()]);

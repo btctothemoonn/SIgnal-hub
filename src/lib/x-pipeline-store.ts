@@ -25,13 +25,10 @@ import {
   isUsefulTranslation,
   shouldTranslateText,
 } from "./translation-quality.ts";
-import { getXApiUsageSnapshot } from "./x-api-usage.ts";
 import {
   getXPipelineConfig,
   getXPipelineTrackedKeywords,
   hasXPipelineDataSource,
-  isMonitor985Enabled,
-  isXPipelineEnabled,
 } from "./x-pipeline-config.ts";
 
 type DbValue = string | number | null;
@@ -1446,7 +1443,6 @@ function snapshotStatus(
   feedCount: number,
 ): TwitterDashboardSnapshot["status"] {
   if (!hasXPipelineDataSource()) return "needs_token";
-  if (!isXPipelineEnabled() && !isMonitor985Enabled()) return "paused";
 
   const status = stringValue(health?.status);
   if (status === "error" && feedCount === 0) return "error";
@@ -1455,7 +1451,6 @@ function snapshotStatus(
 
 function snapshotConnected(health: DbRow | undefined): boolean {
   if (!hasXPipelineDataSource()) return false;
-  if (!isXPipelineEnabled() && !isMonitor985Enabled()) return false;
   const status = stringValue(health?.status);
   return ["connected", "subscribed", "live"].includes(status);
 }
@@ -1512,7 +1507,7 @@ export function getXPipelineSnapshot(
     healthStatus === "error" ? [stringValue(health?.detail)].filter(Boolean) : [];
 
   return {
-    provider: "6551",
+    provider: "x-pipeline",
     baseUrl: getXPipelineConfig().baseUrl,
     isConfigured: hasXPipelineDataSource(),
     isConnected: snapshotConnected(health),
@@ -1520,9 +1515,8 @@ export function getXPipelineSnapshot(
     watchAccounts,
     trackedKeywords: getXPipelineTrackedKeywords(),
     feed,
-    usage: getXApiUsageSnapshot({ db }),
     note:
-      "X pipeline reads local SQLite only. Page refresh and browser reconnects do not call 6551 REST.",
+      "X 信息流由 985 与 VPS 采集写入本地数据库。",
     errors,
   };
 }

@@ -4,6 +4,7 @@ import {
   hasXPipelineDataSource,
   isXHybridEnabled,
   isMonitor985Enabled,
+  isXPipelineEnabled,
 } from "./x-pipeline-config.ts";
 
 const config = getXPipelineConfig({
@@ -28,11 +29,15 @@ assert.match(fallback.dbPath, /x-pipeline\.sqlite$/);
 
 assert.equal(isMonitor985Enabled({ MONITOR985_ENABLED: "true" }), true);
 assert.equal(isMonitor985Enabled({ MONITOR985_ENABLED: "0" }), false);
-assert.equal(isXHybridEnabled({}), true);
+assert.equal(isXHybridEnabled({}), false);
 assert.equal(isXHybridEnabled({ X_HYBRID_ENABLED: "false" }), false);
-assert.equal(isXHybridEnabled({ X_HYBRID_ENABLED: "on" }), true);
+assert.equal(isXHybridEnabled({ X_HYBRID_ENABLED: "on" }), false);
+assert.equal(isXHybridEnabled({ X_HYBRID_ENABLED: "on", TWITTER_CONNECTOR_ENABLED: "true" }), true);
+assert.equal(isXPipelineEnabled({}), false);
+assert.equal(isXPipelineEnabled({ TWITTER_CONNECTOR_ENABLED: "true" }), true);
 assert.equal(hasXPipelineDataSource({ MONITOR985_ENABLED: "true" }), true);
-assert.equal(hasXPipelineDataSource({ TWITTER_TOKEN: "token" }), true);
+assert.equal(hasXPipelineDataSource({ TWITTER_TOKEN: "token" }), false);
+assert.equal(hasXPipelineDataSource({ TWITTER_TOKEN: "token", TWITTER_CONNECTOR_ENABLED: "true" }), true);
 assert.equal(hasXPipelineDataSource({}), false);
 assert.equal(hasXPipelineDataSource({ X_OWNED_READER_ENABLED: "true" }), true);
 assert.equal(hasXPipelineDataSource({ X_OWNED_READER_ENABLED: "false" }), false);

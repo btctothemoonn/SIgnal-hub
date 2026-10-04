@@ -588,7 +588,7 @@ function WatchListPanel({
       {failedSyncs.length > 0 ? (
         <details className="mt-3 rounded-[6px] bg-warning-soft px-3 py-2 text-xs text-warning">
           <summary className="cursor-pointer font-medium">
-            {failedSyncs.length} 条已保存但 6551 同步失败,点开查看
+            {failedSyncs.length} 条已保存但采集同步失败,点开查看
           </summary>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             {failedSyncs.map((r) => (
@@ -626,7 +626,7 @@ function WatchListPanel({
         {kind === "telegram"
           ? "Telegram 频道保存后立即热更新下一次抓取。"
           : kind === "twitter"
-            ? "X 账号保存时会调用 6551 watch 接口订阅实时事件(消耗 token 额度);已存在的订阅会被忽略。"
+            ? "X 账号保存后同步到 985 监控名单；发现公开新帖漏收时，后台会将对应博主转入 VPS 采集。"
             : "抖音博主保存后由后台 worker 低频抓取公开视频，只展示在独立抖音板块。"}
       </p>
     </div>

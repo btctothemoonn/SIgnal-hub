@@ -17,6 +17,7 @@ export type XOwnedReaderConfig = {
   minIntervalMs: number;
   maxPages: number;
   staleAfterMs: number;
+  auditEnabled: boolean;
 };
 export type XOwnedReaderEnv = Record<string, string | undefined>;
 
@@ -49,6 +50,7 @@ export function getXOwnedReaderConfig(env: XOwnedReaderEnv = process.env): XOwne
     minIntervalMs: Math.max(2_000, positive(env.X_OWNED_READER_MIN_INTERVAL_MS, 2_000)),
     maxPages: Math.min(5, positive(env.X_OWNED_READER_MAX_PAGES, 5)),
     staleAfterMs: 600_000,
+    auditEnabled: ["1", "true", "yes", "on"].includes(env.X_985_AUDIT_ENABLED?.trim().toLowerCase() || ""),
   };
 }
 

@@ -15,8 +15,8 @@ export function matchesSignalFeedTab(
 }
 
 export function getXSourceBadgeLabel(source: SignalFeedSource) {
-  if (source === "x") return "6551";
-  if (source === "monitor985") return "985";
-  if (source === "owned-reader") return "自有采集";
+  if (source === "x") return "6551 历史";
+  if (source === "monitor985") return "985 采集";
+  if (source === "owned-reader") return "VPS 采集";
   return null;
 }

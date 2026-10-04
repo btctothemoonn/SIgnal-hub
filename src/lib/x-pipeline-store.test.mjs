@@ -107,6 +107,7 @@ const {
 } = await transpileToTemp();
 
 process.env.TWITTER_TOKEN = "test-token";
+process.env.TWITTER_CONNECTOR_ENABLED = "true";
 
 const db = openXPipelineDb(":memory:");
 upsertXPipelineAccount(
@@ -251,7 +252,7 @@ setXPipelineHealth(
 );
 
 const snapshot = getXPipelineSnapshot(100, db);
-assert.equal(snapshot.provider, "6551");
+assert.equal(snapshot.provider, "x-pipeline");
 assert.equal(snapshot.status, "live");
 assert.equal(snapshot.watchAccounts.length, 1);
 assert.equal(snapshot.watchAccounts[0].username, "SpaceY");
@@ -343,7 +344,12 @@ assert.equal(
 process.env.TWITTER_CONNECTOR_ENABLED = "false";
 process.env.MONITOR985_ENABLED = "true";
 assert.equal(getXPipelineSnapshot(100, db).status, "live");
-process.env.TWITTER_CONNECTOR_ENABLED = "";
+process.env.MONITOR985_ENABLED = "";
+process.env.X_OWNED_READER_ENABLED = "true";
+assert.equal(getXPipelineSnapshot(100, db).status, "live", "VPS collection remains live when 6551 is disabled");
+assert.equal(getXPipelineSnapshot(100, db).isConnected, true);
+process.env.X_OWNED_READER_ENABLED = "";
+process.env.TWITTER_CONNECTOR_ENABLED = "true";
 process.env.MONITOR985_ENABLED = "";
 
 upsertXPipelineRealtimeUpdate(

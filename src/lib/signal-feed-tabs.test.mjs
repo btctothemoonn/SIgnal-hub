@@ -18,12 +18,12 @@ assert.equal(matchesSignalFeedTab({ source: "truth" }, "truth"), true);
 assert.equal(matchesSignalFeedTab({ source: "telegram" }, "telegram"), true);
 assert.equal(matchesSignalFeedTab({ source: "monitor985" }, "all"), true);
 
-assert.equal(getXSourceBadgeLabel("x"), "6551");
-assert.equal(getXSourceBadgeLabel("monitor985"), "985");
+assert.equal(getXSourceBadgeLabel("x"), "6551 历史");
+assert.equal(getXSourceBadgeLabel("monitor985"), "985 采集");
 assert.equal(getXSourceBadgeLabel("truth"), null);
 
 console.log("ok - signal feed tabs merge 6551 and 985 while keeping truth separate");
 
 assert.equal(isMergedXSignalSource("owned-reader"), true);
 assert.equal(matchesSignalFeedTab({ source: "owned-reader" }, "x"), true);
-assert.equal(getXSourceBadgeLabel("owned-reader"), "自有采集");
+assert.equal(getXSourceBadgeLabel("owned-reader"), "VPS 采集");

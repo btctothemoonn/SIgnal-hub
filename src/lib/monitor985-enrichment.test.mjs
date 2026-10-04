@@ -98,6 +98,14 @@ assert.equal(
 
 const db = new DatabaseSync(":memory:");
 initXPipelineDb(db);
+delete process.env.TWITTER_CONNECTOR_ENABLED;
+let pausedFetches = 0;
+assert.equal(await resolveMonitor985FullTweet(feedItem(), {
+  getFeedItem: () => null,
+  fetchTweetById: async () => { pausedFetches += 1; return fullTweet; },
+  db,
+}), null);
+assert.equal(pausedFetches, 0, "985 enrichment must not fetch or reserve points while 6551 is retired");
 upsertXPipelineRealtimeUpdate(
   {
     ...update(),
@@ -122,6 +130,7 @@ const cachedResolved = await resolveMonitor985FullTweet(feedItem(), {
 assert.equal(cachedResolved?.text, fullTweet.text);
 assert.equal(fetchCalls, 0);
 
+process.env.TWITTER_CONNECTOR_ENABLED = "true";
 const firstFetched = await resolveMonitor985FullTweet(feedItem({ id: "repeat-id" }), {
   getFeedItem: () => null,
   fetchTweetById: async () => {

@@ -9,6 +9,8 @@ const task={version:1,runId:"safe-run",sessionDbPath:"/private/session.db",coold
 const feedItem={id:"1987654321098765432",text:"complete original post",createdAt:"2026-10-04T01:00:00Z",username:"PhotonCap",displayName:"PhotonCap",profileUrl:"https://x.com/PhotonCap",userAvatar:"",tweetUrl:"https://x.com/PhotonCap/status/1987654321098765432",hashtags:[],likes:1,retweets:2,replies:3,quotes:4,views:5,media:[],quotedTweet:null,origin:"watch",queryLabel:"owned-reader / full",translation:null,contentSource:"owned-reader",contentComplete:true};
 const tweet={version:1,runId:"safe-run",type:"tweet",account:{username:"photoncap",userId:"321"},feedItem,evidence:{entryId:"tweet-1987654321098765432",entryType:"TimelineTimelineItem",selection:"standalone",tweetId:feedItem.id,userId:"321",pinned:false}};
 assert.equal(validateXOwnedReaderEvent(tweet,task).feedItem.id,feedItem.id);
+assert.equal(validateXOwnedReaderEvent({version:1,runId:task.runId,type:'cycle_complete',requests:7},task).requests,7);
+assert.throws(()=>validateXOwnedReaderEvent({version:1,runId:task.runId,type:'cycle_complete',requests:81},task),/protocol_invalid/);
 assert.equal(validateXOwnedReaderEvent({...tweet,feedItem:{...feedItem,contentVersion:"2",eventType:"NEW_TWEET_REPLY"}},task).feedItem.contentVersion,"2");
 assert.equal(validateXOwnedReaderEvent({...tweet,feedItem:{...feedItem,contentVersion:"2026-10-04T01:30:00Z",eventType:"reply"}},task).feedItem.eventType,"NEW_TWEET_REPLY");
 for(const invalidVersion of ["not-edit-proof", -1, "18446744073709551616", "2026-90-90T00:00:00Z"])assert.throws(()=>validateXOwnedReaderEvent({...tweet,feedItem:{...feedItem,contentVersion:invalidVersion}},task),/protocol_invalid/);

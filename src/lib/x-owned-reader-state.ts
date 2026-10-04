@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { getXPipelineDb } from "./x-pipeline-store.ts";
 import { getXOwnedReaderConfig, normalizeXOwnedUsername, selectXOwnedReaderAccounts, type XOwnedReaderConfig, type XOwnedReaderEnv } from "./x-owned-reader-config.ts";
+import { get985Promotions, get985AuditSnapshot } from "./x-985-audit.ts";
 
 type Row = Record<string, unknown>;
 export type XOwnedReaderAccountState = {
@@ -41,6 +42,12 @@ function excludedTweetIds(value:unknown):string[] {
 }
 function tableExists(db: DatabaseSync, name: string) {
   return Boolean(db.prepare("select 1 from sqlite_master where type='table' and name=?").get(name));
+}
+export function getEffectiveXOwnedReaderConfig(config:XOwnedReaderConfig,db:DatabaseSync):XOwnedReaderConfig {
+  return {...config,allowlist:[...new Set([...config.allowlist,...get985Promotions(db)])]};
+}
+function routeReason(key:string,owned:boolean,db:DatabaseSync) {
+  return owned ? get985Promotions(db).includes(key) ? "confirmed_985_missing" : key === "fffffiyes_yu" ? "approved_trial_985_unmonitored" : "approved_trial_985_unverified" : "primary_985";
 }
 
 export function initXOwnedReaderStateDb(db: DatabaseSync = getXPipelineDb()) {
@@ -119,17 +126,17 @@ function monitorEvidence(username: string, db: DatabaseSync) {
 }
 
 export function recordXOwnedReaderRoutes(usernames: readonly string[], config: XOwnedReaderConfig, db: DatabaseSync, nowMs: number) {
-  const owned = new Set(selectXOwnedReaderAccounts(usernames,config).map(normalizeXOwnedUsername));
+  const owned = new Set(selectXOwnedReaderAccounts(usernames,getEffectiveXOwnedReaderConfig(config,db)).map(normalizeXOwnedUsername));
   for (const username of usernames) {
     const key=normalizeXOwnedUsername(username); if (!key) continue;
     const route=owned.has(key) ? "owned-reader" : "monitor985";
     const evidence=monitorEvidence(key,db);
-    db.prepare(`insert into x_owned_reader_routes(username_key,username,route,reason,evidence,evidence_at,updated_at) values(?,?,?,?,?,?,?) on conflict(username_key) do update set username=excluded.username,route=excluded.route,reason=excluded.reason,evidence=excluded.evidence,evidence_at=excluded.evidence_at,updated_at=excluded.updated_at`).run(key,username,route,route === "owned-reader" ? key === "fffffiyes_yu" ? "approved_trial_985_unmonitored" : "approved_trial_985_unverified" : "primary_985",evidence.evidence,evidence.evidenceAt,new Date(nowMs).toISOString());
+    db.prepare(`insert into x_owned_reader_routes(username_key,username,route,reason,evidence,evidence_at,updated_at) values(?,?,?,?,?,?,?) on conflict(username_key) do update set username=excluded.username,route=excluded.route,reason=excluded.reason,evidence=excluded.evidence,evidence_at=excluded.evidence_at,updated_at=excluded.updated_at`).run(key,username,route,routeReason(key,route==='owned-reader',db),evidence.evidence,evidence.evidenceAt,new Date(nowMs).toISOString());
   }
 }
 
 export function getXAccountCoverageSnapshot(usernames: readonly string[], db: DatabaseSync = getXPipelineDb(), env: XOwnedReaderEnv = process.env, nowMs = Date.now()) {
-  const config=getXOwnedReaderConfig(env);
+  const config=getEffectiveXOwnedReaderConfig(getXOwnedReaderConfig(env),db);
   const owned=new Set(selectXOwnedReaderAccounts(usernames,config).map(normalizeXOwnedUsername));
   const seen=new Set<string>();
   const pause=getXOwnedReaderPause(db);
@@ -146,7 +153,7 @@ export function getXAccountCoverageSnapshot(usernames: readonly string[], db: Da
     const paused=route === "owned-reader" && (!config.enabled || pauseActive);
     let lastIngestedAt=state?.lastIngestedAt || null;
     if (!lastIngestedAt && tableExists(db,"x_feed")) lastIngestedAt=text((db.prepare("select max(inserted_at) as inserted_at from x_feed where account_username_key=?").get(key) as Row)?.inserted_at);
-    return [{username,route,routeReason:route === "owned-reader" ? key === "fffffiyes_yu" ? "approved_trial_985_unmonitored" : "approved_trial_985_unverified" : "primary_985",...evidence,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
+    return [{username,route,routeReason:routeReason(key,route==='owned-reader',db),audit:get985AuditSnapshot(key,db),...evidence,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
   });
   return {generatedAt:new Date(nowMs).toISOString(),enabled:config.enabled,trial:true,counts:{total:accounts.length,monitor985:accounts.filter(a=>a.route === "monitor985").length,ownedReader:accounts.filter(a=>a.route === "owned-reader").length,covered:accounts.filter(a=>a.evidence === "covered").length,unmonitored:accounts.filter(a=>a.evidence === "unmonitored").length,unverified:accounts.filter(a=>a.evidence === "unverified").length,stale:accounts.filter(a=>a.stale).length,incomplete:accounts.filter(a=>a.route === "owned-reader" && a.status === "incomplete").length,paused:accounts.filter(a=>a.route === "owned-reader" && a.status === "paused").length,replyIncomplete:accounts.filter(a=>a.route === "owned-reader" && a.replyCoverageComplete===false).length},accounts};
 }

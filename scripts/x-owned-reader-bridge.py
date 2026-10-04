@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-session owned X reader. stdin v1 task; stdout sanitized v1 JSONL only."""
 import asyncio
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, ExitStack
 import importlib.metadata
 import importlib.util
 import json
@@ -42,6 +42,19 @@ def session_status(path):
 def sdk_version():
     try: return importlib.metadata.version('twscrape')
     except importlib.metadata.PackageNotFoundError: return None
+
+@contextmanager
+def reader_session_lock(path):
+    """Serialize Linux readers without changing the SDK's endpoint cooldowns."""
+    import fcntl
+    lock_path=str(Path(path).resolve())+'.reader.lock'
+    descriptor=os.open(lock_path,os.O_CREAT|os.O_RDWR|os.O_CLOEXEC|os.O_NOFOLLOW,0o600)
+    with os.fdopen(descriptor,'a+b') as held:
+        os.fchmod(held.fileno(),0o600)
+        try: fcntl.flock(held.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError: raise core.ReaderStop('in_progress',core.RequestGate.to_iso(time.time()+60))
+        try: yield
+        finally: fcntl.flock(held.fileno(),fcntl.LOCK_UN)
 
 @contextmanager
 def sdk_guards(gate):
@@ -89,8 +102,13 @@ async def run(task,emit):
         emit('doctor',sdkVersion=version,protocolVersion=1,sessionAvailable=status['sessionAvailable'],coolingDown=bool(cooldown or status['until']),nextRetryAt=core.RequestGate.to_iso(until))
         emit('cycle_complete',requests=0,completedAccounts=0,reason=None); return
     gate=core.RequestGate(task['cooldownFilePath'],max_requests=task['maxRequests'],deadline_ms=task['deadlineMs'],min_interval_ms=task['minIntervalMs'])
-    completed=0
+    completed=0; completed_owned=0
+    required_owned={account['username'].lower() for account in task['accounts'] if account.get('purpose')!='audit'}
+    session_context=ExitStack()
     try:
+        session_context.enter_context(reader_session_lock(task['sessionDbPath']))
+        # Refresh read-only state after acquiring the process lock.
+        status=session_status(task['sessionDbPath']); cooldown=core.cooldown_state(task['cooldownFilePath'])
         if cooldown: raise core.ReaderStop(cooldown['reason'],core.RequestGate.to_iso(cooldown['until']))
         if not status['sessionAvailable']: raise core.ReaderStop('session_unavailable')
         if status['until']: raise core.ReaderStop('session_cooldown',core.RequestGate.to_iso(status['until']))
@@ -129,23 +147,26 @@ async def run(task,emit):
                     if response is None: gate.stop('unexpected_api_response',time.time()+300)
                     return response.json()
                 def finish(result):
-                    nonlocal completed
+                    nonlocal completed,completed_owned
                     emit('account_complete',**{key:value for key,value in result.items() if key not in ('tweets','fromAt') and not key.startswith('_')})
                     completed+=int(result['complete'])
+                    completed_owned+=int(result['complete'] and result['username'].lower() in required_owned)
                 await core.scan_cycle(task['accounts'],resolve,fetch,task['maxPages'],lambda event:emit('tweet',**event),finish,detail)
     except core.ReaderStop as stopped:
-        if completed!=len(task['accounts']) or stopped.reason not in ('request_budget_reached','cycle_deadline_reached'):
+        if completed_owned!=len(required_owned) or stopped.reason not in ('request_budget_reached','cycle_deadline_reached'):
             emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)
     except TimeoutError:
         try: gate.stop('cycle_deadline_reached',time.time()+60,persist=False)
         except core.ReaderStop as stopped:
-            if completed!=len(task['accounts']): emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)
+            if completed_owned!=len(required_owned): emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)
     except Exception:
         # No exception text/stack/headers can enter protocol or stderr.
         try: gate.stop('network_error_paused',time.time()+300)
         except core.ReaderStop as stopped: emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)
         emit('error',reason='library_or_network_error')
-    finally: emit('cycle_complete',requests=gate.count,completedAccounts=completed,reason=gate.stopped)
+    finally:
+        session_context.close()
+        emit('cycle_complete',requests=gate.count,completedAccounts=completed,reason=gate.stopped)
 
 def main():
     task={}; terminal=False
