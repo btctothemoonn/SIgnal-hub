@@ -67,8 +67,8 @@ assert.equal((await fetch985AuditEvidence({MONITOR985_ENABLED:'true'},async url=
 record985RawPayload(unsafeId,db,base+7*60000);
 assert.equal(db.prepare('select 1 from x_985_raw_observations where tweet_id=?').get(unsafeId.content.id),undefined);
 db.prepare('delete from x_985_parse_fault').run();
-for(const truth of [{twAccount:'truth:someone',content:{}},{twAccount:'someone',content:{source:'truth'}}])record985RawPayload(truth,db,base+7*60000);
-assert.equal(db.prepare('select count(*) as n from x_985_parse_fault').get().n,0,'normal Truth events cannot disable Twitter confirmation');
+for(const other of [{twAccount:'truth:someone',content:{}},{twAccount:'someone',content:{source:'truth'}},{eventType:'NEW_INSTAGRAM_POST',source:'instagram',twAccount:'instagram:khaokheow.zoo',content:{id:'unsafe-instagram-id',userScreenName:'khaokheow.zoo',source:'instagram'}},{twAccount:'instagram:complex',content:{platform:'instagram'}}])record985RawPayload(other,db,base+7*60000);
+assert.equal(db.prepare('select count(*) as n from x_985_parse_fault').get().n,0,'known non-X platform events cannot disable Twitter confirmation');
 record985RawPayload({content:{unexpected:'schema'}},db,base+8*60000);
 record985StreamState('connected',db,base);record985StreamState('heartbeat',db,base+30*60000);
 complete985Audit({...completion,username:'parsefault'},[{...item,username:'parsefault',id:'2106500000000000003'}],{healthy:true,monitored:['parsefault'],tweetIds:[]},db,base+30*60000);
