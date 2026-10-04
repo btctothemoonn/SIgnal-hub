@@ -2,7 +2,7 @@ export const PUSH_DEVICE_STORAGE_KEY = 'signal-hub:push-device:v1';
 type Credentials = { deviceId: string; deviceKey: string; publicKey?: string; epoch?: number };
 type BrowserSubscription = { options: { applicationServerKey?: ArrayBuffer | null }; toJSON(): PushSubscriptionJSON; unsubscribe(): Promise<boolean> };
 type BrowserRegistration = { pushManager: { getSubscription(): Promise<BrowserSubscription | null>; subscribe(options: { userVisibleOnly: boolean; applicationServerKey: Uint8Array<ArrayBuffer> }): Promise<BrowserSubscription> } };
-export type PushBrowser = { secureContext: boolean; userAgent: string; standalone: boolean; available: boolean; notification: { permission: NotificationPermission; requestPermission(): Promise<NotificationPermission> } | null; register(): Promise<BrowserRegistration>; crypto: Crypto; storage: Pick<Storage, 'getItem' | 'setItem'> };
+export type PushBrowser = { secureContext: boolean; userAgent: string; standalone: boolean; available: boolean; notification: { permission: NotificationPermission; requestPermission(): Promise<NotificationPermission> } | null; register(): Promise<BrowserRegistration>; crypto: Crypto; storage: Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'length' | 'key' | 'removeItem'>> };
 export type PushClientStatus = { state: 'unsupported' | 'home_screen' | 'unconfigured' | 'denied' | 'ready' | 'enabled' | 'error'; enabled: boolean };
 type PushEnrollmentStage = 'permission' | 'device_storage' | 'browser_subscription' | 'server_registration' | 'confirmation';
 const pushErrorMessages = {
@@ -71,7 +71,8 @@ function defaultBrowser(): PushBrowser | null {
   const nav = navigator as Navigator & { standalone?: boolean };
   return { secureContext: window.isSecureContext, userAgent: nav.userAgent + (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1 ? ' iPad' : ''), standalone: nav.standalone === true || window.matchMedia('(display-mode: standalone)').matches, available: 'serviceWorker' in nav && 'PushManager' in window && 'Notification' in window, notification: 'Notification' in window ? Notification : null,
     register: async () => { await nav.serviceWorker.register('/sw.js', { scope: '/' }); return await nav.serviceWorker.ready; }, crypto: window.crypto,
-    storage: { getItem: key => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value) } };
+    storage: { getItem: key => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value),
+      get length() { return window.localStorage.length; }, key: index => window.localStorage.key(index), removeItem: key => window.localStorage.removeItem(key) } };
 }
 export function getPushEnvironment(browser: PushBrowser | null = defaultBrowser()) {
   const needsHomeScreen = Boolean(browser && /iPhone|iPad|iPod/i.test(browser.userAgent) && !browser.standalone);
@@ -84,6 +85,48 @@ function encodeBytes(value: ArrayBuffer | Uint8Array) { return btoa(String.fromC
 export function getPushLogoutFields(browser: PushBrowser | null = defaultBrowser()) {
   try { const value = JSON.parse(browser?.storage.getItem(PUSH_DEVICE_STORAGE_KEY) ?? 'null') as Credentials | null; return value?.deviceId && value.deviceKey ? { pushDeviceId: value.deviceId, pushDeviceKey: value.deviceKey } : {}; } catch { return {}; }
 }
+const rebuildablePushCacheKeys = new Set([
+  'signal-hub:stocks:hynix-premium:5m:v1',
+  'signal-hub:stocks:hynix-premium:5m:v2',
+  'signal-hub:stocks:hynix-premium:v3:5m',
+  'signal-hub:stocks:hynix-premium:v3:1h',
+  'signal-hub:stocks:hynix-premium:v3:1d',
+  'signal-hub:stocks:hynix-funding:v1',
+  'signal-hub:stocks:market-snapshot:v1',
+  'signal-hub:stocks:financial-snapshot:v1',
+  'signal-hub.binance-holding-snapshot.v1',
+  'signal-hub.tiger-holding-snapshot.v1',
+  'signal-hub.tiger-equity-history.v1',
+]);
+function isRebuildablePushCache(key: string): boolean {
+  if (rebuildablePushCacheKeys.has(key) || /^signal-hub:stocks:hynix-premium:v4:(1m|5m|1h|1d)$/.test(key)) return true;
+  const prefix = 'signal-hub:stocks:performance-snapshot:v1:';
+  if (!key.startsWith(prefix)) return false;
+  const tickers = key.slice(prefix.length);
+  try { return tickers.length > 0 && encodeURIComponent(decodeURIComponent(tickers)) === tickers; } catch { return false; }
+}
+function persistPushDevice(storage: PushBrowser['storage'], value: string, allowCacheRecovery: boolean): boolean {
+  try { storage.setItem(PUSH_DEVICE_STORAGE_KEY, value); return false; }
+  catch (error) {
+    if (!allowCacheRecovery || typeof DOMException === 'undefined' || !(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error;
+    // Reclaim one server-rebuildable snapshot; a failed retry must stay a storage failure.
+    try {
+      const length = storage.length;
+      if (typeof length !== 'number' || !Number.isInteger(length) || length < 0 || !storage.key || !storage.removeItem) throw error;
+      let largestKey: string | null = null, largestLength = -1;
+      for (let index = 0; index < length; index++) {
+        const key = storage.key(index);
+        if (!key || !isRebuildablePushCache(key)) continue;
+        const cached = storage.getItem(key);
+        if (cached !== null && cached.length > largestLength) { largestKey = key; largestLength = cached.length; }
+      }
+      if (!largestKey) throw error;
+      storage.removeItem(largestKey);
+    } catch { throw error; }
+    storage.setItem(PUSH_DEVICE_STORAGE_KEY, value);
+    return true;
+  }
+}
 export function createWebPushClient(api: PushApi = async (path, options) => {
   const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin', ...options });
   const result = await response.json(); if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : 'push_request_failed'); return result;
@@ -91,7 +134,7 @@ export function createWebPushClient(api: PushApi = async (path, options) => {
   let config: { enabled: boolean; configured: boolean; publicKey: string | null } | null = null;
   let registration: BrowserRegistration | null = null;
   const load = (): Credentials | null => { try { return JSON.parse(browser?.storage.getItem(PUSH_DEVICE_STORAGE_KEY) ?? 'null'); } catch { return null; } };
-  const save = (credentials: Credentials) => { if (!browser) throw new Error('push_unsupported'); browser.storage.setItem(PUSH_DEVICE_STORAGE_KEY, JSON.stringify(credentials)); if (typeof window !== 'undefined') window.dispatchEvent(new Event('signal-push-device-change')); };
+  const save = (credentials: Credentials, allowCacheRecovery = false) => { if (!browser) throw new Error('push_unsupported'); const recovered = persistPushDevice(browser.storage, JSON.stringify(credentials), allowCacheRecovery); if (typeof window !== 'undefined') window.dispatchEvent(new Event('signal-push-device-change')); return recovered; };
   const headers = () => { const credentials = load(); return { 'X-Signal-Push-Device': credentials?.deviceId ?? '', 'X-Signal-Push-Device-Key': credentials?.deviceKey ?? '' }; };
   async function subscriptionMatches() { const existing = await registration?.pushManager.getSubscription(); if (!existing) return false; const key = existing.options.applicationServerKey; return key ? encodeBytes(key) === config?.publicKey : load()?.publicKey === config?.publicKey; }
   async function readStatus(confirmEnrollment = false): Promise<PushClientStatus> {
@@ -121,11 +164,12 @@ export function createWebPushClient(api: PushApi = async (path, options) => {
       catch (error) { return Promise.reject(new PushEnrollmentError(error, 'permission')); }
       return (async () => {
         let stage: PushEnrollmentStage = 'permission';
+        let cacheRecovered = false;
         try {
           if (await permission !== 'granted') return { state: 'denied', enabled: false };
           stage = 'device_storage';
           let credentials = load();
-          if (!credentials?.deviceId || !credentials.deviceKey) { const bytes = browser.crypto.getRandomValues(new Uint8Array(32)); credentials = { deviceId: browser.crypto.randomUUID(), deviceKey: encodeBytes(bytes) }; save(credentials); }
+          if (!credentials?.deviceId || !credentials.deviceKey) { const bytes = browser.crypto.getRandomValues(new Uint8Array(32)); credentials = { deviceId: browser.crypto.randomUUID(), deviceKey: encodeBytes(bytes) }; cacheRecovered = save(credentials, true); }
           stage = 'browser_subscription';
           let existing = await registration!.pushManager.getSubscription();
           if (existing && !await subscriptionMatches()) { await existing.unsubscribe(); existing = null; }
@@ -133,7 +177,7 @@ export function createWebPushClient(api: PushApi = async (path, options) => {
           stage = 'server_registration';
           const response = await api('/api/push/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: credentials.deviceId, deviceKey: credentials.deviceKey, subscription: subscription.toJSON() }) });
           stage = 'device_storage';
-          save({ ...credentials, publicKey: config!.publicKey!, epoch: response.epoch as number });
+          save({ ...credentials, publicKey: config!.publicKey!, epoch: response.epoch as number }, !cacheRecovered);
           stage = 'confirmation';
           const verified = await readStatus(true); if (verified.state !== 'enabled') throw new Error('enrollment_unconfirmed'); return verified;
         } catch (error) { throw new PushEnrollmentError(error, stage); }

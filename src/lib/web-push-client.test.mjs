@@ -30,8 +30,8 @@ assert.equal((await broken.readStatus()).state, 'error');
 console.log('browser push lifecycle tests passed');
 
 const privateErrorText = 'https://web.push.apple.com/private-endpoint?token=private-token key=private-key';
-function enrollmentHarness(failure = {}) {
- const calls = [], saved = new Map(); let subscription = null, enrolled = false, writes = 0;
+function enrollmentHarness(failure = {}, suppliedStorage) {
+ const calls = [], saved = new Map(), enrollments = [], revocations = []; let subscription = null, enrolled = false, writes = 0;
  const registration = { pushManager: {
   getSubscription: async () => subscription,
   subscribe: async options => {
@@ -49,7 +49,7 @@ function enrollmentHarness(failure = {}) {
    browser.notification.permission = 'granted'; return Promise.resolve('granted');
   } },
   register: async () => registration, crypto: webcrypto,
-  storage: { getItem: name => saved.get(name) ?? null, setItem: (name, value) => {
+  storage: suppliedStorage ?? { getItem: name => saved.get(name) ?? null, setItem: (name, value) => {
    writes++;
    if (failure.storageError && writes === (failure.failWrite ?? 1)) throw failure.storageError;
    saved.set(name, value);
@@ -60,12 +60,20 @@ function enrollmentHarness(failure = {}) {
   if (options.method === 'POST') {
    calls.push('server_registration');
    if (failure.serverError) throw failure.serverError;
+   const body = JSON.parse(options.body);
+   const persisted = JSON.parse(browser.storage.getItem(pushClientModule.PUSH_DEVICE_STORAGE_KEY) ?? 'null');
+   assert.equal(body.deviceId, persisted?.deviceId, 'server registration requires an already durable device ID');
+   assert.equal(body.deviceKey, persisted?.deviceKey, 'server registration requires an already durable proof');
+   enrollments.push(body);
    enrolled = true; return { epoch: 1 };
+  }
+  if (options.method === 'DELETE') {
+   revocations.push(options.headers); enrolled = false; return { success: true };
   }
   if (failure.confirmationError) throw failure.confirmationError;
   return { enabled: enrolled && !failure.unconfirmed, epoch: 1 };
  };
- return { client: createWebPushClient(api, browser), calls, browser };
+ return { client: createWebPushClient(api, browser), calls, browser, api, enrollments, revocations };
 }
 
 for (const [name, failure, stage, code, expectedCalls] of [
@@ -147,4 +155,215 @@ test('DOMException diagnostics use only known browser names and ignore their mes
  const inventedName = pushClientModule.getPushErrorMessage(new DOMException(privateErrorText, 'same_origin_required'));
  assert.ok(inventedName.includes('push_request_failed'), 'an API error code is not a known DOMException name');
  assert.ok(!inventedName.includes('same_origin_required'));
+});
+
+function capacityStorage(entries, options = {}) {
+ const values = new Map(entries), removed = [], writes = [];
+ const usage = () => [...values].reduce((sum, [name, value]) => sum + name.length + value.length, 0);
+ const capacity = options.capacity ?? usage();
+ const storage = {
+  get length() { return values.size; },
+  key: index => [...values.keys()][index] ?? null,
+  getItem: name => values.get(name) ?? null,
+  setItem: (name, value) => {
+   writes.push(name);
+   if (options.writeError) throw options.writeError;
+   const previous = values.get(name);
+   const nextUsage = usage() - (previous === undefined ? 0 : name.length + previous.length) + name.length + value.length;
+   if (nextUsage > capacity) throw new DOMException(privateErrorText, 'QuotaExceededError');
+   values.set(name, value);
+  },
+  removeItem: name => { values.delete(name); removed.push(name); },
+ };
+ return { storage, values, removed, writes };
+}
+
+const protectedCacheEntries = [
+ ['signal-hub:stocks:hynix-premium:selected-interval:v1', '5m'],
+ ['signal-hub:theme:cromojo-dark-dashboard:v1', 'dark'],
+ ['signal-hub:favorites:v1', 'NVDA'],
+ ['signal-hub:reading-anchor:v1', 'saved-position'],
+ ['signal-hub:stocks:hynix-premium:v3:1m', 'unsupported-legacy'.repeat(2000)],
+ ['signal-hub:stocks:hynix-premium:v2:1h', 'unknown-legacy'.repeat(2000)],
+ ['signal-hub:stocks:hynix-premium:1h:v2', 'unknown-legacy-layout'.repeat(2000)],
+ ['signal-hub:stocks:hynix-premium:v5:5m', 'future-version'.repeat(2000)],
+ ['signal-hub:stocks:hynix-premium:v4:15m', 'unsupported'.repeat(1000)],
+ ['signal-hub:stocks:hynix-funding:v2', 'unknown-version'.repeat(1000)],
+ ['signal-hub:stocks:market-snapshot:v1:extra', 'unknown-suffix'.repeat(1000)],
+ ['signal-hub:stocks:performance-snapshot:v1:', 'empty-tickers'.repeat(1000)],
+ ['signal-hub:stocks:performance-snapshot:v1:AAPL,MSFT', 'unencoded-tickers'.repeat(1000)],
+ ['signal-hub:stocks:performance-snapshot:v1:%ZZ', 'invalid-encoding'.repeat(1000)],
+ ['unrelated-private-data', 'unknown-user-data'.repeat(1000)],
+];
+
+test('quota recovery removes only the largest approved cache and survives client reload with the same logout proof', async () => {
+ const largestKey = 'signal-hub:stocks:hynix-premium:v4:5m';
+ const keptKey = 'signal-hub:stocks:performance-snapshot:v1:AAPL%2CMSFT';
+ const capacity = capacityStorage([...protectedCacheEntries, [keptKey, 's'.repeat(1000)], [largestKey, 'l'.repeat(4000)], ['signal-hub:stocks:hynix-funding:v1', 'f'.repeat(2000)]]);
+ const { client, calls, browser, api, enrollments, revocations } = enrollmentHarness({}, capacity.storage);
+ assert.equal((await client.readStatus()).state, 'ready');
+ const pending = client.enableFromUserGesture();
+ assert.deepEqual(calls, ['permission'], 'quota recovery must not delay the permission prompt');
+ assert.deepEqual(await pending, { state: 'enabled', enabled: true });
+ assert.deepEqual(capacity.removed, [largestKey]);
+ assert.equal(capacity.writes.length, 3, 'one failed first write, one retry and one enrollment metadata write');
+ for (const [name, value] of protectedCacheEntries) assert.equal(capacity.values.get(name), value);
+ assert.equal(capacity.values.get(keptKey), 's'.repeat(1000));
+ const proof = JSON.parse(capacity.values.get(pushClientModule.PUSH_DEVICE_STORAGE_KEY));
+ assert.equal(proof.deviceId, enrollments[0].deviceId);
+ assert.equal(proof.deviceKey, enrollments[0].deviceKey);
+ const reloaded = createWebPushClient(api, browser);
+ assert.deepEqual(await reloaded.readStatus(), { state: 'enabled', enabled: true });
+ assert.deepEqual(reloaded.getLogoutFields(), { pushDeviceId: proof.deviceId, pushDeviceKey: proof.deviceKey });
+ await reloaded.disable();
+ assert.equal(revocations[0]['X-Signal-Push-Device'], proof.deviceId);
+ assert.equal(revocations[0]['X-Signal-Push-Device-Key'], proof.deviceKey);
+ assert.deepEqual(capacity.removed, [largestKey], 'later status/revoke does not clean another cache');
+});
+
+test('only the exact current rebuildable cache keys qualify for quota recovery', async () => {
+ for (const name of [
+  'signal-hub:stocks:hynix-premium:v4:1m', 'signal-hub:stocks:hynix-premium:v4:5m',
+  'signal-hub:stocks:hynix-premium:v4:1h', 'signal-hub:stocks:hynix-premium:v4:1d',
+  'signal-hub:stocks:hynix-funding:v1', 'signal-hub:stocks:performance-snapshot:v1:AAPL%2CMSFT',
+  'signal-hub:stocks:market-snapshot:v1', 'signal-hub:stocks:financial-snapshot:v1',
+  'signal-hub.binance-holding-snapshot.v1', 'signal-hub.tiger-holding-snapshot.v1', 'signal-hub.tiger-equity-history.v1',
+ ]) {
+  const capacity = capacityStorage([[name, 'cache'.repeat(200)]]);
+  const { client } = enrollmentHarness({}, capacity.storage);
+  await client.readStatus();
+  assert.equal((await client.enableFromUserGesture()).state, 'enabled', name);
+  assert.deepEqual(capacity.removed, [name]);
+ }
+});
+
+for (const legacyKey of [
+ 'signal-hub:stocks:hynix-premium:5m:v1',
+ 'signal-hub:stocks:hynix-premium:5m:v2',
+ 'signal-hub:stocks:hynix-premium:v3:5m',
+ 'signal-hub:stocks:hynix-premium:v3:1h',
+ 'signal-hub:stocks:hynix-premium:v3:1d',
+]) {
+ test(`verified legacy cache ${legacyKey} alone can recover quota while larger unknown legacy data survives`, async () => {
+  const capacity = capacityStorage([...protectedCacheEntries, [legacyKey, 'known-cache'.repeat(200)]]);
+  const { client, browser, api } = enrollmentHarness({}, capacity.storage);
+  await client.readStatus();
+  assert.equal((await client.enableFromUserGesture()).state, 'enabled');
+  assert.deepEqual(capacity.removed, [legacyKey]);
+  for (const [name, value] of protectedCacheEntries) assert.equal(capacity.values.get(name), value);
+  const proof = JSON.parse(capacity.values.get(pushClientModule.PUSH_DEVICE_STORAGE_KEY));
+  const reloaded = createWebPushClient(api, browser);
+  assert.equal((await reloaded.readStatus()).state, 'enabled');
+  assert.deepEqual(reloaded.getLogoutFields(), { pushDeviceId: proof.deviceId, pushDeviceKey: proof.deviceKey });
+ });
+}
+
+test('quota with no approved cache fails before subscription or POST and does not use memory proof', async () => {
+ const capacity = capacityStorage(protectedCacheEntries);
+ const { client, calls, enrollments } = enrollmentHarness({}, capacity.storage);
+ await client.readStatus();
+ await assert.rejects(client.enableFromUserGesture(), error => error.stage === 'device_storage' && error.code === 'QuotaExceededError');
+ assert.deepEqual(calls, ['permission']);
+ assert.deepEqual(enrollments, []);
+ assert.deepEqual(capacity.removed, []);
+ assert.equal(capacity.writes.length, 1);
+ assert.deepEqual(client.getLogoutFields(), {});
+ assert.equal(capacity.values.has(pushClientModule.PUSH_DEVICE_STORAGE_KEY), false);
+ assert.deepEqual(await client.readStatus(), { state: 'ready', enabled: false });
+});
+
+test('a failed quota retry stops after deleting one cache and never reaches POST', async () => {
+ const largestKey = 'signal-hub:stocks:market-snapshot:v1';
+ const capacity = capacityStorage([[largestKey, 'l'.repeat(20)], ['signal-hub:stocks:financial-snapshot:v1', 's'.repeat(10)]]);
+ const { client, calls } = enrollmentHarness({}, capacity.storage);
+ await client.readStatus();
+ await assert.rejects(client.enableFromUserGesture(), error => error.stage === 'device_storage' && error.code === 'QuotaExceededError');
+ assert.deepEqual(capacity.removed, [largestKey]);
+ assert.equal(capacity.writes.length, 2, 'there is only one persistent retry');
+ assert.deepEqual(calls, ['permission']);
+ assert.deepEqual(client.getLogoutFields(), {});
+ assert.equal(capacity.values.get('signal-hub:stocks:financial-snapshot:v1'), 's'.repeat(10));
+});
+
+test('non-quota failures and quota-like Error names never delete cached data', async () => {
+ const namedError = new Error(privateErrorText); namedError.name = 'QuotaExceededError';
+ for (const writeError of [new DOMException(privateErrorText, 'SecurityError'), namedError, { name: 'QuotaExceededError', message: privateErrorText }]) {
+  const capacity = capacityStorage([['signal-hub:stocks:market-snapshot:v1', 'cache'.repeat(200)]], { writeError });
+  const { client, calls } = enrollmentHarness({}, capacity.storage);
+  await client.readStatus();
+  await assert.rejects(client.enableFromUserGesture(), error => error.stage === 'device_storage');
+  assert.deepEqual(capacity.removed, []);
+  assert.equal(capacity.writes.length, 1);
+  assert.deepEqual(calls, ['permission']);
+ }
+});
+
+test('unavailable enumeration or removal preserves the quota diagnostic without POST', async () => {
+ for (const fault of ['missing-methods', 'length', 'key', 'candidate-read', 'remove']) {
+  const capacity = capacityStorage([['signal-hub:stocks:market-snapshot:v1', 'cache'.repeat(200)]]);
+  const unavailable = () => { throw new DOMException(privateErrorText, 'SecurityError'); };
+  if (fault === 'missing-methods') { delete capacity.storage.key; delete capacity.storage.removeItem; }
+  if (fault === 'length') Object.defineProperty(capacity.storage, 'length', { get: unavailable });
+  if (fault === 'key') capacity.storage.key = unavailable;
+  if (fault === 'candidate-read') {
+   const getItem = capacity.storage.getItem;
+   capacity.storage.getItem = name => name === pushClientModule.PUSH_DEVICE_STORAGE_KEY ? getItem(name) : unavailable();
+  }
+  if (fault === 'remove') capacity.storage.removeItem = unavailable;
+  const { client, calls } = enrollmentHarness({}, capacity.storage);
+  await client.readStatus();
+  await assert.rejects(client.enableFromUserGesture(), error => error.stage === 'device_storage' && error.code === 'QuotaExceededError', fault);
+  assert.deepEqual(capacity.removed, []);
+  assert.equal(capacity.writes.length, 1);
+  assert.deepEqual(calls, ['permission']);
+ }
+});
+
+test('quota while updating existing credentials keeps the same device ID and key for reload and logout', async () => {
+ const oldProof = { deviceId: webcrypto.randomUUID(), deviceKey: Buffer.alloc(32, 9).toString('base64url') };
+ const cacheKey = 'signal-hub.tiger-equity-history.v1';
+ const capacity = capacityStorage([[pushClientModule.PUSH_DEVICE_STORAGE_KEY, JSON.stringify(oldProof)], [cacheKey, 'cache'.repeat(200)]]);
+ const { client, browser, api, enrollments } = enrollmentHarness({}, capacity.storage);
+ await client.readStatus();
+ assert.equal((await client.enableFromUserGesture()).state, 'enabled');
+ assert.deepEqual(capacity.removed, [cacheKey]);
+ assert.equal(capacity.writes.length, 2, 'metadata update retries once without replacing the existing device proof');
+ const persisted = JSON.parse(capacity.values.get(pushClientModule.PUSH_DEVICE_STORAGE_KEY));
+ assert.equal(persisted.deviceId, oldProof.deviceId);
+ assert.equal(persisted.deviceKey, oldProof.deviceKey);
+ assert.equal(enrollments[0].deviceId, oldProof.deviceId);
+ assert.equal(enrollments[0].deviceKey, oldProof.deviceKey);
+ const reloaded = createWebPushClient(api, browser);
+ assert.equal((await reloaded.readStatus()).state, 'enabled');
+ assert.deepEqual(reloaded.getLogoutFields(), { pushDeviceId: oldProof.deviceId, pushDeviceKey: oldProof.deviceKey });
+});
+
+test('one enrollment never deletes a second cache when metadata cannot fit after the first proof recovery', async () => {
+ const largestKey = 'signal-hub:stocks:market-snapshot:v1';
+ const smallerKey = 'signal-hub:stocks:financial-snapshot:v1';
+ const capacity = capacityStorage([[largestKey, 'l'.repeat(150)], [smallerKey, 's'.repeat(100)]]);
+ const { client, enrollments } = enrollmentHarness({}, capacity.storage);
+ await client.readStatus();
+ await assert.rejects(client.enableFromUserGesture(), error => error.stage === 'device_storage' && error.code === 'QuotaExceededError');
+ assert.deepEqual(capacity.removed, [largestKey]);
+ assert.equal(capacity.writes.length, 3, 'base proof retries once; metadata cannot reclaim another cache');
+ assert.equal(capacity.values.get(smallerKey), 's'.repeat(100));
+ assert.equal(enrollments.length, 1, 'the durable base proof existed before server registration');
+ const persisted = JSON.parse(capacity.values.get(pushClientModule.PUSH_DEVICE_STORAGE_KEY));
+ assert.deepEqual(client.getLogoutFields(), { pushDeviceId: persisted.deviceId, pushDeviceKey: persisted.deviceKey });
+ assert.equal(persisted.publicKey, undefined, 'failed metadata write is not represented as success');
+ assert.equal(persisted.deviceId, enrollments[0].deviceId);
+ assert.equal(persisted.deviceKey, enrollments[0].deviceKey);
+});
+
+test('disable keeps its original storage failure without reclaiming cached data', async () => {
+ const fault = { capacity: 10_000 };
+ const capacity = capacityStorage([['signal-hub:stocks:market-snapshot:v1', 'cache'.repeat(200)]], fault);
+ const { client, revocations } = enrollmentHarness({}, capacity.storage);
+ await client.readStatus();
+ await client.enableFromUserGesture();
+ fault.writeError = new DOMException(privateErrorText, 'QuotaExceededError');
+ await assert.rejects(client.disable(), error => error instanceof DOMException && error.name === 'QuotaExceededError');
+ assert.equal(revocations.length, 1);
+ assert.deepEqual(capacity.removed, []);
 });

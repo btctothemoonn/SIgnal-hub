@@ -9,6 +9,85 @@ import { DatabaseSync } from 'node:sqlite';
 import { createImportantNewsPushStore } from '../src/lib/important-news-push.ts';
 import type { DailyBriefSnapshot } from '../src/lib/daily-investment-brief.ts';
 
+test('full local storage recovers device proof and preserves enrollment across reload and logout', async ({ page, context, baseURL }) => {
+  const runtime = mkdtempSync(join(tmpdir(), 'push-browser-quota-'));
+  const store = openWebPushStore(join(runtime, 'web-push.sqlite'));
+  const ec = createECDH('prime256v1'); ec.generateKeys();
+  const publicKey = ec.getPublicKey().toString('base64url');
+  const auth = randomBytes(16).toString('base64url');
+  const env = { NODE_ENV: 'test', ADMIN_PASSWORD: process.env.SIGNAL_E2E_PASSWORD, ADMIN_SESSION_SECRET: process.env.SIGNAL_E2E_SESSION_SECRET, WEB_PUSH_ENABLED: 'true', WEB_PUSH_VAPID_PUBLIC_KEY: publicKey, WEB_PUSH_VAPID_PRIVATE_KEY: ec.getPrivateKey().toString('base64url'), WEB_PUSH_VAPID_SUBJECT: 'mailto:test@example.com', SIGNAL_HUB_PUBLIC_ORIGIN: baseURL };
+  const sent: string[] = [];
+  const handlers = createWebPushApiHandlers({ store, env, sender: { send: async (_, event) => { sent.push(event.title); return { kind: 'accepted', statusCode: 201, retryAfterMs: null, errorCode: null }; } }, baselineProvider: nowMs => ({ sources: { market: 0, news: 0 }, marketEpisodes: [], enabledAt: new Date(nowMs).toISOString() }) });
+  try {
+    await context.grantPermissions(['notifications'], { origin: baseURL! });
+    await context.addInitScript(({ publicKey, auth }) => {
+      const decode = (value: string) => Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), char => char.charCodeAt(0)).buffer;
+      const subscription = () => ({ endpoint: 'https://fcm.googleapis.com/quota-e2e', options: { applicationServerKey: decode(publicKey) }, toJSON: () => ({ endpoint: 'https://fcm.googleapis.com/quota-e2e', expirationTime: null, keys: { p256dh: publicKey, auth } }), unsubscribe: async () => { localStorage.removeItem('signal:mock-push'); return true; } });
+      PushManager.prototype.subscribe = async () => { localStorage.setItem('signal:mock-push', 'yes'); return subscription() as unknown as PushSubscription; };
+      PushManager.prototype.getSubscription = async () => localStorage.getItem('signal:mock-push') ? subscription() as unknown as PushSubscription : null;
+    }, { publicKey, auth });
+    await context.route('**/api/push/**', async route => {
+      const request = route.request(); const method = request.method(); const path = new URL(request.url()).pathname;
+      const handler = path.endsWith('/config') ? handlers.config : path.endsWith('/test') ? handlers.testPush : method === 'POST' ? handlers.subscribe : method === 'DELETE' ? handlers.unsubscribe : handlers.getSubscriptionStatus;
+      const response = await handler(new Request(request.url(), { method, headers: await request.allHeaders(), ...(request.postData() ? { body: request.postData() } : {}) }));
+      await route.fulfill({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() });
+    });
+    await context.route('**/api/logout', async route => {
+      const request = route.request();
+      const rejection = await revokePushForLogout(new Request(request.url(), { method: 'POST', headers: await request.allHeaders(), body: request.postData() }), { env, store });
+      if (rejection) await route.fulfill({ status: rejection.status, body: await rejection.text() }); else await route.continue();
+    });
+    await page.goto('/login?next=/settings');
+    await page.getByLabel('Admin password').fill(process.env.SIGNAL_E2E_PASSWORD!);
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.waitForURL('**/settings');
+    await page.getByRole('button', { name: '重要通知', exact: true }).click();
+    await expect(page.getByRole('button', { name: '开启通知', exact: true })).toBeVisible();
+    const full = await page.evaluate(() => {
+      const cache = 'signal-hub:stocks:hynix-premium:v4:1h';
+      const smallerCache = 'signal-hub:stocks:market-snapshot:v1';
+      const preserved = { 'signal-hub:theme:cromojo-dark-dashboard:v1': 'dark', 'signal-hub:stocks:hynix-premium:selected-interval:v1': JSON.stringify('1h'), 'signal-hub:signal-feed-author-favorites': JSON.stringify(['telegram:kept']), 'signal-hub:signal-feed-reading-anchor': JSON.stringify({ itemId: 'kept', viewportTop: 30, savedAt: '2026-10-04T08:00:00Z' }) };
+      for (const [key, value] of Object.entries(preserved)) localStorage.setItem(key, value);
+      localStorage.setItem(cache, 'x'.repeat(3 * 1024 * 1024));
+      localStorage.setItem(smallerCache, 'y'.repeat(128 * 1024));
+      let low = 0, high = 4 * 1024 * 1024;
+      while (low < high) {
+        const size = Math.ceil((low + high) / 2);
+        try { localStorage.setItem('unrelated:retained-data', 'z'.repeat(size)); low = size; }
+        catch (error) { if (!(error instanceof DOMException) || error.name !== 'QuotaExceededError') throw error; high = size - 1; }
+      }
+      let errorName = '';
+      try { localStorage.setItem('quota-proof-probe', 'p'.repeat(256)); localStorage.removeItem('quota-proof-probe'); }
+      catch (error) { errorName = (error as DOMException).name; }
+      return { errorName, cache, smallerCache, preserved, retainedLength: low };
+    });
+    expect(full.errorName).toBe('QuotaExceededError', 'the fixture must exhaust real browser storage before enrollment');
+    expect(full.retainedLength).toBeGreaterThan(0);
+    await page.getByRole('button', { name: '开启通知', exact: true }).click();
+    await expect(page.getByText('通知已开启', { exact: true })).toBeVisible();
+    const state = await page.evaluate(({ cache, smallerCache, preserved }) => ({ proof: JSON.parse(localStorage.getItem('signal-hub:push-device:v1')!), largest: localStorage.getItem(cache), smallerLength: localStorage.getItem(smallerCache)?.length, retainedLength: localStorage.getItem('unrelated:retained-data')?.length, preserved: Object.fromEntries(Object.keys(preserved).map(key => [key, localStorage.getItem(key)])) }), full);
+    expect(state.largest).toBeNull();
+    expect(state.smallerLength).toBe(128 * 1024);
+    expect(state.retainedLength).toBe(full.retainedLength);
+    expect(state.preserved).toEqual(full.preserved);
+    expect(store.getDeviceStatus(state.proof.deviceId, state.proof.deviceKey)?.enabled).toBe(true);
+    await page.reload();
+    await page.getByRole('button', { name: '重要通知', exact: true }).click();
+    await expect(page.getByText('通知已开启', { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('signal-hub:push-device:v1')!))).toEqual(state.proof);
+    await page.getByRole('button', { name: '发送测试通知', exact: true }).click();
+    await expect(page.getByText('测试通知已提交，请确认当前设备能看到提醒。', { exact: true })).toBeVisible();
+    expect(sent).toEqual(['Signal Hub 测试通知']);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.waitForURL('**/login');
+    expect(store.getDeviceStatus(state.proof.deviceId, state.proof.deviceKey)?.enabled).toBe(false);
+  } finally {
+    await context.unrouteAll({ behavior: 'wait' }); store.close();
+    expect(runtime.startsWith(join(tmpdir(), 'push-browser-quota-'))).toBe(true);
+    rmSync(runtime, { recursive: true, force: true });
+  }
+});
+
 test('current-device enrollment, test, revoke, logout and closed-page service worker', async ({ page, context, baseURL }) => {
   const runtime = mkdtempSync(join(tmpdir(), 'push-browser-'));
   const store = openWebPushStore(join(runtime, 'web-push.sqlite'));
