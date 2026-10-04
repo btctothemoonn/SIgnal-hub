@@ -215,12 +215,12 @@ export function MarketAlertBrief() {
   const xrpRow = renderer.root.findByProps({ "data-market-alert-row": "XRPUSDT" });
   const xrpRowText = renderedText(xrpRow);
   assert.doesNotMatch(xrpRowText, /\+0\.00%/);
-  // A collapsed row carries only symbol, triggering move and time. Valuation,
-  // price and 24h detail are deferred to the expanded panel so the list stays
-  // scannable; missing metrics must not leak an "n/a" placeholder into it.
-  assert.doesNotMatch(xrpRowText, /n\/a/, "collapsed rows must not show placeholder metrics");
-  assert.doesNotMatch(xrpRowText, /流通市值|FDV/, "collapsed rows must defer valuation to the expanded panel");
-  assert.doesNotMatch(xrpRowText, /\$\d/, "collapsed rows must not print a price amount");
+  // Price and valuations are visible before expansion; missing valuation
+  // values use a dash instead of pretending they are zero.
+  assert.doesNotMatch(xrpRowText, /n\/a/);
+  assert.match(xrpRowText, /流通市值\s*—/);
+  assert.match(xrpRowText, /FDV\s*—/);
+  assert.match(xrpRowText, /价格\s*\$68,000/);
 
   assert.equal(
     renderer.root.findAllByProps({ alt: "BTCUSDT 最新 15 分钟 K 线图" }).length,
@@ -234,11 +234,14 @@ export function MarketAlertBrief() {
   const btcSummary = renderedText(expandBtc);
   assert.match(btcSummary, /25m 价格/);
   assert.doesNotMatch(btcSummary, /暴涨预警|A趋势|REST/);
-  assert.doesNotMatch(btcSummary, /\$120M|\$140M/, "valuation belongs to the expanded detail");
+  assert.match(btcSummary, /价格\s*\$68,000/);
+  assert.match(btcSummary, /\$120M/);
+  assert.match(btcSummary, /\$140M/);
   const ethSummary = renderedText(renderer.root.findByProps({
     "data-market-alert-toggle": "volatility:SHORT:ETHUSDT:fixture",
   }));
-  assert.doesNotMatch(ethSummary, /\$450M/);
+  assert.match(ethSummary, /\$450M/);
+  assert.match(ethSummary, /FDV\s*—/);
   assert.match(renderedText(renderer.root.findByProps({
     "data-market-alert-toggle": "short_squeeze:LONG:SQUEEZEUSDT:fixture",
   })), /\+7\.50%15m OI/);

@@ -36,9 +36,9 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "short_squeeze", label: "轧空" },
 ];
 
-// Collapsed rows stay scannable: symbol, the triggering move, and when it
-// happened. Valuation, price and ratio detail live in the expanded panel.
-const ALERT_ROW_COLUMNS = "grid-cols-[minmax(0,1fr)_5.5rem_4.75rem_1.5rem]";
+// Wide rows align price and valuations with the header. Narrow rows keep
+// those metrics on a second line so they remain visible without expansion.
+const ALERT_ROW_COLUMNS = "grid-cols-[minmax(0,1fr)_5.5rem_4.75rem_1.5rem] @min-[40rem]:grid-cols-[minmax(0,1fr)_5.75rem_4.5rem_4.5rem_5.5rem_4.75rem_1.5rem]";
 
 function formatTime(value: string | null | undefined, seconds = false) {
   if (!value) return "尚未更新";
@@ -61,10 +61,10 @@ function signedPercent(value: unknown, digits = 2) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}%`;
 }
 
-function compactMoney(value: unknown, locale = "zh-CN") {
-  if (value === null || value === undefined || value === "") return "n/a";
+function compactMoney(value: unknown, locale = "zh-CN", fallback = "n/a") {
+  if (value === null || value === undefined || value === "") return fallback;
   const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return "n/a";
+  if (!Number.isFinite(number) || number <= 0) return fallback;
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
@@ -73,9 +73,9 @@ function compactMoney(value: unknown, locale = "zh-CN") {
   }).format(number);
 }
 
-function priceText(value: unknown) {
+function priceText(value: unknown, fallback = "n/a") {
   const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return "n/a";
+  if (!Number.isFinite(number) || number <= 0) return fallback;
   if (number >= 1_000) return `$${number.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
   if (number >= 1) return `$${number.toLocaleString("en-US", { maximumFractionDigits: 4 })}`;
   return `$${number.toPrecision(5)}`;
@@ -229,8 +229,8 @@ const EventCard = memo(function EventCard({
     : signedPercent(event.changePct);
   const kindLabel = squeeze ? "轧空" : rising ? "暴涨" : "暴跌";
   const detailId = `market-alert-detail-${event.id}`;
-  const marketCap = compactMoney(event.marketCapUsd, "en-US");
-  const fdv = compactMoney(event.fdvUsd, "en-US");
+  const marketCap = compactMoney(event.marketCapUsd, "en-US", "—");
+  const fdv = compactMoney(event.fdvUsd, "en-US", "—");
   const valuationTitle = event.valuationUpdatedAt
     ? `市值更新 ${formatTime(event.valuationUpdatedAt)}`
     : "暂无市值数据";
@@ -256,6 +256,10 @@ const EventCard = memo(function EventCard({
           <strong className="min-w-0 break-all font-mono text-xs leading-4 text-foreground">{event.symbol}</strong>
         </span>
 
+        <span data-market-alert-price title="触发时价格（美元）" className="hidden break-all text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{priceText(event.price, "—")}</span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{marketCap}</span>
+        <span title={valuationTitle} className="hidden text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{fdv}</span>
+
         <span className={`text-right font-mono text-xs font-semibold ${squeeze ? "text-warning" : rising ? "text-success" : "text-danger"}`}>
           {shortValue}
           <span className="mt-0.5 block whitespace-nowrap text-[10px] font-normal text-muted">{shortLabel}</span>
@@ -265,6 +269,11 @@ const EventCard = memo(function EventCard({
 
         <span className="flex h-8 w-6 items-center justify-center text-muted">
           <ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </span>
+        <span title={valuationTitle} className="col-span-full flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted @min-[40rem]:hidden">
+          <span data-market-alert-price title="触发时价格（美元）">价格 <span className="font-mono tabular-nums text-foreground">{priceText(event.price, "—")}</span></span>
+          <span>流通市值 <span className="font-mono tabular-nums text-foreground">{marketCap}</span></span>
+          <span>FDV <span className="font-mono tabular-nums text-foreground">{fdv}</span></span>
         </span>
       </button>
 
@@ -581,6 +590,9 @@ export function MarketAlertsPanel({
           <div className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
             <div className={`grid min-h-8 items-center gap-x-1.5 border-b border-l-2 border-l-transparent border-line bg-workspace-surface-raised px-2.5 text-[10px] font-medium text-muted ${ALERT_ROW_COLUMNS}`}>
               <span>币种</span>
+              <span title="预警触发时价格（美元）" className="hidden text-right @min-[40rem]:block">价格</span>
+              <span className="hidden text-right @min-[40rem]:block">流通市值</span>
+              <span className="hidden text-right @min-[40rem]:block">FDV</span>
               <span className="text-right">触发变化</span>
               <span className="text-right">时间</span>
               <span />
