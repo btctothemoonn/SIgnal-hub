@@ -2,6 +2,7 @@ type TweetCacheCandidate = {
   id?: string;
   text?: string;
   queryLabel?: string;
+  contentComplete?: boolean;
 };
 
 export function isFullTweetByIdCacheHit(
@@ -11,7 +12,8 @@ export function isFullTweetByIdCacheHit(
   return Boolean(
     item &&
       item.id === tweetId &&
-      item.queryLabel === "Telegram trigger / full" &&
+      item.contentComplete !== false &&
+      (item.contentComplete === true || item.queryLabel === "Telegram trigger / full") &&
       typeof item.text === "string" &&
       item.text.trim().length > 0,
   );

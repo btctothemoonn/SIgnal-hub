@@ -6,6 +6,9 @@
     "node": ">=22.5.0"
   },
   "scripts": {
+    "x:owned-reader": "node --experimental-strip-types --experimental-transform-types scripts/x-owned-reader-worker.mjs",
+    "x:owned-reader:once": "node --experimental-strip-types --experimental-transform-types scripts/x-owned-reader-worker.mjs --once",
+    "x:owned-reader:doctor": "node --experimental-strip-types --experimental-transform-types scripts/x-owned-reader-worker.mjs --doctor",
     "push:worker": "node --experimental-strip-types --experimental-transform-types scripts/web-push-worker.mjs",
     "push:worker:once": "node --experimental-strip-types --experimental-transform-types scripts/web-push-worker.mjs --once",
     "dev": "next dev",

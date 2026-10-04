@@ -44,6 +44,12 @@ async function transpileToTemp() {
     .replace('from "./translate.ts"', 'from "./translate.mjs"')
     .replace('from "./translation-quality.ts"', 'from "./translation-quality.mjs"');
 
+  await writeFile(join(dir, "x-feed-merge.mjs"), ts.transpileModule(
+    (await readFile(new URL("./x-feed-merge.ts", import.meta.url), "utf8"))
+      .replace('from "./translation-quality.ts"', 'from "./translation-quality.mjs"'),
+    { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } },
+  ).outputText);
+
   const compilerOptions = {
     module: ts.ModuleKind.ESNext,
     target: ts.ScriptTarget.ES2022,
@@ -82,7 +88,7 @@ async function transpileToTemp() {
   );
   await writeFile(
     join(dir, "x-pipeline-store.mjs"),
-    ts.transpileModule(storeSource, { compilerOptions }).outputText,
+    ts.transpileModule(storeSource.replace('from "./x-feed-merge.ts"', 'from "./x-feed-merge.mjs"'), { compilerOptions }).outputText,
     "utf8",
   );
   return import(`file:///${join(dir, "x-pipeline-store.mjs").replace(/\\/g, "/")}`);

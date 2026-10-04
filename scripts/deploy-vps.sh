@@ -86,6 +86,14 @@ if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(proce
   scripts+=(web-push-worker.mjs)
 fi
 
+owned_reader_enabled=0
+if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1", "true", "yes", "on"].includes((process.env.X_OWNED_READER_ENABLED || "").trim().toLowerCase()) ? 0 : 1)'; then
+  owned_reader_enabled=1
+  services+=(signal-hub-x-owned-reader)
+  scripts+=(x-owned-reader-worker.mjs)
+  "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/x-owned-reader-worker.mjs --doctor
+fi
+
 activate() {
   local target="$1"
   local pending_link="${CURRENT_LINK}.pending-$$"
@@ -172,8 +180,25 @@ Restart=on-failure
 RestartSec=5
 EOF
   fi
+  if [[ "$service" == "signal-hub-x-owned-reader" ]]; then
+    owned_private_dir="$("$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'const p=require("node:path"); process.stdout.write(p.dirname(process.env.X_OWNED_READER_SESSION_DB || "/home/ubuntu/signal-hub-owned-reader-pilot/accounts.db"));')"
+    sudo tee "/etc/systemd/system/$service.service.d/resources.conf" >/dev/null <<EOF
+[Service]
+MemoryMax=256M
+CPUQuota=30%
+TasksMax=64
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$APP_DIR/.signal-hub $owned_private_dir
+Restart=on-failure
+RestartSec=15
+EOF
+  fi
 done
 
+deployment_activated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 activate "$release"
 sudo systemctl daemon-reload
 sudo systemctl enable "${services[@]}" >/dev/null
@@ -184,7 +209,10 @@ fi
 if [[ "$push_enabled" == "0" ]] && systemctl cat signal-hub-web-push >/dev/null 2>&1; then
   sudo systemctl disable --now signal-hub-web-push
 fi
-"$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
+if [[ "$owned_reader_enabled" == "0" ]] && systemctl cat signal-hub-x-owned-reader >/dev/null 2>&1; then
+  sudo systemctl disable --now signal-hub-x-owned-reader
+fi
+SIGNAL_HUB_DEPLOY_ACTIVATED_AT="$deployment_activated_at" "$NODE_BIN" --experimental-strip-types --experimental-transform-types scripts/check-deployment.mjs
 wait_for_services() {
   local attempt service stable=0
   local -a pending

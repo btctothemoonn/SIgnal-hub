@@ -1,8 +1,8 @@
-export type SignalFeedSource = "telegram" | "x" | "monitor985" | "truth" | "alert";
+export type SignalFeedSource = "telegram" | "x" | "monitor985" | "owned-reader" | "truth" | "alert";
 export type SignalFeedTab = "all" | "telegram" | "x" | "truth";
 
 export function isMergedXSignalSource(source: SignalFeedSource) {
-  return source === "x" || source === "monitor985";
+  return source === "x" || source === "monitor985" || source === "owned-reader";
 }
 
 export function matchesSignalFeedTab(
@@ -17,5 +17,6 @@ export function matchesSignalFeedTab(
 export function getXSourceBadgeLabel(source: SignalFeedSource) {
   if (source === "x") return "6551";
   if (source === "monitor985") return "985";
+  if (source === "owned-reader") return "自有采集";
   return null;
 }

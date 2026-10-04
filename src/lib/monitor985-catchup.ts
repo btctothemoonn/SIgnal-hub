@@ -14,7 +14,9 @@ import {
   backfillMissingXTranslations,
   ensureXFeedItemTranslation,
 } from "./x-translation-backfill";
-import { getXPipelineConfiguredTruthAccounts } from "./x-pipeline-accounts";
+import { getXPipelineConfiguredAccounts, getXPipelineConfiguredTruthAccounts } from "./x-pipeline-accounts";
+import { loadRuntimeConfig } from "./runtime-config";
+import { resolveMonitor985AcceptedAccounts } from "./monitor985-account-filter";
 import {
   buildMonitor985CatchupSummary,
   getMonitor985CatchupLimit,
@@ -82,11 +84,13 @@ export async function runMonitor985ManualCatchup({
     parseMonitor985WatchConfig(watchConfig),
   );
   const truthAccounts = getXPipelineConfiguredTruthAccounts(env as NodeJS.ProcessEnv);
-  const accounts =
-    remoteAccounts.length > 0 ? [...remoteAccounts, ...truthAccounts] : truthAccounts;
-  const accountSource: Monitor985CatchupResult["accountSource"] =
-    remoteAccounts.length > 0 ? "985" : "local";
-  const allowed = new Set(accounts.map((account) => accountKey(account.username)));
+  const localAccounts = getXPipelineConfiguredAccounts(
+    await loadRuntimeConfig(), env as NodeJS.ProcessEnv,
+  );
+  const { accounts, allowedAccountKeys: allowed } = resolveMonitor985AcceptedAccounts({
+    localAccounts, truthAccounts, remoteAccounts,
+  });
+  const accountSource: Monitor985CatchupResult["accountSource"] = "local";
 
   for (const account of accounts) {
     upsertXPipelineAccount(account);

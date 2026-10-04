@@ -32,3 +32,7 @@ assert.deepEqual(stats, {
 });
 
 console.log("ok - signal source stats split x and truth counts");
+
+const owned = buildSignalSourceStats({ telegram: {}, x: { feed: [{ username: "PhotonCap", queryLabel: "owned-reader / full" }] } });
+assert.equal(owned.xItems, 1, "owned-reader content remains part of the X total");
+assert.equal(owned.monitor985Items, 0);

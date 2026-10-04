@@ -23,3 +23,7 @@ assert.equal(getXSourceBadgeLabel("monitor985"), "985");
 assert.equal(getXSourceBadgeLabel("truth"), null);
 
 console.log("ok - signal feed tabs merge 6551 and 985 while keeping truth separate");
+
+assert.equal(isMergedXSignalSource("owned-reader"), true);
+assert.equal(matchesSignalFeedTab({ source: "owned-reader" }, "x"), true);
+assert.equal(getXSourceBadgeLabel("owned-reader"), "自有采集");

@@ -1,0 +1,2 @@
+# Installed in an external isolated venv; never upgrade during each deployment.
+twscrape==0.20.1

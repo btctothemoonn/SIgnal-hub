@@ -27,3 +27,6 @@ assert.equal(
 );
 
 console.log("ok - x feed source classification splits 985 and truth");
+
+assert.equal(classifyXFeedSource({ username: "PhotonCap", queryLabel: "owned-reader / full" }), "owned-reader");
+assert.equal(classifyXFeedSource({ username: "PhotonCap", queryLabel: "985monitor / NEW_TWEET", contentSource: "owned-reader" }), "owned-reader", "merged content keeps its actual content source");

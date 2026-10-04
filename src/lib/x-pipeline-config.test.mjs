@@ -34,5 +34,7 @@ assert.equal(isXHybridEnabled({ X_HYBRID_ENABLED: "on" }), true);
 assert.equal(hasXPipelineDataSource({ MONITOR985_ENABLED: "true" }), true);
 assert.equal(hasXPipelineDataSource({ TWITTER_TOKEN: "token" }), true);
 assert.equal(hasXPipelineDataSource({}), false);
+assert.equal(hasXPipelineDataSource({ X_OWNED_READER_ENABLED: "true" }), true);
+assert.equal(hasXPipelineDataSource({ X_OWNED_READER_ENABLED: "false" }), false);
 
 console.log("ok - x pipeline config parses local settings");

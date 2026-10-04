@@ -417,7 +417,7 @@ function toUnifiedTwitterItems(
       createdAt: tweet.createdAt,
       eventType: tweet.eventType ?? null,
       sourceLabel:
-        source === "truth" ? "Truth" : source === "monitor985" ? "X-985" : "X-6551",
+        source === "truth" ? "Truth" : source === "monitor985" ? "X-985" : source === "owned-reader" ? "X · 自有采集" : "X-6551",
       title: tweet.displayName || `@${displayUsername}`,
       titleUrl: tweet.profileUrl,
       subtitle: formatXAuthorSubtitle(displayUsername, tweet.queryLabel),
@@ -596,6 +596,7 @@ const SOURCE_ICON: Record<string, { letter: string; tone: string }> = {
   telegram: { letter: "T", tone: "bg-info text-background" },
   x: { letter: "X", tone: "bg-foreground text-background" },
   monitor985: { letter: "985", tone: "bg-accent text-accent-contrast" },
+  "owned-reader": { letter: "X", tone: "bg-info text-background" },
   truth: { letter: "TS", tone: "bg-foreground text-background" },
   alert: { letter: "!", tone: "bg-danger text-background" },
 };

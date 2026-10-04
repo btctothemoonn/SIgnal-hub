@@ -11,6 +11,17 @@ import type {
 } from "@/lib/6551-twitter";
 import type { TranslationNote } from "./translate.ts";
 import {
+  matchesXFeedTranslationSnapshot,
+  isStaleXFeedTranslation,
+  isStaleXQuotedTranslationCache,
+  mergeXFeedItems,
+  mergeXQuotedTweet,
+  xFeedObservationSource,
+  X_FEED_TRANSLATION_BASE,
+  type XFeedWithTranslationBase,
+  type XFeedTranslationSnapshot,
+} from "./x-feed-merge.ts";
+import {
   isUsefulTranslation,
   shouldTranslateText,
 } from "./translation-quality.ts";
@@ -438,6 +449,9 @@ function parseQuotedTweet(raw: unknown): TwitterQuotedTweet | null {
       parsed.relation === "reply" || parsed.relation === "quote"
         ? parsed.relation
         : "quote",
+    ...(nullableString(parsed.contentSource) ? { contentSource: stringValue(parsed.contentSource) } : {}),
+    ...(typeof parsed.contentComplete === "boolean" ? { contentComplete: parsed.contentComplete } : {}),
+    ...(nullableString(parsed.contentVersion) ? { contentVersion: stringValue(parsed.contentVersion) } : {}),
   };
 }
 
@@ -579,6 +593,22 @@ export function initXPipelineDb(db: DatabaseSync) {
       updated_at text not null
     );
 
+    create table if not exists x_feed_observations (
+      tweet_id text not null,
+      source text not null,
+      author_username text not null,
+      first_seen_at text not null,
+      last_seen_at text not null,
+      content_complete integer,
+      primary key (tweet_id, source)
+    );
+
+    create table if not exists x_translation_leases (
+      tweet_id text primary key,
+      owner text not null,
+      expires_at_ms integer not null
+    );
+
     create table if not exists x_quoted_tweets (
       id text primary key,
       quoted_tweet_json text not null,
@@ -641,6 +671,10 @@ export function initXPipelineDb(db: DatabaseSync) {
   try {
     db.exec("alter table x_feed add column quoted_tweet_json text");
   } catch {}
+  const feedColumns = new Set(db.prepare("pragma table_info(x_feed)").all().map((row) => row.name));
+  for (const [name, sqlType] of [["content_source", "text"], ["content_complete", "integer"], ["content_version", "text"]]) {
+    if (!feedColumns.has(name)) db.exec(`alter table x_feed add column ${name} ${sqlType}`);
+  }
 }
 
 export function getXHybridAccountFetchStatus(
@@ -925,110 +959,199 @@ function upsertFeedItem(
   const usernameKey = accountKey(username);
   if (!feedItem.id || !usernameKey) return;
 
-  const updatedAt = nowIso();
-  const quotedTweet = feedItem.quotedTweet;
-  const incomingUserAvatar = feedItem.userAvatar || "";
-  const resolvedUserAvatar = preferredAvatar({
-    incoming: incomingUserAvatar,
-    cached: accountAvatarFor(usernameKey, db),
-  });
-  const usefulTranslation = isUsefulTranslation(feedItem.text, feedItem.translation)
-    ? feedItem.translation
-    : null;
-  const createdAt = isoDateString(feedItem.createdAt);
-  if (isCompleteQuotedTweet(quotedTweet)) {
-    upsertXPipelineQuotedTweet(quotedTweet, db);
-  }
-  run(
-    db.prepare(`
-      insert into x_feed
-        (
-          id, account_username_key, username, display_name, profile_url,
-          user_avatar, tweet_url, text, created_at, event_type, origin,
-          query_label, hashtags_json, likes, retweets, replies, quotes, views,
-          media_json, quoted_tweet_json, translation_json, remark, raw_json,
-          inserted_at, updated_at
-        )
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      on conflict(id) do update set
-        account_username_key = excluded.account_username_key,
-        username = excluded.username,
-        display_name = excluded.display_name,
-        profile_url = excluded.profile_url,
-        user_avatar = case
-          when lower(excluded.user_avatar) like '%unavatar.io/twitter/%'
-            and trim(coalesce(x_feed.user_avatar, '')) != '' then x_feed.user_avatar
-          when lower(excluded.user_avatar) like '%unavatar.io/x/%'
-            and trim(coalesce(x_feed.user_avatar, '')) != '' then x_feed.user_avatar
-          when trim(coalesce(json_extract(excluded.raw_json, '$.feedItem.userAvatar'), '')) != ''
-            then excluded.user_avatar
-          when trim(coalesce(x_feed.user_avatar, '')) != ''
-            then x_feed.user_avatar
-          else excluded.user_avatar
-        end,
-        tweet_url = excluded.tweet_url,
-        text = excluded.text,
-        created_at = excluded.created_at,
-        event_type = excluded.event_type,
-        origin = excluded.origin,
-        query_label = excluded.query_label,
-        hashtags_json = excluded.hashtags_json,
-        likes = excluded.likes,
-        retweets = excluded.retweets,
-        replies = excluded.replies,
-        quotes = excluded.quotes,
-        views = excluded.views,
-        media_json = excluded.media_json,
-        quoted_tweet_json = excluded.quoted_tweet_json,
-        translation_json = excluded.translation_json,
-        remark = excluded.remark,
-        raw_json = excluded.raw_json,
-        updated_at = excluded.updated_at
-    `),
-    feedItem.id,
-    usernameKey,
-    username,
-    feedItem.displayName || username,
-    feedItem.profileUrl || fallbackProfileUrl(username),
-    resolvedUserAvatar,
-    feedItem.tweetUrl || fallbackProfileUrl(username),
-    feedItem.text,
-    createdAt,
-    eventType,
-    feedItem.origin,
-    feedItem.queryLabel,
-    jsonString(feedItem.hashtags),
-    feedItem.likes,
-    feedItem.retweets,
-    feedItem.replies,
-    feedItem.quotes,
-    feedItem.views,
-    jsonString(feedItem.media ?? []),
-    feedItem.quotedTweet ? jsonString(feedItem.quotedTweet) : null,
-    usefulTranslation ? jsonString(usefulTranslation) : null,
-    remark,
-    jsonString(raw),
-    updatedAt,
-    updatedAt,
-  );
+  const observedItem = feedItem;
+  db.exec("savepoint x_feed_upsert");
+  try {
+    // Reserve the SQLite writer before reading so another process cannot change
+    // the original between field merge and commit. Savepoints also support callers
+    // which already have an outer transaction.
+    db.prepare("update x_feed set id = id where id = ?").run(feedItem.id);
+    let existing = getXPipelineFeedItem(feedItem.id, db);
+    const cachedQuote = feedItem.quotedTweet?.id ? getXPipelineQuotedTweet(feedItem.quotedTweet.id, db) : null;
+    if (isStaleXFeedTranslation(existing, feedItem)) {
+      // Reject stale model input before it can participate in either the root
+      // quote merge or the shared cache merge, including unversioned985quotes.
+      if (existing?.quotedTweet) {
+        const priorQuote = existing.quotedTweet;
+        const currentCache = getXPipelineQuotedTweet(priorQuote.id, db);
+        const currentQuote = mergeXQuotedTweet(priorQuote, currentCache);
+        existing = { ...existing, quotedTweet: currentQuote ? { ...currentQuote, relation: priorQuote.relation } : null };
+      }
+      feedItem = { ...feedItem, translation: null, quotedTweet: existing?.quotedTweet ?? null };
+    } else if (isStaleXQuotedTranslationCache(feedItem, cachedQuote) && cachedQuote) {
+      // Another root can edit the shared context while this root remains
+      // unchanged. Reject the model output and hydrate this root atomically.
+      const priorQuote = existing?.quotedTweet?.id === cachedQuote.id ? existing.quotedTweet
+        : feedItem.quotedTweet ? { ...feedItem.quotedTweet, translation: null } : null;
+      const currentQuote = mergeXQuotedTweet(priorQuote, cachedQuote);
+      const hydrated = currentQuote ? { ...currentQuote, relation: priorQuote?.relation ?? currentQuote.relation } : null;
+      if (existing && existing.quotedTweet?.id === hydrated?.id) existing = { ...existing, quotedTweet: hydrated };
+      feedItem = { ...feedItem, translation: null, quotedTweet: hydrated };
+    } else if (feedItem.quotedTweet?.id) {
+      // Resolve the referenced post from the shared cache before writing a new
+      // root as well as an existing root. A new root has no local merge history.
+      feedItem = { ...feedItem, quotedTweet: mergeXQuotedTweet(cachedQuote, feedItem.quotedTweet) };
+    }
+    feedItem = mergeXFeedItems(existing, feedItem);
+    const updatedAt = nowIso();
+    const quotedTweet = feedItem.quotedTweet;
+    const incomingUserAvatar = feedItem.userAvatar || "";
+    const resolvedUserAvatar = preferredAvatar({
+      incoming: incomingUserAvatar,
+      cached: accountAvatarFor(usernameKey, db),
+    });
+    const usefulTranslation = isUsefulTranslation(feedItem.text, feedItem.translation)
+      ? feedItem.translation
+      : null;
+    const createdAt = isoDateString(feedItem.createdAt);
+    run(db.prepare(`
+      insert into x_feed_observations(tweet_id, source, author_username, first_seen_at, last_seen_at, content_complete)
+      values (?, ?, ?, ?, ?, ?)
+      on conflict(tweet_id, source) do update set
+        author_username = excluded.author_username,
+        last_seen_at = excluded.last_seen_at,
+        content_complete = case when x_feed_observations.content_complete = 1 then 1
+          else coalesce(excluded.content_complete, x_feed_observations.content_complete) end
+    `), observedItem.id, xFeedObservationSource(observedItem), username, updatedAt, updatedAt,
+      observedItem.contentComplete === undefined ? null : observedItem.contentComplete ? 1 : 0);
+    if (isCompleteQuotedTweet(quotedTweet)) {
+      upsertXPipelineQuotedTweet(quotedTweet, db);
+    }
+    run(
+      db.prepare(`
+        insert into x_feed
+          (
+            id, account_username_key, username, display_name, profile_url,
+            user_avatar, tweet_url, text, created_at, event_type, origin,
+            query_label, hashtags_json, likes, retweets, replies, quotes, views,
+            media_json, quoted_tweet_json, translation_json, remark, raw_json,
+            inserted_at, updated_at, content_source, content_complete, content_version
+          )
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(id) do update set
+          account_username_key = excluded.account_username_key,
+          username = excluded.username,
+          display_name = excluded.display_name,
+          profile_url = excluded.profile_url,
+          user_avatar = case
+            when lower(excluded.user_avatar) like '%unavatar.io/twitter/%'
+              and trim(coalesce(x_feed.user_avatar, '')) != '' then x_feed.user_avatar
+            when lower(excluded.user_avatar) like '%unavatar.io/x/%'
+              and trim(coalesce(x_feed.user_avatar, '')) != '' then x_feed.user_avatar
+            when trim(coalesce(json_extract(excluded.raw_json, '$.feedItem.userAvatar'), '')) != ''
+              then excluded.user_avatar
+            when trim(coalesce(x_feed.user_avatar, '')) != ''
+              then x_feed.user_avatar
+            else excluded.user_avatar
+          end,
+          tweet_url = excluded.tweet_url,
+          text = excluded.text,
+          created_at = excluded.created_at,
+          event_type = excluded.event_type,
+          origin = excluded.origin,
+          query_label = excluded.query_label,
+          hashtags_json = excluded.hashtags_json,
+          likes = excluded.likes,
+          retweets = excluded.retweets,
+          replies = excluded.replies,
+          quotes = excluded.quotes,
+          views = excluded.views,
+          media_json = excluded.media_json,
+          quoted_tweet_json = excluded.quoted_tweet_json,
+          translation_json = excluded.translation_json,
+          remark = excluded.remark,
+          raw_json = excluded.raw_json,
+          content_source = excluded.content_source,
+          content_complete = excluded.content_complete,
+          content_version = excluded.content_version,
+          updated_at = excluded.updated_at
+      `),
+      feedItem.id,
+      usernameKey,
+      username,
+      feedItem.displayName || username,
+      feedItem.profileUrl || fallbackProfileUrl(username),
+      resolvedUserAvatar,
+      feedItem.tweetUrl || fallbackProfileUrl(username),
+      feedItem.text,
+      createdAt,
+      eventType,
+      feedItem.origin,
+      feedItem.queryLabel,
+      jsonString(feedItem.hashtags),
+      feedItem.likes,
+      feedItem.retweets,
+      feedItem.replies,
+      feedItem.quotes,
+      feedItem.views,
+      jsonString(feedItem.media ?? []),
+      feedItem.quotedTweet ? jsonString(feedItem.quotedTweet) : null,
+      usefulTranslation ? jsonString(usefulTranslation) : null,
+      remark,
+      jsonString(raw),
+      updatedAt,
+      updatedAt,
+      feedItem.contentSource || null,
+      feedItem.contentComplete === undefined ? null : feedItem.contentComplete ? 1 : 0,
+      feedItem.contentVersion || null,
+    );
 
-  run(
-    db.prepare(`
-      update x_accounts
-      set
-        last_event_at = case
-          when last_event_at is null or ? > last_event_at then ?
-          else last_event_at
-        end,
-        last_error = null,
-        updated_at = ?
-      where username_key = ?
-    `),
-    createdAt,
-    createdAt,
-    updatedAt,
-    usernameKey,
-  );
+    run(
+      db.prepare(`
+        update x_accounts
+        set
+          last_event_at = case
+            when last_event_at is null or ? > last_event_at then ?
+            else last_event_at
+          end,
+          last_error = null,
+          updated_at = ?
+        where username_key = ?
+      `),
+      createdAt,
+      createdAt,
+      updatedAt,
+      usernameKey,
+    );
+    const leaseOwner = (observedItem as XFeedWithTranslationBase)[X_FEED_TRANSLATION_BASE]?.leaseOwner;
+    if (leaseOwner) releaseXPipelineTranslationLease(observedItem.id, leaseOwner, db);
+    db.exec("release x_feed_upsert");
+  } catch (error) {
+    db.exec("rollback to x_feed_upsert");
+    db.exec("release x_feed_upsert");
+    throw error;
+  }
+}
+
+export function listXPipelineFeedObservations(tweetId?: string, db = getXPipelineDb()) {
+  const rows = tweetId
+    ? db.prepare("select * from x_feed_observations where tweet_id = ? order by source").all(tweetId)
+    : db.prepare("select * from x_feed_observations order by last_seen_at desc").all();
+  return rows.map((row) => ({
+    tweetId: stringValue(row.tweet_id), source: stringValue(row.source),
+    authorUsername: stringValue(row.author_username), firstSeenAt: stringValue(row.first_seen_at),
+    lastSeenAt: stringValue(row.last_seen_at),
+    contentComplete: row.content_complete === null ? null : row.content_complete === 1,
+  }));
+}
+
+export function acquireXPipelineTranslationLease(
+  id: string, owner: string,
+  options: { db?: DatabaseSync; nowMs?: number; ttlMs?: number } = {},
+): boolean {
+  if (!id || !owner) return false;
+  const db = options.db ?? getXPipelineDb();
+  const nowMs = options.nowMs ?? Date.now();
+  const ttlMs = Math.max(1, options.ttlMs ?? 10 * 60_000);
+  return Number(db.prepare(`
+    insert into x_translation_leases(tweet_id, owner, expires_at_ms) values (?, ?, ?)
+    on conflict(tweet_id) do update set owner = excluded.owner, expires_at_ms = excluded.expires_at_ms
+    where x_translation_leases.expires_at_ms <= ?
+  `).run(id, owner, nowMs + ttlMs, nowMs).changes) === 1;
+}
+
+export function releaseXPipelineTranslationLease(id: string, owner: string, db = getXPipelineDb()): boolean {
+  return Number(db.prepare("delete from x_translation_leases where tweet_id = ? and owner = ?").run(id, owner).changes) === 1;
 }
 
 export function upsertXPipelineQuotedTweet(
@@ -1036,6 +1159,7 @@ export function upsertXPipelineQuotedTweet(
   db = getXPipelineDb(),
 ) {
   if (!isCompleteQuotedTweet(quotedTweet)) return;
+  quotedTweet = mergeXQuotedTweet(getXPipelineQuotedTweet(quotedTweet.id, db), quotedTweet) ?? quotedTweet;
   const updatedAt = nowIso();
   run(
     db.prepare(`
@@ -1139,34 +1263,50 @@ export function setXPipelineFeedTranslation(
   translation: TranslationNote | null,
   db = getXPipelineDb(),
   quotedTweet?: TwitterQuotedTweet | null,
-) {
-  if (quotedTweet !== undefined) {
-    if (quotedTweet && isCompleteQuotedTweet(quotedTweet)) {
-      upsertXPipelineQuotedTweet(quotedTweet, db);
+  expected?: XFeedTranslationSnapshot,
+): boolean {
+  db.exec("savepoint x_translation_cas");
+  try {
+    db.prepare("update x_feed set id = id where id = ?").run(id);
+    const current = getXPipelineFeedItem(id, db);
+    if (!current || (expected && !matchesXFeedTranslationSnapshot(current, expected))) {
+      db.exec("release x_translation_cas");
+      return false;
     }
-    run(
-      db.prepare(`
-        update x_feed
-        set translation_json = ?, quoted_tweet_json = ?, updated_at = ?
-        where id = ?
-      `),
-      translation ? jsonString(translation) : null,
-      quotedTweet ? jsonString(quotedTweet) : null,
-      nowIso(),
-      id,
-    );
-    return;
+    if (expected && current.quotedTweet) {
+      const priorQuote = current.quotedTweet;
+      const resolved = mergeXQuotedTweet(priorQuote, getXPipelineQuotedTweet(priorQuote.id, db));
+      current.quotedTweet = resolved ? { ...resolved, relation: priorQuote.relation } : null;
+      if (!matchesXFeedTranslationSnapshot(current, expected)) {
+        run(db.prepare("update x_feed set quoted_tweet_json = ?, updated_at = ? where id = ?"),
+          current.quotedTweet ? jsonString(current.quotedTweet) : null, nowIso(), id);
+        db.exec("release x_translation_cas");
+        return false;
+      }
+    }
+    // Translation writes cannot change the original quote; its snapshot must
+    // still match before either the feed or the shared quote cache is written.
+    if (expected && quotedTweet !== undefined &&
+        ((quotedTweet?.id ?? null) !== (current.quotedTweet?.id ?? null) ||
+         (quotedTweet?.text ?? null) !== (current.quotedTweet?.text ?? null))) {
+      db.exec("release x_translation_cas");
+      return false;
+    }
+    const mergedQuote = quotedTweet === undefined ? current.quotedTweet : mergeXQuotedTweet(current.quotedTweet, quotedTweet);
+    const useful = isUsefulTranslation(current.text, translation) ? translation : current.translation;
+    run(db.prepare(`update x_feed set translation_json = ?, quoted_tweet_json = ?, updated_at = ? where id = ?`),
+      useful ? jsonString(useful) : null, mergedQuote ? jsonString(mergedQuote) : null, nowIso(), id);
+    if (mergedQuote && isCompleteQuotedTweet(mergedQuote)) {
+      const cached = getXPipelineQuotedTweet(mergedQuote.id, db);
+      if (!cached || !expected || cached.text === mergedQuote.text) upsertXPipelineQuotedTweet(mergedQuote, db);
+    }
+    db.exec("release x_translation_cas");
+    return true;
+  } catch (error) {
+    db.exec("rollback to x_translation_cas");
+    db.exec("release x_translation_cas");
+    throw error;
   }
-  run(
-    db.prepare(`
-      update x_feed
-      set translation_json = ?, updated_at = ?
-      where id = ?
-    `),
-    translation ? jsonString(translation) : null,
-    nowIso(),
-    id,
-  );
 }
 
 export function getXPipelineFeedItem(
@@ -1294,6 +1434,9 @@ function toFeedItem(row: DbRow): TwitterFeedItem {
     origin: stringValue(row.origin) === "search" ? "search" : "watch",
     queryLabel: stringValue(row.query_label),
     eventType: stringValue(row.event_type),
+    ...(nullableString(row.content_source) ? { contentSource: stringValue(row.content_source) } : {}),
+    ...(row.content_complete === 0 || row.content_complete === 1 ? { contentComplete: row.content_complete === 1 } : {}),
+    ...(nullableString(row.content_version) ? { contentVersion: stringValue(row.content_version) } : {}),
     translation: isUsefulTranslation(text, translation) ? translation : null,
   };
 }

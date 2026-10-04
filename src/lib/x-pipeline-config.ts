@@ -58,7 +58,8 @@ export function isXHybridEnabled(env: NodeJS.ProcessEnv = process.env): boolean 
 export function hasXPipelineDataSource(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return hasXPipelineToken(env) || isMonitor985Enabled(env);
+  return hasXPipelineToken(env) || isMonitor985Enabled(env) ||
+    ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || "");
 }
 
 export function isXPipelineEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

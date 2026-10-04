@@ -149,6 +149,10 @@ export type TwitterQuotedTweet = {
   media: TwitterMediaItem[];
   translation: TranslationNote | null;
   relation?: "quote" | "reply";
+  contentSource?: string;
+  contentComplete?: boolean;
+  /** Explicit revision of this quoted post, independent of its referring root. */
+  contentVersion?: string;
 };
 
 export type TwitterFeedItem = {
@@ -171,6 +175,10 @@ export type TwitterFeedItem = {
   origin: "watch" | "search";
   queryLabel: string;
   eventType?: string;
+  contentSource?: string;
+  contentComplete?: boolean;
+  /** Explicit upstream revision ID or edit timestamp, never observation time. */
+  contentVersion?: string;
   translation: TranslationNote | null;
 };
 

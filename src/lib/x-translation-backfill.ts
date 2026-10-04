@@ -1,4 +1,11 @@
 import type { TwitterFeedItem, TwitterQuotedTweet } from "./6551-twitter.ts";
+import { randomUUID } from "node:crypto";
+import {
+  X_FEED_TRANSLATION_BASE,
+  xFeedTranslationSnapshot,
+  mergeXFeedItems,
+  mergeXQuotedTweet,
+} from "./x-feed-merge.ts";
 import {
   isUsefulTranslation,
   translateText,
@@ -6,7 +13,10 @@ import {
 } from "./translate.ts";
 import {
   getXPipelineDb,
+  acquireXPipelineTranslationLease,
+  releaseXPipelineTranslationLease,
   getXPipelineFeedItem,
+  getXPipelineQuotedTweet,
   listXPipelineTranslationCandidates,
   setXPipelineFeedTranslation,
 } from "./x-pipeline-store.ts";
@@ -25,6 +35,8 @@ type XTranslationOptions = {
   enabled?: boolean;
   targetLanguage?: string;
   cacheNamespace?: string;
+  db?: DbLike;
+  leaseTtlMs?: number;
 };
 
 type XTranslationBackfillOptions = XTranslationOptions & {
@@ -93,7 +105,7 @@ async function ensureQuotedTweetTranslation(
     : quotedTweet;
 }
 
-export async function ensureXFeedItemTranslation<T extends TwitterFeedItem>(
+async function translateFeedItem<T extends TwitterFeedItem>(
   feedItem: T,
   options: XTranslationOptions = {},
 ): Promise<T> {
@@ -113,6 +125,47 @@ export async function ensureXFeedItemTranslation<T extends TwitterFeedItem>(
     translation,
     quotedTweet,
   };
+}
+
+export async function ensureXFeedItemTranslation<T extends TwitterFeedItem>(
+  feedItem: T,
+  options: XTranslationOptions = {},
+): Promise<T> {
+  if (isUsefulTranslation(feedItem.text, feedItem.translation) &&
+      (!feedItem.quotedTweet?.text || isUsefulTranslation(feedItem.quotedTweet.text, feedItem.quotedTweet.translation))) return feedItem;
+  const db = options.db ?? getXPipelineDb();
+  const owner = randomUUID();
+  if (!acquireXPipelineTranslationLease(feedItem.id, owner, { db, ttlMs: options.leaseTtlMs })) return feedItem;
+  let handedOff = false;
+  try {
+    const persisted = getXPipelineFeedItem(feedItem.id, db);
+    const prospective = mergeXFeedItems(persisted, feedItem);
+    // Ignore a partial/replayed observation before paying for text the merge
+    // would discard. The caller still upserts the observation normally.
+    if (prospective.text !== feedItem.text) return feedItem;
+    const quotedCache = prospective.quotedTweet ? getXPipelineQuotedTweet(prospective.quotedTweet.id, db) : null;
+    if (quotedCache && prospective.quotedTweet) {
+      const inputQuote = prospective.quotedTweet;
+      const repeatsStoredQuote = persisted?.quotedTweet?.id === inputQuote.id && persisted.quotedTweet.text === inputQuote.text;
+      const resolved = repeatsStoredQuote ? mergeXQuotedTweet(inputQuote, quotedCache) : mergeXQuotedTweet(quotedCache, inputQuote);
+      prospective.quotedTweet = resolved ? { ...resolved, relation: inputQuote.relation } : null;
+    }
+    const translated = await translateFeedItem({ ...feedItem,
+      translation: prospective.translation, quotedTweet: prospective.quotedTweet,
+    }, options);
+    Object.defineProperty(translated, X_FEED_TRANSLATION_BASE, {
+      value: { original: persisted ? xFeedTranslationSnapshot(persisted) : null, leaseOwner: owner,
+        quotedCacheOriginal: quotedCache ? { id: quotedCache.id, text: quotedCache.text } : null },
+      // Symbol keys survive object spread but are never encoded into feed JSON.
+      enumerable: true,
+    });
+    // The eventual feed upsert releases this owner after its commit; if the
+    // caller exits first the TTL recovers the lease without duplicate requests.
+    handedOff = true;
+    return translated;
+  } finally {
+    if (!handedOff) releaseXPipelineTranslationLease(feedItem.id, owner, db);
+  }
 }
 
 export async function backfillMissingXTranslations(
@@ -138,12 +191,18 @@ export async function backfillMissingXTranslations(
       continue;
     }
 
+    const owner = randomUUID();
+    if (!acquireXPipelineTranslationLease(candidate.id, owner, { db, ttlMs: options.leaseTtlMs })) {
+      stats.skippedCooldown += 1;
+      continue;
+    }
+
     inFlightTranslationIds.add(candidate.id);
     stats.attempted += 1;
     try {
       const feedItem = getXPipelineFeedItem(candidate.id, db);
       const translatedFeedItem = feedItem
-        ? await ensureXFeedItemTranslation(feedItem, options)
+        ? await translateFeedItem(feedItem, options)
         : null;
       if (
         translatedFeedItem &&
@@ -151,14 +210,15 @@ export async function backfillMissingXTranslations(
         (translatedFeedItem.translation !== feedItem.translation ||
           translatedFeedItem.quotedTweet !== feedItem.quotedTweet)
       ) {
-        setXPipelineFeedTranslation(
+        const accepted = setXPipelineFeedTranslation(
           candidate.id,
           translatedFeedItem.translation,
           db,
           translatedFeedItem.quotedTweet,
+          xFeedTranslationSnapshot(feedItem),
         );
         failedTranslationCooldowns.delete(candidate.id);
-        stats.translated += 1;
+        if (accepted) stats.translated += 1;
       } else {
         failedTranslationCooldowns.set(candidate.id, Date.now() + retryCooldownMs);
         stats.failed += 1;
@@ -168,6 +228,7 @@ export async function backfillMissingXTranslations(
       stats.failed += 1;
     } finally {
       inFlightTranslationIds.delete(candidate.id);
+      releaseXPipelineTranslationLease(candidate.id, owner, db);
     }
   }
 

@@ -37,3 +37,6 @@ assert.equal(
 );
 
 console.log("ok - x hybrid tweet cache detects full tweet-id hits");
+
+assert.equal(isFullTweetByIdCacheHit({ id: "1", text: "complete owned text", queryLabel: "owned-reader / full", contentComplete: true }, "1"), true);
+assert.equal(isFullTweetByIdCacheHit({ id: "1", text: "owned partial", queryLabel: "owned-reader / full", contentComplete: false }, "1"), false);

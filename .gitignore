@@ -40,6 +40,10 @@ yarn-error.log*
 *.log
 *.err.log
 
+# Python bridge runtime bytecode
+__pycache__/
+*.pyc
+
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example

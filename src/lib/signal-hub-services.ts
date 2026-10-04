@@ -6,6 +6,7 @@ export type SignalHubSystemdService = {
 };
 
 export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
+  { name: "signal-hub-x-owned-reader", label: "X 自有账号补采", category: "collector", required: false },
   { name: "signal-hub-web-push", label: "重要通知", category: "collector", required: false },
   {
     name: "signal-hub-web",
@@ -88,6 +89,9 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
 ];
 
 export function isSignalHubServiceEnabled(name: string, env: Record<string, string | undefined> = process.env) {
+  if (name === "signal-hub-x-owned-reader") {
+    return ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || "");
+  }
   return name !== "signal-hub-web-push" || env.WEB_PUSH_ENABLED === "true";
 }
 export function getEnabledSignalHubSystemdServices(env: Record<string, string | undefined> = process.env) {

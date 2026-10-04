@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { summarizeXOwnedReaderCoverage } from "./system-health.ts";
+
+const now = new Date("2026-10-04T02:00:00Z");
+const account = (username, time, extra = {}) => ({ username, route: "owned-reader", lastSuccessfulCheckAt: time, status: "live", stale: false, replyCoverageComplete: true, ...extra });
+const recent = "2026-10-04T01:58:00Z";
+const old = "2026-10-04T01:40:00Z";
+const summarize = accounts => summarizeXOwnedReaderCoverage({ snapshot: { enabled: true, accounts }, now });
+assert.equal(summarizeXOwnedReaderCoverage({ snapshot: { enabled: false, accounts: [] }, now }), null);
+assert.equal(summarize([account("a", recent)]).status, "ok");
+const mixed = summarize([account("a", recent), account("b", old)]);
+assert.equal(mixed.status, "warning", "another author's fresh check cannot hide a stale author");
+assert.equal(mixed.stale, true);
+assert.equal(mixed.updatedAt, old);
+assert.equal(summarize([account("a", recent, { status: "paused", reason: "rate_limited", nextRetryAt: "2026-10-04T02:30:00Z" })]).status, "error");
+const replies = summarize([account("a", recent, { replyCoverageComplete: false, replyReason: "unknown_conversation_module" })]);
+assert.equal(replies.meta.replyIncomplete, 1);
+assert.match(replies.detail, /回复/);
+const subscriber = summarize([account("a", recent, { subscriberContentExcluded: 1, subscriberExcludedTweetIds: ["2106417382965268577"] })]);
+assert.equal(subscriber.status, "warning");
+assert.equal(subscriber.meta.subscriberContentExcluded, 1);
+assert.match(subscriber.detail, /付费/);
+assert.equal(summarize([]).status, "warning");
+console.log("ok - owned health checks every assigned author independently and reports reply limits");

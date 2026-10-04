@@ -343,6 +343,63 @@ function xHealthItem(now: Date): SystemHealthItem {
   }
 }
 
+type XOwnedCoverageHealthInput = {
+  enabled: boolean;
+  accounts: {
+    username: string;
+    route: string;
+    lastSuccessfulCheckAt: string | null;
+    status: string;
+    stale?: boolean;
+    replyCoverageComplete?: boolean | null;
+    subscriberContentExcluded?: number;
+  }[];
+};
+
+export function summarizeXOwnedReaderCoverage({
+  snapshot, now = new Date(),
+}: {
+  snapshot: XOwnedCoverageHealthInput;
+  now?: Date;
+}): SystemHealthItem | null {
+  if (!snapshot.enabled) return null;
+  const assigned = snapshot.accounts.filter(account => account.route === "owned-reader");
+  const staleCount = assigned.filter(account => account.stale || isStale(account.lastSuccessfulCheckAt, now, 10 * 60_000)).length;
+  const failedCount = assigned.filter(account => ["error", "paused", "failed"].includes(account.status)).length;
+  const incompleteCount = assigned.filter(account => account.status === "incomplete").length;
+  const replyIncomplete = assigned.filter(account => account.replyCoverageComplete !== true).length;
+  const subscriberContentExcluded = assigned.reduce((sum, account) => sum + Math.max(0, account.subscriberContentExcluded || 0), 0);
+  const successfulTimes = assigned.map(account => account.lastSuccessfulCheckAt).filter((value): value is string => Boolean(value));
+  const oldest = successfulTimes.sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
+  const detail = failedCount ? `自有补采异常或暂停：${failedCount}/${assigned.length} 位`
+    : !assigned.length ? "自有补采已启用，尚未分配博主"
+    : staleCount ? `自有补采检查逾期或尚未完成：${staleCount}/${assigned.length} 位`
+    : incompleteCount ? `自有补采检查不完整：${incompleteCount}/${assigned.length} 位`
+    : `自有补采试运行：${assigned.length} 位公开主帖与引用检查正常`;
+  return {
+    id: "x-owned-reader", label: "X 自有账号补采",
+    status: failedCount ? "error" : staleCount || incompleteCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
+    detail: detail + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
+    updatedAt: successfulTimes.length === assigned.length ? oldest : null,
+    stale: staleCount > 0,
+    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, replyIncomplete, subscriberContentExcluded },
+  };
+}
+
+async function ownedReaderHealthItem(env: EnvLike, now: Date) {
+  if (!isSignalHubServiceEnabled("signal-hub-x-owned-reader", env)) return null;
+  try {
+    const [{ loadRuntimeConfig }, { getXPipelineConfiguredAccounts }, { getXAccountCoverageSnapshot }] = await Promise.all([
+      import("./runtime-config.ts"), import("./x-pipeline-accounts.ts"), import("./x-owned-reader-state.ts"),
+    ]);
+    const accounts = getXPipelineConfiguredAccounts(await loadRuntimeConfig(), env as NodeJS.ProcessEnv);
+    const snapshot = getXAccountCoverageSnapshot(accounts.map(account => account.username), undefined, env, now.getTime());
+    return summarizeXOwnedReaderCoverage({ snapshot, now });
+  } catch {
+    return { id: "x-owned-reader", label: "X 自有账号补采", status: "error" as const, detail: "无法读取自有补采状态", updatedAt: null, stale: true };
+  }
+}
+
 export function stocksHealthStaleMs(kind: StocksSnapshotKind, env: EnvLike) {
   const baseline = kind === "market" ? DEFAULT_STALE_MS.stocksMarket
     : kind === "financial" ? DEFAULT_STALE_MS.stocksFinancial : DEFAULT_STALE_MS.stocksCatalysts;
@@ -580,6 +637,7 @@ export async function getSystemHealthSnapshot({
   serviceStates?: SystemdServiceState[];
 } = {}): Promise<SystemHealthSnapshot> {
   const stocksItems = await stocksHealthItems(env, now);
+  const ownedReader = await ownedReaderHealthItem(env, now);
   let marketAlertItems: SystemHealthItem[];
   try {
     const marketAlerts = getMarketAlertsSnapshot({
@@ -612,6 +670,7 @@ export async function getSystemHealthSnapshot({
   const items: SystemHealthItem[] = [
     telegramHealthItem(now),
     xHealthItem(now),
+    ...(ownedReader ? [ownedReader] : []),
     ...stocksItems,
     summaryHealthItem({ audience: "signals", label: "AI 总结(信号)", env, now }),
     summaryHealthItem({ audience: "stocks", label: "AI 总结(Stocks)", env, now }),

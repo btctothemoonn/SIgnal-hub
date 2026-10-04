@@ -4,6 +4,7 @@ const {
   SIGNAL_HUB_SYSTEMD_SERVICES,
   getSignalHubSystemdServiceNames,
   getSignalHubSystemdServiceLabel,
+  getEnabledSignalHubSystemdServices,
 } = await import("./signal-hub-services.ts");
 
 const names = getSignalHubSystemdServiceNames();
@@ -34,3 +35,6 @@ assert.equal(
 );
 
 console.log("ok - signal hub service registry");
+
+assert.ok(!getEnabledSignalHubSystemdServices({}).some(service => service.name === "signal-hub-x-owned-reader"));
+assert.ok(getEnabledSignalHubSystemdServices({ X_OWNED_READER_ENABLED: "true" }).some(service => service.name === "signal-hub-x-owned-reader"));
