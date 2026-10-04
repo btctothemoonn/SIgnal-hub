@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { initXPipelineDb } from './x-pipeline-store.ts';
 import { initX985AuditDb, record985RawObservation, record985RawPayload, fetch985AuditEvidence, record985StreamState, prepare985AuditAccounts, complete985Audit, get985AuditSnapshot, get985Promotions } from './x-985-audit.ts';
@@ -83,3 +84,55 @@ for(let hour=0;hour<6;hour++) {
 }
 assert.equal(new Set(checked).size,42,'default hourly seven-person cadence covers all 42 in six hours');rotationDb.close();
 console.log('985 audit: two independent confirmations, raw-vs-local failure, time/health/watchlist gates and fair rotation passed.');
+
+const followerEvents=[
+ {eventType:'NEW_FOLLOWER',twAccount:'media',content:{}},
+ {eventType:'NEW_FOLLOWER',twAccount:'media',content:null},
+ {eventType:'NEW_FOLLOWER',twAccount:'media',content:{id:'2106500000000000100',userScreenName:'media',text:'follower metadata is not a post receipt'}},
+];
+const cachedPosts=[
+ mediaRaw,
+ {eventType:'NEW_TWEET_QUOTE',twAccount:'media',content:{id:'2106500000000000101',userScreenName:'media',text:'public quote'}},
+ {eventType:'NEW_TWEET_REPLY',twAccount:'media',content:{id:'2106500000000000102',userScreenName:'media',text:'public reply'}},
+];
+const cachedEvidence=events=>fetch985AuditEvidence({MONITOR985_ENABLED:'true'},async url=>
+ Response.json(String(url).includes('watch-config')?{config:{twitter:['media']}}:{events}));
+
+await test('known NEW_FOLLOWER events do not poison raw post receipts',()=>{
+ const receiptsDb=new DatabaseSync(':memory:');initX985AuditDb(receiptsDb);
+ try {
+  for(const follower of followerEvents)record985RawPayload(follower,receiptsDb,base+31*60000);
+  assert.equal(receiptsDb.prepare('select count(*) as n from x_985_parse_fault').get().n,0,'known follower metadata must not record a Twitter parse fault');
+  assert.equal(receiptsDb.prepare('select count(*) as n from x_985_raw_observations').get().n,0,'a follower event must not become a post receipt even when its metadata resembles a tweet');
+  for(const post of cachedPosts)record985RawPayload(post,receiptsDb,base+32*60000);
+  assert.deepEqual(receiptsDb.prepare('select tweet_id from x_985_raw_observations order by tweet_id').all().map(row=>row.tweet_id),['2106500000000000002','2106500000000000101','2106500000000000102'],'real media, quote and reply receipt IDs remain recorded');
+ } finally {receiptsDb.close();}
+});
+
+await test('cached NEW_FOLLOWER metadata leaves mixed public post evidence healthy',async()=>{
+ const mixed=await cachedEvidence([followerEvents[0],cachedPosts[0],followerEvents[1],cachedPosts[1],followerEvents[2],cachedPosts[2]]);
+ assert.equal(mixed.healthy,true,'known follower events must not disable an otherwise valid cached post audit');
+ assert.deepEqual(mixed.tweetIds,['2106500000000000002','2106500000000000101','2106500000000000102'],'follower metadata must not supply receipt evidence');
+ const followersOnly=await cachedEvidence(followerEvents);
+ assert.equal(followersOnly.healthy,true,'an explicitly known non-post cache is a valid empty post result');
+ assert.deepEqual(followersOnly.tweetIds,[],'no follower event proves receipt of a tweet');
+});
+
+await test('future non-post-looking events and malformed tweets still block absence evidence',async()=>{
+ for(const unknown of [
+  {eventType:'NEW_FOLLOWER_V2',twAccount:'media',content:{}},
+  {eventType:'FUTURE_NON_POST_EVENT',twAccount:'media',content:{}},
+  {eventType:'NEW_TWEET',twAccount:'media',content:{text:'unknown tweet structure'}},
+ ]) {
+  const mixed=await cachedEvidence([...cachedPosts,unknown,...followerEvents]);
+  assert.equal(mixed.healthy,false,unknown.eventType+' must keep the upstream absence check unavailable');
+  const faultsDb=new DatabaseSync(':memory:');initX985AuditDb(faultsDb);
+  try {
+   record985RawPayload(unknown,faultsDb,base+33*60000);
+   assert.equal(faultsDb.prepare('select count(*) as n from x_985_parse_fault').get().n,1,unknown.eventType+' must record an unparsed upstream event');
+   assert.equal(faultsDb.prepare('select count(*) as n from x_985_raw_observations').get().n,0,'unknown structures cannot prove receipt');
+   record985RawPayload(followerEvents[0],faultsDb,base+34*60000);
+   assert.equal(faultsDb.prepare('select occurred_at from x_985_parse_fault where id=1').get().occurred_at,'2026-10-04T03:33:00.000Z','ignoring known follower metadata must preserve an earlier unknown-event fault');
+  } finally {faultsDb.close();}
+ }
+});

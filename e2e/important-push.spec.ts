@@ -61,7 +61,7 @@ test('full local storage recovers device proof and preserves enrollment across r
       catch (error) { errorName = (error as DOMException).name; }
       return { errorName, cache, smallerCache, preserved, retainedLength: low };
     });
-    expect(full.errorName).toBe('QuotaExceededError', 'the fixture must exhaust real browser storage before enrollment');
+    expect(full.errorName, 'the fixture must exhaust real browser storage before enrollment').toBe('QuotaExceededError');
     expect(full.retainedLength).toBeGreaterThan(0);
     await page.getByRole('button', { name: '开启通知', exact: true }).click();
     await expect(page.getByText('通知已开启', { exact: true })).toBeVisible();

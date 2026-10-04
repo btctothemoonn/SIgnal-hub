@@ -49,8 +49,13 @@ function isOtherPlatformPayload(raw:unknown) {
   const prefix=String(event.twAccount || '').toLowerCase().split(':');
   return sources.some(source=>other.includes(source)) || (prefix.length>1 && other.includes(prefix[0])) || content.isInstagram===true;
 }
+function isNonTweetPayload(raw:unknown) {
+  // Follower notifications share the 985 feed but carry no tweet receipt.
+  if(raw && typeof raw==='object' && (raw as Row).eventType==='NEW_FOLLOWER')return true;
+  return isOtherPlatformPayload(raw);
+}
 export function record985RawPayload(raw:unknown,db:DatabaseSync=getXPipelineDb(),nowMs=Date.now()) {
-  if(isOtherPlatformPayload(raw))return;
+  if(isNonTweetPayload(raw))return;
   initX985AuditDb(db);const identity=raw985Identity(raw);const at=new Date(nowMs).toISOString();
   if(identity)db.prepare(`insert into x_985_raw_observations values(?,?,?,?) on conflict(tweet_id) do update set last_seen_at=excluded.last_seen_at`).run(identity.id,identity.username,at,at);
   else db.prepare('insert into x_985_parse_fault values(1,?) on conflict(id) do update set occurred_at=excluded.occurred_at').run(at);
@@ -106,7 +111,7 @@ export async function fetch985AuditEvidence(env:Record<string,string|undefined>=
     const monitored=parseMonitor985WatchConfig(values[0]).effectiveTwitter.map(a=>normalizeXOwnedUsername(a.handle));
     if(!values[1] || typeof values[1]!=='object' || !Array.isArray(values[1].events))return unavailable;
     const events=extractMonitor985Events(values[1]);
-    const ids=events.filter(raw=>!isOtherPlatformPayload(raw)).map(raw985Identity);
+    const ids=events.filter(raw=>!isNonTweetPayload(raw)).map(raw985Identity);
     return {healthy:monitored.length>0 && ids.every(Boolean),monitored,tweetIds:ids.filter(Boolean).map(identity=>identity!.id)};
   } catch {return unavailable;}
 }
