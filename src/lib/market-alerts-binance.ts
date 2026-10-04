@@ -317,7 +317,10 @@ export function createBinanceFuturesClient(
       const read = async (path: string, field: string): Promise<TimedSqueezeRatio> => {
         const rows = await requestJson(path, { symbol, period: "5m", limit: 2 }) as JsonRecord[];
         const latest = rows.at(-1);
-        return { value: nullableNumber(latest?.[field]), observedAt: sourceTimestampIso(latest?.timestamp) };
+        const observedAt = path === "/futures/data/takerlongshortRatio"
+          ? takerPeriodEndIso(latest?.timestamp, now())
+          : sourceTimestampIso(latest?.timestamp);
+        return { value: nullableNumber(latest?.[field]), observedAt };
       };
       const [global, top, taker] = await Promise.all([
         read("/futures/data/globalLongShortAccountRatio", "longShortRatio"),
@@ -966,6 +969,16 @@ function sourceTimestampIso(value: unknown): string | null {
   const timestamp = nullableNumber(value);
   if (timestamp === null || timestamp <= 0 || timestamp > 8.64e15) return null;
   return new Date(timestamp).toISOString();
+}
+
+function takerPeriodEndIso(value: unknown, collectedAtMs: number): string | null {
+  if ((typeof value !== "number" && typeof value !== "string") || !Number.isFinite(collectedAtMs)) return null;
+  const startedAt = nullableNumber(value);
+  if (startedAt === null || startedAt <= 0) return null;
+  // Binance taker timestamps mark the start of the requested 5m period.
+  // Unclosed periods keep their ratio value but cannot supply push freshness evidence.
+  const completedAt = startedAt + 300_000;
+  return completedAt <= collectedAtMs ? sourceTimestampIso(completedAt) : null;
 }
 
 function oldestCompleteSourceTime(values: Array<string | null>): string {
