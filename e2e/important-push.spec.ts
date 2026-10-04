@@ -75,6 +75,30 @@ test('current-device enrollment, test, revoke, logout and closed-page service wo
   } finally { await context.unrouteAll({ behavior: 'wait' }); store.close(); rmSync(runtime, { recursive: true, force: true }); }
 });
 
+test('browser subscription failure displays its safe setup stage', async ({ page, context, baseURL }) => {
+  const ec = createECDH('prime256v1'); ec.generateKeys();
+  const publicKey = ec.getPublicKey().toString('base64url');
+  await context.grantPermissions(['notifications'], { origin: baseURL! });
+  await context.addInitScript(() => {
+    PushManager.prototype.getSubscription = async () => null;
+    PushManager.prototype.subscribe = async () => {
+      throw new DOMException('Private provider detail https://secret.invalid/device-key', 'AbortError');
+    };
+  });
+  await context.route('**/api/push/config', route => route.fulfill({ json: { enabled: true, configured: true, publicKey } }));
+  await page.goto('/login?next=/settings');
+  await page.getByLabel('Admin password').fill(process.env.SIGNAL_E2E_PASSWORD!);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.waitForURL('**/settings');
+  await page.getByRole('button', { name: '重要通知', exact: true }).click();
+  await page.getByRole('button', { name: '开启通知', exact: true }).click();
+  const diagnostic = page.getByRole('status').filter({ hasText: 'AbortError' });
+  await expect(diagnostic).toBeVisible();
+  await expect(diagnostic).toContainText('browser_subscription');
+  await expect(page.getByText('通知已开启', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/secret\.invalid|device-key/)).toHaveCount(0);
+});
+
 test('news links open their preserved edition and select crypto or markets', async ({ page }) => {
   const at = new Date().toISOString();
   const dateKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);

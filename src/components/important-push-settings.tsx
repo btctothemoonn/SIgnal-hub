@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from 'react';
-import { createWebPushClient, type WebPushClient, type PushClientStatus } from '../lib/web-push-client.ts';
+import { createWebPushClient, getPushErrorMessage, type WebPushClient, type PushClientStatus } from '../lib/web-push-client.ts';
 export function ImportantPushSettings({ client: supplied }: { client?: WebPushClient }) {
   const client = useMemo(() => supplied ?? createWebPushClient(), [supplied]);
   const [status, setStatus] = useState<PushClientStatus | { state: 'loading' | 'enabling' | 'disabling'; enabled: boolean }>({ state: 'loading', enabled: false });
@@ -10,7 +10,7 @@ export function ImportantPushSettings({ client: supplied }: { client?: WebPushCl
   async function change(action: () => Promise<PushClientStatus>, state: 'enabling' | 'disabling') {
     setMessage('');
     try { const pending = action(); setStatus(previous => ({ state, enabled: previous.enabled })); setStatus(await pending); }
-    catch { setStatus(previous => ({ state: 'error', enabled: previous.enabled })); setMessage('操作未完成，请刷新状态后重试。'); }
+    catch (error) { setStatus(previous => ({ state: 'error', enabled: previous.enabled })); setMessage(getPushErrorMessage(error)); }
   }
   const labels: Record<string, string> = { loading: '正在检查通知状态…', unsupported: '当前浏览器暂不支持通知', home_screen: '请先添加到 iPhone 主屏幕', unconfigured: '通知服务尚未开启', denied: '系统通知权限已关闭', ready: '重要通知未开启', enabled: '通知已开启', enabling: '正在开启通知…', disabling: '正在关闭通知…', error: '通知状态需要重新确认' };
   return <section className="rounded-xl border border-workspace-line-strong bg-workspace-surface p-4 sm:p-5" aria-label="重要通知">

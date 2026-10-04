@@ -16,5 +16,13 @@ try {
  const enable = renderer.root.findAllByType('button').find(b => b.children.join('') === '开启通知'); assert.ok(enable);
  await act(async () => { await enable.props.onClick(); }); assert.equal(enables, 1);
  assert.ok(JSON.stringify(renderer.toJSON()).includes('通知已开启'));
+ await act(async () => renderer.unmount()); renderer = null;
+ const failingClient = { ...client, enableFromUserGesture: () => Promise.reject(new Error('same_origin_required')) };
+ await act(async () => { renderer = TestRenderer.create(React.createElement(ImportantPushSettings, { client: failingClient })); });
+ const retryEnable = renderer.root.findAllByType('button').find(b => b.children.join('') === '开启通知');
+ await act(async () => { await retryEnable.props.onClick(); });
+ const failedPage = JSON.stringify(renderer.toJSON());
+ assert.ok(failedPage.includes('same_origin_required'), 'enrollment rejection must display its safe diagnostic code');
+ assert.ok(failedPage.includes('网址'), 'origin rejection must explain how to check the website address');
 } finally { if (renderer) await act(async () => renderer.unmount()); rmSync(path, { force: true }); }
 console.log('important push settings behavior passed');

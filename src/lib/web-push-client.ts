@@ -4,6 +4,67 @@ type BrowserSubscription = { options: { applicationServerKey?: ArrayBuffer | nul
 type BrowserRegistration = { pushManager: { getSubscription(): Promise<BrowserSubscription | null>; subscribe(options: { userVisibleOnly: boolean; applicationServerKey: Uint8Array<ArrayBuffer> }): Promise<BrowserSubscription> } };
 export type PushBrowser = { secureContext: boolean; userAgent: string; standalone: boolean; available: boolean; notification: { permission: NotificationPermission; requestPermission(): Promise<NotificationPermission> } | null; register(): Promise<BrowserRegistration>; crypto: Crypto; storage: Pick<Storage, 'getItem' | 'setItem'> };
 export type PushClientStatus = { state: 'unsupported' | 'home_screen' | 'unconfigured' | 'denied' | 'ready' | 'enabled' | 'error'; enabled: boolean };
+type PushEnrollmentStage = 'permission' | 'device_storage' | 'browser_subscription' | 'server_registration' | 'confirmation';
+const pushErrorMessages = {
+  same_origin_required: '通知注册被同源检查拒绝，请核对当前网址与正式网站网址是否一致，并从正式网址重新开启通知。',
+  login_required: '登录状态已失效，请重新登录后再操作通知。',
+  control_rate_limited: '通知操作过于频繁，请稍后再试。',
+  device_proof_required: '当前设备登记无法确认，请刷新状态后重新开启通知。',
+  device_conflict: '当前设备登记发生冲突，请刷新状态后重试。',
+  push_not_ready: '通知准备尚未完成，请刷新状态后再开启通知。',
+  push_unsupported: '当前环境无法使用通知，请检查浏览器支持情况和安全网址。',
+  push_not_configured: '通知服务配置尚未就绪，请联系管理员检查服务配置。',
+  invalid_request: '服务器未接受通知登记数据，请刷新状态后重试；仍失败时请联系管理员。',
+  invalid_device: '服务器未接受当前设备的通知凭证，请记录错误码和阶段供管理员检查。',
+  body_too_large: '通知登记数据超出限制，请联系管理员检查。',
+  json_required: '通知登记请求格式未被接受，请刷新页面后重试。',
+  push_control_failed: '服务器未能完成通知操作，请稍后重试；仍失败时请联系管理员。',
+  enrollment_unconfirmed: '通知登记后的状态未确认，请刷新状态，并记录错误码和阶段。',
+  push_request_failed: '通知操作未完成，请检查网络，刷新状态，并记录错误码和阶段。',
+  push_gone: '推送订阅已失效，请刷新状态后重新开启通知。',
+  push_auth_failed: '推送服务认证失败，请联系管理员检查服务密钥。',
+  push_rejected: '推送服务拒绝了测试通知，请联系管理员检查。',
+  push_rate_limited: '推送服务暂时限流，请稍后重试。',
+  push_temporarily_unavailable: '推送服务暂时不可用，请检查网络或稍后重试。',
+  event_expired: '测试通知已过期，请在设备联网时重新发送。',
+  test_not_accepted: '测试通知未被推送服务接受，请稍后重试。',
+  NotAllowedError: '浏览器未允许通知操作，请检查本站通知权限；iPhone 请从主屏幕图标打开。',
+  AbortError: '浏览器中止了通知操作，请检查网络，保持页面打开后手动重试。',
+  NotSupportedError: '浏览器不支持此通知操作，请检查浏览器版本；iPhone 请从主屏幕图标打开。',
+  InvalidStateError: '浏览器通知状态暂不可用，请刷新页面并重新检查通知状态。',
+  SecurityError: '浏览器安全检查拒绝了通知操作，请核对正式网站网址和安全连接。',
+  QuotaExceededError: '当前设备无法保存通知登记，请检查浏览器存储是否可用。',
+  NetworkError: '浏览器通知操作遇到网络错误，请检查网络后手动重试。',
+  TimeoutError: '浏览器通知操作超时，请检查网络后手动重试。',
+  DataError: '浏览器未接受通知订阅数据，请刷新状态；仍失败时请联系管理员。',
+  InvalidAccessError: '浏览器未接受通知订阅参数，请联系管理员检查。',
+  OperationError: '浏览器未能完成通知订阅，请记录错误码和阶段供管理员检查。',
+} as const;
+type PushErrorCode = keyof typeof pushErrorMessages;
+const pushDomExceptionNames = new Set(['NotAllowedError', 'AbortError', 'NotSupportedError', 'InvalidStateError', 'SecurityError', 'QuotaExceededError', 'NetworkError', 'TimeoutError', 'DataError', 'InvalidAccessError', 'OperationError']);
+function safePushErrorCode(error: unknown): PushErrorCode {
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+    return pushDomExceptionNames.has(error.name) ? error.name as PushErrorCode : 'push_request_failed';
+  }
+  return error instanceof Error && Object.prototype.hasOwnProperty.call(pushErrorMessages, error.message) ? error.message as PushErrorCode : 'push_request_failed';
+}
+class PushEnrollmentError extends Error {
+  readonly code: PushErrorCode;
+  readonly stage: PushEnrollmentStage;
+  constructor(error: unknown, stage: PushEnrollmentStage) {
+    const code = safePushErrorCode(error);
+    super(code);
+    this.name = 'PushEnrollmentError';
+    this.code = code;
+    this.stage = stage;
+  }
+}
+export function getPushErrorMessage(error: unknown): string {
+  const code = safePushErrorCode(error);
+  const stage = error instanceof PushEnrollmentError ? error.stage : 'unknown';
+  return `${pushErrorMessages[code]}（${code}；阶段：${stage}）`;
+}
+
 type PushApi = (path: string, options?: RequestInit) => Promise<Record<string, unknown>>;
 function defaultBrowser(): PushBrowser | null {
   if (typeof window === 'undefined') return null;
@@ -33,38 +94,49 @@ export function createWebPushClient(api: PushApi = async (path, options) => {
   const save = (credentials: Credentials) => { if (!browser) throw new Error('push_unsupported'); browser.storage.setItem(PUSH_DEVICE_STORAGE_KEY, JSON.stringify(credentials)); if (typeof window !== 'undefined') window.dispatchEvent(new Event('signal-push-device-change')); };
   const headers = () => { const credentials = load(); return { 'X-Signal-Push-Device': credentials?.deviceId ?? '', 'X-Signal-Push-Device-Key': credentials?.deviceKey ?? '' }; };
   async function subscriptionMatches() { const existing = await registration?.pushManager.getSubscription(); if (!existing) return false; const key = existing.options.applicationServerKey; return key ? encodeBytes(key) === config?.publicKey : load()?.publicKey === config?.publicKey; }
+  async function readStatus(confirmEnrollment = false): Promise<PushClientStatus> {
+    const environment = getPushEnvironment(browser);
+    if (environment.needsHomeScreen) return { state: 'home_screen', enabled: false };
+    if (!environment.supported) return { state: 'unsupported', enabled: false };
+    try {
+      config = await api('/api/push/config') as typeof config;
+      if (!config?.enabled || !config.configured || !config.publicKey) return { state: 'unconfigured', enabled: false };
+      registration = await browser!.register();
+      let enabled = false;
+      if (load()) {
+        try { enabled = (await api('/api/push/subscriptions', { headers: headers() })).enabled === true; }
+        catch (error) { if (confirmEnrollment || !(error instanceof Error) || error.message !== 'device_proof_required') throw error; }
+      }
+      if (browser!.notification!.permission === 'denied') return { state: 'denied', enabled };
+      return { state: enabled && browser!.notification!.permission === 'granted' && await subscriptionMatches() ? 'enabled' : 'ready', enabled };
+    } catch (error) { if (confirmEnrollment) throw error; return { state: 'error', enabled: false }; }
+  }
   const client = {
-    async readStatus(): Promise<PushClientStatus> {
-      const environment = getPushEnvironment(browser);
-      if (environment.needsHomeScreen) return { state: 'home_screen', enabled: false };
-      if (!environment.supported) return { state: 'unsupported', enabled: false };
-      try {
-        config = await api('/api/push/config') as typeof config;
-        if (!config?.enabled || !config.configured || !config.publicKey) return { state: 'unconfigured', enabled: false };
-        registration = await browser!.register();
-        let enabled = false;
-        if (load()) {
-          try { enabled = (await api('/api/push/subscriptions', { headers: headers() })).enabled === true; }
-          catch (error) { if (!(error instanceof Error) || error.message !== 'device_proof_required') throw error; }
-        }
-        if (browser!.notification!.permission === 'denied') return { state: 'denied', enabled };
-        return { state: enabled && browser!.notification!.permission === 'granted' && await subscriptionMatches() ? 'enabled' : 'ready', enabled };
-      } catch { return { state: 'error', enabled: false }; }
-    },
+    readStatus: () => readStatus(),
     enableFromUserGesture(): Promise<PushClientStatus> {
-      if (!browser?.notification || !registration || !config?.publicKey || !getPushEnvironment(browser).supported) return Promise.reject(new Error('push_not_ready'));
+      if (!browser?.notification || !registration || !config?.publicKey || !getPushEnvironment(browser).supported) return Promise.reject(new PushEnrollmentError(new Error('push_not_ready'), 'permission'));
       // Keep this call synchronous in the click handler, before subscription/network awaits (iOS).
-      const permission = browser.notification.permission === 'granted' ? Promise.resolve('granted' as const) : browser.notification.requestPermission();
+      let permission: Promise<NotificationPermission>;
+      try { permission = browser.notification.permission === 'granted' ? Promise.resolve('granted' as const) : browser.notification.requestPermission(); }
+      catch (error) { return Promise.reject(new PushEnrollmentError(error, 'permission')); }
       return (async () => {
-        if (await permission !== 'granted') return { state: 'denied', enabled: false };
-        let credentials = load();
-        if (!credentials?.deviceId || !credentials.deviceKey) { const bytes = browser.crypto.getRandomValues(new Uint8Array(32)); credentials = { deviceId: browser.crypto.randomUUID(), deviceKey: encodeBytes(bytes) }; save(credentials); }
-        let existing = await registration!.pushManager.getSubscription();
-        if (existing && !await subscriptionMatches()) { await existing.unsubscribe(); existing = null; }
-        const subscription = existing ?? await registration!.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodePublicKey(config!.publicKey!) });
-        const response = await api('/api/push/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: credentials.deviceId, deviceKey: credentials.deviceKey, subscription: subscription.toJSON() }) });
-        save({ ...credentials, publicKey: config!.publicKey!, epoch: response.epoch as number });
-        const verified = await client.readStatus(); if (verified.state !== 'enabled') throw new Error('enrollment_unconfirmed'); return verified;
+        let stage: PushEnrollmentStage = 'permission';
+        try {
+          if (await permission !== 'granted') return { state: 'denied', enabled: false };
+          stage = 'device_storage';
+          let credentials = load();
+          if (!credentials?.deviceId || !credentials.deviceKey) { const bytes = browser.crypto.getRandomValues(new Uint8Array(32)); credentials = { deviceId: browser.crypto.randomUUID(), deviceKey: encodeBytes(bytes) }; save(credentials); }
+          stage = 'browser_subscription';
+          let existing = await registration!.pushManager.getSubscription();
+          if (existing && !await subscriptionMatches()) { await existing.unsubscribe(); existing = null; }
+          const subscription = existing ?? await registration!.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodePublicKey(config!.publicKey!) });
+          stage = 'server_registration';
+          const response = await api('/api/push/subscriptions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: credentials.deviceId, deviceKey: credentials.deviceKey, subscription: subscription.toJSON() }) });
+          stage = 'device_storage';
+          save({ ...credentials, publicKey: config!.publicKey!, epoch: response.epoch as number });
+          stage = 'confirmation';
+          const verified = await readStatus(true); if (verified.state !== 'enabled') throw new Error('enrollment_unconfirmed'); return verified;
+        } catch (error) { throw new PushEnrollmentError(error, stage); }
       })();
     },
     async disable(): Promise<PushClientStatus> {
