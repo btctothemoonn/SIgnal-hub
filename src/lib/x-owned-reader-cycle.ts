@@ -4,7 +4,7 @@ import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } fro
 import { normalizeXOwnedUsername, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, recordXOwnedReaderRoutes, safeXOwnedReason, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
-import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
+import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
 
 let inFlight=false;
@@ -21,6 +21,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     initXOwnedReaderStateDb(db);
     config=getEffectiveXOwnedReaderConfig(config,db);
     const usernames=accounts.map(account=>typeof account === "string" ? account : account.username);
+    if(config.auditEnabled)sync985ConfiguredAuthors(usernames,db,nowMs);
     recordXOwnedReaderRoutes(usernames,config,db,nowMs);
     const pause=getXOwnedReaderPause(db);
     if(!config.enabled || (pause && (!pause.nextRetryAt || Date.parse(pause.nextRetryAt)>nowMs))) {
@@ -39,6 +40,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     let auditAccounts=config.auditEnabled ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs) : [];
     if(auditAccounts.length) {
       auditEvidence=await auditEvidenceProvider();
+      sync985AuthorMonitoringEvidence(auditEvidence,db,nowMs);
       if(!auditEvidence.healthy) {
         for(const account of auditAccounts)complete985Audit({username:account.username,complete:false,reason:'upstream_evidence_unavailable'},[],auditEvidence,db,nowMs);
         auditAccounts=[];

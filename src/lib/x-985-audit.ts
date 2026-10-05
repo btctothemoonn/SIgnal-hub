@@ -22,6 +22,7 @@ export function initX985AuditDb(db:DatabaseSync=getXPipelineDb()) {
     create table if not exists x_985_promotions(username_key text primary key,tweet_id text not null,created_at text not null,confirmed_at text not null,reason text not null);
     create table if not exists x_985_audit_control(id integer primary key check(id=1),last_sweep_at text not null);
     create table if not exists x_985_parse_fault(id integer primary key check(id=1),occurred_at text not null);
+    create table if not exists x_985_author_monitoring(username_key text primary key,configured_since_at text not null,monitored_since_at text);
   `);initialized.add(db);
 }
 export function record985RawObservation(update:Pick<TwitterRealtimeUpdate,'account'|'feedItem'>,db:DatabaseSync=getXPipelineDb(),nowMs=Date.now()) {
@@ -76,8 +77,38 @@ export function get985AuditSnapshot(username:string,db:DatabaseSync=getXPipeline
   const promotion=db.prepare('select tweet_id,confirmed_at from x_985_promotions where username_key=?').get(normalizeXOwnedUsername(username)) as Row|undefined;
   return {status:String(row.status),reason:row.reason?String(row.reason):null,lastAttemptAt:row.last_attempt_at?String(row.last_attempt_at):null,lastSuccessfulCheckAt:row.last_successful_check_at?String(row.last_successful_check_at):null,checkedCount:Number(row.checked_count),confirmedMissingTweetId:promotion?String(promotion.tweet_id):null,promotedAt:promotion?String(promotion.confirmed_at):null};
 }
+export function sync985ConfiguredAuthors(usernames:readonly string[],db:DatabaseSync,nowMs:number) {
+  initX985AuditDb(db);
+  const configured=new Set(usernames.map(normalizeXOwnedUsername).filter(Boolean));
+  const at=new Date(nowMs).toISOString();
+  for(const row of db.prepare('select username_key from x_985_author_monitoring').all()) {
+    const username=String(row.username_key);
+    if(configured.has(username))continue;
+    db.prepare('delete from x_985_author_monitoring where username_key=?').run(username);
+    db.prepare("update x_985_audit_candidates set status='monitoring_reset' where username_key=? and status='missing'").run(username);
+  }
+  for(const username of configured)db.prepare('insert or ignore into x_985_author_monitoring values(?,?,null)').run(username,at);
+}
+export function sync985AuthorMonitoringEvidence(evidence:X985AuditEvidence,db:DatabaseSync,nowMs:number) {
+  initX985AuditDb(db);
+  const monitored=new Set(evidence.healthy?evidence.monitored.map(normalizeXOwnedUsername).filter(Boolean):[]);
+  const at=new Date(nowMs).toISOString();
+  // A shared cache also tells us about authors outside this cycle's seven-person batch.
+  for(const row of db.prepare('select username_key,monitored_since_at from x_985_author_monitoring').all()) {
+    const username=String(row.username_key);
+    if(!monitored.has(username)) {
+      db.prepare('update x_985_author_monitoring set monitored_since_at=null where username_key=?').run(username);
+      db.prepare("update x_985_audit_candidates set status='monitoring_reset' where username_key=? and status='missing'").run(username);
+    } else if(!row.monitored_since_at) {
+      // Never infer that a current subscription existed before we first observed it.
+      db.prepare('update x_985_author_monitoring set monitored_since_at=? where username_key=?').run(at,username);
+      db.prepare("update x_985_audit_candidates set status='monitoring_reset' where username_key=? and status='missing'").run(username);
+    }
+  }
+}
 export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7) {
   initX985AuditDb(db);const assigned=new Set(owned.map(normalizeXOwnedUsername));const at=new Date(nowMs).toISOString();
+  sync985ConfiguredAuthors(usernames,db,nowMs);
   const authors=[...new Set(usernames.map(normalizeXOwnedUsername).filter(Boolean))].filter(name=>!assigned.has(name));
   for(const name of authors)db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(name);
   const rows=authors.map(name=>db.prepare('select * from x_985_audit_state where username_key=?').get(name) as Row);
@@ -117,6 +148,7 @@ export async function fetch985AuditEvidence(env:Record<string,string|undefined>=
 }
 export function complete985Audit(event:Record<string,unknown>,items:readonly TwitterFeedItem[],evidence:X985AuditEvidence,db:DatabaseSync,nowMs=Date.now()) {
   initX985AuditDb(db);const username=normalizeXOwnedUsername(event.username);const at=new Date(nowMs).toISOString();
+  sync985AuthorMonitoringEvidence(evidence,db,nowMs);
   db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(username);
   const checkedAt=typeof event.checkedAt==='string'?event.checkedAt:at;
   const stream=db.prepare('select * from x_985_stream where id=1').get() as Row|undefined;
@@ -124,7 +156,11 @@ export function complete985Audit(event:Record<string,unknown>,items:readonly Twi
   const active=stream?.last_activity_at?Date.parse(String(stream.last_activity_at)):NaN;
   const fault=db.prepare('select occurred_at from x_985_parse_fault where id=1').get() as Row|undefined;
   const faultAt=fault?Date.parse(String(fault.occurred_at)):NaN;
-  const available=evidence.healthy && evidence.monitored.includes(username) && Number.isFinite(since) && Number.isFinite(active) && nowMs-active<=180_000 && active<=nowMs+60_000;
+  const monitoring=db.prepare('select configured_since_at,monitored_since_at from x_985_author_monitoring where username_key=?').get(username) as Row|undefined;
+  const configuredSince=monitoring?Date.parse(String(monitoring.configured_since_at)):NaN;
+  const monitoredSince=monitoring?.monitored_since_at?Date.parse(String(monitoring.monitored_since_at)):NaN;
+  const eligibleSince=Math.max(since,configuredSince,monitoredSince);
+  const available=evidence.healthy && evidence.monitored.includes(username) && Number.isFinite(eligibleSince) && Number.isFinite(active) && nowMs-active<=180_000 && active<=nowMs+60_000;
   let status=event.complete?'verified':'incomplete';let reason=event.complete?null:String(event.reason || 'account_missing_completion');const promotedIds:string[]=[];
   if(event.complete && !available) {status='unavailable';reason='upstream_evidence_unavailable';}
   if(event.complete && available) {
@@ -140,6 +176,7 @@ export function complete985Audit(event:Record<string,unknown>,items:readonly Twi
         if(!db.prepare('select 1 from x_feed where id=?').get(item.id)) {status='local_processing';reason='upstream_received_local_missing';}
         continue;
       }
+      if(created<=eligibleSince)continue;
       const separated=prior && nowMs-Date.parse(String(prior.last_missing_at))>=600_000;
       const checks=prior?.status==='missing' ? Number(prior.checks)+(separated?1:0) : 1;
       db.prepare(`insert into x_985_audit_candidates values(?,?,?,?,?,?,'missing') on conflict(tweet_id) do update set last_missing_at=case when ?=1 then excluded.last_missing_at else last_missing_at end,checks=excluded.checks,status='missing'`).run(item.id,username,item.createdAt,at,at,checks,separated?1:0);

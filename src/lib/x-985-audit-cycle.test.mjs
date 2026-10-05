@@ -4,12 +4,18 @@ import { initXPipelineDb,getXPipelineFeedItem } from './x-pipeline-store.ts';
 import { getXOwnedReaderConfig } from './x-owned-reader-config.ts';
 import { getXAccountCoverageSnapshot } from './x-owned-reader-state.ts';
 import { runXOwnedReaderCycle } from './x-owned-reader-cycle.ts';
-import { record985StreamState } from './x-985-audit.ts';
+import { record985StreamState, prepare985AuditAccounts, sync985AuthorMonitoringEvidence } from './x-985-audit.ts';
 
 const db=new DatabaseSync(':memory:');initXPipelineDb(db);
 const base=Date.parse('2026-10-04T03:00:00Z');
 const env={X_OWNED_READER_ENABLED:'true',X_985_AUDIT_ENABLED:'true',X_OWNED_READER_USERNAMES:'owned',X_OWNED_READER_SESSION_DB:'/private/account.db',X_OWNED_READER_COOLDOWN_FILE:'/private/cooldown.json'};
 const config=getXOwnedReaderConfig(env);
+function establishMonitoring(database) {
+ prepare985AuditAccounts(['owned','primary'],['owned'],database,base,0);
+ sync985AuthorMonitoringEvidence({healthy:true,monitored:['primary'],tweetIds:[]},database,base);
+ database.prepare('delete from x_985_audit_control').run();
+}
+establishMonitoring(db);
 const item={id:'2106500000000000000',username:'primary',displayName:'primary',text:'public post',createdAt:new Date(base+60000).toISOString(),profileUrl:'https://x.com/primary',userAvatar:'',tweetUrl:'https://x.com/primary/status/2106500000000000000',hashtags:[],likes:0,retweets:0,replies:0,quotes:0,views:0,media:[],quotedTweet:null,origin:'watch',queryLabel:'owned-reader / full',translation:null,contentSource:'owned-reader',contentComplete:true};
 record985StreamState('connected',db,base);
 const tasks=[];
@@ -39,6 +45,7 @@ assert.equal(tasks.at(-1).accounts.length,2);
 assert.ok(tasks.at(-1).accounts.every(account=>!account.purpose),'persisted promotion is included without env restart');
 db.close();
 const lateDb=new DatabaseSync(':memory:');initXPipelineDb(lateDb);
+establishMonitoring(lateDb);
 record985StreamState('connected',lateDb,base);
 record985StreamState('heartbeat',lateDb,base+15*60000);
 await runXOwnedReaderCycle({accounts:['owned','primary'],config,db:lateDb,nowMs:base+12*60000,clock:()=>base+15*60000,bridgeRunner:bridge,auditEvidenceProvider:async()=>({healthy:true,monitored:['primary'],tweetIds:[]})});

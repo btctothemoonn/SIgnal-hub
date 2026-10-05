@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { initXPipelineDb } from './x-pipeline-store.ts';
-import { initX985AuditDb, record985RawObservation, record985RawPayload, fetch985AuditEvidence, record985StreamState, prepare985AuditAccounts, complete985Audit, get985AuditSnapshot, get985Promotions } from './x-985-audit.ts';
+import { initX985AuditDb, record985RawObservation, record985RawPayload, fetch985AuditEvidence, record985StreamState, prepare985AuditAccounts, sync985AuthorMonitoringEvidence, complete985Audit, get985AuditSnapshot, get985Promotions } from './x-985-audit.ts';
 
 const db=new DatabaseSync(':memory:');initXPipelineDb(db);initX985AuditDb(db);
 const base=Date.parse('2026-10-04T03:00:00Z');
 const item={id:'2106500000000000000',username:'Primary',displayName:'Primary',text:'public post',createdAt:new Date(base+60000).toISOString(),profileUrl:'https://x.com/Primary',userAvatar:'',tweetUrl:'https://x.com/Primary/status/2106500000000000000',hashtags:[],likes:0,retweets:0,replies:0,quotes:0,views:0,media:[],quotedTweet:null,origin:'watch',queryLabel:'owned-reader / full',translation:null,contentSource:'owned-reader',contentComplete:true};
 const evidence={healthy:true,monitored:['primary'],tweetIds:[]};
 const completion={username:'primary',userId:'321',complete:true,checkedAt:new Date(base+12*60000).toISOString(),throughAt:new Date(base+12*60000).toISOString(),reason:null};
+function establishMonitoring(username) {
+ prepare985AuditAccounts([username],[],db,base,0);
+ sync985AuthorMonitoringEvidence({healthy:true,monitored:[username],tweetIds:[]},db,base);
+ db.prepare('delete from x_985_audit_control').run();
+}
+establishMonitoring('primary');
 record985StreamState('connected',db,base);
 record985StreamState('heartbeat',db,base+12*60000);
 assert.deepEqual(complete985Audit(completion,[item],evidence,db,base+12*60000).promotedIds,[],'one missing sample is not confirmation');
@@ -28,6 +34,7 @@ for(const [name,changes,gate] of [
  ['offline',{}, {...evidence,healthy:false}],
  ['unmonitored',{}, {...evidence,monitored:[]}],
 ]) {
+ establishMonitoring(name);
  const value={...item,username:name,tweetUrl:`https://x.com/${name}/status/${item.id}`};
  const account={...completion,username:name};
  const context={...gate,monitored:gate.monitored.length?[name]:[]};
@@ -35,6 +42,7 @@ for(const [name,changes,gate] of [
  assert.equal(get985Promotions(db).includes(name),false,name+' must not migrate');
 }
 const raw={...item,id:'2106500000000000001',username:'received',tweetUrl:'https://x.com/received/status/2106500000000000001'};
+establishMonitoring('received');
 record985RawObservation({account:'received',feedItem:raw},db,base+2*60000);
 record985StreamState('heartbeat',db,base+23*60000);
 complete985Audit({...completion,username:'received'},[raw],{...evidence,monitored:['received']},db,base+23*60000);
@@ -71,6 +79,7 @@ db.prepare('delete from x_985_parse_fault').run();
 for(const other of [{twAccount:'truth:someone',content:{}},{twAccount:'someone',content:{source:'truth'}},{eventType:'NEW_INSTAGRAM_POST',source:'instagram',twAccount:'instagram:khaokheow.zoo',content:{id:'unsafe-instagram-id',userScreenName:'khaokheow.zoo',source:'instagram'}},{twAccount:'instagram:complex',content:{platform:'instagram'}}])record985RawPayload(other,db,base+7*60000);
 assert.equal(db.prepare('select count(*) as n from x_985_parse_fault').get().n,0,'known non-X platform events cannot disable Twitter confirmation');
 record985RawPayload({content:{unexpected:'schema'}},db,base+8*60000);
+establishMonitoring('parsefault');
 record985StreamState('connected',db,base);record985StreamState('heartbeat',db,base+30*60000);
 complete985Audit({...completion,username:'parsefault'},[{...item,username:'parsefault',id:'2106500000000000003'}],{healthy:true,monitored:['parsefault'],tweetIds:[]},db,base+30*60000);
 assert.equal(get985AuditSnapshot('parsefault',db).reason,'upstream_event_unparsed');
