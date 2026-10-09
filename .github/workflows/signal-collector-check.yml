@@ -18,8 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-      - run: npm ci
+      - run: npm install --global pnpm@10
+      - run: pnpm install --frozen-lockfile
       - name: Collector, search and aggregation regression tests
         run: >-
           node --experimental-strip-types --experimental-transform-types --test
