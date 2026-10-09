@@ -1,5 +1,6 @@
 export type SignalFeedSource = "telegram" | "x" | "monitor985" | "owned-reader" | "truth" | "alert";
 export type SignalFeedTab = "all" | "telegram" | "x" | "truth";
+export type SignalFeedCollector = "all" | "monitor985" | "owned-reader";
 
 export function isMergedXSignalSource(source: SignalFeedSource) {
   return source === "x" || source === "monitor985" || source === "owned-reader";
@@ -12,6 +13,13 @@ export function matchesSignalFeedTab(
   if (tab === "all") return true;
   if (tab === "x") return isMergedXSignalSource(item.source);
   return item.source === tab;
+}
+
+export function matchesSignalFeedCollector(
+  item: { source: SignalFeedSource },
+  collector: SignalFeedCollector,
+) {
+  return collector === "all" || item.source === collector;
 }
 
 export function getXSourceBadgeLabel(source: SignalFeedSource) {

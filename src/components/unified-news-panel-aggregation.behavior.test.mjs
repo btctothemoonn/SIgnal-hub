@@ -7,7 +7,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { aggregateSignalFeed } from "../lib/signal-feed-aggregation.ts";
-import { matchesSignalFeedTab } from "../lib/signal-feed-tabs.ts";
+import { matchesSignalFeedCollector, matchesSignalFeedTab } from "../lib/signal-feed-tabs.ts";
 import { matchesSignalFeedAuthorFilter } from "../lib/signal-feed-author-filter.ts";
 import { getSignalFeedRangeLimit } from "../lib/signal-feed-range.ts";
 
@@ -70,6 +70,13 @@ try {
     assert.match(html, /VPS 采集/);
     assert.match(html, /6551 历史/);
     assert.match(html, /刷新 985/);
+    assert.match(html, /data-signal-collector-filter[^>]*role="group"[^>]*aria-label="X 采集来源"/);
+    const collectorMarkup = html.match(/data-signal-collector-filter[\s\S]*?<\/div>/)?.[0];
+    assert.ok(collectorMarkup);
+    assert.equal((collectorMarkup.match(/aria-pressed="true"/g) || []).length, 1);
+    assert.match(collectorMarkup, /aria-pressed="true"[^>]*>全部<\/button>/);
+    assert.match(collectorMarkup, />985<\/button>/);
+    assert.match(collectorMarkup, />VPS<\/button>/);
     assert.doesNotMatch(html, /6551 补漏|X points|Authorize X today/);
   });
 
@@ -107,8 +114,8 @@ try {
   }
   visit(ast);
   const helpers = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["sortByCreatedAt", "limitNewsItems", "feedLimitForTab"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
-  const code = ts.transpileModule(`${helpers}\nreturn function(unifiedFeed, deferredSearchQuery, activeTab = "all", effectiveAuthorFilter = "__all__", feedRange = "latest") ${filteringBody}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const filter = new Function("matchesSignalFeedTab", "matchesSignalFeedAuthorFilter", "getSignalFeedRangeLimit", code)(matchesSignalFeedTab, matchesSignalFeedAuthorFilter, getSignalFeedRangeLimit);
+  const code = ts.transpileModule(`${helpers}\nreturn function(unifiedFeed, deferredSearchQuery, activeTab = "all", effectiveAuthorFilter = "__all__", feedRange = "latest", collectorFilter = "all") ${filteringBody}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const filter = new Function("matchesSignalFeedTab", "matchesSignalFeedCollector", "matchesSignalFeedAuthorFilter", "getSignalFeedRangeLimit", code)(matchesSignalFeedTab, matchesSignalFeedCollector, matchesSignalFeedAuthorFilter, getSignalFeedRangeLimit);
   const filterItems = [
     { id: "telegram:one", source: "telegram", title: "Alpha", subtitle: "@alpha", text: "Report https://news.example/articles/one", translation: null, quotedTweet: null, link: "https://t.me/alpha/1", createdAt: "2026-10-02T01:00:00Z" },
     { id: "x:two", source: "monitor985", title: "Research", subtitle: "@research", text: "Assessment https://news.example/articles/one", translation: { text: "公开测试发现了新的限制" }, quotedTweet: { text: "Release", translation: { text: "原帖翻译：发布已延期" } }, link: "https://x.com/research/status/123", createdAt: "2026-10-02T02:00:00Z" },
@@ -125,6 +132,21 @@ try {
     assert.deepEqual(aggregateSignalFeed(filter(filterItems, "", "x", "x:research"))[0].aliases, ["x:two"]);
     assert.equal(aggregateSignalFeed(filter(filterItems, "新的限制", "telegram")).length, 0);
   });
+  test("collector filtering happens before cross-source copies are grouped", () => {
+    const rows = [
+      ...filterItems,
+      { ...filterItems[1], id: "x:vps", source: "owned-reader", text: "VPS commentary https://news.example/articles/one", createdAt: "2026-10-02T03:00:00Z" },
+    ];
+    const grouped985 = aggregateSignalFeed(filter(rows, "", "all", "__all__", "latest", "monitor985"));
+    const groupedVps = aggregateSignalFeed(filter(rows, "", "x", "__all__", "latest", "owned-reader"));
+    assert.equal(grouped985.length, 1);
+    assert.deepEqual(grouped985[0].aliases, ["x:two"]);
+    assert.equal(groupedVps.length, 1);
+    assert.deepEqual(groupedVps[0].aliases, ["x:vps"]);
+    assert.equal(groupedVps[0].text, "VPS commentary https://news.example/articles/one");
+    assert.equal(aggregateSignalFeed(filter(rows, ""))[0].members.length, 3);
+  });
+
 } finally {
   // The generated directory is always a direct child of the test directory.
   if (dirname(temporaryDirectory) !== componentDirectory) throw new Error("Unsafe runtime cleanup path");

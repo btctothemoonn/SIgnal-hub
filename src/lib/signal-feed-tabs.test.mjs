@@ -4,6 +4,7 @@ const {
   getXSourceBadgeLabel,
   isMergedXSignalSource,
   matchesSignalFeedTab,
+  matchesSignalFeedCollector,
 } = await import("./signal-feed-tabs.ts");
 
 assert.equal(isMergedXSignalSource("x"), true);
@@ -27,3 +28,9 @@ console.log("ok - signal feed tabs merge 6551 and 985 while keeping truth separa
 assert.equal(isMergedXSignalSource("owned-reader"), true);
 assert.equal(matchesSignalFeedTab({ source: "owned-reader" }, "x"), true);
 assert.equal(getXSourceBadgeLabel("owned-reader"), "VPS 采集");
+
+for (const source of ["telegram", "x", "monitor985", "owned-reader", "truth", "alert"]) {
+  assert.equal(matchesSignalFeedCollector({ source }, "all"), true);
+  assert.equal(matchesSignalFeedCollector({ source }, "monitor985"), source === "monitor985");
+  assert.equal(matchesSignalFeedCollector({ source }, "owned-reader"), source === "owned-reader");
+}

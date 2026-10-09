@@ -65,7 +65,9 @@ import {
 import {
   getXSourceBadgeLabel,
   isMergedXSignalSource,
+  matchesSignalFeedCollector,
   matchesSignalFeedTab,
+  type SignalFeedCollector,
   type SignalFeedSource,
   type SignalFeedTab,
 } from "@/lib/signal-feed-tabs";
@@ -74,6 +76,14 @@ const MAX_ALL_NEWS_ITEMS = 200;
 const MAX_TELEGRAM_NEWS_ITEMS = 300;
 const MAX_X_NEWS_ITEMS = 200;
 const SNAPSHOT_REFRESH_MS = 30_000;
+const SIGNAL_FEED_COLLECTOR_OPTIONS: Array<{
+  id: SignalFeedCollector;
+  label: string;
+}> = [
+  { id: "all", label: "全部" },
+  { id: "monitor985", label: "985" },
+  { id: "owned-reader", label: "VPS" },
+];
 const SIGNAL_FEED_AUTHOR_FAVORITES_KEY =
   "signal-hub:signal-feed-author-favorites";
 const SIGNAL_FEED_READING_ANCHOR_KEY =
@@ -641,6 +651,7 @@ export function UnifiedNewsPanel({
   const [telegramSnapshot, setTelegramSnapshot] = useState(initialTelegramSnapshot);
   const [xSnapshot, setXSnapshot] = useState(initialXSnapshot);
   const [activeTab, setActiveTab] = useState<FeedTab>("all");
+  const [collectorFilter, setCollectorFilter] = useState<SignalFeedCollector>("all");
   const [feedRange, setFeedRange] = useState<SignalFeedRange>(
     DEFAULT_SIGNAL_FEED_RANGE,
   );
@@ -1106,9 +1117,13 @@ export function UnifiedNewsPanel({
   const authorFilterOptions = useMemo(
     () =>
       buildSignalFeedAuthorOptions(
-        unifiedFeed.filter((item) => matchesSignalFeedTab(item, activeTab)),
+        unifiedFeed.filter(
+          (item) =>
+            matchesSignalFeedTab(item, activeTab) &&
+            matchesSignalFeedCollector(item, collectorFilter),
+        ),
       ),
-    [unifiedFeed, activeTab],
+    [unifiedFeed, activeTab, collectorFilter],
   );
   const effectiveAuthorFilter = effectiveSignalFeedAuthorFilter(
     authorFilter,
@@ -1149,7 +1164,14 @@ export function UnifiedNewsPanel({
 
   const selectActiveTab = (tab: FeedTab) => {
     setActiveTab(tab);
+    setCollectorFilter("all");
     setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
+  };
+
+  const selectCollector = (collector: SignalFeedCollector) => {
+    setCollectorFilter(collector);
+    setAuthorFilter(ALL_SIGNAL_FEED_AUTHOR_FILTER);
+    setAuthorMenuOpen(false);
   };
 
   const filteredFeed = useMemo(() => {
@@ -1158,7 +1180,7 @@ export function UnifiedNewsPanel({
       const matchesTab =
         matchesSignalFeedTab(item, activeTab);
 
-      if (!matchesTab) {
+      if (!matchesTab || !matchesSignalFeedCollector(item, collectorFilter)) {
         return false;
       }
 
@@ -1182,6 +1204,7 @@ export function UnifiedNewsPanel({
   }, [
     unifiedFeed,
     activeTab,
+    collectorFilter,
     effectiveAuthorFilter,
     deferredSearchQuery,
     feedRange,
@@ -1201,6 +1224,7 @@ export function UnifiedNewsPanel({
 
   const feedRenderWindowKey = [
     activeTab,
+    collectorFilter,
     feedRange,
     effectiveAuthorFilter,
     deferredSearchQuery.trim().toLowerCase(),
@@ -1945,6 +1969,31 @@ export function UnifiedNewsPanel({
             >
               返回上次阅读
             </button>
+            {activeTab === "all" || activeTab === "x" ? (
+              <div
+                data-signal-collector-filter
+                role="group"
+                aria-label="X 采集来源"
+                className="order-[-35] inline-flex shrink-0 items-center gap-0.5 rounded-md border border-workspace-line-strong bg-workspace-canvas p-0.5"
+              >
+                <span className="px-1.5 text-muted">采集</span>
+                {SIGNAL_FEED_COLLECTOR_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={collectorFilter === option.id}
+                    onClick={() => selectCollector(option.id)}
+                    className={`h-6 min-w-[2.5rem] rounded border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                      collectorFilter === option.id
+                        ? "border-accent/40 bg-accent-soft text-foreground"
+                        : "border-transparent text-muted hover:bg-panel-strong/70 hover:text-foreground"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {readingPositionStatus ? (
               <span className="max-w-[16rem] truncate text-muted">
                 {readingPositionStatus}
