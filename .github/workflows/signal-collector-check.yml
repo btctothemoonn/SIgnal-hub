@@ -1,0 +1,42 @@
+name: Verify Signal collector filter
+
+on:
+  push:
+    branches: [codex/signal-collector-filter-20261009]
+
+permissions:
+  contents: read
+
+jobs:
+  collector-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Collector, search and aggregation regression tests
+        run: >-
+          node --experimental-strip-types --experimental-transform-types --test
+          src/lib/signal-feed-tabs.test.mjs
+          src/lib/x-feed-source.test.mjs
+          src/lib/signal-feed-author-filter.test.mjs
+          src/lib/signal-feed-range.test.mjs
+          src/components/unified-news-panel-search.test.mjs
+          src/components/unified-news-panel-aggregation.behavior.test.mjs
+          src/components/unified-news-panel-mobile.test.mjs
+          src/components/unified-news-panel-reading-position.test.mjs
+      - name: Lint changed application files
+        run: npx eslint src/lib/signal-feed-tabs.ts src/components/unified-news-panel.tsx
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Production build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          SIGNAL_HUB_RUNTIME_DIR: .build-runtime
+        run: npm run build
