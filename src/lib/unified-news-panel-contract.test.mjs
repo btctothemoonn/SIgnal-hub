@@ -35,7 +35,11 @@ assert.doesNotMatch(
 );
 assert.match(
   source,
-  /const selectActiveTab = \(tab: FeedTab\) => \{\s*setActiveTab\(tab\);\s*setAuthorFilter\(ALL_SIGNAL_FEED_AUTHOR_FILTER\);\s*\};/,
+  /const selectActiveTab = \(tab: FeedTab\) => \{\s*setActiveTab\(tab\);\s*setCollectorFilter\("all"\);\s*setAuthorFilter\(ALL_SIGNAL_FEED_AUTHOR_FILTER\);\s*\};/,
+);
+assert.match(
+  source,
+  /const selectCollector = \(collector: SignalFeedCollector\) => \{\s*setCollectorFilter\(collector\);\s*setAuthorFilter\(ALL_SIGNAL_FEED_AUTHOR_FILTER\);\s*setAuthorMenuOpen\(false\);\s*\};/,
 );
 
 const mainMediaIndex = source.indexOf("{/* Media */}");
