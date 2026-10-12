@@ -13,7 +13,7 @@ const originalFetch = globalThis.fetch;
 const originalTelegramPath = process.env.TELEGRAM_PIPELINE_DB;
 const originalXPath = process.env.X_PIPELINE_DB;
 const env = {
-  AI_SUMMARY_API_KEY: "fixture-key", AI_SUMMARY_BASE_URL: "https://continuity.fixture/v1", AI_SUMMARY_MODEL: "fixture-model",
+  AI_SUMMARY_API_KEY: "fixture-key", AI_SUMMARY_BASE_URL: "https://api.deepseek.com/v1", AI_SUMMARY_MODEL: "deepseek-fixture-model",
   SIGNAL_SUMMARY_DB: join(directory, "summary.sqlite"), TELEGRAM_PIPELINE_DB: join(directory, "telegram.sqlite"), X_PIPELINE_DB: join(directory, "x.sqlite"),
 };
 process.env.TELEGRAM_PIPELINE_DB = env.TELEGRAM_PIPELINE_DB;

@@ -1,3 +1,4 @@
+import { deepSeekChatOptions } from "./deepseek-provider.ts";
 import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -5,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   getAlphaSummaryModel,
   getAlphaSummaryProviderCandidates,
-  isMiniMaxBaseUrl,
 } from "./alpha-summary.ts";
 import {
   runWithAiProviderFallback,
@@ -1240,9 +1240,8 @@ async function requestDailyBrief({
         { role: "user", content: prompt },
       ],
       temperature: 0.2,
-      ...(isMiniMaxBaseUrl(provider.baseUrl)
-        ? {}
-        : { response_format: { type: "json_object" } }),
+      ...deepSeekChatOptions(),
+            response_format: { type: "json_object" },
     }),
     signal: AbortSignal.timeout(
       positiveInt(
@@ -1500,7 +1499,7 @@ export async function getOrCreateDailyInvestmentBrief({
         briefDateKey: getSnapshotBriefDateKey(fallbackWithContent),
         lastAttemptAt: attemptedAt,
         error:
-          "MINIMAX_API_KEY, AI_SUMMARY_API_KEY, DEEPSEEK_API_KEY, or OPENAI_API_KEY is required",
+          "DeepSeek API credentials are required (DEEPSEEK_API_KEY or an existing official DeepSeek provider configuration)",
       };
       writeFailedDailyBriefAttempt({
         snapshot,

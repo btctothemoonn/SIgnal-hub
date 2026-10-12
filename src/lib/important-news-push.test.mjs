@@ -35,7 +35,7 @@ try {
 } finally { db.close(); }
 
 const dir = mkdtempSync(join(tmpdir(), "news-push-integration-"));
-const env = { DAILY_BRIEF_DB: join(dir, "brief.sqlite"), MINIMAX_API_KEY: "fixture-key" };
+const env = { DAILY_BRIEF_DB: join(dir, "brief.sqlite"), DEEPSEEK_API_KEY: "fixture-key" };
 const candidate = { id: "https://www.reuters.com/world/policy", source: "Reuters", title: item.title, summary: assessment.fact, url: item.sourceUrls[0], publishedAt: pushNow, publicationTimeBasis: "publication", imageUrl: null, language: "English", country: "US" };
 let calls = 0;
 const generate = async (request) => { calls++; return { brief: { title: "简报", marketPulse: "", items: [{ ...item, validatedSources: undefined, pushAssessedAt: undefined }], watchVariables: [], priorityLine: "" }, provider: request.provider }; };

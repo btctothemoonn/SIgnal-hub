@@ -9,7 +9,7 @@ const dir=mkdtempSync(join(tmpdir(),'market-brief-worker-'));
 const now=Date.parse('2026-09-18T06:00:00Z');
 const interval=10*60000;
 const iso=ms=>new Date(ms).toISOString();
-const env={MINIMAX_API_KEY:'test',AI_SUMMARY_MODEL:'MiniMax-M3'};
+const env={DEEPSEEK_API_KEY:'test',AI_SUMMARY_MODEL:'deepseek-flash'};
 const makeStore=name=>()=>openMarketAlertsStore(join(dir,`${name}.sqlite`));
 function alert(store,symbol,id,at) {
   store.insertMarketAlertEvent({id,symbol,type:'volatility',side:'LONG',level:2,stage:'test',trigger:'test',source:'ws',price:1,changePct:5,volumeRatio:3,score:null,metrics:{},reasons:[],occurredAt:iso(at)});
@@ -42,7 +42,7 @@ function transport(log,{fail=false}={}) {
       assert.deepEqual(Object.keys(retrospective.items[0]).sort(),['crash','direction','maxLevel','pump','squeeze','symbol','total']);
     }
     log.push(reports.map(report=>report.scope));
-    assert.equal(request.model,'MiniMax-M3');
+    assert.equal(request.model,'deepseek-flash');
     assert.equal(request.thinking.type,'disabled');
     if(fail)return new Response('{}',{status:429});
     return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(explanation(reports))}}]});

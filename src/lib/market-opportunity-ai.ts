@@ -1,6 +1,6 @@
+import { deepSeekChatOptions, isOfficialDeepSeekBaseUrl } from "./deepseek-provider.ts";
 import {
   getAlphaSummaryProviderCandidates,
-  isMiniMaxBaseUrl,
 } from "./alpha-summary.ts";
 import {
   runWithAiProviderFallback,
@@ -190,9 +190,8 @@ async function generate(input: {
                 { role: "user", content: prompt },
               ],
               temperature: 0.1,
-              ...(isMiniMaxBaseUrl(provider.baseUrl)
-                ? {}
-                : { response_format: { type: "json_object" } }),
+              ...deepSeekChatOptions(),
+            response_format: { type: "json_object" },
             }),
             signal: AbortSignal.timeout(45_000),
           },
@@ -256,7 +255,7 @@ export function explainMarketOpportunities(input: {
 
   const request = generate({
     decisions: input.decisions,
-    providers: input.providers ?? getAlphaSummaryProviderCandidates(input.env),
+    providers: (input.providers ?? getAlphaSummaryProviderCandidates(input.env)).filter(provider => isOfficialDeepSeekBaseUrl(provider.baseUrl) && provider.model.startsWith("deepseek-")),
     fetchImpl: input.fetchImpl ?? fetch,
     now: input.now ?? new Date(),
   }).finally(() => {

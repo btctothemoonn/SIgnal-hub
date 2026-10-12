@@ -15,8 +15,8 @@ const originalXPath = process.env.X_PIPELINE_DB;
 const now = new Date("2026-10-02T04:00:00.000Z");
 const env = {
   AI_SUMMARY_API_KEY: "fixture-key",
-  AI_SUMMARY_BASE_URL: "https://signal-summary.fixture/v1",
-  AI_SUMMARY_MODEL: "fixture-model",
+  AI_SUMMARY_BASE_URL: "https://api.deepseek.com/v1",
+  AI_SUMMARY_MODEL: "deepseek-fixture-model",
   SIGNAL_SUMMARY_DB: join(directory, "summaries.sqlite"),
   TELEGRAM_PIPELINE_DB: join(directory, "telegram.sqlite"),
   X_PIPELINE_DB: join(directory, "x.sqlite"),
@@ -96,9 +96,9 @@ try {
   assert.equal(invalid.generatedAt, first.generatedAt);
 
   mode = "failure";
-  const changedModelEnv = { ...env, AI_SUMMARY_MODEL: "fixture-model-next" };
+  const changedModelEnv = { ...env, AI_SUMMARY_MODEL: "deepseek-fixture-model-next" };
   const changedModelFailure = await getOrCreateAlphaSummary({ now, env: changedModelEnv, force: true });
-  assert.equal(changedModelFailure.model, "fixture-model", "retained content still belongs to its successful model");
+  assert.equal(changedModelFailure.model, "deepseek-fixture-model", "retained content still belongs to its successful model");
   const callsBeforeRetry = calls;
   await getOrCreateAlphaSummary({ now, env: changedModelEnv });
   assert.equal(calls, callsBeforeRetry, "a model switch must not bypass the failed-attempt backoff");
@@ -133,7 +133,7 @@ try {
   const legacyPeriod = { ...period };
   delete legacyPeriod.signalContentVersion;
   legacy.prepare("INSERT INTO alpha_summary_cache VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
-    period.key, JSON.stringify(legacyPeriod), "fixture-model", "legacy", 1,
+    period.key, JSON.stringify(legacyPeriod), "deepseek-fixture-model", "legacy", 1,
     '{"telegram":1,"x":0,"stocks":0}', JSON.stringify({ headline: "Legacy retained content", authors: [], consensus: [], risks: [], watchlist: [] }),
     "error", "prior timeout", now.toISOString(), now.toISOString(),
   );
@@ -157,6 +157,14 @@ try {
   assert.equal(stockFallback.summary.headline, "Legacy retained content");
   assert.equal(stockFallback.summary.stocks, undefined);
   assert.equal(calls, callsBeforeStockFallback, "a legacy Stocks error must not trigger a provider request before its cache interval expires");
+  const callsBeforeMissingKey = calls;
+  const missingKey = await getOrCreateAlphaSummary({now: new Date("2026-10-05T04:00:00.000Z"),
+    force: true, env: {...env, AI_SUMMARY_API_KEY: "", AI_SUMMARY_MODEL: "MiniMax-M3"}});
+  assert.equal(missingKey.status, "needs_key");
+  assert.deepEqual(missingKey.summary, first.summary, "missing DeepSeek credentials must retain the last successful result even without current source items");
+  assert.equal(missingKey.model, first.model, "retained content keeps its actual generating model");
+  assert.equal(missingKey.generatedAt, first.generatedAt);
+  assert.equal(calls, callsBeforeMissingKey);
   console.log("ok - signal summary keeps successful evidence and honest cache freshness on failure");
 } finally {
   globalThis.fetch = originalFetch;

@@ -77,17 +77,19 @@ assert.doesNotMatch(
   "configuration status must contain booleans only, never secret values or fragments",
 );
 
-assert.match(
-  statusSource,
-  /env\.AI_TRANSLATION_API_KEY\?\.trim\(\) \|\| env\.MINIMAX_API_KEY\?\.trim\(\)/,
+assert.equal(
+  getSettingsConfigurationStatus({ DEEPSEEK_API_KEY: "test-deepseek-key" }).translationConfigured,
+  true,
+  "official DeepSeek credentials enable translation",
 );
-assert.match(
-  statusSource,
-  /AI_TRANSLATION_ALLOW_SUMMARY_KEY[\s\S]{0,180}AI_SUMMARY_API_KEY[\s\S]{0,80}OPENAI_API_KEY/,
-  "translation status must retain the existing summary-key fallback semantics",
+assert.equal(
+  getSettingsConfigurationStatus({ MINIMAX_API_KEY: "test-minimax-key" }).translationConfigured,
+  false,
+  "legacy MiniMax credentials cannot enable DeepSeek translation",
 );
 
 const suppliedSecrets = {
+  DEEPSEEK_API_KEY: "test-deepseek-secret-value",
   AI_SUMMARY_API_KEY: "summary-secret-value",
   AI_SUMMARY_BASE_URL: "https://summary.internal.example/v1",
   AI_SUMMARY_MODEL: "summary-model-value",
@@ -121,12 +123,30 @@ for (const suppliedValue of Object.values(suppliedSecrets)) {
 assert.equal(
   getSettingsConfigurationStatus({
     AI_SUMMARY_API_KEY: "summary-secret",
-    AI_TRANSLATION_ALLOW_SUMMARY_KEY: "true",
+    AI_SUMMARY_BASE_URL: "https://api.deepseek.com",
     ADMIN_PASSWORD: "admin-password",
     ADMIN_SESSION_SECRET: "admin-session-secret",
   }).translationConfigured,
   true,
-  "translation status must use the existing summary-key fallback semantics",
+  "an explicitly paired DeepSeek summary credential also enables translation",
+);
+
+assert.equal(
+  getSettingsConfigurationStatus({
+    AI_SUMMARY_API_KEY: "test-openai-key",
+    AI_SUMMARY_BASE_URL: "https://api.openai.com/v1",
+    AI_TRANSLATION_ALLOW_SUMMARY_KEY: "true",
+  }).translationConfigured,
+  false,
+  "legacy opt-in does not forward other providers' keys to DeepSeek",
+);
+assert.equal(
+  getSettingsConfigurationStatus({
+    AI_TRANSLATION_API_KEY: "test-deepseek-translation-key",
+    AI_TRANSLATION_BASE_URL: "https://api.deepseek.com/v1",
+  }).translationConfigured,
+  true,
+  "translation-specific DeepSeek configuration is recognized",
 );
 
 console.log("ok - settings GET exposes boolean configuration status only");

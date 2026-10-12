@@ -121,6 +121,7 @@ try {
     cacheDir,
     env: {
       MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
       AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
       AI_SUMMARY_MODEL: "MiniMax-M2.7",
     },
@@ -153,6 +154,7 @@ try {
     cacheDir,
     env: {
       MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
       AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     },
     fetchImpl: async () => {
@@ -171,6 +173,7 @@ try {
       cacheDir: invalidSourceDir,
       env: {
         MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
         AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
       },
       fetchImpl: async (url) =>
@@ -232,6 +235,7 @@ try {
       cacheDir: deterministicDir,
       env: {
         MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
         AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
       },
       fetchImpl: async (url, init) => {
@@ -292,6 +296,7 @@ try {
       cacheDir: boundedInputDir,
       env: {
         MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
         AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
       },
       fetchImpl: async (url, init) => {
@@ -314,7 +319,12 @@ try {
             base_resp: { status_code: 0, status_msg: "success" },
           });
         }
+        assert.equal(String(url), "https://api.deepseek.com/chat/completions");
+        assert.equal(init.headers.Authorization, "Bearer test-deepseek-extraction");
         const body = JSON.parse(String(init?.body));
+        assert.equal(body.model, "deepseek-flash");
+        assert.deepEqual(body.thinking, {type: "disabled"});
+        assert.deepEqual(body.response_format, {type: "json_object"});
         const marker = "\nSEARCH_RESULTS=";
         const prompt = body.messages[1].content;
         extractionHits = JSON.parse(
@@ -351,6 +361,7 @@ try {
       cacheDir: reasoningDir,
       env: {
         MINIMAX_API_KEY: "sk-cp-test",
+        DEEPSEEK_API_KEY: "test-deepseek-extraction",
         AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
       },
       fetchImpl: async (url) =>

@@ -1,6 +1,5 @@
-import { request as httpRequest, type IncomingMessage } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { connect as tlsConnect } from "node:tls";
+import type { AiProviderConfig } from "./ai-provider-fallback.ts";
+import { deepSeekChatOptions, getDeepSeekProviderCandidates } from "./deepseek-provider.ts";
 import {
   isUsefulTranslation,
   shouldTranslateText,
@@ -9,14 +8,11 @@ import {
 export { isUsefulTranslation, shouldTranslateText } from "./translation-quality.ts";
 
 export type TranslationNote = {
-  provider: "google-web" | "mymemory" | "minimax" | "985monitor";
+  provider: "deepseek" | "google-web" | "mymemory" | "minimax" | "985monitor";
   sourceLanguage: string;
   targetLanguage: string;
   text: string;
 };
-
-const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
-const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 
 const translationCache = new Map<string, TranslationNote | null>();
 const inFlightTranslations = new Map<string, Promise<TranslationNote | null>>();
@@ -24,172 +20,6 @@ const inFlightTranslations = new Map<string, Promise<TranslationNote | null>>();
 function positiveInt(raw: string | undefined, fallback: number) {
   const parsed = Number(raw?.trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function proxyAuthorization(proxyUrl: URL): string | undefined {
-  if (!proxyUrl.username) {
-    return undefined;
-  }
-
-  return `Basic ${Buffer.from(
-    `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`,
-  ).toString("base64")}`;
-}
-
-function getTranslationProxyUrl(): URL | null {
-  const raw =
-    process.env.TRANSLATION_PROXY_URL?.trim() ||
-    process.env.TELEGRAM_PROXY_URL?.trim() ||
-    process.env.HTTPS_PROXY?.trim() ||
-    process.env.HTTP_PROXY?.trim() ||
-    "";
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed;
-    }
-    if (
-      ["socks:", "socks4:", "socks5:", "socks5h:"].includes(parsed.protocol) &&
-      parsed.hostname &&
-      parsed.port
-    ) {
-      return new URL(
-        `http://${parsed.username ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ""}@` : ""}${parsed.hostname}:${parsed.port}`,
-      );
-    }
-  } catch {}
-
-  return null;
-}
-
-function readJsonResponse(
-  response: IncomingMessage,
-  resolve: (value: unknown) => void,
-  reject: (reason?: unknown) => void,
-) {
-  const statusCode = response.statusCode ?? 0;
-  const chunks: Buffer[] = [];
-
-  response.on("data", (chunk) => {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-
-  response.on("end", () => {
-    if (statusCode < 200 || statusCode >= 300) {
-      reject(new Error(`Translation HTTP ${statusCode}`));
-      return;
-    }
-
-    try {
-      resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function requestJsonDirect(url: URL, timeoutMs: number): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const request = httpsRequest(
-      url,
-      {
-        method: "GET",
-        headers: {
-          "User-Agent": "SignalHub/1.0",
-        },
-      },
-      (response) => {
-        readJsonResponse(response, resolve, reject);
-      },
-    );
-
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error("Translation request timeout"));
-    });
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-function requestJsonViaProxy(
-  url: URL,
-  proxyUrl: URL,
-  timeoutMs: number,
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const proxyAuth = proxyAuthorization(proxyUrl);
-    const connectRequest = httpRequest({
-      host: proxyUrl.hostname,
-      port: Number(proxyUrl.port || 80),
-      method: "CONNECT",
-      path: `${url.hostname}:443`,
-      headers: {
-        Host: `${url.hostname}:443`,
-        ...(proxyAuth ? { "Proxy-Authorization": proxyAuth } : {}),
-      },
-    });
-
-    connectRequest.setTimeout(timeoutMs, () => {
-      connectRequest.destroy(new Error("Translation proxy timeout"));
-    });
-    connectRequest.on("connect", (response, socket) => {
-      if ((response.statusCode ?? 0) < 200 || (response.statusCode ?? 0) >= 300) {
-        socket.destroy();
-        reject(new Error(`Translation proxy CONNECT ${response.statusCode ?? 0}`));
-        return;
-      }
-
-      const tlsSocket = tlsConnect({
-        socket,
-        servername: url.hostname,
-      });
-      const request = httpsRequest(
-        {
-          host: url.hostname,
-          servername: url.hostname,
-          method: "GET",
-          path: `${url.pathname}${url.search}`,
-          createConnection: () => tlsSocket,
-          headers: {
-            "User-Agent": "SignalHub/1.0",
-          },
-        },
-        (httpsResponse) => {
-          readJsonResponse(httpsResponse, resolve, reject);
-        },
-      );
-
-      request.setTimeout(timeoutMs, () => {
-        request.destroy(new Error("Translation request timeout"));
-      });
-      request.on("error", reject);
-      request.end();
-    });
-    connectRequest.on("error", reject);
-    connectRequest.end();
-  });
-}
-
-function requestJson(url: URL, timeoutMs = 8000): Promise<unknown> {
-  const proxyUrl = getTranslationProxyUrl();
-  if (proxyUrl && url.protocol === "https:") {
-    return requestJsonViaProxy(url, proxyUrl, timeoutMs).catch(() =>
-      requestJsonDirect(url, timeoutMs),
-    );
-  }
-
-  return requestJsonDirect(url, timeoutMs);
-}
-
-function guessSourceLanguage(text: string): string {
-  if (/\p{Script=Cyrillic}/u.test(text)) return "ru";
-  if (/\p{Script=Arabic}/u.test(text)) return "ar";
-  if (/\p{Script=Greek}/u.test(text)) return "el";
-  return "en";
 }
 
 export function cleanTranslationText(text: string): string {
@@ -221,132 +51,20 @@ export function cleanTranslationText(text: string): string {
     .trim();
 }
 
-async function translateWithGoogle(
+async function translateWithDeepSeek(
   text: string,
   targetLanguage: string,
+  provider: AiProviderConfig,
 ): Promise<TranslationNote | null> {
-  const url = new URL("https://translate.googleapis.com/translate_a/single");
-  url.searchParams.set("client", "gtx");
-  url.searchParams.set("sl", "auto");
-  url.searchParams.set("tl", targetLanguage);
-  url.searchParams.set("dt", "t");
-  url.searchParams.set("q", text);
-
-  const payload = (await requestJson(url, 5000)) as unknown[];
-  const segments = Array.isArray(payload[0]) ? (payload[0] as unknown[]) : [];
-  const translated = cleanTranslationText(segments
-    .map((segment) =>
-      Array.isArray(segment) && typeof segment[0] === "string" ? segment[0] : "",
-    )
-    .join("")
-    .trim());
-  const sourceLanguage = typeof payload[2] === "string" ? payload[2] : "unknown";
-
-  const note: TranslationNote = {
-    provider: "google-web",
-    sourceLanguage,
-    targetLanguage,
-    text: translated,
-  };
-
-  if (!isUsefulTranslation(text, note)) {
-    return null;
-  }
-
-  return note;
-}
-
-async function translateWithMyMemory(
-  text: string,
-  targetLanguage: string,
-): Promise<TranslationNote | null> {
-  const sourceLanguage = guessSourceLanguage(text);
-  const url = new URL("https://api.mymemory.translated.net/get");
-  url.searchParams.set("q", text);
-  url.searchParams.set("langpair", `${sourceLanguage}|${targetLanguage}`);
-
-  const payload = (await requestJson(url, 10000)) as Record<string, unknown>;
-  const responseData =
-    payload.responseData &&
-    typeof payload.responseData === "object" &&
-    !Array.isArray(payload.responseData)
-      ? (payload.responseData as Record<string, unknown>)
-      : null;
-  const translated = cleanTranslationText(
-    typeof responseData?.translatedText === "string"
-      ? responseData.translatedText.trim()
-      : "",
-  );
-
-  const note: TranslationNote = {
-    provider: "mymemory",
-    sourceLanguage,
-    targetLanguage,
-    text: translated,
-  };
-
-  if (!isUsefulTranslation(text, note)) {
-    return null;
-  }
-
-  return note;
-}
-
-function getMiniMaxTranslationBaseUrl() {
-  const explicit = process.env.AI_TRANSLATION_BASE_URL?.trim();
-  if (explicit) return explicit.replace(/\/+$/, "");
-  if (!allowSummaryKeyForTranslation()) return DEFAULT_MINIMAX_BASE_URL;
-  return (
-    process.env.AI_SUMMARY_BASE_URL?.trim() ||
-    process.env.OPENAI_BASE_URL?.trim() ||
-    DEFAULT_MINIMAX_BASE_URL
-  ).replace(/\/+$/, "");
-}
-
-function allowSummaryKeyForTranslation() {
-  return process.env.AI_TRANSLATION_ALLOW_SUMMARY_KEY?.trim().toLowerCase() === "true";
-}
-
-function getMiniMaxTranslationApiKey() {
-  const explicit =
-    process.env.AI_TRANSLATION_API_KEY?.trim() ||
-    process.env.MINIMAX_API_KEY?.trim() ||
-    "";
-  if (explicit) return explicit;
-  if (!allowSummaryKeyForTranslation()) return "";
-  return (
-    process.env.AI_SUMMARY_API_KEY?.trim() ||
-    process.env.OPENAI_API_KEY?.trim() ||
-    ""
-  );
-}
-
-function getMiniMaxTranslationModel() {
-  const explicit = process.env.AI_TRANSLATION_MODEL?.trim();
-  if (explicit) return explicit;
-  if (!allowSummaryKeyForTranslation()) return DEFAULT_MINIMAX_MODEL;
-  return (
-    process.env.AI_SUMMARY_MODEL?.trim() ||
-    process.env.OPENAI_MODEL?.trim() ||
-    DEFAULT_MINIMAX_MODEL
-  );
-}
-
-async function translateWithMiniMax(
-  text: string,
-  targetLanguage: string,
-): Promise<TranslationNote | null> {
-  const apiKey = getMiniMaxTranslationApiKey();
-  if (!apiKey) return null;
-  const baseUrl = getMiniMaxTranslationBaseUrl();
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify({
-      model: getMiniMaxTranslationModel(),
+      model: provider.model,
+      ...deepSeekChatOptions(),
       messages: [
         {
           role: "system",
@@ -374,7 +92,7 @@ async function translateWithMiniMax(
     throw new Error(
       typeof error?.message === "string"
         ? error.message
-        : `MiniMax translation HTTP ${response.status}`,
+        : `DeepSeek translation HTTP ${response.status}`,
     );
   }
 
@@ -385,7 +103,7 @@ async function translateWithMiniMax(
     typeof message?.content === "string" ? message.content.trim() : "",
   );
   const note: TranslationNote = {
-    provider: "minimax",
+    provider: "deepseek",
     sourceLanguage: "auto",
     targetLanguage,
     text: translated,
@@ -402,18 +120,13 @@ async function translateWithProviders(
   text: string,
   targetLanguage: string,
 ): Promise<TranslationNote | null> {
-  const providers = getTranslationProviderNames();
+  const providers = getDeepSeekProviderCandidates(process.env, {
+    model: process.env.AI_TRANSLATION_MODEL,
+  });
 
   for (const provider of providers) {
     try {
-      const result =
-        provider === "minimax"
-          ? await translateWithMiniMax(text, targetLanguage)
-          : provider === "google"
-          ? await translateWithGoogle(text, targetLanguage)
-          : provider === "mymemory"
-            ? await translateWithMyMemory(text, targetLanguage)
-            : null;
+      const result = await translateWithDeepSeek(text, targetLanguage, provider);
       if (result) {
         return result;
       }
@@ -426,13 +139,7 @@ async function translateWithProviders(
 }
 
 export function getTranslationProviderNames() {
-  const defaultProviders = getMiniMaxTranslationApiKey()
-    ? "google,minimax,mymemory"
-    : "google,mymemory";
-  return (process.env.TRANSLATION_PROVIDERS || defaultProviders)
-    .split(",")
-    .map((provider) => provider.trim().toLowerCase())
-    .filter(Boolean);
+  return getDeepSeekProviderCandidates(process.env).length > 0 ? ["deepseek"] : [];
 }
 
 export async function translateText(

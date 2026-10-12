@@ -3,7 +3,7 @@ import * as summaries from "./alpha-summary.ts";
 
 assert.equal(typeof summaries.requestAiSummary, "function", "summary requests need a bounded malformed-output retry");
 const originalFetch = globalThis.fetch;
-const env = { AI_SUMMARY_API_KEY: "test", AI_SUMMARY_BASE_URL: "https://summary.test/v1", AI_SUMMARY_MODEL: "test" };
+const env = { AI_SUMMARY_API_KEY: "test", AI_SUMMARY_BASE_URL: "https://api.deepseek.com/v1", AI_SUMMARY_MODEL: "deepseek-test" };
 const valid = JSON.stringify({ headline: "result", stocks: [{ target: "NVDA", opinions: [{ author: "author", view: "view" }] }], crypto: [] });
 const legacy = JSON.stringify({ headline: "legacy", authors: [{ name: "author", sourceCount: 1, coreView: "NVDA view", alpha: [], watch: ["NVDA"] }], consensus: [], risks: [], watchlist: ["NVDA"] });
 let calls = [];

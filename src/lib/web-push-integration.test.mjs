@@ -9,7 +9,7 @@ import { qualifyOpportunity } from './important-push-policy.ts';
 import { createMarketPushSource, createNewsPushSource, runWebPushCycle } from './web-push-worker.ts';
 import { getOrCreateDailyInvestmentBrief, readDailyBriefPushOutboxAfter } from './daily-investment-brief.ts';
 import { opportunityDecision, pushNowMs, pushNow } from './important-push-test-fixtures.mjs';
-const dir = mkdtempSync(join(tmpdir(), 'push-complete-')); const env = { DAILY_BRIEF_DB: join(dir, 'brief.sqlite'), MINIMAX_API_KEY: 'fixture-only' };
+const dir = mkdtempSync(join(tmpdir(), 'push-complete-')); const env = { DAILY_BRIEF_DB: join(dir, 'brief.sqlite'), DEEPSEEK_API_KEY: 'fixture-only' };
 const market = openMarketAlertsStore(join(dir, 'market.sqlite')); const pushStore = openWebPushStore(join(dir, 'push.sqlite'));
 const ec = createECDH('prime256v1'); ec.generateKeys();
 const initial = pushNowMs - 300000;

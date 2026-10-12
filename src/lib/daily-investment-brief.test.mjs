@@ -306,12 +306,29 @@ assert.equal(repairedQuotedContent.priorityLine, "利率 > AI capex");
 
 const dir = await mkdtemp(join(tmpdir(), "daily-brief-test-"));
 const dbPath = join(dir, "brief.sqlite");
+const previousFetch = globalThis.fetch;
+let deepSeekRequest = null;
+try {
+  globalThis.fetch = async (url, init) => {
+    deepSeekRequest = {url, body: JSON.parse(init.body)};
+    return Response.json({choices: [{message: {content: JSON.stringify(parsed)}}]});
+  };
+  const liveShape = await getOrCreateDailyInvestmentBrief({force: true, now: afterEight,
+    env: {DAILY_BRIEF_DB: join(dir, "deepseek-protocol.sqlite"), DEEPSEEK_API_KEY: "test-only"},
+    collectCandidates: async () => candidates});
+  assert.equal(liveShape.success, true);
+  assert.equal(deepSeekRequest.url, "https://api.deepseek.com/chat/completions");
+  assert.equal(deepSeekRequest.body.model, "deepseek-flash");
+  assert.deepEqual(deepSeekRequest.body.thinking, {type: "disabled"});
+  assert.deepEqual(deepSeekRequest.body.response_format, {type: "json_object"});
+} finally { globalThis.fetch = previousFetch; }
+
 const generated = await getOrCreateDailyInvestmentBrief({
   force: true,
   now: afterEight,
   env: {
     DAILY_BRIEF_DB: dbPath,
-    MINIMAX_API_KEY: "test-key",
+    DEEPSEEK_API_KEY: "test-key",
     AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     AI_SUMMARY_MODEL: "MiniMax-M2.7",
   },
@@ -338,7 +355,7 @@ const failed = await getOrCreateDailyInvestmentBrief({
   now: nextDay,
   env: {
     DAILY_BRIEF_DB: dbPath,
-    MINIMAX_API_KEY: "test-key",
+    DEEPSEEK_API_KEY: "test-key",
     AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     AI_SUMMARY_MODEL: "MiniMax-M2.7",
   },
@@ -367,7 +384,7 @@ const recovered = await getOrCreateDailyInvestmentBrief({
   now: nextDay,
   env: {
     DAILY_BRIEF_DB: dbPath,
-    MINIMAX_API_KEY: "test-key",
+    DEEPSEEK_API_KEY: "test-key",
     AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     AI_SUMMARY_MODEL: "MiniMax-M2.7",
   },
@@ -440,7 +457,7 @@ const badSourceSnapshot = await getOrCreateDailyInvestmentBrief({
   now: afterEight,
   env: {
     DAILY_BRIEF_DB: join(badSourceDir, "brief.sqlite"),
-    MINIMAX_API_KEY: "test-key",
+    DEEPSEEK_API_KEY: "test-key",
     AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     AI_SUMMARY_MODEL: "MiniMax-M2.7",
   },
@@ -467,7 +484,7 @@ const indexedSourceSnapshot = await getOrCreateDailyInvestmentBrief({
   now: afterEight,
   env: {
     DAILY_BRIEF_DB: join(indexedSourceDir, "brief.sqlite"),
-    MINIMAX_API_KEY: "test-key",
+    DEEPSEEK_API_KEY: "test-key",
     AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
     AI_SUMMARY_MODEL: "MiniMax-M2.7",
   },
