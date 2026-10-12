@@ -25,13 +25,15 @@ async function test(name, fn) {
   }
 }
 
-const now = new Date("2026-04-26T12:30:00+08:00");
+// This formatter intentionally uses the viewer's local time. Build fixtures in
+// that same local zone instead of assuming the test host runs in UTC+8.
+const now = new Date(2026, 3, 26, 12, 30);
 
 await test("formatDisplayTime shows today with time", async () => {
   const { formatDisplayTime } = await importTs("./display-time.ts");
 
   assert.equal(
-    formatDisplayTime("2026-04-26T08:05:00+08:00", now),
+    formatDisplayTime(new Date(2026, 3, 26, 8, 5).toISOString(), now),
     "今天 08:05",
   );
 });
@@ -40,7 +42,7 @@ await test("formatDisplayTime shows yesterday with time", async () => {
   const { formatDisplayTime } = await importTs("./display-time.ts");
 
   assert.equal(
-    formatDisplayTime("2026-04-25T23:45:00+08:00", now),
+    formatDisplayTime(new Date(2026, 3, 25, 23, 45).toISOString(), now),
     "昨天 23:45",
   );
 });
@@ -49,7 +51,7 @@ await test("formatDisplayTime shows date for older messages", async () => {
   const { formatDisplayTime } = await importTs("./display-time.ts");
 
   assert.equal(
-    formatDisplayTime("2026-04-24T07:09:00+08:00", now),
+    formatDisplayTime(new Date(2026, 3, 24, 7, 9).toISOString(), now),
     "04-24 07:09",
   );
 });

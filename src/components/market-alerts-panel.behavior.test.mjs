@@ -105,7 +105,8 @@ export function MarketAlertBrief() {
         chartUrl: "/api/market-alerts/charts/BTCUSDT?v=1788135000000",
         chartInterval: "15m",
         chartUpdatedAt: "2026-08-31T00:10:00.000Z",
-        occurredAt: "2026-08-31T00:10:00.000Z",
+        // The panel renders local dates, so its asserted date must be local too.
+        occurredAt: new Date(2026, 7, 31, 8, 10).toISOString(),
         createdAt: "2026-08-31T00:10:00.000Z",
       },
     ],
