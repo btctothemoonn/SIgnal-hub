@@ -1,4 +1,3 @@
-import { getDeepSeekProviderCandidates, deepSeekChatOptions } from "./deepseek-provider.ts";
 import type { AlphaResearchStock } from "./alpha-research-pool.ts";
 import type { StocksEarningsComparison } from "./stocks-earnings-comparison.ts";
 import type { StocksEarningsSourceRef } from "./stocks-earnings-calendar.ts";
@@ -99,6 +98,14 @@ function getSearchHost(env: EnvLike) {
     return summaryBase.replace(/\/+$/, "").replace(/\/v1$/, "");
   }
   return "https://api.minimaxi.com";
+}
+
+function getTextBaseUrl(env: EnvLike, searchHost: string) {
+  const configured = env.AI_SUMMARY_BASE_URL?.trim();
+  if (configured && /^https:\/\/api\.minimax(?:i)?\.com(?:\/|$)/i.test(configured)) {
+    return configured.replace(/\/+$/, "");
+  }
+  return `${searchHost}/v1`;
 }
 
 function positiveInt(value: string | undefined, fallback: number, max: number) {
@@ -531,13 +538,11 @@ async function requestExtraction(input: {
         { role: "user", content: prompt },
       ],
       temperature: 0,
-      ...deepSeekChatOptions(),
-      response_format: { type: "json_object" },
     }),
     signal: AbortSignal.timeout(input.timeoutMs),
   });
   const payload = asRecord(await response.json().catch(() => ({})));
-  if (!response.ok) throw new Error(`DeepSeek extraction HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`MiniMax extraction HTTP ${response.status}`);
   return parseCompletionContent(payload);
 }
 
@@ -711,15 +716,13 @@ export async function fetchMiniMaxEarningsCandidates({
   let candidates = deterministicCandidates;
   if (candidates.length === 0 && uniqueHits.length > 0) {
     try {
-      const provider = getDeepSeekProviderCandidates(env)[0];
-      if (!provider) throw new Error("DeepSeek earnings extraction is not configured; search results retained without AI extraction");
       const extraction = await requestExtraction({
         stock,
         targets,
         hits: uniqueHits,
-        apiKey: provider.apiKey,
-        textBaseUrl: provider.baseUrl,
-        model: provider.model,
+        apiKey,
+        textBaseUrl: getTextBaseUrl(env, searchHost),
+        model: env.AI_SUMMARY_MODEL?.trim() || "MiniMax-M2.7",
         fetchImpl,
         timeoutMs,
       });
@@ -735,7 +738,7 @@ export async function fetchMiniMaxEarningsCandidates({
       }
     } catch (error) {
       errors.push(
-        error instanceof Error ? error.message : "DeepSeek earnings extraction failed",
+        error instanceof Error ? error.message : "MiniMax earnings extraction failed",
       );
     }
   } else if (uniqueHits.length === 0 && errors.length === 0) {

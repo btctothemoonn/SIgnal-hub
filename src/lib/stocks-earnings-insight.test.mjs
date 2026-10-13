@@ -97,17 +97,14 @@ try {
     comparison,
     cacheDir,
     env: {
-      DEEPSEEK_API_KEY: "test-key",
+      MINIMAX_API_KEY: "test-key",
       AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
-      AI_SUMMARY_MODEL: "deepseek-flash",
+      AI_SUMMARY_MODEL: "MiniMax-M2.7",
     },
     fetchImpl: async (_input, init) => {
       fetchCalls += 1;
       const body = JSON.parse(String(init?.body));
-      assert.equal(body.model, "deepseek-flash");
-      assert.equal(_input, "https://api.deepseek.com/chat/completions");
-      assert.deepEqual(body.thinking, { type: "disabled" });
-      assert.deepEqual(body.response_format, { type: "json_object" });
+      assert.equal(body.model, "MiniMax-M2.7");
       assert.match(body.messages[1].content, /estimatedRevenueAvg|"estimate"/);
       return Response.json({
         choices: [
@@ -131,7 +128,7 @@ try {
   assert.equal(fetchCalls, 1);
   assert.deepEqual(second, first);
   assert.equal(first.source, "ai");
-  assert.equal(first.model, "deepseek-flash");
+  assert.equal(first.model, "MiniMax-M2.7");
 
   const otherQuarter = await getOrCreateStocksEarningsInsight({
     ...request,

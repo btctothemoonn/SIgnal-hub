@@ -1,6 +1,5 @@
 import { isAdminAuthConfigured } from "./admin-auth";
 import { getAlphaSummaryProviderCandidates } from "./alpha-summary";
-import { getDeepSeekProviderCandidates } from "./deepseek-provider";
 
 type SettingsEnvironment = Record<string, string | undefined>;
 
@@ -11,7 +10,14 @@ export type SettingsConfigurationStatus = {
 };
 
 function hasTranslationCredentials(env: SettingsEnvironment): boolean {
-  return getDeepSeekProviderCandidates(env).length > 0;
+  if (env.AI_TRANSLATION_API_KEY?.trim() || env.MINIMAX_API_KEY?.trim()) {
+    return true;
+  }
+
+  return (
+    env.AI_TRANSLATION_ALLOW_SUMMARY_KEY?.trim().toLowerCase() === "true" &&
+    Boolean(env.AI_SUMMARY_API_KEY?.trim() || env.OPENAI_API_KEY?.trim())
+  );
 }
 
 export function getSettingsConfigurationStatus(

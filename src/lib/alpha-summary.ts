@@ -1,4 +1,3 @@
-import { getDeepSeekBaseUrl, getDeepSeekModel, getDeepSeekProviderCandidates, isOfficialDeepSeekBaseUrl, deepSeekChatOptions } from "./deepseek-provider.ts";
 import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname } from "node:path";
@@ -126,6 +125,12 @@ export type AlphaSummarySnapshot = {
 };
 
 const DEFAULT_TIME_ZONE = "Asia/Shanghai";
+const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
+const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
+const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_AI_SUMMARY_TIMEOUT_MS = 240_000;
 const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
@@ -528,10 +533,118 @@ export function isMiniMaxBaseUrl(baseUrl: string) {
   return /minimax\.io|minimaxi\.com/i.test(baseUrl);
 }
 
-export const isDeepSeekBaseUrl = isOfficialDeepSeekBaseUrl;
-export const getAlphaSummaryModel = getDeepSeekModel;
-export const getAlphaSummaryBaseUrl = getDeepSeekBaseUrl;
-export const getAlphaSummaryProviderCandidates = getDeepSeekProviderCandidates;
+export function isDeepSeekBaseUrl(baseUrl: string) {
+  return /deepseek\.com/i.test(baseUrl);
+}
+
+export function getAlphaSummaryModel(env: EnvLike = process.env) {
+  const deepseekModel = env.DEEPSEEK_MODEL?.trim();
+  if (deepseekModel) return deepseekModel;
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    const configuredDeepSeekModel = env.AI_SUMMARY_MODEL?.trim();
+    return configuredDeepSeekModel?.startsWith("deepseek-")
+      ? configuredDeepSeekModel
+      : DEFAULT_DEEPSEEK_MODEL;
+  }
+  const configured =
+    env.AI_SUMMARY_MODEL?.trim() ||
+    env.OPENAI_MODEL?.trim();
+  if (configured) return configured;
+  if (env.DEEPSEEK_API_KEY?.trim() || isDeepSeekBaseUrl(getAlphaSummaryBaseUrl(env))) {
+    return DEFAULT_DEEPSEEK_MODEL;
+  }
+  return env.MINIMAX_API_KEY?.trim() ||
+    isMiniMaxBaseUrl(getAlphaSummaryBaseUrl(env))
+    ? DEFAULT_MINIMAX_MODEL
+    : DEFAULT_MODEL;
+}
+
+export function getAlphaSummaryBaseUrl(env: EnvLike = process.env) {
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    return (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+  }
+  return (
+    env.AI_SUMMARY_BASE_URL?.trim() ||
+    env.DEEPSEEK_BASE_URL?.trim() ||
+    env.OPENAI_BASE_URL?.trim() ||
+    (env.DEEPSEEK_API_KEY?.trim() ? DEFAULT_DEEPSEEK_BASE_URL : "") ||
+    (env.MINIMAX_API_KEY?.trim() ? DEFAULT_MINIMAX_BASE_URL : DEFAULT_BASE_URL)
+  ).replace(/\/+$/, "");
+}
+
+function getAlphaSummaryApiKey(env: EnvLike = process.env) {
+  if (isDeepSeekBaseUrl(getAlphaSummaryBaseUrl(env))) {
+    return (
+      env.DEEPSEEK_API_KEY?.trim() ||
+      env.AI_SUMMARY_API_KEY?.trim() ||
+      env.OPENAI_API_KEY?.trim() ||
+      ""
+    );
+  }
+  if (isMiniMaxBaseUrl(getAlphaSummaryBaseUrl(env))) {
+    return (
+      env.MINIMAX_API_KEY?.trim() ||
+      env.AI_SUMMARY_API_KEY?.trim() ||
+      env.OPENAI_API_KEY?.trim() ||
+      ""
+    );
+  }
+  return (
+    env.AI_SUMMARY_API_KEY?.trim() ||
+    env.DEEPSEEK_API_KEY?.trim() ||
+    env.MINIMAX_API_KEY?.trim() ||
+    env.OPENAI_API_KEY?.trim() ||
+    ""
+  );
+}
+
+function getAiProviderId(baseUrl: string) {
+  return isMiniMaxBaseUrl(baseUrl)
+    ? "minimax"
+    : isDeepSeekBaseUrl(baseUrl)
+      ? "deepseek"
+      : "openai-compatible";
+}
+
+export function getAlphaSummaryProviderCandidates(
+  env: EnvLike = process.env,
+): AiProviderConfig[] {
+  const baseUrl = getAlphaSummaryBaseUrl(env);
+  const primary: AiProviderConfig = {
+    id: getAiProviderId(baseUrl),
+    baseUrl,
+    apiKey: getAlphaSummaryApiKey(env),
+    model: getAlphaSummaryModel(env),
+  };
+  const fallbackApiKey = env.AI_SUMMARY_FALLBACK_API_KEY?.trim() || "";
+  const fallbackBaseUrl = (
+    env.AI_SUMMARY_FALLBACK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL
+  ).replace(/\/+$/, "");
+  const fallback: AiProviderConfig = {
+    id: getAiProviderId(fallbackBaseUrl),
+    baseUrl: fallbackBaseUrl,
+    apiKey: fallbackApiKey,
+    model:
+      env.AI_SUMMARY_FALLBACK_MODEL?.trim() ||
+      (isDeepSeekBaseUrl(fallbackBaseUrl) ? DEFAULT_DEEPSEEK_MODEL : DEFAULT_MODEL),
+  };
+  const providers = primary.apiKey ? [primary] : [];
+  if (
+    fallback.apiKey &&
+    !providers.some(
+      (provider) =>
+        provider.baseUrl === fallback.baseUrl &&
+        provider.apiKey === fallback.apiKey &&
+        provider.model === fallback.model,
+    )
+  ) {
+    providers.push(fallback);
+  }
+  return providers;
+}
 
 function getPreferredAlphaSummaryProvider(env: EnvLike = process.env) {
   const providers = getAlphaSummaryProviderCandidates(env);
@@ -1242,6 +1355,8 @@ export async function requestAiSummary({
     providers: getAlphaSummaryProviderCandidates(env),
     cooldownMs: positiveInt(env.AI_SUMMARY_PROVIDER_COOLDOWN_MS, 6 * 60 * 60 * 1000),
     request: async (provider) => {
+      const useMiniMaxM3FastMode = provider.model === "MiniMax-M3" &&
+        ["api.minimax.io", "api.minimaxi.com"].includes(new URL(provider.baseUrl).hostname);
       const messages = [
         { role: "system", content: "You produce concise Chinese market intelligence summaries from supplied messages only. Return valid JSON only." },
         { role: "user", content: prompt },
@@ -1263,8 +1378,15 @@ export async function requestAiSummary({
             model: provider.model,
             messages,
             temperature: 0.2,
-            ...deepSeekChatOptions(),
-            response_format: { type: "json_object" },
+            ...(isDeepSeekBaseUrl(provider.baseUrl)
+              ? { thinking: { type: "disabled" }, max_tokens: 16_384 }
+              : {}),
+            ...(useMiniMaxM3FastMode
+              ? { thinking: { type: "disabled" }, reasoning_split: true, max_completion_tokens: 16_384 }
+              : {}),
+            ...(isMiniMaxBaseUrl(provider.baseUrl)
+              ? {}
+              : { response_format: { type: "json_object" } }),
           }),
           signal: requestSignal,
         });
@@ -1370,17 +1492,6 @@ async function getOrCreateAlphaSummaryInternal({
       `).get(normalizedScope) as DbRow | undefined;
       if (previous) cached = readCachedSummary(stringValue(previous.period_key), db) ?? cached;
     }
-    if (providers.length === 0 && cached?.summary) {
-      return {
-        ...cached,
-        success: false,
-        status: "needs_key",
-        configured: false,
-        period,
-        error: "DeepSeek API credentials are required (DEEPSEEK_API_KEY or an existing official DeepSeek provider configuration)",
-        ...(isSignals ? { lastAttemptAt: null } : {}),
-      };
-    }
     if (
       cached &&
       cached.period.key === period.key &&
@@ -1428,7 +1539,7 @@ async function getOrCreateAlphaSummaryInternal({
         sourceCounts,
         summary: cached?.summary ?? null,
         error:
-          "DeepSeek API credentials are required (DEEPSEEK_API_KEY or an existing official DeepSeek provider configuration)",
+          "DEEPSEEK_API_KEY, MINIMAX_API_KEY, AI_SUMMARY_API_KEY, or OPENAI_API_KEY is required",
         ...(isSignals ? {
           lastAttemptAt: null,
           coverage: cached?.summary ? cached.coverage : coverage,

@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { runWithAiProviderFallback } from "./ai-provider-fallback.ts";
-import { deepSeekChatOptions, getDeepSeekProviderCandidates } from "./deepseek-provider.ts";
+import {
+  runWithAiProviderFallback,
+  type AiProviderConfig,
+} from "./ai-provider-fallback.ts";
 import { loadRuntimeConfig, type RuntimeWatchItem } from "./runtime-config.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
@@ -75,8 +77,14 @@ const DEFAULT_DOUYIN_DB = "douyin-monitor.sqlite";
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_FETCH_LIMIT = 12;
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
+const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_TIKHUB_BASE_URL = "https://api.tikhub.io";
 const DEFAULT_TIKHUB_USER_POSTS_PATH = "/api/v1/douyin/app/v3/fetch_user_post_videos";
+const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
+const DEFAULT_DEEPSEEK_MODEL = "deepseek-chat";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -708,6 +716,84 @@ function prioritizeResearchSummary(
   };
 }
 
+function getAiBaseUrl(env: EnvLike) {
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    return (env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
+  }
+  return (
+    env.AI_SUMMARY_BASE_URL?.trim() ||
+    env.OPENAI_BASE_URL?.trim() ||
+    env.MINIMAX_BASE_URL?.trim() ||
+    (env.MINIMAX_API_KEY?.trim() ? DEFAULT_MINIMAX_BASE_URL : DEFAULT_OPENAI_BASE_URL)
+  ).replace(/\/+$/, "");
+}
+
+function getAiApiKey(env: EnvLike) {
+  return (
+    env.DEEPSEEK_API_KEY?.trim() ||
+    env.MINIMAX_API_KEY?.trim() ||
+    env.AI_SUMMARY_API_KEY?.trim() ||
+    env.OPENAI_API_KEY?.trim() ||
+    ""
+  );
+}
+
+function getAiModel(env: EnvLike) {
+  if (env.DEEPSEEK_API_KEY?.trim()) {
+    return env.DEEPSEEK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL;
+  }
+  return (
+    env.DOUYIN_AI_MODEL?.trim() ||
+    env.AI_SUMMARY_MODEL?.trim() ||
+    env.OPENAI_MODEL?.trim() ||
+    (env.MINIMAX_API_KEY?.trim() ? DEFAULT_MINIMAX_MODEL : DEFAULT_OPENAI_MODEL)
+  );
+}
+
+function getAiProviderId(baseUrl: string) {
+  return baseUrl.includes("minimax")
+    ? "minimax"
+    : baseUrl.includes("deepseek")
+      ? "deepseek"
+      : "openai-compatible";
+}
+
+function getDouyinAiProviderCandidates(env: EnvLike): AiProviderConfig[] {
+  const baseUrl = getAiBaseUrl(env);
+  const primary: AiProviderConfig = {
+    id: getAiProviderId(baseUrl),
+    baseUrl,
+    apiKey: getAiApiKey(env),
+    model: getAiModel(env),
+  };
+  const fallbackApiKey = env.AI_SUMMARY_FALLBACK_API_KEY?.trim() || "";
+  const fallbackBaseUrl = (
+    env.AI_SUMMARY_FALLBACK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL
+  ).replace(/\/+$/, "");
+  const fallback: AiProviderConfig = {
+    id: getAiProviderId(fallbackBaseUrl),
+    baseUrl: fallbackBaseUrl,
+    apiKey: fallbackApiKey,
+    model: env.AI_SUMMARY_FALLBACK_MODEL?.trim() || DEFAULT_DEEPSEEK_MODEL,
+  };
+  const providers = primary.apiKey ? [primary] : [];
+  if (
+    fallback.apiKey &&
+    !providers.some(
+      (provider) =>
+        provider.baseUrl === fallback.baseUrl &&
+        provider.apiKey === fallback.apiKey &&
+        provider.model === fallback.model,
+    )
+  ) {
+    providers.push(fallback);
+  }
+  return providers;
+}
+
 export function parseAiSummaryContent(content: string): DouyinVideoSummary {
   const cleanedBase = content
     .trim()
@@ -754,7 +840,7 @@ async function requestDouyinAiSummary(
   video: RawDouyinVideo,
   env: EnvLike,
 ): Promise<DouyinVideoSummary> {
-  const providers = getDeepSeekProviderCandidates(env, { model: env.DOUYIN_AI_MODEL });
+  const providers = getDouyinAiProviderCandidates(env);
   if (providers.length === 0) return buildDouyinResearchSummary(video);
 
   const prompt = `
@@ -794,16 +880,17 @@ async function requestDouyinAiSummary(
         },
         body: JSON.stringify({
           model: provider.model,
-          ...deepSeekChatOptions(),
           messages: [
-            {
-              role: "system",
-              content: "你输出简洁、可复核的中文投研摘要，只使用用户给出的信息。",
-            },
-            { role: "user", content: prompt },
+        {
+          role: "system",
+          content: "你输出简洁、可复核的中文投研摘要，只使用用户给出的信息。",
+        },
+        { role: "user", content: prompt },
           ],
           temperature: 0.2,
-          response_format: { type: "json_object" },
+          response_format: provider.baseUrl.includes("minimax")
+            ? undefined
+            : { type: "json_object" },
         }),
         signal: AbortSignal.timeout(positiveInt(env.DOUYIN_AI_TIMEOUT_MS, 60_000)),
       });

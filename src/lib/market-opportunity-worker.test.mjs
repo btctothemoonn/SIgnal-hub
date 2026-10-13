@@ -94,10 +94,10 @@ try {
   const fetchedSymbols = new Set();
   let aiCalls = 0;
   const aiProviders = [{
-    id: "deepseek",
-    baseUrl: "https://api.deepseek.com/v1",
+    id: "minimax",
+    baseUrl: "https://api.minimaxi.com/v1",
     apiKey: "fixture-key",
-    model: "deepseek-worker-test",
+    model: "MiniMax-M2.7-worker-test",
   }];
   const aiFetch = async () => {
     aiCalls += 1;

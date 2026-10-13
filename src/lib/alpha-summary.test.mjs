@@ -29,26 +29,19 @@ assert.equal(isDeepSeekBaseUrl("https://api.deepseek.com"), true);
 assert.equal(isDeepSeekBaseUrl("https://api.deepseek.com/v1"), true);
 assert.equal(isDeepSeekBaseUrl("https://api.openai.com/v1"), false);
 assert.equal(
-  getAlphaSummaryBaseUrl({ DEEPSEEK_API_KEY: "test-deepseek-key" }),
-  "https://api.deepseek.com",
-);
-assert.equal(
-  getAlphaSummaryModel({ DEEPSEEK_API_KEY: "test-deepseek-key" }),
-  "deepseek-flash",
-);
-assert.equal(
   getAlphaSummaryBaseUrl({
-    DEEPSEEK_API_KEY: "test-deepseek-key",
-    AI_SUMMARY_BASE_URL: "http://127.0.0.1:1435/v1",
+    AI_SUMMARY_API_KEY: "minimax-key",
+    AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
   }),
-  "https://api.deepseek.com",
+  "https://api.minimaxi.com/v1",
 );
 assert.equal(
   getAlphaSummaryModel({
-    DEEPSEEK_API_KEY: "test-deepseek-key",
-    AI_SUMMARY_MODEL: "chatgpt/gpt-5.2-instant",
+    AI_SUMMARY_API_KEY: "minimax-key",
+    AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
+    AI_SUMMARY_MODEL: "MiniMax-M3",
   }),
-  "deepseek-flash",
+  "MiniMax-M3",
 );
 assert.deepEqual(
   getAlphaSummaryProviderCandidates({
@@ -60,6 +53,11 @@ assert.deepEqual(
     AI_SUMMARY_FALLBACK_MODEL: "deepseek-v4-flash",
   }).map(({ id, baseUrl, model }) => ({ id, baseUrl, model })),
   [
+    {
+      id: "minimax",
+      baseUrl: "https://api.minimaxi.com/v1",
+      model: "MiniMax-M2.7",
+    },
     {
       id: "deepseek",
       baseUrl: "https://api.deepseek.com",

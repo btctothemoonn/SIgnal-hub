@@ -105,7 +105,7 @@ const dir = await mkdtemp(join(tmpdir(), "daily-brief-consolidation-"));
 const dbPath = join(dir, "brief.sqlite");
 const env = {
   DAILY_BRIEF_DB: dbPath,
-  DEEPSEEK_API_KEY: "test-key",
+  MINIMAX_API_KEY: "test-key",
   AI_SUMMARY_BASE_URL: "https://api.minimaxi.com/v1",
   AI_SUMMARY_MODEL: "MiniMax-M2.7",
 };

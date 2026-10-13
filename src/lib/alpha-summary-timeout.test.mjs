@@ -5,8 +5,8 @@ import { resetAiProviderCircuitBreakers } from "./ai-provider-fallback.ts";
 
 const primaryEnv = {
   AI_SUMMARY_API_KEY: "test-only-key",
-  AI_SUMMARY_BASE_URL: "https://api.deepseek.com/v1",
-  AI_SUMMARY_MODEL: "deepseek-test-primary",
+  AI_SUMMARY_BASE_URL: "https://summary.test/v1",
+  AI_SUMMARY_MODEL: "summary-test-model",
 };
 const fallbackEnv = {
   ...primaryEnv,
@@ -122,7 +122,7 @@ test("default summary deadline ends at 240 seconds with an explicit model error"
   await advance(t, 60_000);
   await advance(t, 180_000);
   const outcome = await pending;
-  assertTimeout(outcome.error, "deepseek-test-primary", 240_000);
+  assertTimeout(outcome.error, "summary-test-model", 240_000);
   assert.equal(outcome.completedAt - startedAt, 240_000);
   assert.equal(requests, 1, "a deadline must not trigger a JSON repair or provider retry");
 });
@@ -148,7 +148,7 @@ test("malformed JSON repair gets only the time left in the generation budget", a
   await advance(t, 30);
   await advance(t, 20);
   const outcome = await pending;
-  assertTimeout(outcome.error, "deepseek-test-primary", 100);
+  assertTimeout(outcome.error, "summary-test-model", 100);
   assert.equal(outcome.completedAt - startedAt, 100, "the second request cannot restart the 100ms budget");
   assert.equal(requests.length, 2);
 });
@@ -180,7 +180,7 @@ test("source validation repair shares the same generation deadline", async (t) =
   await advance(t, 30);
   await advance(t, 20);
   const outcome = await pending;
-  assertTimeout(outcome.error, "deepseek-test-primary", 100);
+  assertTimeout(outcome.error, "summary-test-model", 100);
   assert.equal(outcome.completedAt - startedAt, 100);
   assert.equal(requests, 2);
   assert.equal(validations, 1, "an expired repair response must not reach validation");
@@ -204,7 +204,7 @@ test("quota fallback gets the remaining time instead of a new budget", async (t)
     prompt: "test", env: { ...fallbackEnv, AI_SUMMARY_TIMEOUT_MS: "100" },
   }));
   await advance(t, 70);
-  assert.deepEqual(urls, ["https://api.deepseek.com/v1/chat/completions", "https://api.deepseek.com/chat/completions"]);
+  assert.deepEqual(urls, ["https://summary.test/v1/chat/completions", "https://api.deepseek.com/chat/completions"]);
   await advance(t, 30);
   await advance(t, 20);
   const outcome = await pending;
@@ -230,7 +230,7 @@ test("a native 5ms deadline keeps its timeout classification and does not retry"
     prompt: "test", env: { ...fallbackEnv, AI_SUMMARY_TIMEOUT_MS: "5" },
   }));
   assert.equal(requests, 1, "deadline failures must not invoke repair or quota fallback");
-  assertTimeout(outcome.error, "deepseek-test-primary", 5);
+  assertTimeout(outcome.error, "summary-test-model", 5);
 });
 
 test("response body TimeoutError is preserved and never treated as malformed JSON", async (t) => {
@@ -247,7 +247,7 @@ test("response body TimeoutError is preserved and never treated as malformed JSO
     prompt: "test", env: { ...fallbackEnv, AI_SUMMARY_TIMEOUT_MS: "100" },
   }));
   assert.equal(requests, 1, "body read timeouts must not be swallowed into a JSON repair");
-  assertTimeout(outcome.error, "deepseek-test-primary", 100);
+  assertTimeout(outcome.error, "summary-test-model", 100);
 });
 
 test("official DeepSeek summary requests disable thinking and allow 16384 output tokens", async (t) => {
@@ -269,24 +269,128 @@ test("official DeepSeek summary requests disable thinking and allow 16384 output
   assert.deepEqual(requests[0].payload.response_format, { type: "json_object" });
 });
 
-test("non-DeepSeek legacy credentials cannot trigger any request", async (t) => {
-  let calls = 0;
-  t.mock.method(globalThis, "fetch", async () => { calls++; return completion(); });
-  await assert.rejects(requestAiSummary({prompt: "test", env: {MINIMAX_API_KEY: "test-other"}}));
-  assert.equal(calls, 0);
+test("other compatible providers do not receive the DeepSeek thinking option", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test", env: { ...primaryEnv, AI_SUMMARY_MODEL: "deepseek-compatible-model" },
+  });
+  assertSummary(result);
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.deepEqual(requests[0].response_format, { type: "json_object" });
 });
 
-test("DeepSeek quota errors never call a configured MiniMax fallback", async (t) => {
-  const urls = [];
-  t.mock.method(globalThis, "fetch", async (url) => {
-    urls.push(url);
-    return Response.json({error: {message: "quota exceeded"}}, {status: 429});
+test("MiniMax keeps its existing payload without thinking or response_format", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
   });
-  await assert.rejects(requestAiSummary({prompt: "test", env: {
-    DEEPSEEK_API_KEY: "test-only", AI_SUMMARY_FALLBACK_API_KEY: "test-other",
-    AI_SUMMARY_FALLBACK_BASE_URL: "https://api.minimaxi.com/v1",
-  }}), /quota exceeded/);
-  assert.deepEqual(urls, ["https://api.deepseek.com/chat/completions"]);
+  const result = await requestAiSummary({ prompt: "test", env: { MINIMAX_API_KEY: "test-only-key" } });
+  assertSummary(result);
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
+  assert.equal(Object.hasOwn(requests[0], "response_format"), false);
+});
+
+test("official MiniMax-M3 requests disable thinking and bound completion tokens", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, payload: JSON.parse(init.body) });
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: { MINIMAX_API_KEY: "test-only-key", AI_SUMMARY_MODEL: "MiniMax-M3" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://api.minimaxi.com/v1/chat/completions");
+  assert.equal(requests[0].payload.model, "MiniMax-M3");
+  assert.deepEqual(requests[0].payload.thinking, { type: "disabled" });
+  assert.equal(requests[0].payload.reasoning_split, true);
+  assert.equal(requests[0].payload.max_completion_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[0].payload, "response_format"), false);
+});
+
+test("configured MiniMax-M3 fallback applies controls to the final provider", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, payload: JSON.parse(init.body) });
+    return requests.length === 1
+      ? Response.json({ error: { message: "quota exceeded" } }, { status: 429 })
+      : completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: {
+      DEEPSEEK_API_KEY: "test-only-key",
+      DEEPSEEK_MODEL: "deepseek-v4-flash",
+      AI_SUMMARY_FALLBACK_API_KEY: "test-only-fallback-key",
+      AI_SUMMARY_FALLBACK_BASE_URL: "https://api.minimax.io/v1",
+      AI_SUMMARY_FALLBACK_MODEL: "MiniMax-M3",
+    },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map((request) => request.url), [
+    "https://api.deepseek.com/chat/completions",
+    "https://api.minimax.io/v1/chat/completions",
+  ]);
+  assert.deepEqual(requests[0].payload.thinking, { type: "disabled" });
+  assert.equal(requests[0].payload.max_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[0].payload, "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0].payload, "max_completion_tokens"), false);
+  assert.equal(requests[1].payload.model, "MiniMax-M3");
+  assert.deepEqual(requests[1].payload.thinking, { type: "disabled" });
+  assert.equal(requests[1].payload.reasoning_split, true);
+  assert.equal(requests[1].payload.max_completion_tokens, 16_384);
+  assert.equal(Object.hasOwn(requests[1].payload, "response_format"), false);
+});
+
+test("MiniMax-M3.1-Flash-Preview does not receive M3-only thinking controls", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test",
+    env: { MINIMAX_API_KEY: "test-only-key", AI_SUMMARY_MODEL: "MiniMax-M3.1-Flash-Preview" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3.1-Flash-Preview");
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
+  assert.equal(Object.hasOwn(requests[0], "response_format"), false);
+});
+
+test("a non-MiniMax proxy named MiniMax-M3 receives no provider-specific controls", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return completion();
+  });
+  const result = await requestAiSummary({
+    prompt: "test", env: { ...primaryEnv, AI_SUMMARY_MODEL: "MiniMax-M3" },
+  });
+  assertSummary(result);
+  assert.equal(result.provider.model, "MiniMax-M3");
+  assert.equal(requests.length, 1);
+  assert.equal(Object.hasOwn(requests[0], "thinking"), false);
+  assert.equal(Object.hasOwn(requests[0], "reasoning_split"), false);
+  assert.equal(Object.hasOwn(requests[0], "max_completion_tokens"), false);
+  assert.deepEqual(requests[0].response_format, { type: "json_object" });
 });
 
 test("existing quota fallback still succeeds within the shared budget", async (t) => {

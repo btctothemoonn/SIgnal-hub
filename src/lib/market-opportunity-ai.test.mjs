@@ -58,7 +58,7 @@ function decision(symbol, direction = "LONG") {
 
 const topFive = [decision("AAAUSDT"), decision("BBBUSDT", "SHORT")];
 const providers = [
-  { id: "deepseek-primary", baseUrl: "https://api.deepseek.com/v1", apiKey: "test-primary", model: "deepseek-flash" },
+  { id: "minimax", baseUrl: "https://api.minimaxi.com/v1", apiKey: "mini-key", model: "MiniMax-M2.7" },
   { id: "deepseek", baseUrl: "https://api.deepseek.com", apiKey: "deep-key", model: "deepseek-v4-flash" },
 ];
 
@@ -85,8 +85,6 @@ const fallbackResult = await explainMarketOpportunities({
     calls += 1;
     const body = JSON.parse(String(init?.body));
     receivedPrompt = body.messages.at(-1).content;
-    assert.deepEqual(body.thinking, {type: "disabled"});
-    assert.deepEqual(body.response_format, {type: "json_object"});
     if (calls === 1) {
       return Response.json(
         { error: { message: "weekly usage limit reached" } },
@@ -109,7 +107,7 @@ const thinkingWrapped = await explainMarketOpportunities({
   decisions: topFive,
   fingerprint: "thinking-wrapped-fingerprint",
   policy: { allowed: true, reason: "allowed", retryAt: null },
-  providers: [{ ...providers[0], model: "deepseek-test-thinking" }],
+  providers: [{ ...providers[0], model: "MiniMax-M2.7-thinking" }],
   fetchImpl: async () => Response.json({
     choices: [{ message: { content: [
       "<think>先核对规则，不改变原始方向。</think>",
@@ -142,7 +140,7 @@ const malformed = await explainMarketOpportunities({
   decisions: topFive,
   fingerprint: "malformed-fingerprint",
   policy: { allowed: true, reason: "allowed", retryAt: null },
-  providers: [{ ...providers[0], model: "deepseek-test-malformed" }],
+  providers: [{ ...providers[0], model: "MiniMax-M2.7-malformed" }],
   fetchImpl: async () => Response.json({
     choices: [{ message: { content: "not-json" } }],
   }),
@@ -154,7 +152,7 @@ const prohibited = await explainMarketOpportunities({
   decisions: topFive,
   fingerprint: "prohibited-fingerprint",
   policy: { allowed: true, reason: "allowed", retryAt: null },
-  providers: [{ ...providers[0], model: "deepseek-test-prohibited" }],
+  providers: [{ ...providers[0], model: "MiniMax-M2.7-prohibited" }],
   fetchImpl: async () => Response.json({
     choices: [{ message: { content: JSON.stringify({
       items: validItems().map((item, index) => index === 0
@@ -173,7 +171,7 @@ const singleFlightInput = {
   decisions: topFive,
   fingerprint: "single-flight-fingerprint",
   policy: { allowed: true, reason: "allowed", retryAt: null },
-  providers: [{ ...providers[0], model: "deepseek-test-single-flight" }],
+  providers: [{ ...providers[0], model: "MiniMax-M2.7-single-flight" }],
   fetchImpl: async () => {
     singleFlightCalls += 1;
     await gate;
@@ -191,11 +189,3 @@ assert.equal(singleFlightCalls, 1);
 assert.deepEqual(firstResult, secondResult);
 
 console.log("ok - market opportunity AI is batched, guarded, and falls back");
-
-let nonDeepSeekCalls = 0;
-const blockedProvider = await explainMarketOpportunities({decisions: topFive,
-  fingerprint: "non-deepseek-provider", policy: {allowed: true, reason: "allowed", retryAt: null},
-  providers: [{id: "minimax", baseUrl: "https://api.minimaxi.com/v1", apiKey: "test-other", model: "MiniMax-M3"}],
-  fetchImpl: async () => {nonDeepSeekCalls++; return Response.json({choices: [{message: {content: JSON.stringify({items: validItems()})}}]});}});
-assert.equal(blockedProvider.status, "failed");
-assert.equal(nonDeepSeekCalls, 0);
