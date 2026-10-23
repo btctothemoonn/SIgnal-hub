@@ -26,8 +26,9 @@ const require = createRequire(import.meta.url);
 const yamlDir = readdirSync(pnpmModulesDir).find((entry) => entry.startsWith("js-yaml@4.3.0"));
 const { load } = require(join(pnpmModulesDir, yamlDir, "node_modules/js-yaml"));
 assert.deepEqual(load(workspace).overrides, {
-  postcss: "8.5.23", "ip-address": "10.3.1", "nanoid@3": "3.3.18",
-  browserslist: "4.28.7", sharp: "0.35.0",
+  postcss: "8.5.23", "ip-address": "10.7.4", "nanoid@3": "3.3.18",
+  browserslist: "4.28.7", sharp: "0.35.5",
+  "undici@7": "7.29.1", "source-map-js": "1.2.2",
   "minimatch@3.1.5>brace-expansion": "1.1.13", "js-yaml": "4.3.0",
 });
 const { minimatch } = require(

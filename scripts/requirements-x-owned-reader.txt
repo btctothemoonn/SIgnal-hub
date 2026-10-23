@@ -1,2 +1,3 @@
 # Installed in an external isolated venv; never upgrade during each deployment.
 twscrape==0.20.1
+certifi==2026.10.19
