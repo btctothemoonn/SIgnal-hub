@@ -1,6 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { getXPipelineDb } from "./x-pipeline-store.ts";
-import { getXOwnedReaderConfig, normalizeXOwnedUsername, selectXOwnedReaderAccounts, type XOwnedReaderConfig, type XOwnedReaderEnv } from "./x-owned-reader-config.ts";
+import { getXOwnedReaderConfig, normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_STRUCTURAL_RETRY_MS, type XOwnedReaderConfig, type XOwnedReaderEnv } from "./x-owned-reader-config.ts";
 import { get985Promotions, get985AuditSnapshot } from "./x-985-audit.ts";
 
 type Row = Record<string, unknown>;
@@ -27,8 +28,11 @@ export type XOwnedReaderAccountState = {
 
 export const X_OWNED_SAFE_REASONS = new Set([
   "timeline_structure_unrecognized", "unknown_conversation_module", "unparsed_entry", "cursor_stalled", "page_limit_reached", "request_budget_reached", "cycle_deadline_reached", "rate_limited", "login_or_access_challenge", "unexpected_api_response", "network_error_paused", "unexpected_redirect", "unexpected_cross_origin_redirect", "unexpected_request_destination", "redirect_limit_reached", "session_unavailable", "session_cooldown", "sdk_unavailable", "protocol_invalid", "bridge_timeout", "bridge_failed", "bridge_output_limit", "bridge_line_limit", "bridge_missing_completion", "account_missing_completion", "feed_write_failed", "disabled", "never_checked", "invalid_check_timestamp", "backlog_limit_repeated", "in_progress", "configuration_missing", "network_error", "entry_quarantined", "reply_focal_unverified", "reply_page_budget_unavailable",
-  "protected_account", "author_mismatch", "invalid_cooldown", "library_or_network_error",
+  "protected_account", "author_mismatch", "invalid_cooldown", "library_or_network_error", "cooldown_write_failed", "rate_budget_soft_cooldown", "structural_isolated",
 ]);
+export const X_OWNED_STRUCTURAL_REASONS = new Set(["unknown_conversation_module", "timeline_structure_unrecognized"]);
+export const X_OWNED_RATE_LIMIT_LIKE_REASONS = new Set(["rate_limited", "session_cooldown", "rate_budget_soft_cooldown", "request_budget_reached", "cycle_deadline_reached"]);
+const COOLDOWN_FILE_REASONS = new Set(["session_cooldown", "rate_limited", "login_or_access_challenge", "network_error_paused", "unexpected_api_response", "unexpected_redirect", "unexpected_cross_origin_redirect", "unexpected_request_destination", "redirect_limit_reached", "cooldown_write_failed"]);
 export function safeXOwnedReason(value: unknown, fallback = "protocol_invalid"): string {
   return typeof value === "string" && X_OWNED_SAFE_REASONS.has(value) ? value : fallback;
 }
@@ -98,17 +102,70 @@ export function pauseXOwnedReader(reason: string, nextRetryAt: string | null, db
   db.prepare(`insert into x_owned_reader_control(id,paused,reason,next_retry_at,updated_at) values(1,1,?,?,?) on conflict(id) do update set paused=1,reason=excluded.reason,next_retry_at=excluded.next_retry_at,updated_at=excluded.updated_at`).run(safeXOwnedReason(reason), nextRetryAt, new Date(nowMs).toISOString());
 }
 
+export type OwnedReaderCooldown = { reason: string; until: number | null; nextRetryAt: string | null };
+
+export function readOwnedReaderCooldown(filePath: string, nowMs = Date.now()): OwnedReaderCooldown | null {
+  if (!filePath) return null;
+  let raw: string;
+  try {
+    if (!existsSync(filePath)) return null;
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return { reason: "invalid_cooldown", until: null, nextRetryAt: null };
+  }
+  try {
+    const state: unknown = JSON.parse(raw);
+    if (!state || typeof state !== "object" || Array.isArray(state)) return { reason: "invalid_cooldown", until: null, nextRetryAt: null };
+    const record = state as Record<string, unknown>;
+    const rawReason = record.reason;
+    let reason = typeof rawReason === "string" && rawReason ? rawReason : "session_cooldown";
+    if (!COOLDOWN_FILE_REASONS.has(reason)) reason = "invalid_cooldown";
+    if (!("until" in record) || record.until == null) {
+      if (typeof rawReason === "string" && rawReason) return { reason, until: null, nextRetryAt: null };
+      return { reason: "invalid_cooldown", until: null, nextRetryAt: null };
+    }
+    const until = record.until;
+    if (typeof until !== "number" || !Number.isFinite(until)) return { reason: "invalid_cooldown", until: null, nextRetryAt: null };
+    if (until * 1000 <= nowMs) return null;
+    return { reason, until, nextRetryAt: new Date(until * 1000).toISOString() };
+  } catch {
+    return { reason: "invalid_cooldown", until: null, nextRetryAt: null };
+  }
+}
+
+export function isStructuralOwnedFailure(state: { reason: string | null } | null | undefined) {
+  return Boolean(state?.reason && (state.reason === "structural_isolated" || X_OWNED_STRUCTURAL_REASONS.has(state.reason)));
+}
+
+export function shouldIsolateOwnedReaderAccount(state: XOwnedReaderAccountState | null, config: Pick<XOwnedReaderConfig, "structuralIsolateAfter">, nowMs: number) {
+  if (!state) return false;
+  const isolateAfter = config.structuralIsolateAfter ?? 5;
+  const reason = state.lastIncompleteReason || state.reason;
+  if (reason !== "structural_isolated" && !X_OWNED_STRUCTURAL_REASONS.has(reason || "") && state.reason !== "structural_isolated") return false;
+  if (state.incompleteCount < isolateAfter) return false;
+  if (state.nextRetryAt && Date.parse(state.nextRetryAt) <= nowMs) return false;
+  return true;
+}
+
 export function prepareXOwnedReaderAccounts(usernames: readonly string[], config: XOwnedReaderConfig, db: DatabaseSync, nowMs: number) {
   initXOwnedReaderStateDb(db);
   const nowAt = new Date(nowMs).toISOString();
-  return selectXOwnedReaderAccounts(usernames, config).map((username) => {
+  const retryMs = config.structuralRetryMs ?? X_OWNED_STRUCTURAL_RETRY_MS;
+  return selectXOwnedReaderAccounts(usernames, config).flatMap((username) => {
     const key = normalizeXOwnedUsername(username);
+    const existing = getXOwnedReaderAccountState(key, db);
+    if (existing && shouldIsolateOwnedReaderAccount(existing, config, nowMs)) {
+      const parsedRetry = existing.nextRetryAt ? Date.parse(existing.nextRetryAt) : Number.NaN;
+      const nextRetryAt = Number.isFinite(parsedRetry) && parsedRetry > nowMs ? existing.nextRetryAt : new Date(nowMs + retryMs).toISOString();
+      db.prepare("update x_owned_reader_state set status='incomplete', reason='structural_isolated', next_retry_at=?, updated_at=? where username_key=?").run(nextRetryAt, nowAt, key);
+      return [];
+    }
     db.prepare(`insert into x_owned_reader_state(username_key,username,bootstrap_from_at,pending_through_at,last_attempt_at,status,reason,updated_at) values(?,?,?,?,?,'connecting','in_progress',?) on conflict(username_key) do update set last_attempt_at=excluded.last_attempt_at, status='connecting',reason='in_progress',updated_at=excluded.updated_at`).run(key,key,new Date(nowMs - 48 * 60 * 60_000).toISOString(),nowAt,nowAt,nowAt);
     const state = getXOwnedReaderAccountState(key,db)!;
     const throughAt = state.pendingThroughAt || nowAt;
     db.prepare("update x_owned_reader_state set pending_through_at=? where username_key=?").run(throughAt,key);
     const fromAt = state.coveredThroughAt ? new Date(Date.parse(state.coveredThroughAt) - 15 * 60_000).toISOString() : state.bootstrapFromAt!;
-    return { username:key, ...(state.userId ? {userId:state.userId} : {}), fromAt, throughAt };
+    return [{ username:key, ...(state.userId ? {userId:state.userId} : {}), fromAt, throughAt }];
   });
 }
 
@@ -149,11 +206,17 @@ export function getXAccountCoverageSnapshot(usernames: readonly string[], db: Da
     const checkedMs=state?.lastSuccessfulCheckAt ? Date.parse(state.lastSuccessfulCheckAt) : NaN;
     const invalidTimestamp=Boolean(state?.lastSuccessfulCheckAt && (!Number.isFinite(checkedMs) || checkedMs>nowMs+60_000));
     const checkAgeMs=Number.isFinite(checkedMs) && !invalidTimestamp ? Math.max(0,nowMs-checkedMs) : null;
-    const stale=route === "owned-reader" && (invalidTimestamp || checkAgeMs === null || checkAgeMs>config.staleAfterMs);
+    const baseStale=route === "owned-reader" && (invalidTimestamp || checkAgeMs === null || checkAgeMs>config.staleAfterMs);
+    const rateLimitPause=Boolean(pauseActive && pause && X_OWNED_RATE_LIMIT_LIKE_REASONS.has(pause.reason));
+    const suppressStale=route === "owned-reader" && rateLimitPause && checkAgeMs !== null && !invalidTimestamp;
+    const stale=suppressStale ? false : baseStale;
+    const cooling=suppressStale;
+    const structuralIncomplete=route === "owned-reader" && isStructuralOwnedFailure(state);
+    const structuralIsolated=Boolean(structuralIncomplete && shouldIsolateOwnedReaderAccount(state, config, nowMs));
     const paused=route === "owned-reader" && (!config.enabled || pauseActive);
     let lastIngestedAt=state?.lastIngestedAt || null;
     if (!lastIngestedAt && tableExists(db,"x_feed")) lastIngestedAt=text((db.prepare("select max(inserted_at) as inserted_at from x_feed where account_username_key=?").get(key) as Row)?.inserted_at);
-    return [{username,route,routeReason:routeReason(key,route==='owned-reader',db),audit:get985AuditSnapshot(key,db),...evidence,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
+    return [{username,route,routeReason:routeReason(key,route==='owned-reader',db),audit:get985AuditSnapshot(key,db),...evidence,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,cooling,structuralIncomplete,structuralIsolated,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
   });
-  return {generatedAt:new Date(nowMs).toISOString(),enabled:config.enabled,trial:true,counts:{total:accounts.length,monitor985:accounts.filter(a=>a.route === "monitor985").length,ownedReader:accounts.filter(a=>a.route === "owned-reader").length,covered:accounts.filter(a=>a.evidence === "covered").length,unmonitored:accounts.filter(a=>a.evidence === "unmonitored").length,unverified:accounts.filter(a=>a.evidence === "unverified").length,stale:accounts.filter(a=>a.stale).length,incomplete:accounts.filter(a=>a.route === "owned-reader" && a.status === "incomplete").length,paused:accounts.filter(a=>a.route === "owned-reader" && a.status === "paused").length,replyIncomplete:accounts.filter(a=>a.route === "owned-reader" && a.replyCoverageComplete===false).length},accounts};
+  return {generatedAt:new Date(nowMs).toISOString(),enabled:config.enabled,trial:true,counts:{total:accounts.length,monitor985:accounts.filter(a=>a.route === "monitor985").length,ownedReader:accounts.filter(a=>a.route === "owned-reader").length,covered:accounts.filter(a=>a.evidence === "covered").length,unmonitored:accounts.filter(a=>a.evidence === "unmonitored").length,unverified:accounts.filter(a=>a.evidence === "unverified").length,stale:accounts.filter(a=>a.stale).length,cooling:accounts.filter(a=>a.cooling).length,incomplete:accounts.filter(a=>a.route === "owned-reader" && a.status === "incomplete" && !a.structuralIncomplete).length,structuralIncomplete:accounts.filter(a=>a.structuralIncomplete).length,paused:accounts.filter(a=>a.route === "owned-reader" && a.status === "paused").length,replyIncomplete:accounts.filter(a=>a.route === "owned-reader" && a.replyCoverageComplete===false).length},accounts};
 }

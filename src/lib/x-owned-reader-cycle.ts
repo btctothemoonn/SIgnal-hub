@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } from "./x-pipeline-store.ts";
-import { normalizeXOwnedUsername, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
-import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, recordXOwnedReaderRoutes, safeXOwnedReason, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
+import { normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO, X_OWNED_STRUCTURAL_ISOLATE_AFTER, X_OWNED_STRUCTURAL_RETRY_MS, xOwnedReaderSoftCooldownMs, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
+import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, readOwnedReaderCooldown, recordXOwnedReaderRoutes, safeXOwnedReason, X_OWNED_STRUCTURAL_REASONS, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
 import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
@@ -32,11 +32,21 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       result.status="error";result.reason="configuration_missing";setXPipelineHealth({scope:"owned-reader",status:"error",detail:"configuration_missing"},db);return result;
     }
     if(pause) db.prepare("update x_owned_reader_control set paused=0 where id=1").run();
+    const cooldown=readOwnedReaderCooldown(config.cooldownFilePath,nowMs);
+    if(cooldown) {
+      if(cooldown.nextRetryAt) pauseXOwnedReader(cooldown.reason,cooldown.nextRetryAt,db,nowMs);
+      result.status="paused";result.reason=safeXOwnedReason(cooldown.reason);result.nextRetryAt=cooldown.nextRetryAt;
+      setXPipelineHealth({scope:"owned-reader",status:"paused",detail:result.reason},db);return result;
+    }
     const ordered=[...usernames].sort((a,b)=>String(getXOwnedReaderAccountState(a,db)?.lastSuccessfulCheckAt || '').localeCompare(String(getXOwnedReaderAccountState(b,db)?.lastSuccessfulCheckAt || '')));
     const queryAccounts=prepareXOwnedReaderAccounts(ordered,config,db,nowMs);
     result.attempted=queryAccounts.length;
     queryAccounts.forEach(account=>pending.add(account.username));
-    if(!queryAccounts.length) {setXPipelineHealth({scope:"owned-reader",status:"paused",detail:"no configured owned-reader accounts"},db);return {...result,status:"paused"};}
+    if(!queryAccounts.length) {
+      const isolated=selectXOwnedReaderAccounts(ordered,config).length>0;
+      result.status="paused";result.reason=isolated ? "structural_isolated" : null;
+      setXPipelineHealth({scope:"owned-reader",status:"paused",detail:isolated ? "structural_isolated" : "no configured owned-reader accounts"},db);return result;
+    }
     let auditAccounts=config.auditEnabled ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs) : [];
     if(auditAccounts.length) {
       auditEvidence=await auditEvidenceProvider();
@@ -90,13 +100,22 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       }
       const state=getXOwnedReaderAccountState(username,db)!;
       const incompleteCount=event.complete ? 0 : state.lastIncompleteReason===event.reason ? state.incompleteCount+1 : 1;
-      const reason=event.complete ? null : incompleteCount>=3 && ["page_limit_reached","request_budget_reached","cycle_deadline_reached"].includes(String(event.reason)) ? "backlog_limit_repeated" : safeXOwnedReason(event.reason);
-      db.prepare(`update x_owned_reader_state set user_id=?,status=?,reason=?,next_retry_at=null,incomplete_count=?,last_incomplete_reason=?,coverage_kind=?,reply_coverage_complete=?,reply_reason=?,subscriber_content_excluded=?,subscriber_excluded_tweet_ids_json=?,covered_through_at=case when ?=1 then ? else covered_through_at end,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,pending_through_at=case when ?=1 then null else pending_through_at end,updated_at=? where username_key=?`).run(String(event.userId),event.complete ? "complete" : "incomplete",reason,incompleteCount,event.complete ? null : safeXOwnedReason(event.reason),"posts-and-quotes",event.replyCoverageComplete ? 1 : 0,event.replyReason as string|null,Number(event.subscriberContentExcluded),JSON.stringify(event.subscriberExcludedTweetIds),event.complete ? 1 : 0,String(event.throughAt),event.complete ? 1 : 0,String(event.checkedAt),event.complete ? 1 : 0,new Date(nowMs).toISOString(),username);
+      const eventReason=safeXOwnedReason(event.reason);
+      const isolate=!event.complete && X_OWNED_STRUCTURAL_REASONS.has(eventReason) && incompleteCount>=(config.structuralIsolateAfter || X_OWNED_STRUCTURAL_ISOLATE_AFTER);
+      const reason=event.complete ? null : isolate ? "structural_isolated" : incompleteCount>=3 && ["page_limit_reached","request_budget_reached","cycle_deadline_reached"].includes(String(event.reason)) ? "backlog_limit_repeated" : eventReason;
+      const nextRetryAt=isolate ? new Date(nowMs+(config.structuralRetryMs || X_OWNED_STRUCTURAL_RETRY_MS)).toISOString() : null;
+      db.prepare(`update x_owned_reader_state set user_id=?,status=?,reason=?,next_retry_at=?,incomplete_count=?,last_incomplete_reason=?,coverage_kind=?,reply_coverage_complete=?,reply_reason=?,subscriber_content_excluded=?,subscriber_excluded_tweet_ids_json=?,covered_through_at=case when ?=1 then ? else covered_through_at end,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,pending_through_at=case when ?=1 then null else pending_through_at end,updated_at=? where username_key=?`).run(String(event.userId),event.complete ? "complete" : "incomplete",reason,nextRetryAt,incompleteCount,event.complete ? null : eventReason,"posts-and-quotes",event.replyCoverageComplete ? 1 : 0,event.replyReason as string|null,Number(event.subscriberContentExcluded),JSON.stringify(event.subscriberExcludedTweetIds),event.complete ? 1 : 0,String(event.throughAt),event.complete ? 1 : 0,String(event.checkedAt),event.complete ? 1 : 0,new Date(nowMs).toISOString(),username);
       done.add(username);pending.delete(username);if(event.complete)result.completed++;else result.incomplete++;
     });
     if(!cycleComplete) throw new Error("bridge_missing_completion");
     if(pending.size && !globalPaused) {result.incomplete+=pending.size;if(result.status!=="error")result.status="incomplete";result.reason ||= "account_missing_completion";}
     if(result.incomplete && result.status==="live")result.status="incomplete";
+    const softMs=xOwnedReaderSoftCooldownMs(config);
+    if(softMs && !globalPaused && (result.status==="live" || result.status==="incomplete") && typeof result.requests==="number" && result.requests>=config.maxRequests*X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO) {
+      const endMs=Math.max(nowMs,clock());
+      result.status="paused";result.reason="rate_budget_soft_cooldown";result.nextRetryAt=new Date(endMs+softMs).toISOString();
+      pauseXOwnedReader(result.reason,result.nextRetryAt,db,endMs);
+    }
   } catch(error) {result.status="error";result.reason=safeXOwnedReason(error instanceof Error ? error.message : null,"bridge_failed");}
   finally {
     inFlight=false;

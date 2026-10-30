@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { initXPipelineDb, upsertXPipelineRealtimeUpdate, setXPipelineHealth } from "./x-pipeline-store.ts";
-import { getXAccountCoverageSnapshot, initXOwnedReaderStateDb, prepareXOwnedReaderAccounts, getXOwnedReaderAccountState } from "./x-owned-reader-state.ts";
+import { getXAccountCoverageSnapshot, initXOwnedReaderStateDb, prepareXOwnedReaderAccounts, getXOwnedReaderAccountState, readOwnedReaderCooldown } from "./x-owned-reader-state.ts";
 import { getXOwnedReaderConfig } from "./x-owned-reader-config.ts";
 
 const db = new DatabaseSync(":memory:");
@@ -37,4 +40,63 @@ assert.equal(getXAccountCoverageSnapshot(["Established985"],db,env,now).accounts
 db.prepare("insert into x_owned_reader_control(id,paused,reason,next_retry_at,updated_at) values(1,1,'rate_limited','malformed',?)").run("2026-10-04T02:00:00Z");
 assert.equal(getXAccountCoverageSnapshot(["photoncap"],db,env,now).accounts[0].status,"paused","an invalid persisted cooldown must not silently resume requests");
 db.close();
-console.log("Owned state: read-only coverage, fixed bootstrap/retry, overlap, independent stale health and source evidence passed.");
+
+const alignDb = new DatabaseSync(":memory:");
+initXPipelineDb(alignDb);
+initXOwnedReaderStateDb(alignDb);
+const alignEnv = { X_OWNED_READER_ENABLED: "true", X_OWNED_READER_INTERVAL_MS: "600000", X_OWNED_READER_USERNAMES: "semianalysis_,ai_9684xtpa,hzzzz666" };
+const alignConfig = getXOwnedReaderConfig(alignEnv);
+prepareXOwnedReaderAccounts(["hzzzz666", "semianalysis_", "ai_9684xtpa"], alignConfig, alignDb, now);
+const iso = (offset) => new Date(now + offset).toISOString();
+alignDb.prepare("update x_owned_reader_state set status='complete', reason=null, last_successful_check_at=? where username_key='hzzzz666'").run(iso(-15 * 60_000));
+alignDb.prepare("update x_owned_reader_state set status='incomplete', reason='unknown_conversation_module', last_incomplete_reason='unknown_conversation_module', incomplete_count=5, next_retry_at=?, last_successful_check_at=? where username_key='semianalysis_'").run(iso(60 * 60_000), iso(-10 * 60_000));
+alignDb.prepare("update x_owned_reader_state set status='incomplete', reason='timeline_structure_unrecognized', last_incomplete_reason='timeline_structure_unrecognized', incomplete_count=5, next_retry_at=? where username_key='ai_9684xtpa'").run(iso(60 * 60_000));
+const fresh = getXAccountCoverageSnapshot(["hzzzz666", "semianalysis_", "ai_9684xtpa"], alignDb, alignEnv, now);
+assert.equal(fresh.accounts.find((account) => account.username === "hzzzz666").stale, false, "15 minutes is inside the interval-aligned stale window");
+assert.equal(fresh.counts.structuralIncomplete, 2);
+assert.equal(fresh.counts.incomplete, 0);
+assert.equal(fresh.accounts.find((account) => account.username === "semianalysis_").structuralIsolated, true);
+assert.equal(fresh.accounts.find((account) => account.username === "ai_9684xtpa").structuralIsolated, true);
+assert.equal(fresh.accounts.find((account) => account.username === "ai_9684xtpa").stale, true, "a structural author with no successful check stays stale");
+const queued = prepareXOwnedReaderAccounts(["semianalysis_", "ai_9684xtpa", "hzzzz666"], alignConfig, alignDb, now);
+assert.deepEqual(queued.map((account) => account.username), ["hzzzz666"]);
+assert.equal(getXOwnedReaderAccountState("semianalysis_", alignDb).status, "incomplete");
+assert.equal(getXOwnedReaderAccountState("semianalysis_", alignDb).reason, "structural_isolated");
+assert.notEqual(getXOwnedReaderAccountState("ai_9684xtpa", alignDb).status, "connecting");
+alignDb.prepare("update x_owned_reader_state set last_successful_check_at=? where username_key='hzzzz666'").run(iso(-40 * 60_000));
+const aged = getXAccountCoverageSnapshot(["hzzzz666"], alignDb, alignEnv, now);
+assert.equal(aged.accounts[0].stale, true);
+assert.equal(aged.counts.cooling, 0);
+alignDb.prepare("insert into x_owned_reader_control(id,paused,reason,next_retry_at,updated_at) values(1,1,'rate_limited',?,?)").run(iso(9 * 60_000), iso(0));
+alignDb.prepare("update x_owned_reader_state set last_successful_check_at=? where username_key='hzzzz666'").run(iso(-30 * 60_000));
+const cooling = getXAccountCoverageSnapshot(["hzzzz666", "ai_9684xtpa"], alignDb, alignEnv, now);
+assert.equal(cooling.accounts.find((account) => account.username === "hzzzz666").stale, false);
+assert.equal(cooling.accounts.find((account) => account.username === "hzzzz666").status, "paused");
+assert.equal(cooling.accounts.find((account) => account.username === "hzzzz666").cooling, true);
+assert.equal(cooling.counts.cooling, 1);
+assert.equal(cooling.accounts.find((account) => account.username === "ai_9684xtpa").stale, true);
+alignDb.prepare("update x_owned_reader_state set next_retry_at=? where username_key='semianalysis_'").run(iso(-1000));
+const retry = prepareXOwnedReaderAccounts(["semianalysis_"], alignConfig, alignDb, now);
+assert.equal(retry[0].username, "semianalysis_");
+assert.equal(getXOwnedReaderAccountState("semianalysis_", alignDb).status, "connecting");
+alignDb.close();
+
+const cooldownDir = mkdtempSync(join(tmpdir(), "owned-cooldown-"));
+try {
+  const missing = join(cooldownDir, "missing.json");
+  assert.equal(readOwnedReaderCooldown(missing, now), null);
+  const active = join(cooldownDir, "active.json");
+  writeFileSync(active, JSON.stringify({ reason: "rate_limited", until: (now + 600_000) / 1000 }));
+  const read = readOwnedReaderCooldown(active, now);
+  assert.equal(read.reason, "rate_limited");
+  assert.equal(read.nextRetryAt, new Date(now + 600_000).toISOString());
+  const expired = join(cooldownDir, "expired.json");
+  writeFileSync(expired, JSON.stringify({ reason: "rate_limited", until: (now - 1000) / 1000 }));
+  assert.equal(readOwnedReaderCooldown(expired, now), null);
+  const permanent = join(cooldownDir, "permanent.json");
+  writeFileSync(permanent, JSON.stringify({ reason: "login_or_access_challenge", until: null }));
+  assert.equal(readOwnedReaderCooldown(permanent, now).nextRetryAt, null);
+  writeFileSync(join(cooldownDir, "bad.json"), "[\"secret\"]");
+  assert.equal(readOwnedReaderCooldown(join(cooldownDir, "bad.json"), now).reason, "invalid_cooldown");
+} finally { rmSync(cooldownDir, { recursive: true, force: true }); }
+console.log("Owned state: read-only coverage, fixed bootstrap/retry, overlap, stale alignment, structural isolation and source evidence passed.");
