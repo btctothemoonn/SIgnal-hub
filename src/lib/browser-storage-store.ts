@@ -1,3 +1,5 @@
+import { enforceRebuildableStorageBudget } from "./browser-storage-budget.ts";
+
 const BROWSER_STORAGE_EVENT = "signal-hub:storage-change";
 const browserStorageFallbacks = new Map<string, string>();
 
@@ -28,6 +30,7 @@ export function writeBrowserStorage(key: string, value: string): void {
   if (typeof window === "undefined") return;
 
   try {
+    enforceRebuildableStorageBudget(window.localStorage, key, value);
     window.localStorage.setItem(key, value);
     browserStorageFallbacks.delete(key);
   } catch {

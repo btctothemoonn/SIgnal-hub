@@ -1,3 +1,4 @@
+import { isRebuildableBrowserStorageKey as isRebuildablePushCache } from './browser-storage-budget.ts';
 export const PUSH_DEVICE_STORAGE_KEY = 'signal-hub:push-device:v1';
 type Credentials = { deviceId: string; deviceKey: string; publicKey?: string; epoch?: number };
 type BrowserSubscription = { options: { applicationServerKey?: ArrayBuffer | null }; toJSON(): PushSubscriptionJSON; unsubscribe(): Promise<boolean> };
@@ -84,26 +85,6 @@ function decodePublicKey(value: string): Uint8Array<ArrayBuffer> {
 function encodeBytes(value: ArrayBuffer | Uint8Array) { return btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 export function getPushLogoutFields(browser: PushBrowser | null = defaultBrowser()) {
   try { const value = JSON.parse(browser?.storage.getItem(PUSH_DEVICE_STORAGE_KEY) ?? 'null') as Credentials | null; return value?.deviceId && value.deviceKey ? { pushDeviceId: value.deviceId, pushDeviceKey: value.deviceKey } : {}; } catch { return {}; }
-}
-const rebuildablePushCacheKeys = new Set([
-  'signal-hub:stocks:hynix-premium:5m:v1',
-  'signal-hub:stocks:hynix-premium:5m:v2',
-  'signal-hub:stocks:hynix-premium:v3:5m',
-  'signal-hub:stocks:hynix-premium:v3:1h',
-  'signal-hub:stocks:hynix-premium:v3:1d',
-  'signal-hub:stocks:hynix-funding:v1',
-  'signal-hub:stocks:market-snapshot:v1',
-  'signal-hub:stocks:financial-snapshot:v1',
-  'signal-hub.binance-holding-snapshot.v1',
-  'signal-hub.tiger-holding-snapshot.v1',
-  'signal-hub.tiger-equity-history.v1',
-]);
-function isRebuildablePushCache(key: string): boolean {
-  if (rebuildablePushCacheKeys.has(key) || /^signal-hub:stocks:hynix-premium:v4:(1m|5m|1h|1d)$/.test(key)) return true;
-  const prefix = 'signal-hub:stocks:performance-snapshot:v1:';
-  if (!key.startsWith(prefix)) return false;
-  const tickers = key.slice(prefix.length);
-  try { return tickers.length > 0 && encodeURIComponent(decodeURIComponent(tickers)) === tickers; } catch { return false; }
 }
 function persistPushDevice(storage: PushBrowser['storage'], value: string, allowCacheRecovery: boolean): boolean {
   try { storage.setItem(PUSH_DEVICE_STORAGE_KEY, value); return false; }
