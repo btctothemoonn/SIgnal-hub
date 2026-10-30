@@ -76,6 +76,8 @@ export function summarizeFuturesExposure() {
     bias: "方向中性",
   };
 }
+
+export function writeBrowserStorage() {}
 `,
     "utf8",
   );
