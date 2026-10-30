@@ -4,7 +4,7 @@ self.addEventListener('activate', event => event.waitUntil(self.clients.claim())
 function safeTarget(value) {
   try {
     const url = new URL(typeof value === 'string' ? value : '/settings', self.location.origin);
-    if (url.origin === self.location.origin && !url.username && !url.password && ['/alerts', '/intel', '/settings'].includes(url.pathname)) return url.href;
+    if (url.origin === self.location.origin && !url.username && !url.password && ['/alerts', '/intel', '/settings', '/stocks'].includes(url.pathname)) return url.href;
   } catch {}
   return new URL('/settings', self.location.origin).href;
 }

@@ -64,6 +64,7 @@ try {
   assert.deepEqual(payload.config.hynixPremiumAlert, {
     enabled: false,
     thresholdPct: 42.5,
+    pushRevision: 1,
   });
 
   const persisted = JSON.parse(
@@ -72,6 +73,7 @@ try {
   assert.deepEqual(persisted.hynixPremiumAlert, {
     enabled: false,
     thresholdPct: 42.5,
+    pushRevision: 1,
   });
 
   const invalidResponse = await route.POST(

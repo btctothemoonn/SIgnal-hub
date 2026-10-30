@@ -10,11 +10,14 @@ import {
   prewarmStocksCaches,
 } from "../src/lib/stocks-prewarm.ts";
 import { backfillStocksHistory } from "../src/lib/stocks-history-backfill.ts";
+import { runHynixPremiumPushCycle } from "../src/lib/hynix-premium-push.ts";
 
 const KINDS = ["market", "financial", "catalysts"];
 let running = false;
 let historyRunning = false;
+let hynixPushRunning = false;
 let stopRequested = false;
+const HYNIX_PUSH_INTERVAL_MS = 60_000;
 
 function log(event, data = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...data }));
@@ -137,10 +140,37 @@ function getIntervals() {
   );
 }
 
-function nextDelayMs(nextDue, nextHistoryDue) {
+async function runHynixPush(reason) {
+  if (hynixPushRunning) {
+    log("hynix_premium_push.skip", { reason, cause: "already_running" });
+    return;
+  }
+  hynixPushRunning = true;
+  try {
+    const result = await runHynixPremiumPushCycle({ env: process.env });
+    log("hynix_premium_push.done", {
+      reason,
+      status: result.reason,
+      eventId: result.eventId,
+      enabled: result.enabled,
+      thresholdPct: result.thresholdPct,
+      fetchError: result.fetchError,
+    });
+  } catch (error) {
+    log("hynix_premium_push.error", {
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    hynixPushRunning = false;
+  }
+}
+
+function nextDelayMs(nextDue, nextHistoryDue, nextHynixDue) {
   const now = Date.now();
   const dueTimes = Object.values(nextDue);
   if (nextHistoryDue !== null) dueTimes.push(nextHistoryDue);
+  if (nextHynixDue !== null) dueTimes.push(nextHynixDue);
   const nextAt = Math.min(...dueTimes);
   return Math.max(1000, Math.min(nextAt - now, 30_000));
 }
@@ -157,6 +187,7 @@ const historyIntervalMs = Math.max(
 
 const once = process.argv.includes("--once");
 await runPrewarm("startup", KINDS);
+await runHynixPush("startup");
 if (once) {
   await runHistoryBackfill("startup");
 } else {
@@ -170,15 +201,17 @@ const nextDue = Object.fromEntries(
   KINDS.map((kind) => [kind, Date.now() + intervals[kind]]),
 );
 let nextHistoryDue = historyEnabled ? Date.now() + historyIntervalMs : null;
-log("stocks_cache.worker.ready", { intervals });
+let nextHynixDue = Date.now() + HYNIX_PUSH_INTERVAL_MS;
+log("stocks_cache.worker.ready", { intervals, hynixPushIntervalMs: HYNIX_PUSH_INTERVAL_MS });
 
 while (!stopRequested) {
   await new Promise((resolveSleep) =>
-    setTimeout(resolveSleep, nextDelayMs(nextDue, nextHistoryDue)),
+    setTimeout(resolveSleep, nextDelayMs(nextDue, nextHistoryDue, nextHynixDue)),
   );
   const now = Date.now();
   const dueKinds = KINDS.filter((kind) => nextDue[kind] <= now);
   const historyDue = nextHistoryDue !== null && nextHistoryDue <= now;
+  const hynixDue = nextHynixDue !== null && nextHynixDue <= now;
   if (stopRequested) continue;
   if (dueKinds.length > 0) {
     await runPrewarm("interval", dueKinds);
@@ -189,5 +222,9 @@ while (!stopRequested) {
   if (historyDue) {
     nextHistoryDue = Date.now() + historyIntervalMs;
     void runHistoryBackfill("interval");
+  }
+  if (hynixDue) {
+    nextHynixDue = Date.now() + HYNIX_PUSH_INTERVAL_MS;
+    await runHynixPush("interval");
   }
 }

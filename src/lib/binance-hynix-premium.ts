@@ -1150,6 +1150,62 @@ function buildBinanceHynixFundingSnapshot({
   };
 }
 
+export type BinanceHynixPremiumQuote = {
+  premiumPct: number;
+  observedAt: string;
+  baseSymbol: string;
+  benchmarkSymbol: string;
+  basePrice: number;
+  benchmarkPrice: number;
+};
+
+/** Live mark-price quote only. Does not request K-line history. */
+export async function fetchBinanceHynixPremiumQuote({
+  fetchImpl = fetch,
+  env = process.env,
+}: {
+  fetchImpl?: FetchLike;
+  env?: EnvLike;
+} = {}): Promise<BinanceHynixPremiumQuote> {
+  const baseSymbol = normalizeSymbol(
+    env.BINANCE_HYNIX_PREMIUM_BASE_SYMBOL,
+    DEFAULT_BASE_SYMBOL,
+  );
+  const benchmarkSymbol = normalizeSymbol(
+    env.BINANCE_HYNIX_PREMIUM_BENCHMARK_SYMBOL,
+    DEFAULT_BENCHMARK_SYMBOL,
+  );
+  const restBaseUrl = resolveRestBaseUrl(env);
+  const [baseMark, benchmarkMark] = await Promise.all([
+    fetchMarkPrice({
+      fetchImpl,
+      url: premiumIndexUrl({ baseUrl: restBaseUrl, symbol: baseSymbol }),
+      symbol: baseSymbol,
+    }),
+    fetchMarkPrice({
+      fetchImpl,
+      url: premiumIndexUrl({ baseUrl: restBaseUrl, symbol: benchmarkSymbol }),
+      symbol: benchmarkSymbol,
+    }),
+  ]);
+  const observedMs = Math.min(baseMark.time, benchmarkMark.time);
+  const premiumPct = calculatePremiumPct({
+    basePrice: baseMark.markPrice,
+    benchmarkPrice: benchmarkMark.markPrice,
+  });
+  if (premiumPct === null || !Number.isFinite(observedMs) || observedMs <= 0) {
+    throw new Error("hynix premium quote unavailable");
+  }
+  return {
+    premiumPct,
+    observedAt: new Date(observedMs).toISOString(),
+    baseSymbol,
+    benchmarkSymbol,
+    basePrice: baseMark.markPrice,
+    benchmarkPrice: benchmarkMark.markPrice,
+  };
+}
+
 export async function fetchBinanceHynixPremiumSnapshot({
   fetchImpl = fetch,
   env = process.env,

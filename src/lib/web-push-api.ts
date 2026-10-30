@@ -3,7 +3,8 @@ import { ADMIN_SESSION_COOKIE, verifyAdminSessionToken } from './admin-auth.ts';
 import { getPushPublicOrigin, getWebPushConfig, validatePushSubscription } from './web-push-config.ts';
 import { openWebPushStore, type WebPushStore, type DeviceBaseline } from './web-push-store.ts';
 import { createWebPushSender, type WebPushSender } from './web-push-sender.ts';
-import { capturePushBaseline, createNewsPushSource } from './web-push-worker.ts';
+import { openHynixPremiumPushStore } from './hynix-premium-push.ts';
+import { capturePushBaseline, createHynixPushSource, createNewsPushSource } from './web-push-worker.ts';
 import { openMarketAlertsStore } from './market-alerts-store.ts';
 import type { EnvLike, PushEvent } from './important-push-types.ts';
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
@@ -70,7 +71,7 @@ export function createWebPushApiHandlers(input: { store: WebPushStore; sender: W
 export async function withWebPushApi(method: keyof ReturnType<typeof createWebPushApiHandlers>, request: Request) {
   const store = openWebPushStore();
   try {
-    return await createWebPushApiHandlers({ store, sender: createWebPushSender(getWebPushConfig()), baselineProvider: nowMs => { const market = openMarketAlertsStore(); try { return capturePushBaseline(market, createNewsPushSource(), nowMs); } finally { market.close(); } } })[method](request);
+    return await createWebPushApiHandlers({ store, sender: createWebPushSender(getWebPushConfig()), baselineProvider: nowMs => { const market = openMarketAlertsStore(); const hynix = openHynixPremiumPushStore(); try { return capturePushBaseline(market, createNewsPushSource(), nowMs, createHynixPushSource(hynix)); } finally { market.close(); hynix.close(); } } })[method](request);
   } finally { store.close(); }
 }
 export async function revokePushForLogout(request: Request, options: { env?: EnvLike; now?: () => number; store?: WebPushStore } = {}): Promise<Response | null> {
