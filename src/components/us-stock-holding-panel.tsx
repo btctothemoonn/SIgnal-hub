@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { writeBrowserStorage } from "@/lib/browser-storage-store";
 import {
   analyzeUsStockHoldings,
   getUsStockHoldingBriefCards,
@@ -159,18 +160,10 @@ function writeStoredTigerData(
 ) {
   if (typeof window === "undefined") return;
 
-  try {
-    window.localStorage.setItem(
-      TIGER_HOLDING_STORAGE_KEY,
-      JSON.stringify(snapshot),
-    );
-    window.localStorage.setItem(
-      TIGER_EQUITY_HISTORY_STORAGE_KEY,
-      JSON.stringify(equityHistory),
-    );
-  } catch {
-    // Browser cache is only a speed optimization.
-  }
+  const snapshotJson = JSON.stringify(snapshot);
+  const historyJson = JSON.stringify(equityHistory);
+  if (snapshotJson) writeBrowserStorage(TIGER_HOLDING_STORAGE_KEY, snapshotJson);
+  if (historyJson) writeBrowserStorage(TIGER_EQUITY_HISTORY_STORAGE_KEY, historyJson);
 }
 
 function RefreshIcon() {

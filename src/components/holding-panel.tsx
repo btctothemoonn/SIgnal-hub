@@ -17,6 +17,7 @@ import {
   summarizeFuturesExposure,
 } from "@/lib/holding-layout";
 import { USStockHoldingPanel } from "@/components/us-stock-holding-panel";
+import { writeBrowserStorage } from "@/lib/browser-storage-store";
 import type {
   BinanceFuturesEquityPoint,
   BinanceFuturesPosition,
@@ -232,16 +233,8 @@ function readBrowserCachedSnapshot(): BinanceHoldingSnapshot | null {
 }
 
 function writeBrowserCachedSnapshot(snapshot: BinanceHoldingSnapshot) {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(
-      HOLDING_SNAPSHOT_STORAGE_KEY,
-      JSON.stringify(snapshot),
-    );
-  } catch {
-    // Local cache is only a speed optimization.
-  }
+  const serialized = JSON.stringify(snapshot);
+  if (serialized) writeBrowserStorage(HOLDING_SNAPSHOT_STORAGE_KEY, serialized);
 }
 
 function clearBrowserCachedSnapshot() {
