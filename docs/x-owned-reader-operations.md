@@ -45,7 +45,7 @@ doctor只检查协议、Python/SDK版本和会话可用性，不发X请求，不
 
 连续 5 次（`X_OWNED_READER_STRUCTURAL_ISOLATE_AFTER`）`unknown_conversation_module` 或 `timeline_structure_unrecognized` 后，该作者跳过本轮，原因记为 `structural_isolated`，默认 6 小时（`X_OWNED_READER_STRUCTURAL_RETRY_MS`）后再试一次。coverage 用 `structuralIncomplete` 单列，不计入普通 incomplete。一次完整成功会解除隔离。手动解除只清该作者的 `next_retry_at` 并降低 `incomplete_count`，不要清共享库或其他表。
 
-发布采用现有原子release流程。启用时必须通过doctor、web认证readiness及每个补采作者的首轮完整主帖检查；失败回滚旧release并停止旧版没有的新服务。会话、冷却、检查点、来源观测和已入库推文保留，数据库只增加兼容表/列。
+发布采用现有原子release流程。启用时必须通过doctor和web认证readiness。readiness 只在进程不可用、会话不可用、配置缺失，或抽样作者首检失败时回滚：抽样为已分配的种子 7 位全部在激活后完成检查，或全部非结构作者至少 80% 完成。`structural_isolated` 与已知结构失败、以及全局 `rate_limited` / 冷却类暂停只告警，不回滚已构建的包。失败仍回滚旧release并停止旧版没有的新服务。会话、冷却、检查点、来源观测和已入库推文保留，数据库只增加兼容表/列。
 
 第一次采集通过只证明当前轮可用。24小时稳定性、限流和真实新帖延迟需要后续观察，不能由一次空结果或服务active推断。
 

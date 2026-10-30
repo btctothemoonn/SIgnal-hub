@@ -16,8 +16,16 @@ async function waitForOwnedReader() {
     const response = await fetch(`${base}/api/x/coverage`, { headers: { cookie }, signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error(`owned_readiness_http_${response.status}`);
     const result = evaluateOwnedReaderReadiness(await response.json(), activatedAt);
-    if (result.ready) { console.log("Owned reader trial ready: assigned authors completed first checks."); return; }
+    if (result.ready) {
+      const warnings = result.warnings?.length ? ` Warnings: ${result.warnings.join("; ")}.` : "";
+      console.log(`Owned reader trial ready (${result.reason}).${warnings}`);
+      return;
+    }
     if (result.fatal) throw new Error(`owned_readiness_${result.reason}`);
+    if (attempt % 15 === 0) {
+      const detail = result.warnings?.length ? ` ${result.warnings.join("; ")}` : "";
+      console.log(`Owned reader readiness waiting: ${result.reason}.${detail}`);
+    }
     await setTimeout(2000);
   }
   throw new Error("owned_readiness_first_check_timeout");
