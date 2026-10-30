@@ -5,6 +5,7 @@ import { openWebPushStore, type WebPushStore, type DeviceBaseline } from './web-
 import { createWebPushSender, type WebPushSender } from './web-push-sender.ts';
 import { capturePushBaseline, createNewsPushSource } from './web-push-worker.ts';
 import { openMarketAlertsStore } from './market-alerts-store.ts';
+import { readWebPushDiagnostics } from './web-push-diagnostics.ts';
 import type { EnvLike, PushEvent } from './important-push-types.ts';
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
 function sessionToken(request: Request) { return request.headers.get('cookie')?.split(';').map(part => part.trim()).find(part => part.startsWith(`${ADMIN_SESSION_COOKIE}=`))?.slice(ADMIN_SESSION_COOKIE.length + 1) ?? null; }
@@ -41,6 +42,7 @@ export function createWebPushApiHandlers(input: { store: WebPushStore; sender: W
   const protect = (handler: (request: Request) => Promise<Response> | Response, mutation: boolean) => async (request: Request) => { const denied = checkRequest(request, env, now(), mutation); if (denied) return denied; try { return await handler(request); } catch (error) { return errorResponse(error); } };
   return {
     config: protect(() => { const { enabled, configured, publicKey } = getWebPushConfig(env); return reply({ enabled, configured, publicKey }); }, false),
+    diagnostics: protect(() => reply(readWebPushDiagnostics(env, new Date(now()))), false),
     getSubscriptionStatus: protect(request => { const proof = device(request); const status = input.store.getDeviceStatus(proof.deviceId, proof.deviceKey); return status ? reply(status) : reply({ error: 'device_proof_required' }, 403); }, false),
     subscribe: protect(async request => {
       const config = getWebPushConfig(env); if (!config.enabled || !config.configured) return reply({ error: 'push_not_configured' }, 503);
