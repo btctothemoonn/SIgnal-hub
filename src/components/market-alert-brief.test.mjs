@@ -379,6 +379,7 @@ test("the parent renders snapshot briefs above the unchanged alert workspace", a
     "./market-alert-brief": briefUrl,
     "./market-opportunity-panel": moduleUrl(join(directory, "market-opportunity-panel.tsx")),
     "@/lib/market-alerts-health": moduleUrl(join(directory, "../lib/market-alerts-health.ts")),
+    "@/lib/market-snapshot-freshness": moduleUrl(join(directory, "../lib/market-snapshot-freshness.ts")),
   });
   const { MarketAlertsPanel } = await import(parentUrl);
   const snapshot = {
@@ -423,6 +424,7 @@ test("existing snapshot stream updates the selected brief without extra timers o
     "./market-alert-brief": moduleUrl(componentPath),
     "./market-opportunity-panel": moduleUrl(join(directory, "market-opportunity-panel.tsx")),
     "@/lib/market-alerts-health": moduleUrl(join(directory, "../lib/market-alerts-health.ts")),
+    "@/lib/market-snapshot-freshness": moduleUrl(join(directory, "../lib/market-snapshot-freshness.ts")),
   }));
   const previousWindow = globalThis.window;
   const previousEventSource = globalThis.EventSource;
