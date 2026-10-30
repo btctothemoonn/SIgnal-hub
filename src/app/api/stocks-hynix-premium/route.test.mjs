@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const previousFetch = globalThis.fetch;
+const previousRuntimeDir = process.env.SIGNAL_HUB_RUNTIME_DIR;
+const runtimeDir = mkdtempSync(join(tmpdir(), "hynix-premium-route-"));
+process.env.SIGNAL_HUB_RUNTIME_DIR = runtimeDir;
 const previousRestBaseUrl = process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL;
 const previousDateNow = Date.now;
 const requests = [];
@@ -57,6 +63,8 @@ try {
   assert.equal(payload.interval, "1m");
   assert.equal(payload.points.length, 2);
   assert.equal(payload.latest.premiumPct, 10);
+  assert.equal(payload.stale, false);
+  assert.equal(typeof payload.dataAsOf, "string");
   assert.ok(
     requests
       .filter((url) => url.includes("/fapi/v1/klines"))
@@ -96,7 +104,20 @@ try {
     payload.points.length,
     "a transient Binance failure must retain the last healthy chart",
   );
+  assert.equal(degradedPayload.stale, true);
+  assert.equal(degradedPayload.dataAsOf, payload.dataAsOf);
   assert.ok(degradedPayload.errors.some((message) => message.includes("HTTP 429")));
+  const { clearHynixPremiumLastGoodMemoryForTests } = await import("../../../lib/hynix-premium-snapshot-retention.ts");
+  clearHynixPremiumLastGoodMemoryForTests();
+  currentTimeMs += 5 * 60 * 1000;
+  const restoredResponse = await GET(
+    new Request(
+      "http://signal-hub.test/api/stocks-hynix-premium?interval=1m&startTime=1783958400000",
+    ),
+  );
+  const restoredPayload = await restoredResponse.json();
+  assert.equal(restoredPayload.points.length, payload.points.length);
+  assert.equal(restoredPayload.stale, true);
   failKlineRequests = false;
 
   const requestCountBeforeFiveMinuteLoad = requests.length;
@@ -156,6 +177,9 @@ try {
   } else {
     process.env.BINANCE_HYNIX_PREMIUM_REST_BASE_URL = previousRestBaseUrl;
   }
+  if (previousRuntimeDir === undefined) delete process.env.SIGNAL_HUB_RUNTIME_DIR;
+  else process.env.SIGNAL_HUB_RUNTIME_DIR = previousRuntimeDir;
+  rmSync(runtimeDir, { recursive: true, force: true });
 }
 
 console.log("ok - Hynix compact transport defaults to 5m and preserves legacy explicit intervals");

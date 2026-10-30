@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { getMarketAlertWorkerView } from "@/lib/market-alerts-health";
+import { isMarketSnapshotStale } from "@/lib/market-snapshot-freshness";
 import type { getMarketAlertsSnapshot } from "@/lib/market-alerts-store";
 import { MarketAlertBrief } from "./market-alert-brief";
 import { MarketOpportunityPanel } from "./market-opportunity-panel";
@@ -533,7 +534,12 @@ export function MarketAlertsPanel({
             <span className={`h-1.5 w-1.5 rounded-full ${streamStatus === "live" ? "bg-success" : "bg-warning"}`} />
             <span className={`text-[11px] font-medium ${liveWorkers === 4 ? "text-success" : "text-warning"}`}>{liveWorkers}/4 在线</span>
           </div>
-          <p className="mt-1 text-xs text-muted">更新 {formatTime(snapshot.latestUpdatedAt || snapshot.generatedAt, true)}</p>
+          <p className="mt-1 text-xs text-muted">
+            数据时间 {formatTime(snapshot.latestUpdatedAt || snapshot.generatedAt, true)}
+            {isMarketSnapshotStale(snapshot.latestUpdatedAt || snapshot.generatedAt, nowMs) ? (
+              <span className="text-warning"> · 数据可能已过期</span>
+            ) : null}
+          </p>
         </div>
         <div className="flex min-w-0 items-center gap-2">
           <div className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-md border border-line bg-workspace-canvas p-1 sm:flex-none">

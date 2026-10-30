@@ -96,6 +96,8 @@ export type BinanceHynixPremiumSnapshot = {
   points: BinanceHynixPremiumPoint[];
   latest: BinanceHynixPremiumPoint | null;
   errors: string[];
+  stale?: boolean;
+  dataAsOf?: string | null;
 };
 
 export type BinanceHynixFundingSnapshot = {

@@ -164,6 +164,7 @@ export function StocksHynixPremiumCurve({
   const [liveFundingSnapshot, setLiveFundingSnapshot] =
     useState<BinanceHynixFundingSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [quoteStale, setQuoteStale] = useState(false);
   const [fundingError, setFundingError] = useState<string | null>(null);
   const [premiumAlertCycle, setPremiumAlertCycle] =
     useState<HynixPremiumAlertCycle>({
@@ -544,6 +545,7 @@ export function StocksHynixPremiumCurve({
         if (!cancelled) {
           if (snapshot.points.length > 1) {
             setLiveSnapshot(snapshot);
+            setQuoteStale(snapshot.stale === true);
             setPremiumAlertCycle((current) =>
               nextHynixPremiumAlertCycle(
                 current,
@@ -553,11 +555,14 @@ export function StocksHynixPremiumCurve({
             );
             writeCachedSnapshot(snapshot);
             writeCachedSelectedInterval(selectedInterval);
+          } else {
+            setQuoteStale(true);
           }
           setError(snapshot.errors[0] ?? null);
         }
       } catch (error) {
         if (!cancelled) {
+          setQuoteStale(true);
           setError(error instanceof Error ? error.message : String(error));
         }
       }
@@ -618,6 +623,7 @@ export function StocksHynixPremiumCurve({
     websocketMarkPricesRef.current = {};
     const applyPremiumPoint = (point: BinanceHynixPremiumPoint | null) => {
       if (!point) return;
+      setQuoteStale(false);
       setPremiumAlertCycle((current) =>
         nextHynixPremiumAlertCycle(
           current,
@@ -713,10 +719,16 @@ export function StocksHynixPremiumCurve({
       }
     };
     socket.onerror = () => {
-      if (!closedByEffect) setError("Binance Futures WebSocket error");
+      if (!closedByEffect) {
+        setQuoteStale(true);
+        setError("Binance Futures WebSocket error");
+      }
     };
     socket.onclose = () => {
-      if (!closedByEffect) setError("Binance Futures WebSocket disconnected");
+      if (!closedByEffect) {
+        setQuoteStale(true);
+        setError("Binance Futures WebSocket disconnected");
+      }
     };
 
     return () => {
@@ -1010,7 +1022,8 @@ export function StocksHynixPremiumCurve({
             : "加载中"}
         </span>
         {firstPoint ? <span>起点 {formatTime(firstPoint.capturedAt)}</span> : null}
-        {latest ? <span>更新 {formatTime(latest.capturedAt)}</span> : null}
+        {latest ? <span>数据时间 {formatTime(snapshot?.dataAsOf || latest.capturedAt)}</span> : null}
+        {quoteStale ? <span className="text-warning">数据可能已过期</span> : null}
         {error ? <span className="text-warning">{error}</span> : null}
         {fundingError ? (
           <span className="text-warning">{fundingError}</span>
@@ -1024,7 +1037,8 @@ export function StocksHynixPremiumCurve({
               ? `${shownPoints.length} 根 ${selectedInterval} K 线已缓存`
               : "行情加载中"}
           </span>
-          {latest ? <span>更新 {formatTime(latest.capturedAt)}</span> : null}
+          {latest ? <span>数据时间 {formatTime(snapshot?.dataAsOf || latest.capturedAt)}</span> : null}
+          {quoteStale ? <span className="text-warning">数据可能已过期</span> : null}
           {error ? <span className="text-warning">{error}</span> : null}
           {fundingError ? (
             <span className="text-warning">{fundingError}</span>
