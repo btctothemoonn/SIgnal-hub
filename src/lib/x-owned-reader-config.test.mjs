@@ -18,6 +18,7 @@ assert.equal(enabled.softCooldownEnabled, true);
 assert.equal(enabled.structuralIsolateAfter, 5);
 assert.equal(enabled.structuralRetryMs, 6 * 60 * 60_000);
 assert.equal(xOwnedReaderSoftCooldownMs(enabled), enabled.intervalMs);
+assert.equal(getXOwnedReaderConfig({}).intervalMs, 600000, "missing interval uses the 10 minute default");
 const tenMinutes = getXOwnedReaderConfig({ X_OWNED_READER_INTERVAL_MS: "600000" });
 assert.equal(tenMinutes.intervalMs, 600000);
 assert.ok(tenMinutes.staleAfterMs >= 22 * 60_000, "10 minute interval keeps stale behind the cooldown window");

@@ -9,7 +9,7 @@ import { getXOwnedReaderAccountState, getXAccountCoverageSnapshot } from "./x-ow
 import { runXOwnedReaderCycle } from "./x-owned-reader-cycle.ts";
 
 const now=Date.parse("2026-10-04T02:00:00Z");
-const config=getXOwnedReaderConfig({X_OWNED_READER_ENABLED:"true",X_OWNED_READER_SESSION_DB:"/private/session.db",X_OWNED_READER_COOLDOWN_FILE:"/private/cooldown.json"});
+const config=getXOwnedReaderConfig({X_OWNED_READER_ENABLED:"true",X_OWNED_READER_SESSION_DB:"/private/session.db",X_OWNED_READER_COOLDOWN_FILE:"/private/cooldown.json",X_OWNED_READER_INTERVAL_MS:"300000"});
 const db=new DatabaseSync(":memory:");initXPipelineDb(db);
 let taskSeen;
 function completion(task,complete,reason=null) {const account=task.accounts[0];return {version:1,runId:task.runId,type:"account_complete",username:account.username,userId:"321",complete,throughAt:account.throughAt,checkedAt:"2026-10-04T02:01:00Z",pages:complete?1:5,accepted:0,quarantined:0,reason,coverageKind:"posts-and-quotes",replyCoverageComplete:false,replyReason:"reply_focal_unverified"};}

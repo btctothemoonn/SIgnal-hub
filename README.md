@@ -1,6 +1,20 @@
-# 信息面板 / Signal Hub
+# Signal Hub
 
-把 `Telegram`、`X`、`Jin10`、策略警报和多账户持仓聚合到同一个面板里的 Next.js 项目。
+面向自己的投资信息与持仓工作台。页面读取缓存，采集和模型调用在独立进程里跑。
+
+现行数据流：
+
+- X：985 采集加上 Linux VPS 自有读者。`TWITTER_CONNECTOR_ENABLED` 和 `X_HYBRID_ENABLED` 关闭，`X_OWNED_READER_ENABLED` 开启。作者数量以生产库和 `/api/x/coverage` 为准，不是旧文档里的「7 位 VPS / 42 位 985」。
+- 自有读者未设置 `X_OWNED_READER_INTERVAL_MS` 时默认 10 分钟，代码下限 5 分钟。生产环境使用 600000。不要把间隔改到 10 分钟以下。回复补采使用主帖之后剩下的请求，不单独加大请求量。
+- Telegram：MTProto 用户会话和独立 worker。
+- AI：只使用 MiniMax-M3。不要恢复 DeepSeek，也不要加付费回退。
+- `/intel`：独立每日投资简报，不能把 Signal 信息流复制过来。
+- Web Push：保留，使用固定 VAPID。不要轮换密钥。
+- 企微同步和抖音采集默认不优先，保持暂停，除非另有明确要求。
+
+部署从 GitHub `main` 大约每 5 分钟自动发布。不要为了通过检查削弱 X readiness，也不要清空 `.signal-hub` 或 owned-reader 会话/冷却文件。
+
+## 本地运行
 
 ## 本地运行
 
@@ -13,6 +27,10 @@ npm run dev
 登录限流默认忽略客户端传入的 IP 头，使用共享的失败次数限制。若服务仅能通过可信反向代理访问，并且代理使用 `proxy_set_header X-Real-IP $remote_addr;` 覆盖该头，可设置 `ADMIN_LOGIN_TRUST_PROXY=true` 启用按 IP 限流。不要在 Next.js 端口直接暴露或代理保留客户端 IP 头时启用；应用不会使用 `X-Forwarded-For` 的首个地址。
 
 通过持仓面板切换 Binance API Key 时，旧账户快照和净值历史会保存在 `.signal-hub/binance-account-archive/`，新账户从独立的净值记录开始。同一个 Key 的重复保存或 Secret 更新会保留现有历史。
+
+## 已退役：6551 的 X 数据
+
+下面这段是旧接入说明，**不要按它重新打开 6551**。当前 X 数据走 985 和 VPS 自有读者，见文首。
 
 ## 接入 6551 的 X 数据
 
@@ -39,6 +57,10 @@ TWITTER_SEARCH_KEYWORDS=bitcoin,ethereum
 - `TWITTER_WATCH_USERNAMES`：本地补充要监控的 X 账号
 - `TWITTER_SEARCH_KEYWORDS`：额外要盯的关键词
 - `TWITTER_WS_URL`：6551 实时推送 WebSocket 地址
+
+## 已退役：按 6551 / Jin10 理解的本地 API
+
+`/api/x` 现在读的是现行管道，不是 6551 实时流。Jin10 路由如果还在仓库里，也不再是现行信息源。
 
 ## 本地 API
 
@@ -102,6 +124,10 @@ TELEGRAM_TRANSLATE_TARGET=zh-CN
 - 图片、贴纸这类消息会尽量同步成面板里的预览图
 - 外文文本会自动补一条中文“翻译备注”
 - 页面会调用 `GET /api/telegram` 读取历史快照，再通过 `GET /api/telegram/stream` 收实时更新
+
+## 已退役：Jin10 快讯
+
+不要为了补快讯重新配置或启用 Jin10。每日投资简报在 `/intel`，使用独立新闻源。
 
 ## 接入 Jin10 快讯
 
