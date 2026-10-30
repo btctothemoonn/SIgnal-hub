@@ -346,7 +346,7 @@ export function StocksHynixPremiumCurve({
   }, [premiumAlertThresholdPct]);
 
   async function persistPremiumAlertSettings(
-    nextSettings: HynixPremiumAlertSettings,
+    nextSettings: Pick<HynixPremiumAlertSettings, "enabled" | "thresholdPct">,
   ) {
     setPremiumAlertSettingsBusy(true);
     setPremiumAlertSettingsError(null);
