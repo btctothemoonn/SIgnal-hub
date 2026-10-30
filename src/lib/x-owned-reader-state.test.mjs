@@ -30,7 +30,7 @@ assert.equal(getXOwnedReaderAccountState("Hzzzz666", db).bootstrapFromAt, "2026-
 db.prepare("update x_owned_reader_state set covered_through_at=?, pending_through_at=null,last_successful_check_at=?,status='complete' where username_key=?").run("2026-10-04T02:00:00.000Z", "2026-10-04T02:01:00.000Z", "hzzzz666");
 assert.deepEqual(prepareXOwnedReaderAccounts(["hzzzz666"], config, db, now + 600000), [{ username: "hzzzz666", fromAt: "2026-10-04T01:45:00.000Z", throughAt: "2026-10-04T02:10:00.000Z" }]);
 setXPipelineHealth({scope:"collector",status:"live",detail:"other worker"},db);
-const stale = getXAccountCoverageSnapshot(["hzzzz666"],db,env,now+1200000);
+const stale = getXAccountCoverageSnapshot(["hzzzz666"],db,env,Date.parse("2026-10-04T02:01:00.000Z")+config.staleAfterMs+1);
 assert.equal(stale.accounts[0].stale,true);
 assert.equal(stale.counts.stale,1);
 db.prepare("update x_owned_reader_state set last_successful_check_at='2099-01-01T00:00:00Z' where username_key='hzzzz666'").run();

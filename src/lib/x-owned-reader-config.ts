@@ -63,7 +63,10 @@ export function getXOwnedReaderConfig(env: XOwnedReaderEnv = process.env): XOwne
   const allowlist = rawAllowlist === undefined
     ? [...X_OWNED_READER_DEFAULT_USERNAMES]
     : [...new Set(rawAllowlist.split(/[\s,，]+/).map(normalizeXOwnedUsername).filter(Boolean))];
-  const intervalMs = Math.max(300_000, positive(env.X_OWNED_READER_INTERVAL_MS, 300_000));
+  // Unset interval defaults to 10 minutes. The floor stays 5 minutes so an
+  // explicit smaller value cannot go below it, and a 10 minute production env
+  // is not shortened.
+  const intervalMs = Math.max(300_000, positive(env.X_OWNED_READER_INTERVAL_MS, 600_000));
   return {
     enabled: ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || ""),
     allowlist,
