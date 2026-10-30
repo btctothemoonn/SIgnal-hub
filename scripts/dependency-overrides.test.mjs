@@ -28,7 +28,7 @@ const { load } = require(join(pnpmModulesDir, yamlDir, "node_modules/js-yaml"));
 assert.deepEqual(load(workspace).overrides, {
   postcss: "8.5.23", "ip-address": "10.7.4", "nanoid@3": "3.3.18",
   browserslist: "4.28.7", sharp: "0.35.5",
-  "undici@7": "7.29.1", "source-map-js": "1.2.2",
+  "undici@7": "7.30.1", "source-map-js": "1.2.2",
   "minimatch@3.1.5>brace-expansion": "1.1.13", "js-yaml": "4.3.0",
 });
 const { minimatch } = require(

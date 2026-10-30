@@ -11,7 +11,7 @@ collector assignments and private runtime data unchanged.
 | Next.js / eslint-config-next | 16.4.1 |
 | React / React DOM / react-test-renderer | 19.2.9 |
 | sharp override | 0.35.5 |
-| undici 7.x override | 7.29.1 |
+| undici 7.x override | 7.30.1 |
 | ip-address override | 10.7.4 |
 | source-map-js override | 1.2.2 |
 | Ubuntu ca-certificates | 20260816ubuntu0.24.04.1 |
@@ -23,6 +23,19 @@ No PHP runtime is installed or used by Signal Hub. Caddy terminates HTTPS and
 proxies to the loopback Next.js listener. Do not add PHP to resolve an unrelated
 security advisory. The existing public certificate is valid; its renewal stays
 under Caddy's certificate management.
+
+## 2026-10-30 Audit
+
+`pnpm audit --prod` on 2026-10-30 reported eight undici advisories, all patched in
+7.30.1. The only production path was `cheerio -> undici`. The `undici@7` override
+moved from 7.29.1 to 7.30.1. Other overrides, Next, React, and X readiness checks
+were left unchanged.
+
+The site certificate previously expired at about 2026-12-09 00:03 Asia/Shanghai
+(2026-12-08 16:03:49 UTC). This audit did not read the live certificate chain.
+Before that date, confirm Caddy/Let's Encrypt renewal still schedules a
+replacement. Do not treat a successful HTTPS response months earlier as proof
+the current certificate is still inside that window.
 
 ## Security Update Policy
 
