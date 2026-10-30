@@ -16,6 +16,7 @@ import {
   getXPipelineSnapshot,
 } from "./x-pipeline-store.ts";
 import { getSignalHubSystemdServiceLabel, isSignalHubServiceEnabled } from "./signal-hub-services.ts";
+import { readWebPushDiagnostics } from "./web-push-diagnostics.ts";
 import { getWebPushConfig } from "./web-push-config.ts";
 import type { WorkerHealth } from "./web-push-store.ts";
 import { getAlphaSummaryPeriod, getAlphaSummaryRefreshIntervalMs } from "./alpha-summary.ts";
@@ -638,6 +639,12 @@ export function webPushHealthItem(env: EnvLike = process.env, now = new Date()):
     for (const key of ['pending', 'sending', 'retry', 'sent', 'expired']) if (Number.isFinite(health.counts[key])) meta[key] = health.counts[key];
     const errorCode = health.errorCode && /^push_[a-z_]+$/.test(health.errorCode) ? health.errorCode : null;
     if (errorCode) meta.errorCode = errorCode;
+    const diagnostics = readWebPushDiagnostics(env, now);
+    meta.devices = diagnostics.devices.filter((device) => device.enabled).length;
+    const lastDelivery = diagnostics.deliveries[0];
+    if (lastDelivery) meta.lastDelivery = `${lastDelivery.kind}:${lastDelivery.state}`;
+    const lastOutbox = diagnostics.outbox[0];
+    if (lastOutbox) meta.lastOutbox = lastOutbox.source;
     return { ...base, updatedAt: health.updatedAt, stale, status: health.status === 'error' ? 'error' : stale || health.status !== 'live' ? 'warning' : 'ok', detail: health.status === 'error' ? '通知发送异常，请检查服务器配置' : stale ? '通知进程心跳已过期' : health.status === 'live' ? '通知进程运行中' : '等待通知进程就绪', meta };
   } catch { return { ...base, status: "error", detail: "无法读取通知进程状态" }; }
   finally { db?.close(); }
