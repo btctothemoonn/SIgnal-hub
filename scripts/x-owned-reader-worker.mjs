@@ -23,15 +23,34 @@ async function loadEnvFile(path) {
   } catch { /* A service may supply its environment without local env files. */ }
 }
 
-export function createXOwnedReaderScheduler({intervalMs=300000,now=Date.now,runCycle}) {
-  let lastStartedAt=null;let inFlight=false;
+export function createXOwnedReaderScheduler({intervalMs=300000,now=Date.now,runCycle,cooldownJitterMs=1000}) {
+  let lastStartedAt=null;let inFlight=false;let cooldownUntil=null;
+  const jitter=Math.max(0,cooldownJitterMs);
+  const nextStartAt=()=>{
+    if(lastStartedAt===null) return null;
+    const intervalAt=lastStartedAt+intervalMs;
+    return cooldownUntil===null ? intervalAt : Math.max(intervalAt, cooldownUntil);
+  };
+  const waitReason=()=>{
+    const startAt=nextStartAt();
+    if(startAt===null || now()>=startAt) return "due";
+    if(cooldownUntil!==null && now()<cooldownUntil && cooldownUntil>=lastStartedAt+intervalMs) return "waiting_cooldown";
+    return "not_due";
+  };
   return {
-    delayUntilNextStart() {return lastStartedAt===null ? 0 : Math.max(0,lastStartedAt+intervalMs-now());},
+    delayUntilNextStart() {const startAt=nextStartAt(); return startAt===null ? 0 : Math.max(0,startAt-now());},
+    waitReason,
     async run() {
       if(inFlight)return {status:"skipped",reason:"in_progress"};
-      if(lastStartedAt!==null && now()<lastStartedAt+intervalMs)return {status:"skipped",reason:"not_due"};
+      const startAt=nextStartAt();
+      if(startAt!==null && now()<startAt) return {status:"skipped",reason:waitReason()==="waiting_cooldown" ? "waiting_cooldown" : "not_due"};
       inFlight=true;lastStartedAt=now();
-      try {return await runCycle();} finally {inFlight=false;}
+      try {
+        const result=await runCycle();
+        const retry=result?.status==="paused" && result.nextRetryAt ? Date.parse(result.nextRetryAt) : Number.NaN;
+        cooldownUntil=Number.isFinite(retry) ? retry+jitter : null;
+        return result;
+      } finally {inFlight=false;}
     },
   };
 }
@@ -73,7 +92,12 @@ async function main() {
   }});
   const result=await scheduler.run();
   if(once || !config.enabled) {if(result.status==="error")process.exitCode=1;return;}
-  const schedule=()=>{setTimeout(()=>{void scheduler.run().catch(()=>log("x_owned_reader_worker_failed",{reason:"bridge_failed"})).finally(schedule);},scheduler.delayUntilNextStart());};
+  const schedule=()=>{
+    const delayMs=scheduler.delayUntilNextStart();
+    const reason=scheduler.waitReason();
+    if(reason!=="due") log("x_owned_reader_schedule",{delayMs,reason});
+    setTimeout(()=>{void scheduler.run().then(result=>{if(result?.status==="skipped") log("x_owned_reader_cycle",{status:result.status,reason:result.reason});}).catch(()=>log("x_owned_reader_worker_failed",{reason:"bridge_failed"})).finally(schedule);},delayMs);
+  };
   schedule();
 }
 

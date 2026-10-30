@@ -21,6 +21,7 @@ import type { WorkerHealth } from "./web-push-store.ts";
 import { getAlphaSummaryPeriod, getAlphaSummaryRefreshIntervalMs } from "./alpha-summary.ts";
 import { getAlphaSummaryPrewarmIntervalMs } from "./alpha-summary-prewarm.ts";
 import { getStocksPrewarmIntervalMs } from "./stocks-prewarm.ts";
+import { ownedReaderStaleAfterMs } from "./x-owned-reader-config.ts";
 
 type EnvLike = Record<string, string | undefined>;
 type StocksSnapshotKind = "market" | "financial" | "catalysts";
@@ -351,22 +352,35 @@ type XOwnedCoverageHealthInput = {
     lastSuccessfulCheckAt: string | null;
     status: string;
     stale?: boolean;
+    reason?: string | null;
+    structuralIsolated?: boolean;
     replyCoverageComplete?: boolean | null;
     subscriberContentExcluded?: number;
   }[];
 };
 
+function ownedCoverageAccountStale(account: { stale?: boolean; lastSuccessfulCheckAt: string | null }, now: Date, staleAfterMs: number) {
+  if (typeof account.stale === "boolean") return account.stale;
+  return isStale(account.lastSuccessfulCheckAt, now, staleAfterMs);
+}
+
+function ownedCoverageStructural(account: { structuralIsolated?: boolean; reason?: string | null }) {
+  return account.structuralIsolated === true || account.reason === "structural_isolated";
+}
+
 export function summarizeXOwnedReaderCoverage({
-  snapshot, now = new Date(),
+  snapshot, now = new Date(), staleAfterMs = ownedReaderStaleAfterMs(300_000),
 }: {
   snapshot: XOwnedCoverageHealthInput;
   now?: Date;
+  staleAfterMs?: number;
 }): SystemHealthItem | null {
   if (!snapshot.enabled) return null;
   const assigned = snapshot.accounts.filter(account => account.route === "owned-reader");
-  const staleCount = assigned.filter(account => account.stale || isStale(account.lastSuccessfulCheckAt, now, 10 * 60_000)).length;
+  const staleCount = assigned.filter(account => ownedCoverageAccountStale(account, now, staleAfterMs)).length;
   const failedCount = assigned.filter(account => ["error", "paused", "failed"].includes(account.status)).length;
-  const incompleteCount = assigned.filter(account => account.status === "incomplete").length;
+  const structuralCount = assigned.filter(ownedCoverageStructural).length;
+  const incompleteCount = assigned.filter(account => account.status === "incomplete" && !ownedCoverageStructural(account)).length;
   const replyIncomplete = assigned.filter(account => account.replyCoverageComplete !== true).length;
   const subscriberContentExcluded = assigned.reduce((sum, account) => sum + Math.max(0, account.subscriberContentExcluded || 0), 0);
   const successfulTimes = assigned.map(account => account.lastSuccessfulCheckAt).filter((value): value is string => Boolean(value));
@@ -375,14 +389,16 @@ export function summarizeXOwnedReaderCoverage({
     : !assigned.length ? "自有补采已启用，尚未分配博主"
     : staleCount ? `自有补采检查逾期或尚未完成：${staleCount}/${assigned.length} 位`
     : incompleteCount ? `自有补采检查不完整：${incompleteCount}/${assigned.length} 位`
+    : structuralCount ? `自有补采结构隔离 ${structuralCount} 位`
     : `自有补采试运行：${assigned.length} 位公开主帖与引用检查正常`;
+  const structuralNote = structuralCount && (failedCount || staleCount || incompleteCount) ? ` · 结构隔离 ${structuralCount} 位` : "";
   return {
     id: "x-owned-reader", label: "X VPS 采集",
-    status: failedCount ? "error" : staleCount || incompleteCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
-    detail: detail + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
+    status: failedCount ? "error" : staleCount || incompleteCount || structuralCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
+    detail: detail + structuralNote + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
     updatedAt: successfulTimes.length === assigned.length ? oldest : null,
     stale: staleCount > 0,
-    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, replyIncomplete, subscriberContentExcluded },
+    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, structuralIncomplete: structuralCount, replyIncomplete, subscriberContentExcluded },
   };
 }
 

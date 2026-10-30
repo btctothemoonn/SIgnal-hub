@@ -39,6 +39,12 @@ doctor只检查协议、Python/SDK版本和会话可用性，不发X请求，不
 
 限流遵循服务端reset并保留冷却；登录失效/挑战暂停，更新私有会话后再恢复，不能轮换账号绕过。网络和结构错误不当作“没有新帖”。关注列表中已取消的博主下轮不再查询。
 
+冷却文件或控制表里的暂停未到期时，本轮在准备账号之前返回，不调用 bridge，也不把作者标成 connecting。调度器睡到 `nextRetryAt`（加 1 秒抖动）。成功轮请求数达到预算 70% 且调度间隔短于 15 分钟时，默认再写一段 `rate_budget_soft_cooldown`，时长为 `max(minIntervalMs, min(intervalMs, 12min))`；`X_OWNED_READER_SOFT_COOLDOWN=false` 可关闭。只写带 `nextRetryAt` 的临时暂停。
+
+逾期阈值默认 `max(10min, intervalMs + 12min)`，可用 `X_OWNED_READER_STALE_AFTER_MS` 覆盖。限流类全局暂停期间，已有成功检查且时间戳有效的作者不算 stale，coverage 用 `counts.cooling` 标出；健康汇总使用 coverage 已经算好的 `stale`。从未成功或时间戳无效的作者仍算逾期。
+
+连续 5 次（`X_OWNED_READER_STRUCTURAL_ISOLATE_AFTER`）`unknown_conversation_module` 或 `timeline_structure_unrecognized` 后，该作者跳过本轮，原因记为 `structural_isolated`，默认 6 小时（`X_OWNED_READER_STRUCTURAL_RETRY_MS`）后再试一次。coverage 用 `structuralIncomplete` 单列，不计入普通 incomplete。一次完整成功会解除隔离。手动解除只清该作者的 `next_retry_at` 并降低 `incomplete_count`，不要清共享库或其他表。
+
 发布采用现有原子release流程。启用时必须通过doctor、web认证readiness及每个补采作者的首轮完整主帖检查；失败回滚旧release并停止旧版没有的新服务。会话、冷却、检查点、来源观测和已入库推文保留，数据库只增加兼容表/列。
 
 第一次采集通过只证明当前轮可用。24小时稳定性、限流和真实新帖延迟需要后续观察，不能由一次空结果或服务active推断。

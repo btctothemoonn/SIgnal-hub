@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { summarizeXOwnedReaderCoverage } from "./system-health.ts";
+import { initXPipelineDb } from "./x-pipeline-store.ts";
+import { getXAccountCoverageSnapshot, initXOwnedReaderStateDb, prepareXOwnedReaderAccounts } from "./x-owned-reader-state.ts";
+import { getXOwnedReaderConfig } from "./x-owned-reader-config.ts";
 
 const now = new Date("2026-10-04T02:00:00Z");
-const account = (username, time, extra = {}) => ({ username, route: "owned-reader", lastSuccessfulCheckAt: time, status: "live", stale: false, replyCoverageComplete: true, ...extra });
+const account = (username, time, extra = {}) => ({ username, route: "owned-reader", lastSuccessfulCheckAt: time, status: "live", replyCoverageComplete: true, ...extra });
 const recent = "2026-10-04T01:58:00Z";
 const old = "2026-10-04T01:40:00Z";
 const summarize = accounts => summarizeXOwnedReaderCoverage({ snapshot: { enabled: true, accounts }, now });
@@ -21,4 +25,34 @@ assert.equal(subscriber.status, "warning");
 assert.equal(subscriber.meta.subscriberContentExcluded, 1);
 assert.match(subscriber.detail, /付费/);
 assert.equal(summarize([]).status, "warning");
-console.log("ok - owned health checks every assigned author independently and reports reply limits");
+const cooling = summarize([account("a", old, { stale: false, status: "complete" })]);
+assert.equal(cooling.meta.staleCount, 0, "a coverage stale flag is not replaced by a hardcoded 10 minute window");
+assert.equal(cooling.stale, false);
+assert.equal(cooling.status, "ok");
+const isolated = summarize([
+  account("semianalysis_", recent, { status: "incomplete", reason: "structural_isolated", structuralIsolated: true }),
+  account("ai_9684xtpa", recent, { status: "incomplete", reason: "structural_isolated", structuralIsolated: true }),
+]);
+assert.equal(isolated.status, "warning");
+assert.equal(isolated.meta.structuralIncomplete, 2);
+assert.equal(isolated.meta.incompleteCount, 0);
+assert.match(isolated.detail, /结构隔离 2/);
+const healthDb = new DatabaseSync(":memory:");
+initXPipelineDb(healthDb);
+initXOwnedReaderStateDb(healthDb);
+const healthEnv = { X_OWNED_READER_ENABLED: "true", X_OWNED_READER_INTERVAL_MS: "600000", X_OWNED_READER_USERNAMES: "hzzzz666" };
+prepareXOwnedReaderAccounts(["hzzzz666"], getXOwnedReaderConfig(healthEnv), healthDb, now.getTime());
+healthDb.prepare("update x_owned_reader_state set status='complete', reason=null, last_successful_check_at=? where username_key='hzzzz666'").run("2026-10-04T01:20:00.000Z");
+const aligned = getXAccountCoverageSnapshot(["hzzzz666"], healthDb, healthEnv, now.getTime());
+const alignedHealth = summarizeXOwnedReaderCoverage({ snapshot: aligned, now });
+assert.equal(aligned.accounts[0].stale, true);
+assert.equal(alignedHealth.meta.staleCount, aligned.counts.stale);
+healthDb.prepare("insert into x_owned_reader_control(id,paused,reason,next_retry_at,updated_at) values(1,1,'rate_limited',?,?)").run("2026-10-04T02:09:00.000Z", now.toISOString());
+healthDb.prepare("update x_owned_reader_state set last_successful_check_at=? where username_key='hzzzz666'").run("2026-10-04T01:30:00.000Z");
+const pausedCoverage = getXAccountCoverageSnapshot(["hzzzz666"], healthDb, healthEnv, now.getTime());
+const pausedHealth = summarizeXOwnedReaderCoverage({ snapshot: pausedCoverage, now });
+assert.equal(pausedCoverage.accounts[0].stale, false);
+assert.equal(pausedCoverage.accounts[0].status, "paused");
+assert.equal(pausedHealth.meta.staleCount, pausedCoverage.counts.stale);
+healthDb.close();
+console.log("ok - owned health uses coverage stale flags, reports structural isolation, and checks every assigned author");

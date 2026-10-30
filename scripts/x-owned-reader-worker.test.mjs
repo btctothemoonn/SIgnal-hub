@@ -14,6 +14,17 @@ assert.equal(scheduler.delayUntilNextStart(),120000,"the next start is five minu
 assert.equal((await scheduler.run()).reason,"not_due");now=300000;
 const second=scheduler.run();release();await second;assert.equal(completed,2);
 
+let pausedNow=0;
+const pausedScheduler=createXOwnedReaderScheduler({intervalMs:300000,now:()=>pausedNow,runCycle:async()=>({status:"paused",reason:"rate_limited",nextRetryAt:new Date(pausedNow+540000).toISOString()})});
+assert.equal((await pausedScheduler.run()).status,"paused");
+pausedNow=300000;
+assert.equal(pausedScheduler.waitReason(),"waiting_cooldown");
+assert.ok(pausedScheduler.delayUntilNextStart()>=240000,"pause delay waits at least until nextRetryAt");
+assert.equal((await pausedScheduler.run()).reason,"waiting_cooldown");
+const exact=createXOwnedReaderScheduler({intervalMs:300000,now:()=>pausedNow,cooldownJitterMs:0,runCycle:async()=>({status:"paused",reason:"rate_limited",nextRetryAt:new Date(0+540000).toISOString()})});
+pausedNow=0;await exact.run();pausedNow=300000;
+assert.equal(exact.delayUntilNextStart(),240000);
+
 const directory=await mkdtemp(join(tmpdir(),"owned-worker-test-"));
 try {
   const fakeBridge=join(directory,"doctor.mjs");
