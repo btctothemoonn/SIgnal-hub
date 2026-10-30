@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { SystemHealthPanel } from "@/components/system-health-panel";
+import { AiUsagePanel } from "@/components/ai-usage-panel";
 import { ImportantPushSettings } from "@/components/important-push-settings";
 
 type WatchItem = { ref: string; tags: string[] };
@@ -260,7 +261,10 @@ export default function SettingsPage() {
                 加载中...
               </div>
             ) : activeKind === "notifications" ? (
-              <ImportantPushSettings />
+              <div className="space-y-4">
+                <ImportantPushSettings />
+                <AiUsagePanel />
+              </div>
             ) : activeKind === "health" ? (
               <SystemHealthPanel />
             ) : activeKind === "ai" ? (

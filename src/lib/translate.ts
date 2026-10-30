@@ -1,6 +1,7 @@
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect as tlsConnect } from "node:tls";
+import { recordAiProviderAttempt } from "./ai-usage.ts";
 import {
   isUsefulTranslation,
   shouldTranslateText,
@@ -339,6 +340,9 @@ async function translateWithMiniMax(
   const apiKey = getMiniMaxTranslationApiKey();
   if (!apiKey) return null;
   const baseUrl = getMiniMaxTranslationBaseUrl();
+  const model = getMiniMaxTranslationModel();
+  let ok = false;
+  try {
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -346,7 +350,7 @@ async function translateWithMiniMax(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: getMiniMaxTranslationModel(),
+      model,
       messages: [
         {
           role: "system",
@@ -369,6 +373,7 @@ async function translateWithMiniMax(
     string,
     unknown
   >;
+  ok = response.ok;
   if (!response.ok) {
     const error = payload.error as Record<string, unknown> | undefined;
     throw new Error(
@@ -396,6 +401,13 @@ async function translateWithMiniMax(
   }
 
   return note;
+  } finally {
+    try {
+      recordAiProviderAttempt({ providerId: "minimax", model, ok });
+    } catch {
+      // Usage metrics must not change translation.
+    }
+  }
 }
 
 async function translateWithProviders(

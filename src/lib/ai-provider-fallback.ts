@@ -5,6 +5,8 @@ export type AiProviderConfig = {
   model: string;
 };
 
+import { recordAiProviderAttempt } from "./ai-usage.ts";
+
 const DEFAULT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const blockedUntilByProvider = new Map<string, number>();
 
@@ -79,11 +81,11 @@ export async function runWithAiProviderFallback<T>({
   for (let index = 0; index < candidates.length; index += 1) {
     const provider = candidates[index];
     try {
-      return {
-        value: await request(provider),
-        provider,
-      };
+      const value = await request(provider);
+      try { recordAiProviderAttempt({ providerId: provider.id, model: provider.model, ok: true, atMs: asTimestamp(now) }); } catch { /* usage metrics must not affect generation */ }
+      return { value, provider };
     } catch (error) {
+      try { recordAiProviderAttempt({ providerId: provider.id, model: provider.model, ok: false, atMs: asTimestamp(now) }); } catch { /* usage metrics must not affect generation */ }
       lastError = error;
       if (!shouldFallback(error)) {
         throw error;
