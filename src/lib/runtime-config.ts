@@ -1,6 +1,8 @@
 import { readFile, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
+  HYNIX_PREMIUM_ALERT_PUSH_REVISION,
+  isLegacyUnarmedHynixPremiumAlert,
   normalizeHynixPremiumAlertSettings,
   type HynixPremiumAlertSettings,
 } from "./hynix-premium-alert.ts";
@@ -342,10 +344,32 @@ export async function setDouyinEnabled(enabled: boolean): Promise<RuntimeConfig>
 }
 
 export async function setHynixPremiumAlert(
-  settings: HynixPremiumAlertSettings,
+  settings: Pick<HynixPremiumAlertSettings, "enabled" | "thresholdPct">,
 ): Promise<RuntimeConfig> {
   return mutate((current) => ({
     ...current,
-    hynixPremiumAlert: normalizeHynixPremiumAlertSettings(settings),
+    hynixPremiumAlert: normalizeHynixPremiumAlertSettings({
+      ...settings,
+      pushRevision: HYNIX_PREMIUM_ALERT_PUSH_REVISION,
+    }),
   }));
+}
+
+/** Rewrite the pre-push disabled/30% pair once. Later explicit saves keep pushRevision. */
+export async function persistLegacyHynixPremiumAlertUpgrade(): Promise<boolean> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(CONFIG_PATH, "utf-8"));
+  } catch {
+    return false;
+  }
+  const record = raw && typeof raw === "object"
+    ? (raw as { hynixPremiumAlert?: unknown }).hynixPremiumAlert
+    : undefined;
+  if (!isLegacyUnarmedHynixPremiumAlert(record)) return false;
+  await setHynixPremiumAlert({
+    enabled: true,
+    thresholdPct: 50,
+  });
+  return true;
 }

@@ -6,7 +6,8 @@ import { getRuntimeDataPath } from './runtime-storage.ts';
 import { decodePushKey, validatePushSubscription, type ValidatedPushSubscription } from './web-push-config.ts';
 import type { MarketPushStage, PushEvent, SequencedPushEvent } from './important-push-types.ts';
 
-export type DeviceBaseline = { sources: { market: number; news: number }; marketEpisodes: Array<{ episodeId: string; highestStage: MarketPushStage }>; enabledAt: string };
+export type PushSourceKind = "market" | "news" | "hynix";
+export type DeviceBaseline = { sources: { market: number; news: number; hynix?: number }; marketEpisodes: Array<{ episodeId: string; highestStage: MarketPushStage }>; enabledAt: string };
 export type ClaimedDelivery = { deliveryId: number; deviceId: string; epoch: number; leaseOwner: string; subscription: ValidatedPushSubscription; event: PushEvent; attempts: number };
 export type WorkerHealth = { status: 'disabled' | 'starting' | 'live' | 'error'; updatedAt: string; errorCode: string | null; counts: Record<string, number> };
 type LeaseInput = { deliveryId: number; leaseOwner: string; epoch: number; nowMs: number };
@@ -72,8 +73,8 @@ export function openWebPushStore(path = getRuntimeDataPath(process.env, 'web-pus
     getSubscriptionForControl(id: string, key: string): ValidatedPushSubscription | null { const row = proof(id, key); return row?.enabled ? JSON.parse(row.subscription_json) : null; },
     revokeDevice(id: string, key: string, nowMs: number) { return transaction(() => { const row = proof(id, key); if (!row) return false; if (row.enabled) deactivate(row, nowMs); return true; }); },
     invalidateSubscription(input: { deviceId: string; epoch: number; nowMs: number }) { return transaction(() => { const row = readDevice(input.deviceId); if (!row?.enabled || row.epoch !== input.epoch) return false; deactivate(row, input.nowMs); return true; }); },
-    readSourceCursor(source: 'market' | 'news') { return Number((db.prepare('SELECT sequence FROM push_cursors WHERE source=?').get(source) as { sequence: number } | undefined)?.sequence ?? 0); },
-    ingestSourceEventsAndAdvanceCursor(source: 'market' | 'news', events: SequencedPushEvent[], expectedCursor: number, nowMs: number) {
+    readSourceCursor(source: PushSourceKind) { return Number((db.prepare('SELECT sequence FROM push_cursors WHERE source=?').get(source) as { sequence: number } | undefined)?.sequence ?? 0); },
+    ingestSourceEventsAndAdvanceCursor(source: PushSourceKind, events: SequencedPushEvent[], expectedCursor: number, nowMs: number) {
       return transaction(() => {
         const cursor = Number((db.prepare('SELECT sequence FROM push_cursors WHERE source=?').get(source) as { sequence: number } | undefined)?.sequence ?? 0);
         if (cursor !== expectedCursor) return { cursor, enqueued: 0 };
@@ -86,7 +87,8 @@ export function openWebPushStore(path = getRuntimeDataPath(process.env, 'web-pus
           latest = sequence;
           for (const device of devices) {
             const baseline = JSON.parse(device.baseline_json) as DeviceBaseline;
-            if (sequence <= baseline.sources[source] || occurred < device.enabled_at || (source === 'news' && (!event.sourcePublishedAt || Date.parse(event.sourcePublishedAt) <= device.enabled_at))) continue;
+            const baselineSequence = baseline.sources[source] ?? 0;
+            if (sequence <= baselineSequence || occurred < device.enabled_at || ((source === 'news' || source === 'hynix') && (!event.sourcePublishedAt || Date.parse(event.sourcePublishedAt) <= device.enabled_at))) continue;
             const rank = stageRank(event.stage);
             const previous = db.prepare('SELECT rank FROM push_episode_stages WHERE device_id=? AND epoch=? AND episode_id=?').get(device.device_id, device.epoch, event.episodeId) as { rank: number } | undefined;
             if (previous && previous.rank >= rank) continue;
@@ -105,7 +107,7 @@ export function openWebPushStore(path = getRuntimeDataPath(process.env, 'web-pus
         return { cursor: latest, enqueued };
       });
     },
-    claimDeliveries(input: { kind: 'market' | 'news'; limit: number; leaseOwner: string; leaseMs: number; nowMs: number }): ClaimedDelivery[] {
+    claimDeliveries(input: { kind: PushSourceKind; limit: number; leaseOwner: string; leaseMs: number; nowMs: number }): ClaimedDelivery[] {
       return transaction(() => {
         db.prepare("UPDATE push_deliveries SET state='expired',error_code='event_expired',lease_owner=NULL,lease_until=NULL WHERE state IN ('pending','retry','sending') AND expires_at<=?").run(input.nowMs);
         db.prepare("UPDATE push_deliveries SET state='retry',lease_owner=NULL,lease_until=NULL WHERE state='sending' AND lease_until<=?").run(input.nowMs);

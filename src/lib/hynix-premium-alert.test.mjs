@@ -1,29 +1,42 @@
 import assert from "node:assert/strict";
 import {
+  HYNIX_PREMIUM_ALERT_PUSH_REVISION,
   HYNIX_PREMIUM_ALERT_THRESHOLD_PCT,
   dismissHynixPremiumAlertCycle,
+  isLegacyUnarmedHynixPremiumAlert,
   nextHynixPremiumAlertCycle,
+  normalizeHynixPremiumAlertSettings,
   shouldShowHynixPremiumAlert,
 } from "./hynix-premium-alert.ts";
 
-let cycle = nextHynixPremiumAlertCycle(undefined, 29.99);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 29.99), false);
+let cycle = nextHynixPremiumAlertCycle(undefined, 49.99);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 49.99), false);
 
-cycle = nextHynixPremiumAlertCycle(cycle, 30);
-assert.equal(HYNIX_PREMIUM_ALERT_THRESHOLD_PCT, 30);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 30), true);
+cycle = nextHynixPremiumAlertCycle(cycle, 50);
+assert.equal(HYNIX_PREMIUM_ALERT_THRESHOLD_PCT, 50);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 50), true);
 
 cycle = dismissHynixPremiumAlertCycle(cycle);
-cycle = nextHynixPremiumAlertCycle(cycle, 31.5);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 31.5), false);
+cycle = nextHynixPremiumAlertCycle(cycle, 51.5);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 51.5), false);
 
-cycle = nextHynixPremiumAlertCycle(cycle, 29.5);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 29.5), false);
+cycle = nextHynixPremiumAlertCycle(cycle, 49.5);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 49.5), false);
 
-cycle = nextHynixPremiumAlertCycle(cycle, 30.2);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2), true);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, false), false);
-assert.equal(shouldShowHynixPremiumAlert(cycle, 30.2, true), true);
+cycle = nextHynixPremiumAlertCycle(cycle, 50.2);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 50.2), true);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 50.2, false), false);
+assert.equal(shouldShowHynixPremiumAlert(cycle, 50.2, true), true);
+
+assert.equal(isLegacyUnarmedHynixPremiumAlert({ enabled: false, thresholdPct: 30 }), true);
+assert.deepEqual(
+  normalizeHynixPremiumAlertSettings({ enabled: false, thresholdPct: 30 }),
+  { enabled: true, thresholdPct: 50, pushRevision: HYNIX_PREMIUM_ALERT_PUSH_REVISION },
+);
+assert.deepEqual(
+  normalizeHynixPremiumAlertSettings({ enabled: false, thresholdPct: 30, pushRevision: 1 }),
+  { enabled: false, thresholdPct: 30, pushRevision: 1 },
+);
 
 let customCycle = nextHynixPremiumAlertCycle(undefined, 34.9, 35);
 assert.equal(

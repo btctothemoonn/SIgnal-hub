@@ -767,7 +767,7 @@ export function StocksHynixPremiumCurve({
               SKHYUSDT * 10 / SKHYNIXUSDT。
             </p>
             <p className="mt-1 text-[11px] text-muted">
-              本轮溢价回落到 {formatAlertThreshold(premiumAlertThresholdPct)}% 以下后，再次上穿会重新提醒。
+              本轮溢价回落到 {formatAlertThreshold(premiumAlertThresholdPct)}% 以下后，再次上穿会重新提醒。已开启系统通知的设备会收到同一阈值的后台提醒；服务器只使用最新标记价格，不会用旧 K 线补发。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
