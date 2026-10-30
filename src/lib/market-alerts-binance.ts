@@ -653,6 +653,8 @@ async function persistMarketAlertChart(input: {
   }
 }
 
+const MARKET_ALERT_CHART_IN_FLIGHT = 2;
+
 function createMarketAlertChartQueue(input: {
   client: BinanceMarketClient;
   store: Store;
@@ -660,24 +662,33 @@ function createMarketAlertChartQueue(input: {
   now?: () => number;
 }) {
   const pending = new Set<Promise<void>>();
+  const waiting: Array<{ event: ReturnType<Store["insertMarketAlertEvent"]>; nowMs: number }> = [];
+  const pump = () => {
+    while (pending.size < MARKET_ALERT_CHART_IN_FLIGHT && waiting.length > 0) {
+      const next = waiting.shift();
+      if (!next) break;
+      const task = persistMarketAlertChart({
+        ...input,
+        event: next.event,
+        nowMs: next.nowMs,
+      });
+      pending.add(task);
+      const release = () => {
+        pending.delete(task);
+        pump();
+      };
+      void task.then(release, release);
+    }
+  };
   const enqueue = (event: ReturnType<Store["insertMarketAlertEvent"]>) => {
     if (!input.writeChart) return;
-    const task = persistMarketAlertChart({
-      ...input,
-      event,
-      nowMs: input.now?.() ?? Date.now(),
-    });
-    pending.add(task);
-    const release = () => {
-      pending.delete(task);
-    };
-    void task.then(
-      release,
-      release,
-    );
+    waiting.push({ event, nowMs: input.now?.() ?? Date.now() });
+    pump();
   };
   const drain = async () => {
-    while (pending.size) {
+    while (pending.size > 0 || waiting.length > 0) {
+      pump();
+      if (pending.size === 0) break;
       await Promise.allSettled([...pending]);
     }
   };

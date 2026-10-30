@@ -84,6 +84,10 @@ assert.match(
 );
 assert.match(source, /useBrowserJsonCache<BinanceHynixFundingSnapshot>/);
 assert.match(source, /window\.setInterval\(loadPremiumData,\s*15 \* 60 \* 1000\)/);
+assert.match(source, /数据时间/);
+assert.match(source, /数据可能已过期/);
+assert.match(source, /setQuoteStale\(true\)/);
+assert.doesNotMatch(source, /\{ value: "1m",/);
 assert.match(
   source,
   /if \(snapshot\.points\.length > 1\) \{\s*setLiveSnapshot\(snapshot\)/,

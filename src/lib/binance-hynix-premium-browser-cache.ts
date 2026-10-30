@@ -36,6 +36,8 @@ export type BinanceHynixPremiumBrowserCache = {
   websocket: BinanceHynixPremiumSnapshot["websocket"];
   points: CompactPremiumPoint[];
   errors: string[];
+  stale?: boolean;
+  dataAsOf?: string | null;
 };
 
 function isInterval(value: unknown): value is BinanceHynixPremiumInterval {
@@ -165,6 +167,10 @@ export function compactBinanceHynixPremiumSnapshot(
     websocket: snapshot.websocket,
     points: snapshot.points.map(compactPoint),
     errors: snapshot.errors,
+    ...(typeof snapshot.stale === "boolean" ? { stale: snapshot.stale } : {}),
+    ...(snapshot.dataAsOf === null || typeof snapshot.dataAsOf === "string"
+      ? { dataAsOf: snapshot.dataAsOf }
+      : {}),
   };
 }
 
@@ -186,5 +192,9 @@ export function restoreBinanceHynixPremiumSnapshot(
     points,
     latest: points.at(-1) ?? null,
     errors: value.errors,
+    ...(typeof value.stale === "boolean" ? { stale: value.stale } : {}),
+    ...(value.dataAsOf === null || typeof value.dataAsOf === "string"
+      ? { dataAsOf: value.dataAsOf }
+      : {}),
   };
 }

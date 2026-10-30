@@ -8,6 +8,11 @@ import {
   type BinanceHynixPremiumInterval,
 } from "../../../lib/binance-hynix-premium.ts";
 import {
+  recallHynixPremiumLastGood,
+  rememberHynixPremiumLastGood,
+  retainHynixPremiumSnapshot,
+} from "../../../lib/hynix-premium-snapshot-retention.ts";
+import {
   createSnapshotCache,
   type SnapshotCache,
 } from "../../../lib/snapshot-cache.ts";
@@ -21,20 +26,13 @@ const premiumSnapshotCaches = new Map<
   string,
   SnapshotCache<BinanceHynixPremiumSnapshot>
 >();
-const lastHealthyPremiumSnapshots = new Map<
-  BinanceHynixPremiumInterval,
-  BinanceHynixPremiumSnapshot
->();
-
 function retainHealthyPremiumSnapshot(snapshot: BinanceHynixPremiumSnapshot) {
-  if (snapshot.points.length > 1) {
-    lastHealthyPremiumSnapshots.set(snapshot.interval, snapshot);
-    return snapshot;
-  }
-  const lastHealthy = lastHealthyPremiumSnapshots.get(snapshot.interval);
-  return snapshot.errors.length > 0 && lastHealthy
-    ? { ...lastHealthy, errors: snapshot.errors }
-    : snapshot;
+  const served = retainHynixPremiumSnapshot(
+    snapshot,
+    recallHynixPremiumLastGood(snapshot.interval),
+  );
+  if (served.stale !== true) rememberHynixPremiumLastGood(served);
+  return served;
 }
 
 function snapshotCacheKey({

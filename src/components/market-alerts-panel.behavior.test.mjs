@@ -39,6 +39,10 @@ export default function Image(props) {
 export function getMarketAlertWorkerView() {
   return { label: "离线", detail: "尚未启动", tone: "warning", lastError: null };
 }
+export function isMarketSnapshotStale(value, nowMs, maxAgeMs = 90000) {
+  const time = Date.parse(value ?? "");
+  return !Number.isFinite(time) || time > nowMs + 1000 || nowMs - time > maxAgeMs;
+}
 export function MarketOpportunityPanel() {
   return React.createElement("section", { "data-opportunity-panel": true });
 }
@@ -58,6 +62,7 @@ export function MarketAlertBrief() {
   }).outputText
     .replace('from "next/image"', `from "${stubsImport}"`)
     .replace('from "@/lib/market-alerts-health"', `from "${stubsImport}"`)
+    .replace('from "@/lib/market-snapshot-freshness"', `from "${stubsImport}"`)
     .replace('from "./market-alert-brief"', `from "${stubsImport}"`)
     .replace('from "./market-opportunity-panel"', `from "${stubsImport}"`);
   writeFileSync(runtimePath, output, "utf8");
@@ -194,6 +199,8 @@ export function MarketAlertBrief() {
     );
   });
 
+  assert.match(renderedText(renderer.root), /数据时间/);
+  assert.match(renderedText(renderer.root), /数据可能已过期/);
   const workspace = renderer.root.findByProps({
     "data-market-alert-workspace": true,
   });
