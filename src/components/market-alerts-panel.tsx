@@ -358,8 +358,7 @@ const EventCard = memo(function EventCard({
     ? `市值更新 ${formatTime(event.valuationUpdatedAt)}`
     : "暂无市值数据";
   const level = Math.max(event.level, ...peers.map((item) => item.level));
-  const tickerUpdatedAt = "tickerUpdatedAt" in event ? (event as MarketAlertEvent & { tickerUpdatedAt?: string | null }).tickerUpdatedAt : null;
-  const tickerUpdatedMs = Date.parse(tickerUpdatedAt ?? "");
+  const tickerUpdatedMs = Date.parse(event.tickerUpdatedAt ?? "");
   const tickerStale = Number.isFinite(tickerUpdatedMs) && nowMs - tickerUpdatedMs > TICKER_FRESH_MS;
   const direction = alertDirection(event);
   const sparkValues = [...peers].reverse().map((item) => item.changePct).filter((value): value is number => typeof value === "number" && Number.isFinite(value));

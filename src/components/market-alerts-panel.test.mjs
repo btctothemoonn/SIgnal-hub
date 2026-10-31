@@ -41,5 +41,7 @@ assert.match(source, /120_000/);
 assert.match(source, /groupAlerts/);
 assert.match(source, /data-market-alert-status/);
 assert.match(source, /matchMedia/);
+assert.match(source, /data-market-alert-ticker-stale/);
+assert.match(source, /30 \* 60 \* 1000/);
 
 console.log("ok - market alerts panel renders filters and live state");

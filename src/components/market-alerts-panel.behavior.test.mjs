@@ -179,6 +179,7 @@ export function MarketAlertBrief() {
     ...initialSnapshot.events[0],
     id: "volatility:LONG:XRPUSDT:fixture",
     symbol: "XRPUSDT",
+    tickerUpdatedAt: "2020-01-01T00:00:00.000Z",
     marketCapUsd: null,
     fdvUsd: null,
     metrics: {},
@@ -232,6 +233,11 @@ export function MarketAlertBrief() {
   assert.equal(btcRow.props["data-market-alert-level"], 3);
   assert.match(renderedText(btcRow), /×2/);
   const xrpRow = renderer.root.findByProps({ "data-market-alert-row": "XRPUSDT" });
+  assert.equal(xrpRow.props["data-market-alert-ticker-stale"], "true");
+  assert.equal(
+    renderer.root.findByProps({ "data-market-alert-row": "BTCUSDT" }).props["data-market-alert-ticker-stale"],
+    undefined,
+  );
   const xrpRowText = renderedText(xrpRow);
   assert.doesNotMatch(xrpRowText, /\+0\.00%/);
   // Price and valuations are visible before expansion; missing valuation

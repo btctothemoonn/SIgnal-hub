@@ -5,6 +5,8 @@ import { DatabaseSync } from "node:sqlite";
 import type { StatementSync } from "node:sqlite";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 import {
+  MARKET_TICKER_FRESH_MS,
+  MARKET_TICKER_RETENTION_MS,
   rankTriggeredMarkets,
   shouldSendSqueezeAlert,
   transitionVolatilityState,
@@ -22,6 +24,7 @@ import type {
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
+import { pruneAlertsRetention } from "./market-alerts-retention.ts";
 import type { MarketPushObservation } from "./important-push-types.ts";
 
 type DbValue = string | number | null;
@@ -202,6 +205,7 @@ function rowToEvent(row: DbRow) {
         : null,
     chartInterval,
     chartUpdatedAt,
+    tickerUpdatedAt: stringValue(row.ticker_updated_at) || null,
     occurredAt: stringValue(row.occurred_at),
     createdAt: stringValue(row.created_at),
   };
@@ -217,6 +221,7 @@ function rowToHeartbeat(row: DbRow | undefined) {
     updatedAt: stringValue(row.updated_at),
     lastError: stringValue(row.last_error) || null,
     lastErrorAt: stringValue(row.last_error_at) || null,
+    lastSuccessAt: stringValue(row.last_success_at) || null,
   };
 }
 
@@ -313,7 +318,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       meta_json TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       last_error TEXT,
-      last_error_at TEXT
+      last_error_at TEXT,
+      last_success_at TEXT
     );
     CREATE TABLE IF NOT EXISTS market_alert_tickers (
       symbol TEXT PRIMARY KEY,
@@ -414,6 +420,9 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   }
   if (!heartbeatColumns.has("last_error_at")) {
     db.exec("ALTER TABLE market_alert_heartbeat ADD COLUMN last_error_at TEXT;");
+  }
+  if (!heartbeatColumns.has("last_success_at")) {
+    db.exec("ALTER TABLE market_alert_heartbeat ADD COLUMN last_success_at TEXT;");
   }
   const chartColumns = new Set(
     (db.prepare("PRAGMA table_info(market_alert_charts)").all() as DbRow[]).map(
@@ -615,8 +624,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   `);
   const heartbeatUpsert = db.prepare(`
     INSERT INTO market_alert_heartbeat (
-      worker, status, detail, meta_json, updated_at, last_error, last_error_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      worker, status, detail, meta_json, updated_at, last_error, last_error_at, last_success_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(worker) DO UPDATE SET
       status=excluded.status,
       detail=excluded.detail,
@@ -629,6 +638,10 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       last_error_at=CASE
         WHEN excluded.last_error IS NOT NULL AND excluded.last_error<>'' THEN excluded.last_error_at
         ELSE market_alert_heartbeat.last_error_at
+      END,
+      last_success_at=CASE
+        WHEN excluded.status='live' THEN excluded.updated_at
+        ELSE market_alert_heartbeat.last_success_at
       END
   `);
   const eventDeliveryUpdate = db.prepare(`
@@ -1074,6 +1087,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       updatedAt,
       lastError,
       lastError ? updatedAt : null,
+      input.status === "live" ? updatedAt : null,
     );
   }
 
@@ -1089,19 +1103,30 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     ).map((row) => stringValue(row.symbol));
   }
 
+  const tickerDeleteStale = db.prepare(
+    "DELETE FROM market_alert_tickers WHERE updated_at < ?",
+  );
+
   function upsertMarketTickers(tickers: MarketTickerInput[]) {
+    let newestMs = Number.NEGATIVE_INFINITY;
     transaction(() => {
       for (const ticker of tickers) {
+        const updatedAt = ticker.updatedAt ?? nowIso();
+        const updatedMs = Date.parse(updatedAt);
+        if (Number.isFinite(updatedMs) && updatedMs > newestMs) newestMs = updatedMs;
         run(
           tickerUpsert,
           ticker.symbol,
           ticker.price,
           ticker.pct24h,
           ticker.quoteVolume,
-          ticker.updatedAt ?? nowIso(),
+          updatedAt,
         );
       }
     });
+    if (Number.isFinite(newestMs)) {
+      run(tickerDeleteStale, new Date(newestMs - MARKET_TICKER_RETENTION_MS).toISOString());
+    }
   }
 
   function getMarketValuationRefreshCandidates(input: {
@@ -1643,6 +1668,10 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     return Number(run(opportunityDiagnosticPrune, before).changes);
   }
 
+  function pruneMarketAlertsRetention(nowMs = Date.now()) {
+    return pruneAlertsRetention(db, nowMs);
+  }
+
   function getMarketAlertsSnapshot(options: {
     limit?: number;
     page?: number;
@@ -1683,7 +1712,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       .prepare(`
         SELECT e.*, c.interval AS chart_interval,
           c.updated_at AS chart_updated_at, c.source_key AS chart_source_key,
-          t.market_cap_usd, t.fdv_usd, t.valuation_updated_at
+          t.market_cap_usd, t.fdv_usd, t.valuation_updated_at, t.updated_at AS ticker_updated_at
         FROM market_alert_events e
         LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
         LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
@@ -1827,7 +1856,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         tickers,
         since: rankingSince,
         now: options.now ?? nowIso(),
-        maxTickerAgeMs: options.tickerMaxAgeMs ?? 15 * 60 * 1000,
+        maxTickerAgeMs: options.tickerMaxAgeMs ?? MARKET_TICKER_FRESH_MS,
         limit: 20,
       }),
       health: {
@@ -1911,6 +1940,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     saveOpportunityAiResult,
     recordOpportunityDiagnostic,
     pruneOpportunityDiagnostics,
+    pruneMarketAlertsRetention,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,

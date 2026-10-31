@@ -460,6 +460,19 @@ try {
   assert.equal(snapshot.health.squeeze?.status, "live");
   assert.equal(snapshot.health.squeeze?.lastError, "temporary upstream error");
   assert.equal(snapshot.health.squeeze?.lastErrorAt, "2026-08-31T00:00:01.000Z");
+  assert.equal(snapshot.health.volatilityRest?.lastSuccessAt, "2026-08-31T00:00:01.000Z");
+  assert.equal(snapshot.health.squeeze?.lastSuccessAt, "2026-08-31T00:00:02.000Z");
+  assert.equal(snapshot.events[0].tickerUpdatedAt, "2026-08-31T00:00:05.000Z");
+  a.setMarketAlertsHeartbeat({
+    worker: "squeeze",
+    status: "starting",
+    detail: "正在扫描轧空条件",
+    now: "2026-08-31T00:05:30.000Z",
+  });
+  assert.equal(
+    b.getMarketAlertsSnapshot({ limit: 1, now: "2026-08-31T00:05:30.000Z" }).health.squeeze?.lastSuccessAt,
+    "2026-08-31T00:00:02.000Z",
+  );
   assert.deepEqual(snapshot.marketRanking.map((item) => item.symbol), ["BTCUSDT"]);
   assert.equal(snapshot.marketRanking[0].counts.pump, 2);
   assert.equal(snapshot.marketRanking[0].marketCapUsd, 120_000_000);
