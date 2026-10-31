@@ -22,6 +22,7 @@ import type {
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
+import { pruneAlertsRetention } from "./market-alerts-retention.ts";
 import type { MarketPushObservation } from "./important-push-types.ts";
 
 type DbValue = string | number | null;
@@ -1643,6 +1644,10 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     return Number(run(opportunityDiagnosticPrune, before).changes);
   }
 
+  function pruneMarketAlertsRetention(nowMs = Date.now()) {
+    return pruneAlertsRetention(db, nowMs);
+  }
+
   function getMarketAlertsSnapshot(options: {
     limit?: number;
     page?: number;
@@ -1911,6 +1916,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     saveOpportunityAiResult,
     recordOpportunityDiagnostic,
     pruneOpportunityDiagnostics,
+    pruneMarketAlertsRetention,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,

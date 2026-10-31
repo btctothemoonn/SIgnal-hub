@@ -16,9 +16,20 @@ export function createImportantPushOutbox(db: DatabaseSync) {
       PRIMARY KEY(symbol,participant_key)
     );
     CREATE TABLE IF NOT EXISTS important_push_market_scans (
-      symbol TEXT NOT NULL, participant_key TEXT NOT NULL, scan_id TEXT NOT NULL, PRIMARY KEY(symbol,participant_key,scan_id)
+      symbol TEXT NOT NULL, participant_key TEXT NOT NULL, scan_id TEXT NOT NULL, scanned_at INTEGER,
+      PRIMARY KEY(symbol,participant_key,scan_id)
     );
     CREATE TABLE IF NOT EXISTS important_push_producer_baselines (producer TEXT PRIMARY KEY);
+  `);
+  const scanColumns = new Set(
+    db.prepare("PRAGMA table_info(important_push_market_scans)").all().map((row) => String(row.name)),
+  );
+  if (!scanColumns.has("scanned_at")) {
+    db.exec("ALTER TABLE important_push_market_scans ADD COLUMN scanned_at INTEGER;");
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_important_push_market_scans_scanned_at
+      ON important_push_market_scans (scanned_at);
   `);
   function appendEvent(event: PushEvent): number {
     db.prepare("INSERT OR IGNORE INTO important_push_outbox(event_id,event_json) VALUES (?,?)").run(event.id, JSON.stringify(event));
@@ -45,7 +56,7 @@ export function createImportantPushOutbox(db: DatabaseSync) {
         const participant = marketPushParticipantKey(observation);
         const prior = db.prepare("SELECT evaluated_at FROM important_push_latest_evaluation WHERE symbol=? AND participant_key=?").get(observation.symbol, participant);
         if (prior && Number(prior.evaluated_at) > nowMs) continue;
-        const inserted = db.prepare("INSERT OR IGNORE INTO important_push_market_scans(symbol,participant_key,scan_id) VALUES (?,?,?)").run(observation.symbol, participant, observation.scanId);
+        const inserted = db.prepare("INSERT OR IGNORE INTO important_push_market_scans(symbol,participant_key,scan_id,scanned_at) VALUES (?,?,?,?)").run(observation.symbol, participant, observation.scanId, nowMs);
         if (!inserted.changes) continue;
         db.prepare(`INSERT INTO important_push_latest_evaluation(symbol,participant_key,evaluated_at,observation_json) VALUES (?,?,?,?)
           ON CONFLICT(symbol,participant_key) DO UPDATE SET evaluated_at=excluded.evaluated_at,observation_json=excluded.observation_json`)
