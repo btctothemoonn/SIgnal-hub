@@ -186,6 +186,14 @@ export function MarketAlertBrief() {
     chartUrl: null,
     chartUpdatedAt: null,
   });
+  initialSnapshot.events.push({
+    ...initialSnapshot.events.find((event) => event.symbol === "BTCUSDT"),
+    id: "volatility:LONG:BTCUSDT:earlier",
+    level: 3,
+    volumeRatio: 19.4,
+    trigger: "A趋势·确认",
+    occurredAt: new Date(2026, 7, 31, 7, 40).toISOString(),
+  });
   initialSnapshot.events.push(...Array.from({ length: 96 }, (_, index) => ({
     ...initialSnapshot.events[0],
     id: `volatility:LONG:TEST${index}USDT:fixture`,
@@ -221,6 +229,9 @@ export function MarketAlertBrief() {
   assert.match(renderedText(more), /活跃信号/);
   assert.match(renderedText(more), /Worker 状态/);
   assert.equal(renderer.root.findAll((node) => node.props["data-market-alert-row"]).length, 100);
+  const btcRow = renderer.root.findByProps({ "data-market-alert-row": "BTCUSDT" });
+  assert.equal(btcRow.props["data-market-alert-level"], 3);
+  assert.match(renderedText(btcRow), /×2/);
   const xrpRow = renderer.root.findByProps({ "data-market-alert-row": "XRPUSDT" });
   assert.equal(xrpRow.props["data-market-alert-ticker-stale"], "true");
   assert.equal(

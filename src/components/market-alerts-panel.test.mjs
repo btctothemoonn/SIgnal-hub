@@ -36,6 +36,11 @@ assert.match(source, /lg:max-h-\[calc\(100vh-6\.5rem\)\]/);
 assert.doesNotMatch(source, /最新 5 分钟 K 线图/);
 assert.match(source, /chartInterval/);
 assert.match(source, /data-market-alert-price/);
+assert.match(source, /当前无候选 · OI 覆盖/);
+assert.match(source, /120_000/);
+assert.match(source, /groupAlerts/);
+assert.match(source, /data-market-alert-status/);
+assert.match(source, /matchMedia/);
 assert.match(source, /data-market-alert-ticker-stale/);
 assert.match(source, /30 \* 60 \* 1000/);
 

@@ -156,7 +156,7 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
       </header>
 
       {brief ? (
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted">
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted max-sm:hidden">
           <span className="inline-flex flex-wrap items-center gap-1">
             <Clock3 aria-hidden className="h-3 w-3 shrink-0" />
             数据截至 <SnapshotTime value={brief.windowEnd} />
@@ -176,20 +176,28 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
               {brief.headline}
             </p>
           ) : null}
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted max-sm:hidden">
             {isTracking ? <span>近 3h 预警范围</span> : null}
             <span>{brief.totals.symbols} 币种</span>
             <span>{brief.totals.total} 次预警</span>
             <AlertCounts counts={brief.totals} />
           </div>
           {isTracking && brief.changes && (brief.changes.added.length || brief.changes.downgraded.length) ? (
-            <div className="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 break-words text-[11px] [overflow-wrap:anywhere]">
+            <div className="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 break-words text-[11px] max-sm:hidden [overflow-wrap:anywhere]">
               {brief.changes.added.length ? <span className="text-accent">{`本轮新增：${brief.changes.added.join("、")}`}</span> : null}
               {brief.changes.downgraded.length ? <span className="text-warning">{`本轮已降级：${brief.changes.downgraded.join("、")}`}</span> : null}
             </div>
           ) : null}
           {items.length ? (
-            <ul aria-label={isTracking ? "值得跟踪的异动" : "24h 异动币种"} className="mt-2 min-w-0 divide-y divide-line/70 border-t border-line/70">
+            <>
+            <div aria-label="机会选择" className="mt-2 flex gap-1.5 overflow-x-auto max-sm:hidden">
+              {items.map((item) => (
+                <span key={item.symbol} data-market-brief-chip={item.symbol} className="shrink-0 rounded-full border border-line bg-workspace-canvas px-2 py-1 font-mono text-[11px] font-semibold text-foreground">
+                  {item.symbol.replace(/USDT$/i, "")}
+                </span>
+              ))}
+            </div>
+            <ul aria-label={isTracking ? "值得跟踪的异动" : "24h 异动币种"} className="mt-2 min-w-0 divide-y divide-line/70 border-t border-line/70 max-sm:hidden">
               {items.map((item) => isTracking && item.tracking ? (
                 <li key={item.symbol} data-market-brief-symbol={item.symbol} className="min-w-0 py-3">
                   <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -268,11 +276,12 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
                 </li>
               ))}
             </ul>
+            </>
           ) : (
             <p className="mt-2 text-xs text-muted">{isTracking ? "暂无证据充分、值得继续跟踪的异动。" : brief.status === "empty" ? "本时段暂无异动预警" : "暂无重点币种"}</p>
           )}
           {brief.risks.length ? (
-            <ul aria-label="跟踪风险" className="mt-1.5 min-w-0 space-y-1 border-t border-line/70 pt-2">
+            <ul aria-label="跟踪风险" className="mt-1.5 min-w-0 space-y-1 border-t border-line/70 pt-2 max-sm:hidden">
               {brief.risks.slice(0, 2).map((risk, index) => (
                 <li key={index} className="flex min-w-0 items-start gap-1.5 text-[11px] leading-5 text-warning">
                   <ShieldAlert aria-hidden className="mt-1 h-3 w-3 shrink-0" />
