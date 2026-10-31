@@ -215,9 +215,7 @@ export async function runMarketOpportunityScan(input: {
         createdAt: now,
       });
     }
-    store.pruneOpportunityDiagnostics(
-      new Date(nowMs - MARKET_OPPORTUNITY_RULES.diagnosticRetentionMs).toISOString(),
-    );
+    store.pruneMarketAlertsRetention(nowMs);
     store.setMarketAlertsHeartbeat({
       worker: "opportunity",
       status: "live",

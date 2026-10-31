@@ -12,7 +12,7 @@ export const MARKET_OPPORTUNITY_RULES = {
   exitScans: 3,
   aiCooldownMs: 10 * 60_000,
   aiHourlyLimit: 6,
-  diagnosticRetentionMs: 7 * 24 * 60 * 60_000,
+  diagnosticRetentionMs: 14 * 24 * 60 * 60_000,
   maxConcurrency: 3,
   capitalLong: {
     pct5m: 12,

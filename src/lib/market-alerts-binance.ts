@@ -843,6 +843,7 @@ export async function runVolatilityRestScan(input: {
       detail: "正在读取 Binance 合约行情",
       now: scanIso,
     });
+    store.pruneMarketAlertsRetention?.(nowMs);
     const [exchangeInfo, tickers] = await Promise.all([
       client.getExchangeInfo(),
       client.getTickers24h(),
@@ -1095,6 +1096,7 @@ export async function runSqueezeScan(input: {
       detail: "正在扫描轧空条件",
       now: scanIso,
     });
+    store.pruneMarketAlertsRetention?.(nowMs);
     const [exchangeInfo, tickers, premiums] = await Promise.all([
       client.getExchangeInfo(),
       client.getTickers24h(),
