@@ -184,6 +184,13 @@ test("an empty rule result states no qualifying candidates even when alerts exis
   assert.doesNotMatch(html, /本时段暂无异动预警|data-market-brief-symbol=/);
 });
 
+test("a carried-forward brief shows the last generation clock instead of an error", async () => {
+  const html = await markup({ "3h": brief({ narrationStale: true, status: "ready", model: "MiniMax-M3" }) });
+  assert.match(html, /上次生成 12:01/);
+  assert.match(html, /BTCUSDT/);
+  assert.doesNotMatch(html, /AI 解读暂不可用/);
+});
+
 test("AI failure keeps current rule evidence visible and explicitly labels the fallback", async () => {
   const html = await markup({ "3h": brief({ status: "error", model: null, generatedAt: null }) });
   assert.match(html, /AI 解读暂不可用/);
