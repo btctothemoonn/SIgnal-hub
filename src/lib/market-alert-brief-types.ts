@@ -77,5 +77,8 @@ export type MarketBriefSnapshot = {
   schemaVersion?: number;
   narrationFingerprint?: string;
   narrationNextAt?: string;
+  // Set when a failed refresh kept the previous AI text. The UI shows
+  // "上次生成 hh:mm" from generatedAt instead of an error state.
+  narrationStale?: boolean;
   changes?: { added: string[]; downgraded: string[] };
 };

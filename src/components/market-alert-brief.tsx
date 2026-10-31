@@ -34,6 +34,17 @@ function SnapshotTime({ value }: { value: string | null }) {
   );
 }
 
+function shanghaiClock(value: string | null) {
+  const timestamp = Date.parse(value ?? "");
+  if (!Number.isFinite(timestamp)) return "";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(timestamp);
+}
+
 function checkedAge(value: string | null, nowMs: number) {
   const timestamp = Date.parse(value ?? "");
   if (!Number.isFinite(timestamp) || !Number.isFinite(nowMs)) return null;
@@ -98,8 +109,11 @@ export function MarketAlertBrief({ briefs, nowMs }: MarketAlertBriefProps) {
       ? nowMs - checkedAtMs > MARKET_BRIEF_STALE_AFTER_MS
       : hasReport)
   ));
+  const carriedAt = brief?.narrationStale ? shanghaiClock(brief.generatedAt) : "";
   const statusText = !brief
     ? isTracking ? "跟踪清单待生成" : "回顾尚未生成"
+    : carriedAt
+      ? `上次生成 ${carriedAt}`
     : brief.status === "error"
       ? isTracking ? "AI 解读暂不可用 · 规则筛选" : "AI 解读暂不可用 · 数据回顾"
       : brief.status === "pending"
