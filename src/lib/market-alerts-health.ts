@@ -6,6 +6,7 @@ export type MarketAlertHeartbeat = {
   updatedAt: string;
   lastError?: string | null;
   lastErrorAt?: string | null;
+  lastSuccessAt?: string | null;
 } | null;
 
 const WORKER_STALE_AFTER_MS: Record<string, number> = {
@@ -60,11 +61,20 @@ export function getMarketAlertWorkerView(
   );
   const lastError = showLastError ? heartbeat.lastError ?? null : null;
   const lastErrorAt = showLastError ? heartbeat.lastErrorAt ?? null : null;
+  const lastSuccessMs = Date.parse(heartbeat.lastSuccessAt ?? "");
+  const successFresh =
+    Number.isFinite(lastSuccessMs) &&
+    Number.isFinite(nowMs) &&
+    lastSuccessMs <= nowMs &&
+    nowMs - lastSuccessMs <= staleAfterMs;
   const lastErrorRecovered = Boolean(
     lastError &&
-      heartbeat.status === "live" &&
-      Number.isFinite(updatedAtMs) &&
-      updatedAtMs > lastErrorAtMs,
+      ((heartbeat.status === "live" &&
+        Number.isFinite(updatedAtMs) &&
+        updatedAtMs > lastErrorAtMs) ||
+        (heartbeat.status === "starting" &&
+          successFresh &&
+          lastSuccessMs > lastErrorAtMs)),
   );
   if (stale) {
     return {
@@ -79,10 +89,10 @@ export function getMarketAlertWorkerView(
     };
   }
 
-  const online = heartbeat.status === "live";
+  const online = heartbeat.status === "live" || (heartbeat.status === "starting" && successFresh);
   return {
     online,
-    label: online ? "在线" : heartbeat.status || "启动中",
+    label: online ? "在线" : heartbeat.status === "starting" ? "启动中" : heartbeat.status || "启动中",
     tone: online ? ("success" as const) : ("warning" as const),
     stale: false,
     detail: heartbeat.detail,
