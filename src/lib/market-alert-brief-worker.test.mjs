@@ -114,9 +114,22 @@ try {
   const entirelyBad=structuredClone(valid);entirelyBad.summaries[0].headline='五个强势币种';entirelyBad.summaries[0].items[0].reason='上涨5%';
   assert.throws(()=>parseMarketBriefResponse(JSON.stringify(entirelyBad),parserInputs),/text/,'an entirely unusable response must remain a failure');
   const duplicate=structuredClone(valid);duplicate.summaries.push(duplicate.summaries[0]);
-  assert.throws(()=>parseMarketBriefResponse(JSON.stringify(duplicate),parserInputs),/count/);
+  const salvagedDuplicate=parseMarketBriefResponse(JSON.stringify(duplicate),parserInputs);
+  assert.equal(salvagedDuplicate.length,1);
+  assert.equal(salvagedDuplicate[0].scope,'24h');
+  assert.equal(salvagedDuplicate[0].items[0].symbol,'OLDUSDT');
+  assert.throws(()=>parseMarketBriefResponse('{"summaries":[]}',parserInputs),/count/);
+  assert.throws(()=>parseMarketBriefResponse('{}',parserInputs),/count/);
   const oldScope=structuredClone(valid);oldScope.summaries[0].scope='1h';
   assert.throws(()=>parseMarketBriefResponse(JSON.stringify(oldScope),parserInputs),/shape/);
+  const bothInputs=structuredClone(parserInputs);
+  bothInputs['3h'].items=[{...parserInputs['24h'].items[0],symbol:'AAAUSDT',reason:'量价仍待确认。'}];
+  const partial={summaries:[{scope:'3h',headline:'短时走势仍需持续观察。',items:[{symbol:'AAAUSDT',reason:'异动尚未完全冷却，等待量价重新配合。'}]}]};
+  const partialResult=parseMarketBriefResponse(JSON.stringify(partial),bothInputs);
+  assert.deepEqual(partialResult.map(item=>item.scope),['3h','24h']);
+  assert.equal(partialResult[0].items[0].reason,'异动尚未完全冷却，等待量价重新配合。');
+  assert.equal(partialResult[1].headline,'历史预警回顾，触发次数不代表当前强度。');
+  assert.equal(partialResult[1].items[0].reason,bothInputs['24h'].items[0].reason);
 
   // MiniMax live response: an opening quote is omitted from both items keys,
   // while otherwise useful explanations are mixed with numeric headlines.
@@ -167,21 +180,27 @@ try {
 
   // A failed explanation must never resurrect removed candidates or their evidence.
   const removal=openStore();enrich(removal,'AAAUSDT',now+3*interval-1000,{stale:true});enrich(removal,'BBBUSDT',now+3*interval-1000,{stale:true});alert(removal,'CCCUSDT','third',now+3*interval-1000);enrich(removal,'CCCUSDT',now+3*interval-1000);removal.close();
-  assert.equal((await runMarketBriefCheck({nowMs:now+3*interval,openStore,env,fetchImpl:transport(calls,{fail:true})})).status,'error');
+  assert.equal(calls.length,2);
+  assert.equal((await runMarketBriefCheck({nowMs:now+3*interval,openStore,env,fetchImpl:transport(calls,{fail:true})})).status,'preserved');
+  assert.equal(calls.length,4,'a failed explanation is retried once');
   const failed=read(openStore,now+3*interval)['3h'];
   assert.deepEqual(failed.items.map(item=>item.symbol),['CCCUSDT']);
-  assert.equal(failed.status,'error');
+  assert.equal(failed.status,'ready');
+  assert.equal(failed.narrationStale,true);
+  assert.equal(failed.headline,'短时走势仍需持续观察。');
   assert.equal(failed.stale,false,'fresh rule data remains fresh after an AI failure');
-  assert.equal(failed.model,null);assert.equal(failed.generatedAt,null);
+  assert.equal(failed.model,'MiniMax-M3');
+  assert.equal(failed.generatedAt,iso(now+2*interval));
   assert.ok(failed.items[0].tracking.nextWatch);
   assert.equal((await runMarketBriefCheck({nowMs:now+3*interval+1000,openStore,env,fetchImpl})).status,'cooldown');
   const retry=openStore();enrich(retry,'CCCUSDT',now+4*interval-1000);retry.close();
   assert.equal((await runMarketBriefCheck({nowMs:now+4*interval,openStore,env,fetchImpl})).status,'generated');
-  assert.deepEqual(calls[3],['3h'],'failed unchanged evidence retries at the next scheduled check');
+  assert.equal(read(openStore,now+4*interval)['3h'].narrationStale,false);
+  assert.deepEqual(calls[4],['3h'],'failed unchanged evidence retries at the next scheduled check');
 
   // Updating the retrospective facts must not slide its original narration deadline.
   assert.equal((await runMarketBriefCheck({nowMs:now+3*3600000,openStore,env,fetchImpl})).status,'generated');
-  assert.deepEqual(calls[4],['24h']);
+  assert.deepEqual(calls[5],['24h']);
 
   const concurrentStore=makeStore('concurrent');
   const batch=concurrentStore();alert(batch,'AAAUSDT','batch',now-1000);enrich(batch,'AAAUSDT',now-1000);batch.close();
@@ -191,4 +210,46 @@ try {
   assert.deepEqual(concurrent.map(result=>result.status).sort(),['cooldown','generated']);
   const emptyStore=makeStore('empty');
   assert.equal((await runMarketBriefCheck({nowMs:now,openStore:emptyStore,env,fetchImpl:async()=>{throw new Error('empty windows must not call AI');}})).status,'empty');
+
+  const mismatchStore=makeStore('count-mismatch');
+  const mismatchSeed=mismatchStore();alert(mismatchSeed,'AAAUSDT','mismatch',now-1000);enrich(mismatchSeed,'AAAUSDT',now-1000);mismatchSeed.close();
+  let mismatchCalls=0;
+  const mismatchResult=await runMarketBriefCheck({nowMs:now,openStore:mismatchStore,env,fetchImpl:async(_url,options)=>{
+    mismatchCalls++;
+    const reports=JSON.parse(JSON.parse(options.body).messages[1].content.split('数据：')[1]);
+    const content={summaries:explanation(reports).summaries.filter(summary=>summary.scope==='3h')};
+    return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(content)}}]});
+  }});
+  assert.equal(mismatchResult.status,'generated');
+  assert.equal(mismatchCalls,1,'a partial summaries payload is kept without a second call');
+  const mismatchReports=read(mismatchStore,now);
+  assert.equal(mismatchReports['3h'].status,'ready');
+  assert.equal(mismatchReports['3h'].headline,'短时走势仍需持续观察。');
+  assert.equal(mismatchReports['24h'].status,'ready');
+  assert.equal(mismatchReports['24h'].headline,'历史预警回顾，触发次数不代表当前强度。');
+  assert.equal(mismatchReports['24h'].narrationStale,false);
+
+  const retryStore=makeStore('retry-once');
+  const retrySeed=retryStore();alert(retrySeed,'AAAUSDT','retry',now-1000);enrich(retrySeed,'AAAUSDT',now-1000);retrySeed.close();
+  let retryCalls=0;
+  const retryResult=await runMarketBriefCheck({nowMs:now,openStore:retryStore,env,fetchImpl:async(_url,options)=>{
+    retryCalls++;
+    if(retryCalls===1)return new Response('{}',{status:429});
+    const reports=JSON.parse(JSON.parse(options.body).messages[1].content.split('数据：')[1]);
+    return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(explanation(reports))}}]});
+  }});
+  assert.equal(retryResult.status,'generated');
+  assert.equal(retryCalls,2,'the same provider is retried once after a transport failure');
+  assert.equal(read(retryStore,now)['3h'].model,'MiniMax-M3');
+
+  const coldStore=makeStore('cold-failure');
+  const coldSeed=coldStore();alert(coldSeed,'AAAUSDT','cold',now-1000);enrich(coldSeed,'AAAUSDT',now-1000);coldSeed.close();
+  let coldCalls=0;
+  const coldResult=await runMarketBriefCheck({nowMs:now,openStore:coldStore,env,fetchImpl:async()=>{coldCalls++;return new Response('{}',{status:429});}});
+  assert.equal(coldResult.status,'error');
+  assert.equal(coldCalls,2);
+  const cold=read(coldStore,now)['3h'];
+  assert.equal(cold.status,'error');
+  assert.equal(cold.generatedAt,null);
+  assert.equal(cold.narrationStale,false);
 } finally {rmSync(dir,{recursive:true,force:true});}
