@@ -64,6 +64,43 @@ const restarting = getMarketAlertWorkerView(
   now,
 );
 assert.equal(restarting.lastErrorRecovered, false);
+assert.equal(restarting.online, false);
+assert.equal(restarting.tone, "warning");
+
+const scanning = getMarketAlertWorkerView(
+  {
+    worker: "volatility-rest",
+    status: "starting",
+    detail: "正在读取 Binance 合约行情",
+    meta: {},
+    updatedAt: "2026-08-31T03:59:40.000Z",
+    lastError: "HTTP 429 Too Many Requests",
+    lastErrorAt: "2026-08-31T03:50:00.000Z",
+    lastSuccessAt: "2026-08-31T03:59:10.000Z",
+  },
+  now,
+);
+assert.equal(scanning.online, true);
+assert.equal(scanning.tone, "success");
+assert.equal(scanning.label, "在线");
+assert.equal(scanning.lastErrorRecovered, true);
+
+const stalledStart = getMarketAlertWorkerView(
+  {
+    worker: "squeeze",
+    status: "starting",
+    detail: "正在扫描轧空条件",
+    meta: {},
+    updatedAt: "2026-08-31T03:59:50.000Z",
+    lastError: null,
+    lastErrorAt: null,
+    lastSuccessAt: "2026-08-31T03:50:00.000Z",
+  },
+  now,
+);
+assert.equal(stalledStart.online, false);
+assert.equal(stalledStart.label, "启动中");
+assert.equal(stalledStart.tone, "warning");
 
 const oldRecovered = getMarketAlertWorkerView(
   {

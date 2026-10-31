@@ -1,5 +1,7 @@
 export type VolatilitySide = "LONG" | "SHORT";
 export type MarketAlertType = "volatility" | "short_squeeze";
+export const MARKET_TICKER_FRESH_MS = 30 * 60 * 1000;
+export const MARKET_TICKER_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const STABLE_OR_FIAT_BASES = new Set([
   "USDC",

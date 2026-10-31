@@ -70,8 +70,9 @@ function compactMoney(value: unknown, locale = "zh-CN", fallback = "n/a") {
     style: "currency",
     currency: "USD",
     notation: "compact",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 1,
-  }).format(number);
+  }).format(number).replace(/\.0(?=\D|$)/g, "");
 }
 
 function priceText(value: unknown, fallback = "n/a") {
@@ -200,16 +201,20 @@ function Ranking({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
   );
 }
 
+const TICKER_FRESH_MS = 30 * 60 * 1000;
+
 const EventCard = memo(function EventCard({
   event,
   expanded,
   onToggle,
   onOpenChart,
+  nowMs,
 }: {
   event: MarketAlertEvent;
   expanded: boolean;
   onToggle: (eventId: string) => void;
   onOpenChart: (chart: SelectedChart) => void;
+  nowMs: number;
 }) {
   const squeeze = event.type === "short_squeeze";
   const rising = squeeze || event.side === "LONG";
@@ -235,11 +240,14 @@ const EventCard = memo(function EventCard({
   const valuationTitle = event.valuationUpdatedAt
     ? `市值更新 ${formatTime(event.valuationUpdatedAt)}`
     : "暂无市值数据";
+  const tickerUpdatedMs = Date.parse(event.tickerUpdatedAt ?? "");
+  const tickerStale = Number.isFinite(tickerUpdatedMs) && nowMs - tickerUpdatedMs > TICKER_FRESH_MS;
 
   return (
     <article
       data-market-alert-row={event.symbol}
-      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:52px] [content-visibility:auto] ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
+      data-market-alert-ticker-stale={tickerStale ? "true" : undefined}
+      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:52px] [content-visibility:auto] ${tickerStale ? "opacity-60" : ""} ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
     >
       <button
         type="button"
@@ -612,6 +620,7 @@ export function MarketAlertsPanel({
                     expanded={event.id === expandedEventId}
                     onToggle={toggleEvent}
                     onOpenChart={setSelectedChart}
+                    nowMs={nowMs}
                   />
                 ))}
               </div>
