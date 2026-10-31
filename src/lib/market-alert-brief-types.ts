@@ -77,5 +77,6 @@ export type MarketBriefSnapshot = {
   schemaVersion?: number;
   narrationFingerprint?: string;
   narrationNextAt?: string;
+  narrationStale?: boolean;
   changes?: { added: string[]; downgraded: string[] };
 };

@@ -70,8 +70,9 @@ function compactMoney(value: unknown, locale = "zh-CN", fallback = "n/a") {
     style: "currency",
     currency: "USD",
     notation: "compact",
+    minimumFractionDigits: 0,
     maximumFractionDigits: 1,
-  }).format(number);
+  }).format(number).replace(/\.0(?=\D|$)/g, "");
 }
 
 function priceText(value: unknown, fallback = "n/a") {
@@ -103,6 +104,121 @@ function workerTone(tone: "success" | "warning" | "danger") {
   if (tone === "success") return "bg-success text-success";
   if (tone === "danger") return "bg-danger text-danger";
   return "bg-warning text-warning";
+}
+
+type AlertDirection = "up" | "down" | "squeeze";
+type LevelFilter = 0 | 1 | 2 | 3;
+type WindowFilter = "all" | "1h" | "3h" | "24h";
+const TICKER_FRESH_MS = 30 * 60 * 1000;
+const GROUP_WINDOW_MS = 60 * 60 * 1000;
+const WATCHLIST_KEY = "market-alert-watchlist";
+
+function alertDirection(event: MarketAlertEvent): AlertDirection {
+  if (event.type === "short_squeeze") return "squeeze";
+  return event.side === "SHORT" ? "down" : "up";
+}
+
+function directionMark(direction: AlertDirection) {
+  if (direction === "down") return "▼";
+  if (direction === "squeeze") return "⬆";
+  return "▲";
+}
+
+function relativeAge(value: string | null | undefined, nowMs: number) {
+  const time = Date.parse(value ?? "");
+  if (!Number.isFinite(time) || !Number.isFinite(nowMs)) return "时间未知";
+  const minutes = Math.max(0, Math.floor((nowMs - time) / 60_000));
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
+function clock(value: string | null | undefined) {
+  const time = Date.parse(value ?? "");
+  if (!Number.isFinite(time)) return "--:--";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(time);
+}
+
+type AlertGroup = {
+  id: string;
+  symbol: string;
+  direction: AlertDirection;
+  level: number;
+  latest: MarketAlertEvent;
+  events: MarketAlertEvent[];
+};
+
+function groupAlerts(events: MarketAlertEvent[]): AlertGroup[] {
+  const ordered = [...events].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt) || right.id.localeCompare(left.id));
+  const groups: AlertGroup[] = [];
+  for (const event of ordered) {
+    const at = Date.parse(event.occurredAt);
+    const direction = alertDirection(event);
+    const group = groups.find((item) => item.symbol === event.symbol && item.direction === direction && Number.isFinite(at) && item.events[0] && Date.parse(item.latest.occurredAt) - at <= GROUP_WINDOW_MS && Date.parse(item.latest.occurredAt) - at >= 0);
+    if (!group) {
+      groups.push({ id: event.id, symbol: event.symbol, direction, level: event.level, latest: event, events: [event] });
+      continue;
+    }
+    group.events.push(event);
+    if (event.level > group.level) group.level = event.level;
+  }
+  return groups.sort((left, right) =>
+    right.level - left.level
+    || Date.parse(right.latest.occurredAt) - Date.parse(left.latest.occurredAt)
+    || (right.latest.volumeRatio ?? -1) - (left.latest.volumeRatio ?? -1)
+    || left.symbol.localeCompare(right.symbol));
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length < 2) return null;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const span = max - min || 1;
+  const points = finite.map((value, index) => {
+    const x = (index / (finite.length - 1)) * 64;
+    const y = 16 - ((value - min) / span) * 14 - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg aria-hidden viewBox="0 0 64 16" className="h-4 w-16 shrink-0 text-accent">
+      <polyline fill="none" stroke="currentColor" strokeWidth="1.5" points={points} />
+    </svg>
+  );
+}
+
+function SqueezeWatch({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
+  const active = snapshot.activeSignals.filter((signal) => signal.kind === "short_squeeze");
+  const meta = snapshot.health.squeeze?.meta ?? {};
+  const covered = typeof meta.oiCoverage === "number" ? meta.oiCoverage : "—";
+  const scanned = typeof meta.scanned === "number" ? meta.scanned : "—";
+  return (
+    <section aria-label="轧空观察" className="rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
+      <header className="flex items-center justify-between border-b border-line px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">轧空观察</h2>
+        <span className="text-[10px] text-muted">OI 覆盖 {covered}/{scanned}</span>
+      </header>
+      {active.length ? (
+        <ul className="divide-y divide-line/80 px-4">
+          {active.slice(0, 8).map((signal) => (
+            <li key={signal.key} className="flex items-center justify-between py-2 text-xs">
+              <span className="font-mono font-bold text-foreground">{tokenSymbol(signal.symbol)}</span>
+              <span className="rounded-sm bg-warning-soft px-1.5 py-0.5 font-semibold text-warning">L{signal.level}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-6 text-center text-xs text-muted">当前无候选 · OI 覆盖 {covered}/{scanned}</p>
+      )}
+    </section>
+  );
 }
 
 function Ranking({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
@@ -202,14 +318,20 @@ function Ranking({ snapshot }: { snapshot: MarketAlertsSnapshot }) {
 
 const EventCard = memo(function EventCard({
   event,
+  peers,
   expanded,
   onToggle,
   onOpenChart,
+  onOpenSheet,
+  nowMs,
 }: {
   event: MarketAlertEvent;
+  peers: MarketAlertEvent[];
   expanded: boolean;
   onToggle: (eventId: string) => void;
   onOpenChart: (chart: SelectedChart) => void;
+  onOpenSheet: (event: MarketAlertEvent, peers: MarketAlertEvent[]) => void;
+  nowMs: number;
 }) {
   const squeeze = event.type === "short_squeeze";
   const rising = squeeze || event.side === "LONG";
@@ -235,11 +357,19 @@ const EventCard = memo(function EventCard({
   const valuationTitle = event.valuationUpdatedAt
     ? `市值更新 ${formatTime(event.valuationUpdatedAt)}`
     : "暂无市值数据";
+  const level = Math.max(event.level, ...peers.map((item) => item.level));
+  const tickerUpdatedAt = "tickerUpdatedAt" in event ? (event as MarketAlertEvent & { tickerUpdatedAt?: string | null }).tickerUpdatedAt : null;
+  const tickerUpdatedMs = Date.parse(tickerUpdatedAt ?? "");
+  const tickerStale = Number.isFinite(tickerUpdatedMs) && nowMs - tickerUpdatedMs > TICKER_FRESH_MS;
+  const direction = alertDirection(event);
+  const sparkValues = [...peers].reverse().map((item) => item.changePct).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
   return (
     <article
       data-market-alert-row={event.symbol}
-      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:52px] [content-visibility:auto] ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
+      data-market-alert-level={level}
+      data-market-alert-ticker-stale={tickerStale ? "true" : undefined}
+      className={`border-l-2 bg-workspace-surface [contain-intrinsic-size:52px] [content-visibility:auto] ${tickerStale ? "opacity-60" : ""} ${level >= 3 ? "bg-warning-soft/40 ring-1 ring-inset ring-warning/50" : ""} ${squeeze ? "border-l-warning" : rising ? "border-l-success" : "border-l-danger"}`}
     >
       <button
         type="button"
@@ -247,14 +377,23 @@ const EventCard = memo(function EventCard({
         aria-expanded={expanded}
         aria-controls={detailId}
         aria-label={`${expanded ? "收起" : "展开"} ${event.symbol} 预警详情，${kindLabel}，24 小时 ${signedPercent(pct24h)}，${shortLabel} ${shortValue}`}
-        onClick={() => onToggle(event.id)}
-        className={`grid min-h-[52px] w-full items-center gap-x-1.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors hover:bg-workspace-surface-raised ${ALERT_ROW_COLUMNS}`}
+        onClick={() => {
+          if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches) {
+            onOpenSheet(event, peers);
+            return;
+          }
+          onToggle(event.id);
+        }}
+        className={`hidden min-h-[52px] w-full items-center gap-x-1.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors hover:bg-workspace-surface-raised sm:grid ${ALERT_ROW_COLUMNS}`}
       >
         <span className="flex min-w-0 items-center gap-1.5" title={`${event.symbol} · ${kindLabel}`}>
           <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] ${squeeze ? "bg-warning-soft text-warning" : rising ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
             {squeeze ? <ChevronsUp aria-hidden className="h-3.5 w-3.5" /> : rising ? <ArrowUpRight aria-hidden className="h-3.5 w-3.5" /> : <ArrowDownRight aria-hidden className="h-3.5 w-3.5" />}
           </span>
-          <strong className="min-w-0 break-all font-mono text-xs leading-4 text-foreground">{event.symbol}</strong>
+          <strong className="min-w-0 break-all font-mono text-xs leading-4 text-foreground">{tokenSymbol(event.symbol)}</strong>
+          <span className="shrink-0 font-mono text-[10px] font-semibold text-muted">{directionMark(direction)} L{level}</span>
+          <span className="shrink-0 font-mono text-[10px] text-muted">×{peers.length}</span>
+          <Sparkline values={sparkValues} />
         </span>
 
         <span data-market-alert-price title="触发时价格（美元）" className="hidden break-all text-right font-mono text-xs tabular-nums text-foreground @min-[40rem]:block">{priceText(event.price, "—")}</span>
@@ -266,7 +405,7 @@ const EventCard = memo(function EventCard({
           <span className="mt-0.5 block whitespace-nowrap text-[10px] font-normal text-muted">{shortLabel}</span>
         </span>
 
-        <span className="text-right text-[10px] text-muted">{formatTime(event.occurredAt)}</span>
+        <span className="text-right text-[10px] text-muted">{formatTime(event.occurredAt)}<span className="mt-0.5 block sm:hidden">{clock(event.occurredAt)}</span></span>
 
         <span className="flex h-8 w-6 items-center justify-center text-muted">
           <ChevronDown aria-hidden className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
@@ -276,6 +415,16 @@ const EventCard = memo(function EventCard({
           <span>流通市值 <span className="font-mono tabular-nums text-foreground">{marketCap}</span></span>
           <span>FDV <span className="font-mono tabular-nums text-foreground">{fdv}</span></span>
         </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onOpenSheet(event, peers)}
+        className="block w-full px-3 py-2 text-left sm:hidden"
+      >
+        <span className="block truncate font-mono text-sm font-semibold text-foreground">
+          {tokenSymbol(event.symbol)} {directionMark(direction)} L{level} {signedPercent(event.changePct)} ×{peers.length} · {clock(event.occurredAt)}
+        </span>
+        <span className="mt-0.5 block truncate text-[11px] text-muted">量比 {event.volumeRatio == null ? "—" : event.volumeRatio.toFixed(1)} · {event.trigger.split("·")[0]}</span>
       </button>
 
       {expanded ? (
@@ -355,6 +504,16 @@ const EventCard = memo(function EventCard({
             </div>
 
             {event.reasons.length ? <p className="mt-3 text-xs leading-5 text-muted">{event.reasons.join(" · ")}</p> : null}
+            <ol aria-label="触发时间线" className="mt-3 space-y-1 border-t border-line pt-2 text-[11px] text-muted">
+              {peers.map((item) => (
+                <li key={item.id} className="flex flex-wrap gap-x-2">
+                  <span>{formatTime(item.occurredAt)}</span>
+                  <span>L{item.level}</span>
+                  <span>{signedPercent(item.changePct)}</span>
+                  <span>{item.trigger}</span>
+                </li>
+              ))}
+            </ol>
           </div>
         </div>
       ) : null}
@@ -449,6 +608,12 @@ export function MarketAlertsPanel({
   const [selectedChart, setSelectedChart] = useState<SelectedChart | null>(null);
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [pushSymbol, setPushSymbol] = useState<string | null>(null);
+  const [levelFilter, setLevelFilter] = useState<LevelFilter>(0);
+  const [directionFilter, setDirectionFilter] = useState<AlertDirection | "all">("all");
+  const [windowFilter, setWindowFilter] = useState<WindowFilter>("all");
+  const [watchOnly, setWatchOnly] = useState(false);
+  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [sheet, setSheet] = useState<{ event: MarketAlertEvent; peers: MarketAlertEvent[] } | null>(null);
   useEffect(() => {
     const symbol = new URLSearchParams(window.location?.search ?? "").get("symbol");
     if (symbol && /^[A-Z0-9]{2,40}$/.test(symbol)) queueMicrotask(() => setPushSymbol(symbol));
@@ -464,6 +629,14 @@ export function MarketAlertsPanel({
     const timer = window.setInterval(() => setNowMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage?.getItem(WATCHLIST_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed) || !parsed.length) return;
+      setWatchlist(parsed.filter((item) => typeof item === "string"));
+    } catch { /* ignore a damaged watchlist */ }
+  }, []);
 
   useEffect(() => {
     if (!selectedChart) return;
@@ -474,26 +647,18 @@ export function MarketAlertsPanel({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedChart]);
 
-  useEffect(() => {
-    const stream = new EventSource("/api/market-alerts/stream");
-    const handleSnapshot = (message: MessageEvent<string>) => {
-      try {
-        setSnapshot(JSON.parse(message.data) as MarketAlertsSnapshot);
-        setStreamStatus("live");
-      } catch {
-        setStreamStatus("retrying");
-      }
-    };
-    stream.addEventListener("market-alerts-snapshot", handleSnapshot as EventListener);
-    stream.addEventListener("heartbeat", () => setStreamStatus("live"));
-    stream.onerror = () => setStreamStatus("retrying");
-    return () => stream.close();
-  }, []);
-
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const response = await fetch("/api/market-alerts?limit=100", { cache: "no-store" });
+      const params = new URLSearchParams({ limit: "100" });
+      if (levelFilter) params.set("level", String(levelFilter));
+      if (watchOnly && watchlist.length === 1) params.set("symbol", watchlist[0]);
+      if (windowFilter !== "all") {
+        const hours = windowFilter === "1h" ? 1 : windowFilter === "3h" ? 3 : 24;
+        params.set("from", new Date(Date.now() - hours * 60 * 60_000).toISOString());
+        params.set("to", new Date().toISOString());
+      }
+      const response = await fetch(`/api/market-alerts?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setSnapshot((await response.json()) as MarketAlertsSnapshot);
       setStreamStatus("live");
@@ -502,12 +667,67 @@ export function MarketAlertsPanel({
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [levelFilter, watchOnly, watchlist, windowFilter]);
+
+  useEffect(() => {
+    let pollTimer = 0;
+    let closed = false;
+    const stream = new EventSource("/api/market-alerts/stream");
+    const stopPoll = () => {
+      if (!pollTimer) return;
+      window.clearInterval(pollTimer);
+      pollTimer = 0;
+    };
+    const handleSnapshot = (message: MessageEvent<string>) => {
+      try {
+        setSnapshot(JSON.parse(message.data) as MarketAlertsSnapshot);
+        setStreamStatus("live");
+        stopPoll();
+      } catch {
+        setStreamStatus("retrying");
+      }
+    };
+    stream.addEventListener("market-alerts-snapshot", handleSnapshot as EventListener);
+    stream.addEventListener("heartbeat", () => setStreamStatus("live"));
+    stream.onerror = () => {
+      setStreamStatus("retrying");
+      if (pollTimer || closed) return;
+      pollTimer = window.setInterval(() => { void refresh(); }, 120_000);
+    };
+    return () => {
+      closed = true;
+      stopPoll();
+      stream.close();
+    };
+  }, [refresh]);
 
   const filteredEvents = useMemo(
-    () => snapshot.events.filter((event) => filter === "all" || event.type === filter),
-    [filter, snapshot.events],
+    () => snapshot.events.filter((event) => {
+      if (filter !== "all" && event.type !== filter) return false;
+      if (levelFilter && event.level !== levelFilter) return false;
+      if (directionFilter !== "all" && alertDirection(event) !== directionFilter) return false;
+      if (watchOnly && !watchlist.includes(event.symbol)) return false;
+      if (windowFilter !== "all") {
+        const at = Date.parse(event.occurredAt);
+        const hours = windowFilter === "1h" ? 1 : windowFilter === "3h" ? 3 : 24;
+        if (!Number.isFinite(at) || nowMs - at > hours * 60 * 60_000) return false;
+      }
+      return true;
+    }),
+    [directionFilter, filter, levelFilter, nowMs, snapshot.events, watchOnly, watchlist, windowFilter],
   );
+  const groups = useMemo(() => groupAlerts(filteredEvents), [filteredEvents]);
+  const directionCounts = useMemo(() => ({
+    up: snapshot.events.filter((event) => alertDirection(event) === "up").length,
+    down: snapshot.events.filter((event) => alertDirection(event) === "down").length,
+    squeeze: snapshot.events.filter((event) => alertDirection(event) === "squeeze").length,
+  }), [snapshot.events]);
+  const workerLights = [
+    ["WS", snapshot.health.volatilityWs],
+    ["REST", snapshot.health.volatilityRest],
+    ["轧空", snapshot.health.squeeze],
+    ["决策", snapshot.health.opportunity],
+  ] as const;
   const counts = useMemo(
     () => ({
       all: snapshot.events.length,
@@ -528,14 +748,27 @@ export function MarketAlertsPanel({
       {pushSymbol ? <div id={`market-push-${pushSymbol}`} className="rounded-lg border border-accent/30 bg-accent-soft p-3 text-sm text-foreground">通知关联币种：<strong className="font-mono">{pushSymbol}</strong>。当前列表可能已更新，币种不在列表中时仍保留这条通知引用。</div> : null}
       <div className="flex flex-col gap-3 rounded-lg border border-workspace-line-strong bg-workspace-toolbar px-3 py-2.5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <ShieldAlert aria-hidden className="h-5 w-5 text-warning" />
+          <div data-market-alert-status className="flex items-center gap-2 overflow-x-auto whitespace-nowrap max-sm:flex-nowrap sm:flex-wrap">
+            <ShieldAlert aria-hidden className="h-5 w-5 shrink-0 text-warning" />
             <h1 className="text-lg font-semibold text-foreground">合约异动</h1>
-            <span className={`h-1.5 w-1.5 rounded-full ${streamStatus === "live" ? "bg-success" : "bg-warning"}`} />
+            {workerLights.map(([label, heartbeat]) => {
+              const view = getMarketAlertWorkerView(heartbeat, nowMs);
+              const tone = workerTone(view.tone);
+              return (
+                <span key={label} title={`${label} ${view.label}`} className={`inline-flex items-center gap-1 text-[11px] font-medium ${tone.split(" ")[1]}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${tone.split(" ")[0]}`} />
+                  {label}
+                </span>
+              );
+            })}
             <span className={`text-[11px] font-medium ${liveWorkers === 4 ? "text-success" : "text-warning"}`}>{liveWorkers}/4 在线</span>
+            <span className="text-[11px] text-muted">上涨 {directionCounts.up}</span>
+            <span className="text-[11px] text-muted">下跌 {directionCounts.down}</span>
+            <span className="text-[11px] text-muted">轧空 {directionCounts.squeeze}</span>
           </div>
           <p className="mt-1 text-xs text-muted">
             数据时间 {formatTime(snapshot.latestUpdatedAt || snapshot.generatedAt, true)}
+            <span> · 最新 {relativeAge(snapshot.latestUpdatedAt || snapshot.generatedAt, nowMs)}</span>
             {isMarketSnapshotStale(snapshot.latestUpdatedAt || snapshot.generatedAt, nowMs) ? (
               <span className="text-warning"> · 数据可能已过期</span>
             ) : null}
@@ -575,8 +808,21 @@ export function MarketAlertsPanel({
       >
         <div
           data-market-alert-right-rail={true}
-          className="order-1 min-w-0 lg:order-2 lg:col-start-2 lg:row-start-1"
+          className="order-1 min-w-0 space-y-3 lg:order-2 lg:col-start-2 lg:row-start-1"
         >
+          <div data-market-alert-filters className="sticky top-0 z-20 flex gap-1 overflow-x-auto rounded-lg border border-line bg-workspace-surface p-1.5 shadow-sm lg:static lg:flex-wrap">
+            {([0, 1, 2, 3] as const).map((level) => (
+              <button key={level} type="button" aria-pressed={levelFilter === level} onClick={() => setLevelFilter(level)} className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${levelFilter === level ? "border-accent/40 bg-accent-soft text-foreground" : "border-transparent text-muted"}`}>{level === 0 ? "全部等级" : `L${level}`}</button>
+            ))}
+            {(["all", "up", "down", "squeeze"] as const).map((direction) => (
+              <button key={direction} type="button" aria-pressed={directionFilter === direction} onClick={() => setDirectionFilter(direction)} className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${directionFilter === direction ? "border-accent/40 bg-accent-soft text-foreground" : "border-transparent text-muted"}`}>{direction === "all" ? "全部方向" : direction === "up" ? "上涨" : direction === "down" ? "下跌" : "轧空方向"}</button>
+            ))}
+            {(["all", "1h", "3h", "24h"] as const).map((windowKey) => (
+              <button key={windowKey} type="button" aria-pressed={windowFilter === windowKey} onClick={() => setWindowFilter(windowKey)} className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${windowFilter === windowKey ? "border-accent/40 bg-accent-soft text-foreground" : "border-transparent text-muted"}`}>{windowKey === "all" ? "全部时间" : windowKey === "1h" ? "1小时" : windowKey === "3h" ? "3小时" : "24小时"}</button>
+            ))}
+            <button type="button" aria-pressed={watchOnly} onClick={() => setWatchOnly((current) => !current)} className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${watchOnly ? "border-accent/40 bg-accent-soft text-foreground" : "border-transparent text-muted"}`}>自选 {watchlist.length}</button>
+          </div>
+          <SqueezeWatch snapshot={snapshot} />
           <MarketOpportunityPanel
             opportunities={snapshot.opportunities}
             meta={snapshot.opportunityMeta}
@@ -591,7 +837,7 @@ export function MarketAlertsPanel({
         >
           <header className="mb-2 flex items-center justify-between px-1.5">
             <h2 className="text-sm font-semibold text-foreground">实时预警</h2>
-            <span className="text-xs text-muted">{filteredEvents.length} 条</span>
+            <span className="text-xs text-muted">{groups.length} 组</span>
           </header>
           <div className="overflow-hidden rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm">
             <div className={`grid min-h-8 items-center gap-x-1.5 border-b border-l-2 border-l-transparent border-line bg-workspace-surface-raised px-2.5 text-[10px] font-medium text-muted ${ALERT_ROW_COLUMNS}`}>
@@ -603,15 +849,18 @@ export function MarketAlertsPanel({
               <span className="text-right">时间</span>
               <span />
             </div>
-            {filteredEvents.length ? (
+            {groups.length ? (
               <div className="divide-y divide-line/80">
-                {filteredEvents.map((event) => (
+                {groups.map((group) => (
                   <EventCard
-                    key={event.id}
-                    event={event}
-                    expanded={event.id === expandedEventId}
+                    key={group.id}
+                    event={group.latest}
+                    peers={group.events}
+                    expanded={group.id === expandedEventId}
                     onToggle={toggleEvent}
                     onOpenChart={setSelectedChart}
+                    onOpenSheet={(event, peers) => setSheet({ event, peers })}
+                    nowMs={nowMs}
                   />
                 ))}
               </div>
@@ -647,6 +896,24 @@ export function MarketAlertsPanel({
           </details>
         </aside>
       </div>
+
+      {sheet ? (
+        <div role="dialog" aria-modal="true" aria-label={`${sheet.event.symbol} 详情`} className="fixed inset-0 z-[80] flex items-end sm:hidden">
+          <button type="button" aria-label="关闭详情背景" className="absolute inset-0 bg-black/70" onClick={() => setSheet(null)} />
+          <div className="relative z-10 max-h-[85vh] w-full overflow-auto rounded-t-2xl border border-line bg-workspace-surface p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="font-mono text-sm font-bold">{tokenSymbol(sheet.event.symbol)} {directionMark(alertDirection(sheet.event))} L{sheet.event.level}</h2>
+              <button type="button" aria-label="关闭详情" onClick={() => setSheet(null)} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line"><X aria-hidden className="h-4 w-4" /></button>
+            </div>
+            {sheet.event.chartUrl ? (
+              <Image unoptimized src={sheet.event.chartUrl} alt={`${sheet.event.symbol} 最新 ${klineIntervalLabel(sheet.event.chartInterval)} K 线图`} width={1200} height={630} className="h-auto w-full" />
+            ) : <p className="py-6 text-center text-xs text-muted">暂无 K 线快照</p>}
+            <ol aria-label="触发时间线" className="mt-3 space-y-1 text-xs text-muted">
+              {sheet.peers.map((item) => <li key={item.id}>{clock(item.occurredAt)} · L{item.level} · {signedPercent(item.changePct)} · {item.trigger}</li>)}
+            </ol>
+          </div>
+        </div>
+      ) : null}
 
       {selectedChart ? (
         <div

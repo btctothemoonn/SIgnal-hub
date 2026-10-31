@@ -91,6 +91,13 @@ async function markup(briefs) {
   return renderToStaticMarkup(React.createElement(Component, { briefs, nowMs }));
 }
 
+test("opportunity picks render as chips and a stale narration shows its clock", async () => {
+  const html = await markup({ "3h": brief({ narrationStale: true }) });
+  assert.match(html, /data-market-brief-chip="BTCUSDT"/);
+  assert.match(html, /上次生成 12:01/);
+  assert.match(html, /max-sm:hidden/);
+});
+
 test("defaults to a three-candidate tracking list with evidence and observation conditions", async () => {
   const html = await markup({ "3h": brief(), "24h": brief({ scope: "24h", headline: "全天报告" }) });
   assert.match(html, /异动跟踪/);
