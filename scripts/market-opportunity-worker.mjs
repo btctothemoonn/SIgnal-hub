@@ -2,6 +2,7 @@ import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
 import { runMarketOpportunityScan } from "../src/lib/market-opportunity-worker.ts";
 import { runMarketBriefCheck } from "../src/lib/market-alert-brief-worker.ts";
 import { MARKET_BRIEF_INTERVAL_MS } from "../src/lib/market-alert-brief-types.ts";
+import { runMarketSignalsCycle } from "../src/lib/market-signals-worker.ts";
 import {
   installWorkerShutdown,
   loadWorkerEnv,
@@ -40,6 +41,26 @@ const briefTask = (async () => {
   } while (!once && !controller.signal.aborted);
 })();
 
+// Rule-based signals (pullback entries, positioning watches, outcome tracking) on their own cadence.
+const SIGNALS_INTERVAL_MS = 5 * 60_000;
+const signalsTask = (async () => {
+  do {
+    const startedAt = Date.now();
+    try {
+      const result = await runMarketSignalsCycle();
+      logWorker("market.signals.done", {
+        durationMs: Date.now() - startedAt,
+        ...result,
+        errors: result.errors.slice(0, 5),
+        errorCount: result.errors.length,
+      });
+    } catch (error) {
+      logWorker("market.signals.error", { error: safeError(error) });
+    }
+    if (!once) await waitFor(nextWorkerDelay(SIGNALS_INTERVAL_MS, startedAt), controller.signal);
+  } while (!once && !controller.signal.aborted);
+})();
+
 do {
   const cycleStartedAt = Date.now();
   try {
@@ -58,3 +79,4 @@ do {
   }
 } while (!once && !controller.signal.aborted);
 await briefTask;
+await signalsTask;

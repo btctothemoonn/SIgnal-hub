@@ -2,6 +2,7 @@ import type { EnvLike, PushEvent, SequencedPushEvent } from './important-push-ty
 import { qualifyOpportunity, qualifySqueeze } from './important-push-policy.ts';
 import { qualifyImportantNews } from './important-news-push.ts';
 import type { HynixPremiumPushStore } from './hynix-premium-push.ts';
+import type { MarketSignalsStore } from './market-signals.ts';
 import { readDailyBriefPushEvidence, readDailyBriefPushOutboxAfter, getDailyBriefPushBaseline } from './daily-investment-brief.ts';
 import type { openMarketAlertsStore } from './market-alerts-store.ts';
 import type { WebPushSender } from './web-push-sender.ts';
@@ -32,17 +33,20 @@ export function createNewsPushSource(env: EnvLike = process.env): PushSourceAdap
 export function createHynixPushSource(store: HynixPremiumPushStore): PushSourceAdapter {
   return { readAfter: store.readAfter, getBaseline: store.getBaseline, revalidate: (event, nowMs) => store.revalidate(event, nowMs) };
 }
-export function capturePushBaseline(market: ReturnType<typeof openMarketAlertsStore>, news: PushSourceAdapter, nowMs: number, hynix?: PushSourceAdapter): DeviceBaseline {
-  const baseline = market.getMarketPushBaseline();
-  return { sources: { market: baseline.lastSequence, news: news.getBaseline().lastSequence, hynix: hynix?.getBaseline().lastSequence ?? 0 }, marketEpisodes: baseline.episodes.map(episode => ({ episodeId: episode.episodeId, highestStage: episode.highestStage })), enabledAt: new Date(nowMs).toISOString() };
+export function createSignalsPushSource(store: MarketSignalsStore): PushSourceAdapter {
+  return { readAfter: store.readAfter, getBaseline: store.getBaseline, revalidate: (event, nowMs) => store.revalidate(event, nowMs) };
 }
-export async function runWebPushCycle(input: { pushStore: WebPushStore; marketSource: PushSourceAdapter; newsSource: PushSourceAdapter; hynixSource?: PushSourceAdapter; sender: WebPushSender; nowMs: number; owner: string; readNews?: boolean; now?: () => number; random?: () => number; signal?: AbortSignal }) {
+export function capturePushBaseline(market: ReturnType<typeof openMarketAlertsStore>, news: PushSourceAdapter, nowMs: number, hynix?: PushSourceAdapter, signals?: PushSourceAdapter): DeviceBaseline {
+  const baseline = market.getMarketPushBaseline();
+  return { sources: { market: baseline.lastSequence, news: news.getBaseline().lastSequence, hynix: hynix?.getBaseline().lastSequence ?? 0, signals: signals?.getBaseline().lastSequence ?? 0 }, marketEpisodes: baseline.episodes.map(episode => ({ episodeId: episode.episodeId, highestStage: episode.highestStage })), enabledAt: new Date(nowMs).toISOString() };
+}
+export async function runWebPushCycle(input: { pushStore: WebPushStore; marketSource: PushSourceAdapter; newsSource: PushSourceAdapter; hynixSource?: PushSourceAdapter; signalsSource?: PushSourceAdapter; sender: WebPushSender; nowMs: number; owner: string; readNews?: boolean; now?: () => number; random?: () => number; signal?: AbortSignal }) {
   const started = Date.now(); const now = input.now ?? (() => input.nowMs + Date.now() - started);
-  const result = { marketSent: 0, newsSent: 0, hynixSent: 0, expired: 0, failed: 0 };
+  const result = { marketSent: 0, newsSent: 0, hynixSent: 0, signalsSent: 0, expired: 0, failed: 0 };
   let errorCode: string | null = null;
-  for (const kind of ['market', 'news', 'hynix'] as const) {
-    if ((kind === 'news' && input.readNews === false) || (kind === 'hynix' && !input.hynixSource) || input.signal?.aborted) continue;
-    const adapter = kind === 'market' ? input.marketSource : kind === 'hynix' ? input.hynixSource! : input.newsSource;
+  for (const kind of ['market', 'news', 'hynix', 'signals'] as const) {
+    if ((kind === 'news' && input.readNews === false) || (kind === 'hynix' && !input.hynixSource) || (kind === 'signals' && !input.signalsSource) || input.signal?.aborted) continue;
+    const adapter = kind === 'market' ? input.marketSource : kind === 'hynix' ? input.hynixSource! : kind === 'signals' ? input.signalsSource! : input.newsSource;
     let cursor = input.pushStore.readSourceCursor(kind);
     while (!input.signal?.aborted) {
       const events = adapter.readAfter(cursor, 1000); if (!events.length) break;
@@ -55,9 +59,10 @@ export async function runWebPushCycle(input: { pushStore: WebPushStore; marketSo
     ...input.pushStore.claimDeliveries({ kind: 'market', limit: 3, leaseOwner: input.owner, leaseMs: 30000, nowMs: now() }),
     ...input.pushStore.claimDeliveries({ kind: 'news', limit: 1, leaseOwner: input.owner, leaseMs: 30000, nowMs: now() }),
     ...(input.hynixSource ? input.pushStore.claimDeliveries({ kind: 'hynix', limit: 1, leaseOwner: input.owner, leaseMs: 30000, nowMs: now() }) : []),
+    ...(input.signalsSource ? input.pushStore.claimDeliveries({ kind: 'signals', limit: 1, leaseOwner: input.owner, leaseMs: 30000, nowMs: now() }) : []),
   ];
   await Promise.all(jobs.map(async job => {
-    const current = now(); const adapter = job.event.source === 'market' ? input.marketSource : job.event.source === 'hynix' ? input.hynixSource ?? input.newsSource : input.newsSource;
+    const current = now(); const adapter = job.event.source === 'market' ? input.marketSource : job.event.source === 'hynix' ? input.hynixSource ?? input.newsSource : job.event.source === 'signals' ? input.signalsSource ?? input.newsSource : input.newsSource;
     if (input.signal?.aborted || !input.pushStore.isDeliveryActive({ ...job, nowMs: current })) return;
     const ttlSeconds = Math.floor((Date.parse(job.event.expiresAt) - current) / 1000);
     if (ttlSeconds <= 0 || !adapter.revalidate(job.event, current)) {
@@ -65,10 +70,10 @@ export async function runWebPushCycle(input: { pushStore: WebPushStore; marketSo
     }
     if (!input.pushStore.isDeliveryActive({ ...job, nowMs: now() })) return;
     const remainingMs = Date.parse(job.event.expiresAt) - now();
-    const sent = await input.sender.send(job.subscription, job.event, { ttlSeconds, urgency: job.event.source === 'market' || job.event.source === 'hynix' ? 'high' : 'normal', timeoutMs: 10000, expiresAtMs: Date.now() + remainingMs, signal: input.signal });
+    const sent = await input.sender.send(job.subscription, job.event, { ttlSeconds, urgency: job.event.source === 'market' || job.event.source === 'hynix' || job.event.source === 'signals' ? 'high' : 'normal', timeoutMs: 10000, expiresAtMs: Date.now() + remainingMs, signal: input.signal });
     const finished = now();
     if (sent.kind === 'accepted') {
-      if (input.pushStore.finishDelivery({ ...job, nowMs: finished })) { if (job.event.source === 'market') result.marketSent++; else if (job.event.source === 'hynix') result.hynixSent++; else result.newsSent++; }
+      if (input.pushStore.finishDelivery({ ...job, nowMs: finished })) { if (job.event.source === 'market') result.marketSent++; else if (job.event.source === 'hynix') result.hynixSent++; else if (job.event.source === 'signals') result.signalsSent++; else result.newsSent++; }
     } else if (sent.kind === 'gone') {
       input.pushStore.invalidateSubscription({ deviceId: job.deviceId, epoch: job.epoch, nowMs: finished }); result.failed++;
     } else if (sent.kind === 'retry') {
@@ -82,7 +87,7 @@ export async function runWebPushCycle(input: { pushStore: WebPushStore; marketSo
     }
   }));
   const previousError = input.pushStore.readWorkerHealth()?.errorCode;
-  if (!errorCode && previousError === 'push_auth_failed' && result.marketSent + result.newsSent + result.hynixSent === 0) errorCode = previousError;
+  if (!errorCode && previousError === 'push_auth_failed' && result.marketSent + result.newsSent + result.hynixSent + result.signalsSent === 0) errorCode = previousError;
   input.pushStore.setWorkerHealth({ status: errorCode ? 'error' : 'live', updatedAt: new Date(now()).toISOString(), errorCode, counts: input.pushStore.readDeliveryCounts() });
   return result;
 }

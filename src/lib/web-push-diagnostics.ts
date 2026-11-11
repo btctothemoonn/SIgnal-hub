@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { getDailyBriefDbPath } from "./daily-investment-brief.ts";
 import { getWebPushConfig } from "./web-push-config.ts";
 import type { EnvLike } from "./important-push-types.ts";
+import { marketSignalsDbPath } from "./market-signals.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 export type PushDiagnosticEvent = {
@@ -148,6 +149,7 @@ export function readWebPushDiagnostics(env: EnvLike = process.env, now = new Dat
       ...readOutbox(marketPath),
       ...readOutbox(getDailyBriefDbPath(env)),
       ...readOutbox(hynixPath),
+      ...readOutbox(marketSignalsDbPath(env)),
     ].sort((left, right) => (right.sequence ?? 0) - (left.sequence ?? 0)).slice(0, 12),
     deliveries: stored.deliveries,
   };

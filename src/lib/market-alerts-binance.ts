@@ -42,6 +42,8 @@ export interface BinanceMarketClient {
   getMarketValuations?(markets: MarketValuationRequest[]): Promise<MarketValuation[]>;
   getPremiumIndex?(): Promise<JsonRecord[]>;
   getOpenInterestHistory?(symbol: string): Promise<JsonRecord[]>;
+  getKlinesSince?(symbol: string, interval: "15m" | "1h", startTime: number, limit: number): Promise<KlineRow[]>;
+  getHourlyOpenInterest?(symbol: string, limit: number): Promise<JsonRecord[]>;
   getGlobalLongShortRatio?(symbol: string): Promise<number | null>;
   getTopTraderPositionRatio?(symbol: string): Promise<number | null>;
   getTakerBuySellRatio?(symbol: string): Promise<number | null>;
@@ -313,6 +315,10 @@ export function createBinanceFuturesClient(
         period: "5m",
         limit: 5,
       }) as Promise<JsonRecord[]>,
+    getKlinesSince: (symbol, interval, startTime, limit) =>
+      requestJson("/fapi/v1/klines", { symbol, interval, startTime, limit }) as Promise<KlineRow[]>,
+    getHourlyOpenInterest: (symbol, limit) =>
+      requestJson("/futures/data/openInterestHist", { symbol, period: "1h", limit }) as Promise<JsonRecord[]>,
     async getSqueezePositioning(symbol) {
       const read = async (path: string, field: string): Promise<TimedSqueezeRatio> => {
         const rows = await requestJson(path, { symbol, period: "5m", limit: 2 }) as JsonRecord[];

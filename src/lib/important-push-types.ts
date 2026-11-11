@@ -6,9 +6,9 @@ export type EnvLike = Record<string, string | undefined>;
 export type MarketPushStage = "confirmed" | "squeeze_acceleration";
 export type PushEvent = {
   id: string;
-  source: "market" | "news" | "hynix" | "test";
+  source: "market" | "news" | "hynix" | "signals" | "test";
   episodeId: string;
-  stage: MarketPushStage | "exceptional_news" | "hynix_premium" | "test";
+  stage: MarketPushStage | "exceptional_news" | "hynix_premium" | "pullback_entry" | "test";
   priority: 0 | 1;
   title: string;
   body: string;

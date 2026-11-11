@@ -1944,6 +1944,20 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,
+    getMarketTickers() {
+      return db
+        .prepare("SELECT symbol, price, pct_24h, quote_volume, market_cap_usd, fdv_usd, updated_at FROM market_alert_tickers")
+        .all()
+        .map((row) => ({
+          symbol: stringValue((row as DbRow).symbol),
+          price: numberValue((row as DbRow).price),
+          pct24h: numberValue((row as DbRow).pct_24h),
+          quoteVolume: numberValue((row as DbRow).quote_volume),
+          marketCapUsd: nullableNumber((row as DbRow).market_cap_usd),
+          fdvUsd: nullableNumber((row as DbRow).fdv_usd),
+          updatedAt: stringValue((row as DbRow).updated_at),
+        }));
+    },
     close() {
       db.close();
     },

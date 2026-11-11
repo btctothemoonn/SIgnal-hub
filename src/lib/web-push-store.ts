@@ -6,8 +6,8 @@ import { getRuntimeDataPath } from './runtime-storage.ts';
 import { decodePushKey, validatePushSubscription, type ValidatedPushSubscription } from './web-push-config.ts';
 import type { MarketPushStage, PushEvent, SequencedPushEvent } from './important-push-types.ts';
 
-export type PushSourceKind = "market" | "news" | "hynix";
-export type DeviceBaseline = { sources: { market: number; news: number; hynix?: number }; marketEpisodes: Array<{ episodeId: string; highestStage: MarketPushStage }>; enabledAt: string };
+export type PushSourceKind = "market" | "news" | "hynix" | "signals";
+export type DeviceBaseline = { sources: { market: number; news: number; hynix?: number; signals?: number }; marketEpisodes: Array<{ episodeId: string; highestStage: MarketPushStage }>; enabledAt: string };
 export type ClaimedDelivery = { deliveryId: number; deviceId: string; epoch: number; leaseOwner: string; subscription: ValidatedPushSubscription; event: PushEvent; attempts: number };
 export type WorkerHealth = { status: 'disabled' | 'starting' | 'live' | 'error'; updatedAt: string; errorCode: string | null; counts: Record<string, number> };
 type LeaseInput = { deliveryId: number; leaseOwner: string; epoch: number; nowMs: number };
@@ -88,7 +88,7 @@ export function openWebPushStore(path = getRuntimeDataPath(process.env, 'web-pus
           for (const device of devices) {
             const baseline = JSON.parse(device.baseline_json) as DeviceBaseline;
             const baselineSequence = baseline.sources[source] ?? 0;
-            if (sequence <= baselineSequence || occurred < device.enabled_at || ((source === 'news' || source === 'hynix') && (!event.sourcePublishedAt || Date.parse(event.sourcePublishedAt) <= device.enabled_at))) continue;
+            if (sequence <= baselineSequence || occurred < device.enabled_at || ((source === 'news' || source === 'hynix' || source === 'signals') && (!event.sourcePublishedAt || Date.parse(event.sourcePublishedAt) <= device.enabled_at))) continue;
             const rank = stageRank(event.stage);
             const previous = db.prepare('SELECT rank FROM push_episode_stages WHERE device_id=? AND epoch=? AND episode_id=?').get(device.device_id, device.epoch, event.episodeId) as { rank: number } | undefined;
             if (previous && previous.rank >= rank) continue;

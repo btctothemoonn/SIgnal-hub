@@ -4,7 +4,8 @@ import { openWebPushStore } from '../src/lib/web-push-store.ts';
 import { openMarketAlertsStore } from '../src/lib/market-alerts-store.ts';
 import { createWebPushSender } from '../src/lib/web-push-sender.ts';
 import { openHynixPremiumPushStore } from '../src/lib/hynix-premium-push.ts';
-import { createHynixPushSource, createMarketPushSource, createNewsPushSource, runWebPushCycle } from '../src/lib/web-push-worker.ts';
+import { openMarketSignalsStore } from '../src/lib/market-signals.ts';
+import { createHynixPushSource, createMarketPushSource, createNewsPushSource, createSignalsPushSource, runWebPushCycle } from '../src/lib/web-push-worker.ts';
 import { loadWorkerEnv, installWorkerShutdown, waitFor, nextWorkerDelay, logWorker } from './market-alerts-worker-runtime.mjs';
 await loadWorkerEnv();
 const controller = new AbortController(); installWorkerShutdown(controller, 'web.push');
@@ -12,6 +13,7 @@ const once = process.argv.includes('--once'); const owner = randomUUID();
 const config = getWebPushConfig(); const pushStore = openWebPushStore();
 let market;
 let hynix;
+let signals;
 try {
   if (!config.enabled || !config.configured) {
     pushStore.setWorkerHealth({ status: config.enabled ? 'error' : 'disabled', updatedAt: new Date().toISOString(), errorCode: config.enabled ? config.errorCode : null, counts: pushStore.readDeliveryCounts() });
@@ -20,18 +22,19 @@ try {
   } else {
     market = openMarketAlertsStore();
     hynix = openHynixPremiumPushStore();
-    const marketSource = createMarketPushSource(market), newsSource = createNewsPushSource(), hynixSource = createHynixPushSource(hynix); const sender = createWebPushSender(config);
+    signals = openMarketSignalsStore();
+    const marketSource = createMarketPushSource(market), newsSource = createNewsPushSource(), hynixSource = createHynixPushSource(hynix), signalsSource = createSignalsPushSource(signals); const sender = createWebPushSender(config);
     let nextNewsAt = 0;
     do {
       const nowMs = Date.now();
       try {
         const readNews = nowMs >= nextNewsAt; if (readNews) nextNewsAt = nowMs + 60000;
-        const counts = await runWebPushCycle({ pushStore, marketSource, newsSource, hynixSource, sender, nowMs, now: Date.now, owner, readNews, signal: controller.signal });
-        if (counts.marketSent || counts.newsSent || counts.hynixSent || counts.failed) logWorker('web.push.cycle', counts);
+        const counts = await runWebPushCycle({ pushStore, marketSource, newsSource, hynixSource, signalsSource, sender, nowMs, now: Date.now, owner, readNews, signal: controller.signal });
+        if (counts.marketSent || counts.newsSent || counts.hynixSent || counts.signalsSent || counts.failed) logWorker('web.push.cycle', counts);
       } catch {
         pushStore.setWorkerHealth({ status: 'error', updatedAt: new Date().toISOString(), errorCode: 'push_cycle_failed', counts: pushStore.readDeliveryCounts() }); logWorker('web.push.cycle_failed'); if (once) process.exitCode = 1;
       }
       if (!once && !controller.signal.aborted) await waitFor(nextWorkerDelay(5000, nowMs), controller.signal);
     } while (!once && !controller.signal.aborted);
   }
-} finally { market?.close(); hynix?.close(); pushStore.close(); }
+} finally { market?.close(); hynix?.close(); signals?.close(); pushStore.close(); }

@@ -4,7 +4,8 @@ import { getPushPublicOrigin, getWebPushConfig, validatePushSubscription } from 
 import { openWebPushStore, type WebPushStore, type DeviceBaseline } from './web-push-store.ts';
 import { createWebPushSender, type WebPushSender } from './web-push-sender.ts';
 import { openHynixPremiumPushStore } from './hynix-premium-push.ts';
-import { capturePushBaseline, createHynixPushSource, createNewsPushSource } from './web-push-worker.ts';
+import { openMarketSignalsStore } from './market-signals.ts';
+import { capturePushBaseline, createHynixPushSource, createNewsPushSource, createSignalsPushSource } from './web-push-worker.ts';
 import { openMarketAlertsStore } from './market-alerts-store.ts';
 import { readWebPushDiagnostics } from './web-push-diagnostics.ts';
 import type { EnvLike, PushEvent } from './important-push-types.ts';
@@ -73,7 +74,7 @@ export function createWebPushApiHandlers(input: { store: WebPushStore; sender: W
 export async function withWebPushApi(method: keyof ReturnType<typeof createWebPushApiHandlers>, request: Request) {
   const store = openWebPushStore();
   try {
-    return await createWebPushApiHandlers({ store, sender: createWebPushSender(getWebPushConfig()), baselineProvider: nowMs => { const market = openMarketAlertsStore(); const hynix = openHynixPremiumPushStore(); try { return capturePushBaseline(market, createNewsPushSource(), nowMs, createHynixPushSource(hynix)); } finally { market.close(); hynix.close(); } } })[method](request);
+    return await createWebPushApiHandlers({ store, sender: createWebPushSender(getWebPushConfig()), baselineProvider: nowMs => { const market = openMarketAlertsStore(); const hynix = openHynixPremiumPushStore(); const signals = openMarketSignalsStore(); try { return capturePushBaseline(market, createNewsPushSource(), nowMs, createHynixPushSource(hynix), createSignalsPushSource(signals)); } finally { market.close(); hynix.close(); signals.close(); } } })[method](request);
   } finally { store.close(); }
 }
 export async function revokePushForLogout(request: Request, options: { env?: EnvLike; now?: () => number; store?: WebPushStore } = {}): Promise<Response | null> {
