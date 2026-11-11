@@ -1,5 +1,6 @@
 """Pure timeline selection, pagination, and bounded HTTP transport policy."""
 import asyncio
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import email.utils
 import json
@@ -260,7 +261,10 @@ def parse_timeline_page(body, username, user_id, from_at, through_at):
                 identifier=str(unwrapped.get('rest_id',''))
                 if identifier: parents[identifier]=unwrapped
                 if identifier==focal: candidates.append((result,item_content))
-            if len(candidates)!=1: output['quarantined']+=1; output['reason']='unknown_conversation_module'; continue
+            if len(candidates)!=1:
+                if not candidates:
+                    output['resolutions'].append({'entryId':entry_id,'identifiers':[focal],'requireAuthor':True})
+                output['quarantined']+=1; output['reason']='unknown_conversation_module'; continue
         else: output['quarantined']+=1; output['reason']='unparsed_entry'; continue
         for result, item_content in candidates:
             raw_result=result
@@ -350,9 +354,11 @@ async def resolve_timeline_page(page,account,fetch_detail,cache):
                 try: cache[identifier]=canonical_tweet(await fetch_detail(identifier),identifier)
                 except ValueError: cache[identifier]=False
             feed=cache[identifier]
-            if feed is False: confirmed=False; continue
+            if feed is False or (feed is None and group.get('requireAuthor')): confirmed=False; continue
             if feed is None: continue
-            if feed['userId']!=str(account['userId']) or feed['username'].lower()!=account['username'].lower(): continue
+            if feed['userId']!=str(account['userId']) or feed['username'].lower()!=account['username'].lower():
+                if group.get('requireAuthor'): confirmed=False
+                continue
             timestamp=instant(feed['createdAt'])
             if not instant(account['fromAt'])<=timestamp<=instant(account['throughAt']): continue
             if feed.get('_excluded')=='subscriber_content_excluded':
@@ -429,8 +435,8 @@ async def scan_coverage(fetch_page,account,max_pages=5,on_tweet=None,fetch_detai
         main['replyCoverageComplete']=reply['complete']; main['replyReason']=reply['reason']; main['checkedAt']=reply['checkedAt']
     return main
 
-async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_tweet=None,on_complete=None,fetch_detail=None):
-    """All authors' primary windows precede any supplemental reply request."""
+async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_tweet=None,on_complete=None,fetch_detail=None,audit_scope=nullcontext):
+    """Give a bounded audit turn after the first owned author, before replies."""
     contexts=[]; seen=set(); stopped_reason=None
     def emit(event):
         key=(event['account']['username'].lower(),event['feedItem']['id'])
@@ -445,19 +451,26 @@ async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_twee
         record_subscriber_exclusions(result,[])
         return result
     try:
-        # Collection retains priority even if an audit author appears first in stdin.
-        for requested in sorted(accounts,key=lambda account:account.get('purpose')=='audit'):
-            account=await resolve_account(dict(requested))
+        owned=[account for account in accounts if account.get('purpose')!='audit']
+        audits=[account for account in accounts if account.get('purpose')=='audit']
+        for requested in [*owned[:1],*audits,*owned[1:]]:
+            account=dict(requested)
             cache={}
             async def detail(identifier): return await fetch_detail(account,identifier)
             async def posts(cursor): return await fetch_timeline(account,'posts',cursor)
-            if account.get('_skip_reason'):
-                result={**account,'complete':False,'pages':0,'accepted':0,'quarantined':0,'reason':account['_skip_reason'],'checkedAt':iso_now(),'tweets':[]}
-            else:
-                try: result=await scan_account(posts,account,max_pages,emit,detail if fetch_detail else None,cache)
-                except ReaderStop as stopped:
-                    if stopped.account_result is not None: contexts.append({'account':account,'cache':cache,'result':shape(stopped.account_result)})
+            try:
+                with audit_scope() if requested.get('purpose')=='audit' else nullcontext():
+                    account=await resolve_account(account)
+                    if account.get('_skip_reason'):
+                        result={**account,'complete':False,'pages':0,'accepted':0,'quarantined':0,'reason':account['_skip_reason'],'checkedAt':iso_now(),'tweets':[]}
+                    else:
+                        result=await scan_account(posts,account,max_pages,emit,detail if fetch_detail else None,cache)
+            except ReaderStop as stopped:
+                if stopped.account_result is not None:
+                    contexts.append({'account':account,'cache':cache,'result':shape(stopped.account_result)})
+                if stopped.reason!='audit_request_budget_reached':
                     raise
+                continue
             contexts.append({'account':account,'cache':cache,'result':shape(result)})
         for context in contexts:
             account,result,cache=context['account'],context['result'],context['cache']
@@ -512,6 +525,7 @@ class RequestGate:
     def __init__(self,cooldown_path,max_requests=80,deadline_ms=180000,min_interval_ms=2000,allowed_origins=None):
         self.cooldown_path=Path(cooldown_path); self.max_requests=min(max_requests,80); self.deadline=time.monotonic()+min(deadline_ms,180000)/1000
         self.min_interval=max(min_interval_ms,2000)/1000; self.count=0; self.last=None; self.stopped=None; self.next_retry_at=None; self.lock=asyncio.Lock()
+        self.scope_limit=None
         self.allowed_origins=allowed_origins or {('https',host,None) for host in ('x.com','www.x.com','api.x.com','twitter.com','api.twitter.com','abs.twimg.com','pbs.twimg.com')}
         state=cooldown_state(self.cooldown_path)
         if state:
@@ -535,6 +549,14 @@ class RequestGate:
         if self.stopped: raise ReaderStop(self.stopped,self.next_retry_at)
         if self.count>=self.max_requests: self.stop('request_budget_reached',time.time()+60,persist=False)
         if time.monotonic()>=self.deadline: self.stop('cycle_deadline_reached',time.time()+60,persist=False)
+        if self.scope_limit is not None and self.count>=self.scope_limit:
+            raise ReaderStop('audit_request_budget_reached')
+    @contextmanager
+    def limit_requests(self,count):
+        previous=self.scope_limit
+        self.scope_limit=self.count+count if previous is None else min(previous,self.count+count)
+        try: yield
+        finally: self.scope_limit=previous
     async def request(self,send,method,url,**kwargs):
         async with self.lock:
             for _ in range(5):

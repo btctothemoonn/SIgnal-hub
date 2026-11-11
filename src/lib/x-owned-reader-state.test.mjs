@@ -79,6 +79,36 @@ alignDb.prepare("update x_owned_reader_state set next_retry_at=? where username_
 const retry = prepareXOwnedReaderAccounts(["semianalysis_"], alignConfig, alignDb, now);
 assert.equal(retry[0].username, "semianalysis_");
 assert.equal(getXOwnedReaderAccountState("semianalysis_", alignDb).status, "connecting");
+
+const recoveringAt = Date.parse("2026-11-11T12:00:00Z");
+alignDb.prepare(`update x_owned_reader_state set
+  covered_through_at='2026-10-27T15:10:00.000Z', pending_through_at='2026-10-27T15:25:00.000Z',
+  last_successful_check_at='2026-10-27T15:10:35.000Z', reason='backlog_limit_repeated',
+  last_incomplete_reason='page_limit_reached', incomplete_count=473
+  where username_key='semianalysis_'`).run();
+const recovered = prepareXOwnedReaderAccounts(["semianalysis_"], alignConfig, alignDb, recoveringAt);
+assert.deepEqual(recovered, [{username:"semianalysis_",fromAt:"2026-11-09T12:00:00.000Z",throughAt:"2026-11-11T12:00:00.000Z"}],
+  "a long-expired frozen upper bound must not exclude recent posts indefinitely");
+assert.deepEqual(prepareXOwnedReaderAccounts(["semianalysis_"], alignConfig, alignDb, recoveringAt+600_000),recovered,
+  "retry keeps the same bounded window until it is verified");
+alignDb.prepare("update x_owned_reader_control set next_retry_at=?").run("2026-11-11T12:10:00.000Z");
+const recoveryCoverage = getXAccountCoverageSnapshot(["semianalysis_"],alignDb,alignEnv,recoveringAt).accounts[0];
+assert.equal(recoveryCoverage.coveredThroughAt,"2026-10-27T15:10:00.000Z","opening a new window is not successful coverage");
+assert.equal(recoveryCoverage.historyGapFromAt,"2026-10-27T15:10:00.000Z");
+assert.equal(recoveryCoverage.historyGapThroughAt,"2026-11-09T12:00:00.000Z");
+assert.equal(recoveryCoverage.cooling,true);
+assert.equal(recoveryCoverage.stale,true,"a cooldown cannot conceal a weeks-old checkpoint");
+alignDb.prepare("update x_owned_reader_state set last_successful_check_at=? where username_key='semianalysis_'").run("2026-11-11T12:00:00.000Z");
+assert.equal(getXAccountCoverageSnapshot(["semianalysis_"],alignDb,alignEnv,recoveringAt).accounts[0].stale,true,
+  "finishing a historical scan now does not certify a current coverage horizon");
+alignDb.prepare(`update x_owned_reader_state set
+  covered_through_at='2026-10-30T00:51:00.000Z', pending_through_at='2026-10-30T01:06:00.000Z',
+  reason='structural_isolated', last_incomplete_reason='unknown_conversation_module',
+  incomplete_count=136, next_retry_at='2026-11-11T15:00:00.000Z' where username_key='ai_9684xtpa'`).run();
+const retriedOnRecentWindow=prepareXOwnedReaderAccounts(["ai_9684xtpa"],alignConfig,alignDb,recoveringAt);
+assert.equal(retriedOnRecentWindow[0]?.throughAt,"2026-11-11T12:00:00.000Z",
+  "the quarantine on an abandoned window cannot also block the first attempt at a different window");
+assert.equal(getXOwnedReaderAccountState("ai_9684xtpa",alignDb).incompleteCount,0);
 alignDb.close();
 
 const cooldownDir = mkdtempSync(join(tmpdir(), "owned-cooldown-"));

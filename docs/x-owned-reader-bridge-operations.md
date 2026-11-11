@@ -28,6 +28,10 @@ are followed; login/challenge destinations stop the whole run.
 Each author receives at most 5 timeline pages in total. UserTweets is scanned
 for all authors' `posts-and-quotes` windows before any UserTweetsAndReplies
 supplement. Each author's remaining pages then scan replies.
+An audit author gets a turn after the first owned author. The audit uses at
+most six wire requests within the unchanged global budget; an exhausted
+audit allowance leaves the audit incomplete, while actual upstream rate
+limits still stop the whole session.
 Primary coverage includes full public post/quote bodies available to this session.
 Subscriber-only bodies are excluded only after the exact requested TweetDetail
 entry proves `TweetPreviewDisplay`, `Subscribe to unlock`, the same author's

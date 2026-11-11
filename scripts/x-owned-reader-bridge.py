@@ -151,7 +151,7 @@ async def run(task,emit):
                     emit('account_complete',**{key:value for key,value in result.items() if key not in ('tweets','fromAt') and not key.startswith('_')})
                     completed+=int(result['complete'])
                     completed_owned+=int(result['complete'] and result['username'].lower() in required_owned)
-                await core.scan_cycle(task['accounts'],resolve,fetch,task['maxPages'],lambda event:emit('tweet',**event),finish,detail)
+                await core.scan_cycle(task['accounts'],resolve,fetch,task['maxPages'],lambda event:emit('tweet',**event),finish,detail,lambda:gate.limit_requests(6))
     except core.ReaderStop as stopped:
         if completed_owned!=len(required_owned) or stopped.reason not in ('request_budget_reached','cycle_deadline_reached'):
             emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)

@@ -51,4 +51,19 @@ record985StreamState('heartbeat',lateDb,base+15*60000);
 await runXOwnedReaderCycle({accounts:['owned','primary'],config,db:lateDb,nowMs:base+12*60000,clock:()=>base+15*60000,bridgeRunner:bridge,auditEvidenceProvider:async()=>({healthy:true,monitored:['primary'],tweetIds:[]})});
 assert.equal(getXAccountCoverageSnapshot(['primary'],lateDb,env,base+15*60000).accounts[0].audit.status,'suspected_missing','late completion callback uses processing clock against recent SSE heartbeat');
 lateDb.close();
+const fairDb=new DatabaseSync(':memory:');initXPipelineDb(fairDb);
+const attempted=[];
+for(const minute of [12,22,32]) {
+ if(minute>12) fairDb.prepare("update x_985_audit_state set status='suspected_missing' where username_key='audita'").run();
+ const next=await runXOwnedReaderCycle({accounts:['owned','auditA','auditB','auditC'],config,db:fairDb,
+  nowMs:base+minute*60000,clock:()=>base+minute*60000,
+  auditEvidenceProvider:async()=>({healthy:true,monitored:['audita','auditb','auditc'],tweetIds:[]}),
+  bridgeRunner:async(task,_config,onEvent)=>{
+   attempted.push(task.accounts.filter(a=>a.purpose==='audit').map(a=>a.username));
+   await onEvent({version:1,runId:task.runId,type:'cycle_complete'});
+  }});
+ assert.equal(next.auditAttempted,1,'distribute the hourly audit workload over ordinary cycles');
+}
+assert.deepEqual(attempted,[['audita'],['auditb'],['auditc']],'a failed audit does not monopolize the next slot');
+fairDb.close();
 console.log('985 audit cycle: shared bridge, primary samples not ingested, confirmation raw commit and durable route/coverage passed.');

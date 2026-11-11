@@ -413,6 +413,36 @@ class Scanning(unittest.IsolatedAsyncioTestCase):
         audit=next(result for result in completed if result['username']=='Audit')
         self.assertTrue(audit['complete']); self.assertEqual(audit['purpose'],'audit')
         self.assertEqual(audit['pages'],1); self.assertFalse(audit['replyCoverageComplete'])
+    async def test_audit_gets_a_turn_before_busy_owned_windows_exhaust_budget(self):
+        window={'userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        accounts=[{'username':name,**window} for name in ('First','Busy')]
+        accounts.append({'username':'Audit',**window,'purpose':'audit'})
+        operations=[]; completed=[]
+        async def resolve(account): return account
+        async def fetch(account,kind,cur):
+            operations.append(account['username'])
+            if account['username']=='Busy': raise self.c.ReaderStop('request_budget_reached')
+            return page([cursor('')])
+        with self.assertRaises(self.c.ReaderStop):
+            await self.c.scan_cycle(accounts,resolve,fetch,on_complete=completed.append)
+        self.assertEqual(operations,['First','Audit','Busy'])
+        self.assertTrue(next(result for result in completed if result['username']=='Audit')['complete'])
+    async def test_missing_inline_focal_can_be_confirmed_by_its_exact_detail(self):
+        focal=tweet('100')
+        module=conversation([tweet('90')],focal='100')
+        async def fetch(cur): return page([module,cursor('')])
+        requested=[]
+        async def canonical(identifier):
+            requested.append(identifier); return detail(focal)
+        result=await self.c.scan_account(fetch,{'username':'Alice','userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'},fetch_detail=canonical)
+        self.assertTrue(result['complete']); self.assertEqual(requested,['100'])
+        self.assertEqual([event['feedItem']['id'] for event in result['tweets']],['100'])
+    async def test_foreign_detail_cannot_confirm_a_missing_inline_focal(self):
+        module=conversation([tweet('90')],focal='100')
+        async def fetch(cur): return page([module,cursor('')])
+        async def canonical(identifier): return detail(tweet('100',username='Other',user_id='8'))
+        result=await self.c.scan_account(fetch,{'username':'Alice','userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'},fetch_detail=canonical)
+        self.assertFalse(result['complete']); self.assertEqual(result['tweets'],[])
     async def test_audit_unknown_structure_remains_incomplete_without_reply_request(self):
         account={'username':'Alice','userId':'7','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
         operations=[]; completed=[]; emitted=[]
@@ -568,6 +598,18 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.path.exists())
         self.assertEqual(len(self.received),2); self.assertGreaterEqual(self.received[1][0]-self.received[0][0],1.9)
         self.assertEqual(gate.count,2)
+    async def test_audit_wire_budget_cannot_spill_into_owned_budget_or_clear_cooldown(self):
+        self.replies=[(302,{'location':'/graphql/next'},b''),(429,{'retry-after':'1200'},b'')]
+        gate=self.gate(max_requests=3)
+        with gate.limit_requests(1):
+            with self.assertRaises(self.c.ReaderStop) as limited: await self.get(gate)
+            self.assertEqual(limited.exception.reason,'audit_request_budget_reached')
+            self.assertEqual(len(self.received),1,'the redirect must count against the audit allowance')
+            self.assertFalse(self.path.exists(),'local budget must not create a global pause')
+        with self.assertRaises(self.c.ReaderStop) as upstream: await self.get(gate)
+        self.assertEqual(upstream.exception.reason,'rate_limited')
+        self.assertEqual(len(self.received),2)
+        self.assertTrue(self.path.exists(),'an actual upstream rate limit must still persist')
     async def test_auth_rate_limit_errors_and_malformed_json_pause_no_second_wire(self):
         cases=[(401,{},b'', 'login_or_access_challenge'),(403,{},b'', 'login_or_access_challenge'),(429,{'x-rate-limit-reset':str(int(time.time())+900)},b'', 'rate_limited'),(200,{},b'{"errors":[{"code":88}],"data":{}}','rate_limited'),(200,{},b'not json','unexpected_api_response'),(200,{},b'{"errors":[{"message":"secret-value"}],"data":{}}','unexpected_api_response')]
         for status,headers,body,want in cases:
@@ -670,7 +712,7 @@ class Transport(unittest.IsolatedAsyncioTestCase):
             async def _gql_item(self,operation,variables):
                 kind='posts' if operation.endswith('/UserTweets') else 'replies'
                 index=int(variables['userId'])-7; operations.append((kind,index))
-                if index==7: raise bridge.core.ReaderStop('rate_limited' if audit_rate_limit else 'request_budget_reached','2026-10-04T02:00:00Z')
+                if index==7: raise bridge.core.ReaderStop('rate_limited' if audit_rate_limit else 'audit_request_budget_reached','2026-10-04T02:00:00Z')
                 if kind=='replies': raise bridge.core.ReaderStop('request_budget_reached','2026-10-04T02:00:00Z')
                 body={'data':{}} if incomplete and index==3 else page([item(tweet(str(100+index),username='Alice'+str(index),user_id=str(7+index))),cursor('')])
                 return SimpleNamespace(json=lambda:body)
@@ -696,17 +738,17 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]['type'],'cycle_complete')
     async def test_bridge_audit_budget_does_not_pause_completed_owned_windows(self):
         operations,events=await self.bridge_main_first_fixture(audit_budget=True)
-        self.assertEqual(operations,[('posts',index) for index in range(8)])
+        self.assertEqual(operations,[('posts',index) for index in [0,7,1,2,3,4,5,6]]+[('replies',0)])
         completions=[event for event in events if event['type']=='account_complete']
         owned=[event for event in completions if event.get('purpose')!='audit']
         self.assertEqual(len(owned),7); self.assertTrue(all(event['complete'] for event in owned))
         audit=next(event for event in completions if event.get('purpose')=='audit')
-        self.assertFalse(audit['complete']); self.assertEqual(audit['reason'],'request_budget_reached')
+        self.assertFalse(audit['complete']); self.assertEqual(audit['reason'],'audit_request_budget_reached')
         self.assertFalse(any(event['type']=='paused' for event in events))
         self.assertEqual(events[-1]['type'],'cycle_complete')
     async def test_bridge_audit_rate_limit_still_pauses_all_network_requests(self):
         operations,events=await self.bridge_main_first_fixture(audit_rate_limit=True)
-        self.assertEqual(operations,[('posts',index) for index in range(8)])
+        self.assertEqual(operations,[('posts',0),('posts',7)])
         pauses=[event for event in events if event['type']=='paused']
         self.assertEqual(len(pauses),1); self.assertEqual(pauses[0]['reason'],'rate_limited')
         self.assertEqual(events[-1]['type'],'cycle_complete')

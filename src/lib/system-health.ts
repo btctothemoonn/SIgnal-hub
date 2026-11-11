@@ -355,6 +355,7 @@ type XOwnedCoverageHealthInput = {
     stale?: boolean;
     reason?: string | null;
     structuralIsolated?: boolean;
+    historyGapThroughAt?: string | null;
     replyCoverageComplete?: boolean | null;
     subscriberContentExcluded?: number;
   }[];
@@ -381,6 +382,7 @@ export function summarizeXOwnedReaderCoverage({
   const staleCount = assigned.filter(account => ownedCoverageAccountStale(account, now, staleAfterMs)).length;
   const failedCount = assigned.filter(account => ["error", "paused", "failed"].includes(account.status)).length;
   const structuralCount = assigned.filter(ownedCoverageStructural).length;
+  const historyGapCount = assigned.filter(account => account.historyGapThroughAt).length;
   const incompleteCount = assigned.filter(account => account.status === "incomplete" && !ownedCoverageStructural(account)).length;
   const replyIncomplete = assigned.filter(account => account.replyCoverageComplete !== true).length;
   const subscriberContentExcluded = assigned.reduce((sum, account) => sum + Math.max(0, account.subscriberContentExcluded || 0), 0);
@@ -395,11 +397,11 @@ export function summarizeXOwnedReaderCoverage({
   const structuralNote = structuralCount && (failedCount || staleCount || incompleteCount) ? ` · 结构隔离 ${structuralCount} 位` : "";
   return {
     id: "x-owned-reader", label: "X VPS 采集",
-    status: failedCount ? "error" : staleCount || incompleteCount || structuralCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
-    detail: detail + structuralNote + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
+    status: failedCount ? "error" : staleCount || incompleteCount || structuralCount || historyGapCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
+    detail: detail + structuralNote + (failedCount && staleCount ? ` · ${staleCount} 位检查逾期` : "") + (historyGapCount ? ` · ${historyGapCount} 位有未核实历史缺口` : "") + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
     updatedAt: successfulTimes.length === assigned.length ? oldest : null,
     stale: staleCount > 0,
-    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, structuralIncomplete: structuralCount, replyIncomplete, subscriberContentExcluded },
+    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, structuralIncomplete: structuralCount, historyGapCount, replyIncomplete, subscriberContentExcluded },
   };
 }
 

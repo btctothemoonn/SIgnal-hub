@@ -106,18 +106,21 @@ export function sync985AuthorMonitoringEvidence(evidence:X985AuditEvidence,db:Da
     }
   }
 }
-export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7) {
+export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7,sweepIntervalMs=HOUR) {
   initX985AuditDb(db);const assigned=new Set(owned.map(normalizeXOwnedUsername));const at=new Date(nowMs).toISOString();
   sync985ConfiguredAuthors(usernames,db,nowMs);
   const authors=[...new Set(usernames.map(normalizeXOwnedUsername).filter(Boolean))].filter(name=>!assigned.has(name));
   for(const name of authors)db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(name);
   const rows=authors.map(name=>db.prepare('select * from x_985_audit_state where username_key=?').get(name) as Row);
-  const rechecks=rows.filter(row=>row.status==='suspected_missing' && nowMs-Date.parse(String(row.last_attempt_at))>=600_000).sort((a,b)=>String(a.last_attempt_at).localeCompare(String(b.last_attempt_at))).slice(0,2);
+  const rechecks=rows.filter(row=>row.status==='suspected_missing' && nowMs-Date.parse(String(row.last_attempt_at))>=600_000).sort((a,b)=>String(a.last_attempt_at).localeCompare(String(b.last_attempt_at))).slice(0,Math.min(2,batchLimit));
   const control=db.prepare('select last_sweep_at from x_985_audit_control where id=1').get() as Row|undefined;
-  const due=!control || nowMs-Date.parse(String(control.last_sweep_at))>=HOUR;
-  const selected=[...rechecks];
+  const due=!control || nowMs-Date.parse(String(control.last_sweep_at))>=sweepIntervalMs;
+  // A single due slot is a fair sweep, including eligible rechecks. Suspected
+  // misses cannot indefinitely consume every turn ahead of unvisited authors.
+  const singleSlotSweep=due && batchLimit===1;
+  const selected=singleSlotSweep ? [] : [...rechecks];
   if(due) {
-    selected.push(...rows.filter(row=>!selected.includes(row)).sort((a,b)=>String(a.last_attempt_at || '').localeCompare(String(b.last_attempt_at || '')) || String(a.username_key).localeCompare(String(b.username_key))).slice(0,Math.max(0,batchLimit-selected.length)));
+    selected.push(...rows.filter(row=>!selected.includes(row) && (!singleSlotSweep || row.status!=='suspected_missing' || nowMs-Date.parse(String(row.last_attempt_at))>=600_000)).sort((a,b)=>String(a.last_attempt_at || '').localeCompare(String(b.last_attempt_at || '')) || String(a.username_key).localeCompare(String(b.username_key))).slice(0,Math.max(0,batchLimit-selected.length)));
     db.prepare('insert into x_985_audit_control values(1,?) on conflict(id) do update set last_sweep_at=excluded.last_sweep_at').run(at);
   }
   return selected.map(row=>{

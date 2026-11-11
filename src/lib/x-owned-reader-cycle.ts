@@ -47,13 +47,16 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       result.status="paused";result.reason=isolated ? "structural_isolated" : null;
       setXPipelineHealth({scope:"owned-reader",status:"paused",detail:isolated ? "structural_isolated" : "no configured owned-reader accounts"},db);return result;
     }
-    let auditAccounts=config.auditEnabled ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs) : [];
+    let auditAccounts=config.auditEnabled ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs,1,config.intervalMs) : [];
     if(auditAccounts.length) {
       auditEvidence=await auditEvidenceProvider();
       sync985AuthorMonitoringEvidence(auditEvidence,db,nowMs);
       if(!auditEvidence.healthy) {
         for(const account of auditAccounts)complete985Audit({username:account.username,complete:false,reason:'upstream_evidence_unavailable'},[],auditEvidence,db,nowMs);
         auditAccounts=[];
+      } else {
+        const monitored=new Set(auditEvidence.monitored);
+        queryAccounts.sort((a,b)=>Number(monitored.has(a.username))-Number(monitored.has(b.username)));
       }
     }
     result.auditAttempted=auditAccounts.length;auditAccounts.forEach(account=>{auditPending.add(account.username);auditItems.set(account.username,[]);});

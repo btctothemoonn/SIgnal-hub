@@ -24,6 +24,9 @@ const subscriber = summarize([account("a", recent, { subscriberContentExcluded: 
 assert.equal(subscriber.status, "warning");
 assert.equal(subscriber.meta.subscriberContentExcluded, 1);
 assert.match(subscriber.detail, /付费/);
+const historyGap = summarize([account("a",recent,{historyGapFromAt:old,historyGapThroughAt:recent})]);
+assert.equal(historyGap.status,"warning","recent checks must not conceal an unverified historical range");
+assert.match(historyGap.detail,/历史缺口/);
 assert.equal(summarize([]).status, "warning");
 const cooling = summarize([account("a", old, { stale: false, status: "complete" })]);
 assert.equal(cooling.meta.staleCount, 0, "a coverage stale flag is not replaced by a hardcoded 10 minute window");
