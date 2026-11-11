@@ -342,7 +342,8 @@ function rowToSignal(row: Row): MarketSignal {
 export function openMarketSignalsStore(path = marketSignalsDbPath()) {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;");
+  // busy_timeout must be set first: several processes open this file at startup and the WAL switch needs a lock.
+  db.exec("PRAGMA busy_timeout=10000; PRAGMA journal_mode=WAL;");
   const outbox = createImportantPushOutbox(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_signals (
