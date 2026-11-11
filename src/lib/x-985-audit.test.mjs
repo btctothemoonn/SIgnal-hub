@@ -14,14 +14,17 @@ function establishMonitoring(username) {
  sync985AuthorMonitoringEvidence({healthy:true,monitored:[username],tweetIds:[]},db,base);
  db.prepare('delete from x_985_audit_control').run();
 }
+function pulse(fromMinute,throughMinute) {
+ for(let minute=fromMinute+1;minute<=throughMinute;minute++)record985StreamState('heartbeat',db,base+minute*60000);
+}
 establishMonitoring('primary');
 record985StreamState('connected',db,base);
-record985StreamState('heartbeat',db,base+12*60000);
+pulse(0,12);
 assert.deepEqual(complete985Audit(completion,[item],evidence,db,base+12*60000).promotedIds,[],'one missing sample is not confirmation');
 assert.equal(get985AuditSnapshot('primary',db).status,'suspected_missing');
-record985StreamState('heartbeat',db,base+17*60000);
+pulse(12,17);
 assert.deepEqual(complete985Audit({...completion,checkedAt:new Date(base+17*60000).toISOString()},[item],evidence,db,base+17*60000).promotedIds,[],'five-minute repeat cannot confirm');
-record985StreamState('heartbeat',db,base+22*60000);
+pulse(17,22);
 const confirmed=complete985Audit({...completion,checkedAt:new Date(base+22*60000).toISOString(),throughAt:new Date(base+22*60000).toISOString()},[item],evidence,db,base+22*60000);
 assert.deepEqual(confirmed.promotedIds,[item.id]);
 assert.deepEqual(get985Promotions(db),['primary']);
@@ -38,7 +41,9 @@ for(const [name,changes,gate] of [
  const value={...item,username:name,tweetUrl:`https://x.com/${name}/status/${item.id}`};
  const account={...completion,username:name};
  const context={...gate,monitored:gate.monitored.length?[name]:[]};
- for(let n=0;n<2;n++) {record985StreamState('heartbeat',db,base+(17+n*5)*60000);complete985Audit({...account,checkedAt:new Date(base+(17+n*5)*60000).toISOString()},[{...value,...changes}],context,db,base+(17+n*5)*60000);}
+ record985StreamState('connected',db,base);
+ pulse(0,17);
+ for(let n=0;n<2;n++) {if(n)pulse(17,22);complete985Audit({...account,checkedAt:new Date(base+(17+n*5)*60000).toISOString()},[{...value,...changes}],context,db,base+(17+n*5)*60000);}
  assert.equal(get985Promotions(db).includes(name),false,name+' must not migrate');
 }
 const raw={...item,id:'2106500000000000001',username:'received',tweetUrl:'https://x.com/received/status/2106500000000000001'};
@@ -80,7 +85,7 @@ for(const other of [{twAccount:'truth:someone',content:{}},{twAccount:'someone',
 assert.equal(db.prepare('select count(*) as n from x_985_parse_fault').get().n,0,'known non-X platform events cannot disable Twitter confirmation');
 record985RawPayload({content:{unexpected:'schema'}},db,base+8*60000);
 establishMonitoring('parsefault');
-record985StreamState('connected',db,base);record985StreamState('heartbeat',db,base+30*60000);
+record985StreamState('connected',db,base);pulse(0,30);
 complete985Audit({...completion,username:'parsefault'},[{...item,username:'parsefault',id:'2106500000000000003'}],{healthy:true,monitored:['parsefault'],tweetIds:[]},db,base+30*60000);
 assert.equal(get985AuditSnapshot('parsefault',db).reason,'upstream_event_unparsed');
 db.close();

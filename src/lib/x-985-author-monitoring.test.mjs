@@ -51,7 +51,10 @@ function post(store, minute, id = '2106500000000000000') {
 function check(store, minute, items = [], options = {}) {
   const { db, username } = store;
   prepare985AuditAccounts(options.configured ?? [username], [], db, at(minute));
-  record985StreamState('heartbeat', db, at(minute));
+  for (let tick = (store.lastHeartbeatMinute ?? -120) + 1; tick <= minute; tick++) {
+    record985StreamState('heartbeat', db, at(tick));
+  }
+  store.lastHeartbeatMinute = minute;
   return complete985Audit({
     username, userId: '321', complete: options.complete ?? true,
     checkedAt: iso(minute), throughAt: iso(minute),

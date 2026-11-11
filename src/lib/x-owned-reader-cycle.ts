@@ -4,7 +4,7 @@ import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } fro
 import { normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO, X_OWNED_STRUCTURAL_ISOLATE_AFTER, X_OWNED_STRUCTURAL_RETRY_MS, xOwnedReaderSoftCooldownMs, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, readOwnedReaderCooldown, recordXOwnedReaderRoutes, safeXOwnedReason, X_OWNED_STRUCTURAL_REASONS, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
-import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
+import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
 
 let inFlight=false;
@@ -47,8 +47,10 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       result.status="paused";result.reason=isolated ? "structural_isolated" : null;
       setXPipelineHealth({scope:"owned-reader",status:"paused",detail:isolated ? "structural_isolated" : "no configured owned-reader accounts"},db);return result;
     }
-    let auditAccounts=config.auditEnabled ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs,1,config.intervalMs) : [];
-    if(auditAccounts.length) {
+    const liveAuditSince=config.auditEnabled ? get985AuditLiveSince(db,nowMs) : null;
+    let auditAccounts=liveAuditSince!==null ? prepare985AuditAccounts(usernames,config.allowlist,db,nowMs,1,config.intervalMs,liveAuditSince) : [];
+    const has985Primary=config.auditEnabled && usernames.some(name=>!config.allowlist.includes(normalizeXOwnedUsername(name)));
+    if(has985Primary) {
       auditEvidence=await auditEvidenceProvider();
       sync985AuthorMonitoringEvidence(auditEvidence,db,nowMs);
       if(!auditEvidence.healthy) {
@@ -89,7 +91,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       if(done.has(username) || (identities.has(username) && identities.get(username)!==event.userId)) throw new Error("protocol_invalid");
       if(auditItems.has(username)) {
         const items=auditItems.get(username)!;
-        const audited=complete985Audit(event,items,auditEvidence,db,Math.max(nowMs,clock()));
+        const audited=complete985Audit(event,items,auditEvidence,db,Math.max(nowMs,clock()),liveAuditSince!);
         if(audited.promotedIds.length) {
           result.promotedUsernames.push(username);
           for(const item of items.filter(value=>audited.promotedIds.includes(value.id))) {
@@ -98,7 +100,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
           recordXOwnedReaderRoutes(usernames,config,db,nowMs);
         }
         done.add(username);auditPending.delete(username);
-        if(event.complete)result.auditCompleted++;else result.auditIncomplete++;
+        if(event.complete && audited.status!=='unavailable')result.auditCompleted++;else result.auditIncomplete++;
         return;
       }
       const state=getXOwnedReaderAccountState(username,db)!;

@@ -10,6 +10,9 @@ type Row=Record<string,unknown>;
 export type X985AuditEvidence={healthy:boolean;monitored:string[];tweetIds:string[]};
 const initialized=new WeakSet<DatabaseSync>();
 const HOUR=3_600_000;
+const AUDIT_DELAY_MS=600_000;
+const STREAM_FRESH_MS=180_000;
+const CLOCK_SKEW_MS=60_000;
 function validTweetId(id:string) {return /^[1-9]\d{0,19}$/.test(id) && BigInt(id)<=BigInt('18446744073709551615');}
 function tableExists(db:DatabaseSync,name:string) {return Boolean(db.prepare("select 1 from sqlite_master where type='table' and name=?").get(name));}
 export function initX985AuditDb(db:DatabaseSync=getXPipelineDb()) {
@@ -65,7 +68,9 @@ export function record985StreamState(state:'connected'|'heartbeat'|'disconnected
   initX985AuditDb(db);const at=new Date(nowMs).toISOString();
   if(state==='connected')db.prepare(`insert into x_985_stream values(1,?,?) on conflict(id) do update set connected_since_at=excluded.connected_since_at,last_activity_at=excluded.last_activity_at`).run(at,at);
   else if(state==='disconnected')db.prepare(`insert into x_985_stream values(1,null,?) on conflict(id) do update set connected_since_at=null,last_activity_at=excluded.last_activity_at`).run(at);
-  else db.prepare('update x_985_stream set last_activity_at=? where id=1 and connected_since_at is not null').run(at);
+  else db.prepare(`update x_985_stream
+    set connected_since_at=case when last_activity_at<? then ? else connected_since_at end,last_activity_at=?
+    where id=1 and connected_since_at is not null and last_activity_at<=?`).run(new Date(nowMs-STREAM_FRESH_MS).toISOString(),at,at,at);
 }
 export function get985Promotions(db:DatabaseSync=getXPipelineDb()):string[] {
   return tableExists(db,'x_985_promotions') ? db.prepare('select username_key from x_985_promotions order by confirmed_at,username_key').all().map(row=>String(row.username_key)) : [];
@@ -106,9 +111,29 @@ export function sync985AuthorMonitoringEvidence(evidence:X985AuditEvidence,db:Da
     }
   }
 }
-export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7,sweepIntervalMs=HOUR) {
+function getFresh985StreamSince(db:DatabaseSync,nowMs:number) {
+  if(!tableExists(db,'x_985_stream'))return null;
+  const stream=db.prepare('select connected_since_at,last_activity_at from x_985_stream where id=1').get() as Row|undefined;
+  const since=Date.parse(String(stream?.connected_since_at || ''));
+  const lastActivity=Date.parse(String(stream?.last_activity_at || ''));
+  return Number.isFinite(since) && lastActivity>=Math.max(since,nowMs-STREAM_FRESH_MS) &&
+    lastActivity<=nowMs+CLOCK_SKEW_MS ? since : null;
+}
+export function get985AuditLiveSince(db:DatabaseSync,nowMs:number) {
+  const since=getFresh985StreamSince(db,nowMs);
+  return since!==null && since<=nowMs-AUDIT_DELAY_MS ? since : null;
+}
+function get985ParseFaultAt(db:DatabaseSync) {
+  const fault=db.prepare('select occurred_at from x_985_parse_fault where id=1').get() as Row|undefined;
+  return Date.parse(String(fault?.occurred_at || ''));
+}
+export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7,sweepIntervalMs=HOUR,liveSince=-Infinity) {
   initX985AuditDb(db);const assigned=new Set(owned.map(normalizeXOwnedUsername));const at=new Date(nowMs).toISOString();
   sync985ConfiguredAuthors(usernames,db,nowMs);
+  const faultAt=Number.isFinite(liveSince) ? get985ParseFaultAt(db) : NaN;
+  const proofFloor=Math.max(liveSince,Number.isFinite(faultAt) ? faultAt+1 : -Infinity);
+  if(proofFloor>nowMs-AUDIT_DELAY_MS)return [];
+  const candidateAfter=Number.isFinite(proofFloor) ? new Date(proofFloor-1).toISOString() : '';
   const authors=[...new Set(usernames.map(normalizeXOwnedUsername).filter(Boolean))].filter(name=>!assigned.has(name));
   for(const name of authors)db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(name);
   const rows=authors.map(name=>db.prepare('select * from x_985_audit_state where username_key=?').get(name) as Row);
@@ -125,10 +150,10 @@ export function prepare985AuditAccounts(usernames:readonly string[],owned:readon
   }
   return selected.map(row=>{
     const username=String(row.username_key);
-    const missing=db.prepare("select min(created_at) as created_at from x_985_audit_candidates where username_key=? and status='missing'").get(username) as Row;
+    const missing=db.prepare("select min(created_at) as created_at from x_985_audit_candidates where username_key=? and status='missing' and created_at>?").get(username,candidateAfter) as Row;
     let fromMs=row.last_successful_check_at ? Date.parse(String(row.last_successful_check_at))-900_000 : nowMs-8*HOUR;
     if(missing.created_at)fromMs=Math.min(fromMs,Date.parse(String(missing.created_at))-60_000);
-    fromMs=Math.max(fromMs,nowMs-48*HOUR);
+    fromMs=Math.max(fromMs,nowMs-48*HOUR,proofFloor);
     db.prepare('update x_985_audit_state set last_attempt_at=? where username_key=?').run(at,username);
     return {username,...(row.user_id?{userId:String(row.user_id)}:{}),fromAt:new Date(Math.min(fromMs,nowMs-1)).toISOString(),throughAt:at,purpose:'audit' as const};
   });
@@ -149,27 +174,25 @@ export async function fetch985AuditEvidence(env:Record<string,string|undefined>=
     return {healthy:monitored.length>0 && ids.every(Boolean),monitored,tweetIds:ids.filter(Boolean).map(identity=>identity!.id)};
   } catch {return unavailable;}
 }
-export function complete985Audit(event:Record<string,unknown>,items:readonly TwitterFeedItem[],evidence:X985AuditEvidence,db:DatabaseSync,nowMs=Date.now()) {
+export function complete985Audit(event:Record<string,unknown>,items:readonly TwitterFeedItem[],evidence:X985AuditEvidence,db:DatabaseSync,nowMs=Date.now(),expectedLiveSince?:number) {
   initX985AuditDb(db);const username=normalizeXOwnedUsername(event.username);const at=new Date(nowMs).toISOString();
   sync985AuthorMonitoringEvidence(evidence,db,nowMs);
   db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(username);
   const checkedAt=typeof event.checkedAt==='string'?event.checkedAt:at;
-  const stream=db.prepare('select * from x_985_stream where id=1').get() as Row|undefined;
-  const since=stream?.connected_since_at?Date.parse(String(stream.connected_since_at)):NaN;
-  const active=stream?.last_activity_at?Date.parse(String(stream.last_activity_at)):NaN;
-  const fault=db.prepare('select occurred_at from x_985_parse_fault where id=1').get() as Row|undefined;
-  const faultAt=fault?Date.parse(String(fault.occurred_at)):NaN;
+  const since=getFresh985StreamSince(db,nowMs) ?? NaN;
+  const faultAt=get985ParseFaultAt(db);
   const monitoring=db.prepare('select configured_since_at,monitored_since_at from x_985_author_monitoring where username_key=?').get(username) as Row|undefined;
   const configuredSince=monitoring?Date.parse(String(monitoring.configured_since_at)):NaN;
   const monitoredSince=monitoring?.monitored_since_at?Date.parse(String(monitoring.monitored_since_at)):NaN;
   const eligibleSince=Math.max(since,configuredSince,monitoredSince);
-  const available=evidence.healthy && evidence.monitored.includes(username) && Number.isFinite(eligibleSince) && Number.isFinite(active) && nowMs-active<=180_000 && active<=nowMs+60_000;
+  const available=evidence.healthy && evidence.monitored.includes(username) && Number.isFinite(eligibleSince) &&
+    (expectedLiveSince===undefined || expectedLiveSince===since);
   let status=event.complete?'verified':'incomplete';let reason=event.complete?null:String(event.reason || 'account_missing_completion');const promotedIds:string[]=[];
   if(event.complete && !available) {status='unavailable';reason='upstream_evidence_unavailable';}
   if(event.complete && available) {
     for(const item of items) {
       const created=Date.parse(item.createdAt);
-      if(normalizeXOwnedUsername(item.username)!==username || !Number.isFinite(created) || created<since || nowMs-created<600_000 || created>nowMs)continue;
+      if(normalizeXOwnedUsername(item.username)!==username || !Number.isFinite(created) || created<since || nowMs-created<AUDIT_DELAY_MS || created>nowMs)continue;
       if(Number.isFinite(faultAt) && faultAt>=created) {status='unavailable';reason='upstream_event_unparsed';continue;}
       const raw=db.prepare('select 1 from x_985_raw_observations where tweet_id=? and username_key=?').get(item.id,username);
       const observed=tableExists(db,'x_feed_observations') && db.prepare("select 1 from x_feed_observations where tweet_id=? and source='monitor985' and lower(author_username)=?").get(item.id,username);
@@ -190,6 +213,6 @@ export function complete985Audit(event:Record<string,unknown>,items:readonly Twi
       }
     }
   }
-  db.prepare(`update x_985_audit_state set user_id=coalesce(?,user_id),status=?,reason=?,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,checked_count=checked_count+1 where username_key=?`).run(typeof event.userId==='string'?event.userId:null,status,reason,event.complete?1:0,checkedAt,username);
+  db.prepare(`update x_985_audit_state set user_id=coalesce(?,user_id),status=?,reason=?,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,checked_count=checked_count+1 where username_key=?`).run(typeof event.userId==='string'?event.userId:null,status,reason,event.complete && status!=='unavailable'?1:0,checkedAt,username);
   return {status,reason,promotedIds};
 }
