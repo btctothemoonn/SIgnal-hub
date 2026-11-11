@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+// These cases exercise the generic legacy delivery path with long pushes, which the backtested filter blocks by default.
+process.env.MARKET_SIGNAL_LEGACY_PUSH_FILTER = 'false';
 import { enrichOpportunitySeeds } from './market-opportunity-enrichment.ts';
 import { scoreSqueezeLong } from './market-opportunity-core.ts';
 import { qualifyOpportunity, qualifySqueeze } from './important-push-policy.ts';

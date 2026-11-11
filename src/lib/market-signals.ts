@@ -38,6 +38,11 @@ export function getMarketSignalRules(env: EnvLike = process.env) {
     positioningRetentionMs: 180 * 24 * HOUR_MS,
     btcShortWarningPct: envNumber(env, "MARKET_SIGNAL_BTC_SHORT_WARNING_PCT", -1.7),
     statsWindowMs: 30 * 24 * HOUR_MS,
+    legacyPushFilter: (env.MARKET_SIGNAL_LEGACY_PUSH_FILTER ?? "true").trim().toLowerCase() !== "false",
+    aiEnabled: (env.MARKET_SIGNAL_AI_ENABLED ?? "true").trim().toLowerCase() !== "false",
+    aiNotesPerCycle: envNumber(env, "MARKET_SIGNAL_AI_NOTES_PER_CYCLE", 3),
+    aiMaxAttempts: 2,
+    aiNoteWindowMs: 6 * HOUR_MS,
   };
 }
 export type MarketSignalRules = ReturnType<typeof getMarketSignalRules>;
@@ -228,6 +233,7 @@ export type MarketSignal = {
   detail: Record<string, number | string | boolean | null>;
   outcome: (TradeOutcome | WatchOutcome) | null;
   pushed: boolean;
+  aiNote?: string | null;
 };
 
 export type MarketSignalStats = {
@@ -301,6 +307,14 @@ export function buildPullbackPushEvent(signal: MarketSignal, rules: MarketSignal
   };
 }
 
+// Legacy opportunity/squeeze pushes pass only if they agree with the backtested rules: long pushes
+// (pump chasing and squeeze longs) lost money, and shorts are skipped once BTC already fell sharply.
+export function legacyMarketPushAllowed(input: { direction: "LONG" | "SHORT"; btc24hPct: number | null; rules: MarketSignalRules }) {
+  if (input.direction === "LONG") return false;
+  if (input.btc24hPct !== null && input.btc24hPct <= input.rules.btcShortWarningPct) return false;
+  return true;
+}
+
 export function marketSignalsDbPath(env: EnvLike = process.env) {
   return env.MARKET_SIGNALS_DB?.trim() || getRuntimeDataPath(env, "market-alerts", "signals.sqlite");
 }
@@ -321,6 +335,7 @@ function rowToSignal(row: Row): MarketSignal {
     detail: parseJson(row.detail_json, {}),
     outcome: parseJson(row.outcome_json, null),
     pushed: Number(row.pushed) === 1,
+    aiNote: typeof row.ai_note === "string" && row.ai_note ? row.ai_note : null,
   };
 }
 
@@ -339,7 +354,9 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
       detail_json TEXT NOT NULL,
       outcome_json TEXT,
       pushed INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      ai_note TEXT,
+      ai_attempts INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_market_signals_kind_time ON market_signals(kind, signal_at);
     CREATE INDEX IF NOT EXISTS idx_market_signals_symbol_time ON market_signals(symbol, kind, signal_at);
@@ -413,6 +430,16 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     },
     setOutcome(id: string, outcome: TradeOutcome | WatchOutcome) {
       db.prepare("UPDATE market_signals SET outcome_json=? WHERE id=?").run(JSON.stringify(outcome), id);
+    },
+    pendingNotes(kinds: MarketSignalKind[], sinceMs: number, maxAttempts: number, limit: number) {
+      const placeholders = kinds.map(() => "?").join(",");
+      return db.prepare(`SELECT * FROM market_signals WHERE kind IN (${placeholders}) AND ai_note IS NULL
+          AND ai_attempts<? AND signal_at>=? ORDER BY signal_at DESC LIMIT ?`)
+        .all(...kinds, maxAttempts, new Date(sinceMs).toISOString(), limit)
+        .map((row) => rowToSignal(row as Row));
+    },
+    recordNoteAttempt(id: string, note: string | null) {
+      db.prepare("UPDATE market_signals SET ai_attempts=ai_attempts+1, ai_note=COALESCE(?, ai_note) WHERE id=?").run(note, id);
     },
     listSignals(sinceMs: number) {
       return db.prepare("SELECT * FROM market_signals WHERE signal_at>=? ORDER BY signal_at DESC")

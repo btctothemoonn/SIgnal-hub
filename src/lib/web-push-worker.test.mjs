@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+// These cases exercise the generic legacy delivery path with long pushes, which the backtested filter blocks by default.
+process.env.MARKET_SIGNAL_LEGACY_PUSH_FILTER = 'false';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { openWebPushStore } from './web-push-store.ts';
 import { runWebPushCycle } from './web-push-worker.ts';
@@ -42,6 +44,9 @@ try {
  const candidate = event('real', 'market', { episodeId: episode.episodeId, occurredAt: pushNow, expiresAt: new Date(pushNowMs + 120000).toISOString() });
  assert.equal(adapter.revalidate(candidate, pushNowMs), true);
  assert.equal(adapter.revalidate(candidate, pushNowMs + 120001), false);
+ delete process.env.MARKET_SIGNAL_LEGACY_PUSH_FILTER;
+ assert.equal(adapter.revalidate(candidate, pushNowMs), false, 'long legacy pushes are blocked by the backtested filter');
+ process.env.MARKET_SIGNAL_LEGACY_PUSH_FILTER = 'false';
  marketStore.commitOpportunityScan({ states: [], pushObservations: [{ ...observation, scanId: 'missing', classification: 'incomplete' }], scannedAt: pushNow });
  assert.equal(adapter.revalidate(candidate, pushNowMs), false, 'latest missing input invalidates sending without ending episode');
 } finally { marketStore.close(); }

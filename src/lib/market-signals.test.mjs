@@ -296,4 +296,58 @@ store.close();
   }
 }
 
+// AI notes: grounded, neutral sentences only.
+{
+  const { cleanSignalNote } = await import("./market-signals-ai.ts");
+  const input = JSON.stringify({ symbol: "A", detail: { pre24hPct: 3.2, pullbackPct: 12 } });
+  assert.equal(cleanSignalNote("A 触发前 24h 仅涨 3.2%，随后回调 12%。", input), "A 触发前 24h 仅涨 3.2%，随后回调 12%。");
+  assert.equal(cleanSignalNote("<think>x</think>\nA 回调 12% 后企稳", input), "A 回调 12% 后企稳");
+  assert.equal(cleanSignalNote("A 回调 15%。", input), null, "invented number");
+  assert.equal(cleanSignalNote("建议轻仓做多 A", input), null, "trading advice");
+  assert.equal(cleanSignalNote("", input), null);
+  assert.equal(cleanSignalNote("长".repeat(81), input), null);
+}
+
+// Legacy market pushes: longs are blocked, shorts pass unless BTC already fell hard.
+{
+  const { legacyMarketPushAllowed } = await import("./market-signals.ts");
+  assert.equal(legacyMarketPushAllowed({ direction: "LONG", btc24hPct: 1, rules }), false);
+  assert.equal(legacyMarketPushAllowed({ direction: "SHORT", btc24hPct: 0.5, rules }), true);
+  assert.equal(legacyMarketPushAllowed({ direction: "SHORT", btc24hPct: -1.7, rules }), false);
+  assert.equal(legacyMarketPushAllowed({ direction: "SHORT", btc24hPct: null, rules }), true);
+}
+
+// Notes are generated after recording, at most twice per signal, and never for volatility watches.
+{
+  const signals = openMarketSignalsStore(":memory:");
+  const at = new Date(T).toISOString();
+  signals.recordSignal({ id: "p1", kind: "pullback_long", symbol: "AUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
+  signals.recordSignal({ id: "v1", kind: "volatile_watch", symbol: "BUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
+  signals.recordSignal({ id: "c1", kind: "coil_watch", symbol: "CUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
+  const asked = [];
+  let fail = true;
+  const generateNote = async ({ context }) => {
+    asked.push(context.signal.id);
+    if (context.signal.id === "c1" && fail) throw new Error("boom");
+    return `${context.signal.symbol} 说明`;
+  };
+  const client = { async getKlinesSince() { return []; }, async getHourlyOpenInterest() { return []; }, async getPremiumIndex() { return []; }, async getTickers24h() { return []; } };
+  const alerts = { getMarketAlertsSnapshot: () => ({ events: [] }) };
+  const first = await runMarketSignalsCycle({ env: {}, nowMs: T + H, alerts, signals, client, generateNote });
+  assert.equal(first.notes, 1);
+  assert.deepEqual(asked.sort(), ["c1", "p1"]);
+  fail = false;
+  const second = await runMarketSignalsCycle({ env: {}, nowMs: T + H + 300_000, alerts, signals, client, generateNote });
+  assert.equal(second.notes, 1, "failed note retried once");
+  const third = await runMarketSignalsCycle({ env: {}, nowMs: T + H + 600_000, alerts, signals, client, generateNote });
+  assert.equal(third.notes, 0);
+  const snap = readMarketSignalsSnapshot({ store: signals, nowMs: T + 2 * H, env: {} });
+  assert.equal(snap.signals.find((s) => s.id === "p1").aiNote, "AUSDT 说明");
+  assert.equal(snap.signals.find((s) => s.id === "c1").aiNote, "CUSDT 说明");
+  assert.equal(snap.signals.find((s) => s.id === "v1").aiNote, null);
+  const off = await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + H, alerts, signals: openMarketSignalsStore(":memory:"), client, generateNote });
+  assert.equal(off.notes, 0);
+  signals.close();
+}
+
 console.log("market-signals tests passed");

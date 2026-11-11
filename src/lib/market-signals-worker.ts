@@ -2,6 +2,7 @@ import { createBinanceFuturesClient, type BinanceMarketClient } from "./market-a
 import { isStableOrFiatBase } from "./market-alerts-core.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 import type { EnvLike } from "./important-push-types.ts";
+import { generateSignalNote } from "./market-signals-ai.ts";
 import {
   buildPullbackPushEvent,
   classifyPositioning,
@@ -39,6 +40,7 @@ export type MarketSignalsCycleResult = {
   pushed: number;
   outcomes: number;
   positioning: { hourMs: number; symbols: number; volatile: number; coil: number } | null;
+  notes: number;
   errors: string[];
 };
 
@@ -239,12 +241,41 @@ async function runPositioning(input: {
   result.positioning = { hourMs, symbols: stored, volatile, coil };
 }
 
+// One neutral sentence per pullback / coil signal, generated after the signal is recorded so pushes never wait on AI.
+async function runNotes(input: {
+  alerts: AlertsStore;
+  signals: MarketSignalsStore;
+  nowMs: number;
+  rules: MarketSignalRules;
+  result: MarketSignalsCycleResult;
+  env: EnvLike;
+  generate?: typeof generateSignalNote;
+}) {
+  const { alerts, signals, nowMs, rules, result } = input;
+  const generate = input.generate ?? generateSignalNote;
+  const pending = signals.pendingNotes(["pullback_long", "coil_watch"], nowMs - rules.aiNoteWindowMs, rules.aiMaxAttempts, rules.aiNotesPerCycle);
+  for (const signal of pending) {
+    let note: string | null = null;
+    try {
+      const recentEvents = alerts
+        .getMarketAlertsSnapshot({ symbol: signal.symbol, from: new Date(nowMs - 24 * HOUR_MS).toISOString(), limit: 12, now: new Date(nowMs).toISOString() })
+        .events.map((event) => ({ occurredAt: event.occurredAt, stage: event.stage, level: event.level, changePct: event.changePct === null ? null : Math.round(event.changePct * 10) / 10 }));
+      note = await generate({ context: { signal, recentEvents }, env: input.env });
+    } catch (error) {
+      result.errors.push(`note ${signal.symbol}: ${safeError(error)}`);
+    }
+    signals.recordNoteAttempt(signal.id, note);
+    if (note) result.notes += 1;
+  }
+}
+
 export async function runMarketSignalsCycle(input: {
   env?: EnvLike;
   nowMs?: number;
   alerts?: AlertsStore;
   signals?: MarketSignalsStore;
   client?: BinanceMarketClient;
+  generateNote?: typeof generateSignalNote;
 } = {}): Promise<MarketSignalsCycleResult> {
   const env = input.env ?? process.env;
   const nowMs = input.nowMs ?? Date.now();
@@ -252,7 +283,7 @@ export async function runMarketSignalsCycle(input: {
   const alerts = input.alerts ?? openMarketAlertsStore();
   const signals = input.signals ?? openMarketSignalsStore(marketSignalsDbPath(env));
   const client = input.client ?? createBinanceFuturesClient({}, { rateLimitStore: alerts });
-  const result: MarketSignalsCycleResult = { anchors: 0, symbolsChecked: 0, filled: 0, pushed: 0, outcomes: 0, positioning: null, errors: [] };
+  const result: MarketSignalsCycleResult = { anchors: 0, symbolsChecked: 0, filled: 0, pushed: 0, outcomes: 0, positioning: null, notes: 0, errors: [] };
   try {
     await runPullbackChecks({ alerts, signals, client, nowMs, rules, result });
     await runOutcomes({ signals, client, nowMs, rules, result });
@@ -261,6 +292,7 @@ export async function runMarketSignalsCycle(input: {
     } catch (error) {
       result.errors.push(`positioning: ${safeError(error)}`);
     }
+    if (rules.aiEnabled) await runNotes({ alerts, signals, nowMs, rules, result, env, generate: input.generateNote });
     signals.markCycle({ nowMs, error: result.errors.length ? result.errors.slice(0, 3).join("; ") : null });
     return result;
   } catch (error) {

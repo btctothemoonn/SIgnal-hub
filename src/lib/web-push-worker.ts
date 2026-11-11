@@ -2,7 +2,7 @@ import type { EnvLike, PushEvent, SequencedPushEvent } from './important-push-ty
 import { qualifyOpportunity, qualifySqueeze } from './important-push-policy.ts';
 import { qualifyImportantNews } from './important-news-push.ts';
 import type { HynixPremiumPushStore } from './hynix-premium-push.ts';
-import type { MarketSignalsStore } from './market-signals.ts';
+import { getMarketSignalRules, legacyMarketPushAllowed, type MarketSignalsStore } from './market-signals.ts';
 import { readDailyBriefPushEvidence, readDailyBriefPushOutboxAfter, getDailyBriefPushBaseline } from './daily-investment-brief.ts';
 import type { openMarketAlertsStore } from './market-alerts-store.ts';
 import type { WebPushSender } from './web-push-sender.ts';
@@ -12,6 +12,9 @@ export function createMarketPushSource(store: ReturnType<typeof openMarketAlerts
   return { readAfter: store.readMarketPushOutboxAfter, getBaseline: store.getMarketPushBaseline, revalidate(event, nowMs) {
     const episode = store.readMarketPushEpisode(event.episodeId);
     if (!episode || episode.endedAt || Date.parse(event.expiresAt) <= nowMs) return false;
+    const btc = store.getMarketTickers().find((ticker) => ticker.symbol === 'BTCUSDT');
+    const signalRules = getMarketSignalRules();
+    if (signalRules.legacyPushFilter && !legacyMarketPushAllowed({ direction: episode.direction, btc24hPct: btc ? btc.pct24h : null, rules: signalRules })) return false;
     return Object.entries(episode.participants).some(([key, participant]) => {
       if (participant.ended) return false;
       const evaluation = store.readMarketPushEvaluation(episode.symbol, key);

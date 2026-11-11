@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+// These cases exercise the generic legacy delivery path with long pushes, which the backtested filter blocks by default.
+process.env.MARKET_SIGNAL_LEGACY_PUSH_FILTER = 'false';
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

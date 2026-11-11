@@ -137,6 +137,7 @@ function PullbackCard({ signal, ticker, nowMs }: { signal: BoardSignal; ticker: 
       <p className="mt-1.5 text-[11px] text-muted">
         {clock(signal.signalAt)} 提示 · 触发前 24h {pct(num(signal.detail, "pre24hPct"))} · 触发后高点 {price(num(signal.detail, "highSinceTrigger"))}
       </p>
+      {signal.aiNote ? <p className="mt-1.5 text-xs leading-5 text-foreground/85">{signal.aiNote}</p> : null}
       <p className={`mt-1 text-[11px] font-medium ${status.className}`}>{status.label}</p>
     </article>
   );
@@ -145,7 +146,8 @@ function PullbackCard({ signal, ticker, nowMs }: { signal: BoardSignal; ticker: 
 function WatchRow({ signal, nowMs }: { signal: BoardSignal; nowMs: number }) {
   const funding = num(signal.detail, "funding");
   return (
-    <li className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+    <li className="px-3 py-1.5 text-xs">
+      <div className="flex items-center justify-between gap-2">
       <span className="min-w-0 truncate font-mono font-semibold text-foreground">{base(signal.symbol)}</span>
       <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-muted">
         <span title="OI 24h 变化">OI {pct(num(signal.detail, "oi24hPct"), 0)}</span>
@@ -155,6 +157,8 @@ function WatchRow({ signal, nowMs }: { signal: BoardSignal; nowMs: number }) {
         <span title="价格 24h">24h {pct(num(signal.detail, "px24hPct"))}</span>
         <span className="w-14 text-right">{age(signal.signalAt, nowMs)}</span>
       </span>
+      </div>
+      {signal.aiNote ? <p className="mt-0.5 text-[11px] leading-5 text-foreground/80">{signal.aiNote}</p> : null}
     </li>
   );
 }
