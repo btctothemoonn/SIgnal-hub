@@ -4,7 +4,7 @@ import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } fro
 import { normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO, X_OWNED_STRUCTURAL_ISOLATE_AFTER, X_OWNED_STRUCTURAL_RETRY_MS, xOwnedReaderSoftCooldownMs, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, readOwnedReaderCooldown, recordXOwnedReaderRoutes, safeXOwnedReason, X_OWNED_STRUCTURAL_REASONS, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
-import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds } from "./x-owned-reader-activity.ts";
+import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds, xOwnedReaderSpreadQuietChecks } from "./x-owned-reader-activity.ts";
 import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, record985PostRecheckAttempt, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
 
@@ -45,7 +45,9 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     const ordered=[...usernames].sort((a,b)=>String(getXOwnedReaderAccountState(a,db)?.lastSuccessfulCheckAt || '').localeCompare(String(getXOwnedReaderAccountState(b,db)?.lastSuccessfulCheckAt || '')));
     const owned=selectXOwnedReaderAccounts(ordered,config);
     const rounds=new Map(owned.map(name=>{const key=normalizeXOwnedUsername(name);return [key,config.activityTiers ? xOwnedReaderCheckRounds(key,db,nowMs) : 1] as const;}));
-    const due=fullRoundCompleted ? owned.filter(name=>{const key=normalizeXOwnedUsername(name);return isXOwnedReaderCheckDue(getXOwnedReaderAccountState(key,db),rounds.get(key) ?? 1,config.intervalMs,nowMs);}) : owned;
+    const dueFlags=owned.map(name=>{const key=normalizeXOwnedUsername(name);const state=getXOwnedReaderAccountState(key,db);return {name,key,rounds:rounds.get(key) ?? 1,due:isXOwnedReaderCheckDue(state,rounds.get(key) ?? 1,config.intervalMs,nowMs),checkedMs:Date.parse(state?.lastSuccessfulCheckAt || "")};});
+    const early=fullRoundCompleted ? xOwnedReaderSpreadQuietChecks(dueFlags,config.intervalMs,nowMs) : new Set<string>();
+    const due=fullRoundCompleted ? dueFlags.filter(item=>item.due || early.has(item.key)).map(item=>item.name) : owned;
     result.deferredQuiet=owned.length-due.length;
     const queryAccounts=prepareXOwnedReaderAccounts(due,config,db,nowMs);
     result.attempted=queryAccounts.length;

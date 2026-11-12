@@ -4,7 +4,7 @@ import { initXPipelineDb, upsertXPipelineRealtimeUpdate } from "./x-pipeline-sto
 import { getXOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXAccountCoverageSnapshot } from "./x-owned-reader-state.ts";
 import { runXOwnedReaderCycle } from "./x-owned-reader-cycle.ts";
-import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds, xOwnedReaderStaleAfterForRounds } from "./x-owned-reader-activity.ts";
+import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds, xOwnedReaderSpreadQuietChecks, xOwnedReaderStaleAfterForRounds } from "./x-owned-reader-activity.ts";
 
 const interval=960000;
 const env={X_OWNED_READER_ACTIVITY_TIERS:"true",X_OWNED_READER_ENABLED:"true",X_OWNED_READER_SESSION_DB:"/private/session.db",X_OWNED_READER_COOLDOWN_FILE:"/private/cooldown.json",X_OWNED_READER_INTERVAL_MS:String(interval),X_OWNED_READER_USERNAMES:"busy,quiet"};
@@ -52,3 +52,13 @@ const busy=snapshot.accounts.find(account=>account.username==="busy");
 assert.equal(quiet.stale,false,"quiet author within its longer window is not overdue");
 assert.equal(busy.stale,true,"busy author keeps the normal overdue window");
 db.close();
+
+{
+  // Six quiet authors checked together: the next round pulls an even share forward.
+  const lockstep=["a","b","c","d","e","f"].map(key=>({key,rounds:3,due:false,checkedMs:start}));
+  assert.deepEqual([...xOwnedReaderSpreadQuietChecks(lockstep,interval,start+interval)].sort(),["a","b"]);
+  assert.equal(xOwnedReaderSpreadQuietChecks(lockstep,interval,start+interval/4).size,0,"never re-checks within half an interval");
+  const withDue=lockstep.map((item,index)=>({...item,due:index<2}));
+  assert.equal(xOwnedReaderSpreadQuietChecks(withDue,interval,start+interval).size,0,"no pull when the share is already due");
+  assert.equal(xOwnedReaderSpreadQuietChecks([{key:"solo",rounds:3,due:false,checkedMs:start}],interval,start+interval).size,0,"a lone quiet author keeps its tier");
+}

@@ -29,6 +29,25 @@ export function isXOwnedReaderCheckDue(state: XOwnedReaderAccountState | null, r
   return nowMs - checkedMs >= rounds * intervalMs - intervalMs / 2;
 }
 
+// Quiet authors checked in the same round stay in lockstep. Pull a few of them
+// forward (never later) so each round carries about an even share of them.
+export function xOwnedReaderSpreadQuietChecks(
+  candidates: { key: string; rounds: number; due: boolean; checkedMs: number }[],
+  intervalMs: number,
+  nowMs: number,
+) {
+  const quiet = candidates.filter((item) => item.rounds > 1);
+  if (!quiet.length) return new Set<string>();
+  const share = Math.round(quiet.reduce((sum, item) => sum + 1 / item.rounds, 0));
+  const dueCount = quiet.filter((item) => item.due).length;
+  if (dueCount >= share) return new Set<string>();
+  const early = quiet
+    .filter((item) => !item.due && Number.isFinite(item.checkedMs) && nowMs - item.checkedMs >= intervalMs / 2)
+    .sort((a, b) => a.checkedMs - b.checkedMs || a.key.localeCompare(b.key))
+    .slice(0, share - dueCount);
+  return new Set(early.map((item) => item.key));
+}
+
 export function xOwnedReaderStaleAfterForRounds(staleAfterMs: number, intervalMs: number, rounds: number) {
   return staleAfterMs + Math.max(0, rounds - 1) * intervalMs;
 }
