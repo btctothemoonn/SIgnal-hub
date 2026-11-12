@@ -2197,10 +2197,11 @@ export function UnifiedNewsPanel({
                       <span className="truncate text-muted">{item.subtitle}</span>
                     ) : null}
                     <span className="text-muted">·</span>
-                    {item.lowFrequencyCollectedAt ? (
-                      <span className="text-xs font-medium text-muted" title={`采集时间：${formatDisplayTime(item.lowFrequencyCollectedAt)}`}>低频新采集</span>
-                    ) : null}
-                    <span className="shrink-0 text-muted">{formatDisplayTime(item.createdAt)}</span>
+                    <span className="shrink-0 text-muted">
+                      {item.lowFrequencyCollectedAt
+                        ? `采集于 ${formatDisplayTime(item.lowFrequencyCollectedAt)}`
+                        : formatDisplayTime(item.createdAt)}
+                    </span>
                     {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-success" />}
                   </div>
 
