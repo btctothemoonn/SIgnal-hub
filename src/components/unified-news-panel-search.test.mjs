@@ -5,6 +5,7 @@ import ts from "typescript";
 import { matchesSignalFeedCollector, matchesSignalFeedTab } from "../lib/signal-feed-tabs.ts";
 import { matchesSignalFeedAuthorFilter } from "../lib/signal-feed-author-filter.ts";
 import { getSignalFeedRangeLimit } from "../lib/signal-feed-range.ts";
+import { compareSignalFeedTime } from "../lib/signal-feed-aggregation.ts";
 
 // Exercise the real filtering callback without mounting the feed's network,
 // scrolling, and media effects. AST selection avoids textual layout matching.
@@ -24,7 +25,7 @@ const code = ts.transpileModule(`
   ${helpers}
   return function filterFeed(unifiedFeed, deferredSearchQuery, activeTab = "all", effectiveAuthorFilter = "__all__", feedRange = "latest", collectorFilter = "all") ${filteringBody}
 `, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-const filterFeed = new Function("matchesSignalFeedTab", "matchesSignalFeedCollector", "matchesSignalFeedAuthorFilter", "getSignalFeedRangeLimit", code)(matchesSignalFeedTab, matchesSignalFeedCollector, matchesSignalFeedAuthorFilter, getSignalFeedRangeLimit);
+const filterFeed = new Function("matchesSignalFeedTab", "matchesSignalFeedCollector", "matchesSignalFeedAuthorFilter", "getSignalFeedRangeLimit", "compareSignalFeedTime", code)(matchesSignalFeedTab, matchesSignalFeedCollector, matchesSignalFeedAuthorFilter, getSignalFeedRangeLimit, compareSignalFeedTime);
 
 function item(overrides = {}) {
   return { id: "x-1", source: "x", title: "Research", subtitle: "@research", text: "Protocol testing begins tomorrow", translation: { text: "协议测试明天开始" }, quotedTweet: null, createdAt: "2026-10-01T12:00:00Z", ...overrides };
