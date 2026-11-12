@@ -350,4 +350,32 @@ store.close();
   signals.close();
 }
 
+// Symbol classes: refreshed from exchangeInfo at most every 6h; only non-crypto underlyings are exposed.
+{
+  const signals = openMarketSignalsStore(":memory:");
+  let calls = 0;
+  const client = {
+    async getExchangeInfo() {
+      calls += 1;
+      return { symbols: [
+        { symbol: "BTCUSDT", underlyingType: "COIN" },
+        { symbol: "NVDAUSDT", underlyingType: "EQUITY" },
+        { symbol: "0700USDT", underlyingType: "HK_EQUITY" },
+        { symbol: "XAUUSDT", underlyingType: "COMMODITY" },
+        { symbol: "BROKEN" },
+      ] };
+    },
+    async getKlinesSince() { return []; }, async getHourlyOpenInterest() { return []; }, async getPremiumIndex() { return []; }, async getTickers24h() { return []; },
+  };
+  const alerts = { getMarketAlertsSnapshot: () => ({ events: [] }) };
+  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T, alerts, signals, client });
+  assert.deepEqual(signals.readSymbolClasses(), { NVDAUSDT: "EQUITY", "0700USDT": "HK_EQUITY", XAUUSDT: "COMMODITY" });
+  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + H, alerts, signals, client });
+  assert.equal(calls, 1, "not refreshed within 6h");
+  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 7 * H, alerts, signals, client });
+  assert.equal(calls, 2);
+  assert.equal(readMarketSignalsSnapshot({ store: signals, nowMs: T, env: {} }).symbolClasses.NVDAUSDT, "EQUITY");
+  signals.close();
+}
+
 console.log("market-signals tests passed");

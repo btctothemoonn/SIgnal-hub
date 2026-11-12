@@ -14,13 +14,17 @@ export function getMarketSignalsBoardData(nowMs = Date.now()) {
     for (const event of alerts.events) wanted.add(event.symbol);
     for (const signal of signals.signals) wanted.add(signal.symbol);
     const tickers = store.getMarketTickers().filter((ticker) => wanted.has(ticker.symbol));
+    const assetClasses = Object.fromEntries(
+      Object.entries(signals.symbolClasses).filter(([symbol]) => wanted.has(symbol)),
+    );
     return {
       generatedAt: now,
       latestUpdatedAt: alerts.latestUpdatedAt,
       events: alerts.events,
       health: alerts.health,
       tickers,
-      signals,
+      assetClasses,
+      signals: { ...signals, symbolClasses: {} },
     };
   } finally {
     store.close();

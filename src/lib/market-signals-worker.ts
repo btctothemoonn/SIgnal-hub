@@ -26,6 +26,7 @@ const MAX_PULLBACK_SYMBOLS_PER_CYCLE = 40;
 const MAX_OUTCOMES_PER_CYCLE = 20;
 // Positioning is read a few minutes after each hour so the 1h bar and OI point have settled.
 const POSITIONING_SETTLE_MS = 3 * 60_000;
+const SYMBOL_CLASS_REFRESH_MS = 6 * HOUR_MS;
 
 type AlertsStore = ReturnType<typeof openMarketAlertsStore>;
 
@@ -167,6 +168,20 @@ function excludedSymbol(symbol: string) {
   return isStableOrFiatBase(base) || base === "BTC" || base === "ETH";
 }
 
+// Binance labels each contract's underlying (COIN, EQUITY, HK_EQUITY, COMMODITY, ...); the board badges non-crypto ones.
+async function refreshSymbolClasses(input: { signals: MarketSignalsStore; client: BinanceMarketClient; nowMs: number }) {
+  if (typeof input.client.getExchangeInfo !== "function") return false;
+  const last = input.signals.symbolClassesUpdatedAt();
+  if (last !== null && input.nowMs - last < SYMBOL_CLASS_REFRESH_MS) return false;
+  const info = await input.client.getExchangeInfo();
+  const rows = (info.symbols ?? [])
+    .map((row) => ({ symbol: String(row.symbol ?? ""), underlyingType: String(row.underlyingType ?? "").toUpperCase() }))
+    .filter((row) => row.symbol && row.underlyingType);
+  if (!rows.length) return false;
+  input.signals.replaceSymbolClasses(rows, input.nowMs);
+  return true;
+}
+
 async function runPositioning(input: {
   signals: MarketSignalsStore;
   client: BinanceMarketClient;
@@ -291,6 +306,11 @@ export async function runMarketSignalsCycle(input: {
       await runPositioning({ signals, client, nowMs, rules, result });
     } catch (error) {
       result.errors.push(`positioning: ${safeError(error)}`);
+    }
+    try {
+      await refreshSymbolClasses({ signals, client, nowMs });
+    } catch (error) {
+      result.errors.push(`symbol classes: ${safeError(error)}`);
     }
     if (rules.aiEnabled) await runNotes({ alerts, signals, nowMs, rules, result, env, generate: input.generateNote });
     signals.markCycle({ nowMs, error: result.errors.length ? result.errors.slice(0, 3).join("; ") : null });

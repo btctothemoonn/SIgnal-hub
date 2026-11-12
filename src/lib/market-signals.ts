@@ -376,6 +376,11 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
       PRIMARY KEY(symbol, hour_ms)
     );
     CREATE INDEX IF NOT EXISTS idx_market_positioning_hour ON market_positioning_hourly(hour_ms);
+    CREATE TABLE IF NOT EXISTS market_symbol_class (
+      symbol TEXT PRIMARY KEY,
+      underlying_type TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS market_signal_meta (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       last_cycle_at TEXT,
@@ -481,6 +486,27 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     markPositioning(hourMs: number, nowMs: number) {
       db.prepare("UPDATE market_signal_meta SET last_positioning_hour_ms=?, last_positioning_at=? WHERE id=1").run(hourMs, new Date(nowMs).toISOString());
     },
+    symbolClassesUpdatedAt() {
+      const row = db.prepare("SELECT MAX(updated_at) AS value FROM market_symbol_class").get() as Row;
+      const ms = Date.parse(String(row?.value ?? ""));
+      return Number.isFinite(ms) ? ms : null;
+    },
+    replaceSymbolClasses(rows: Array<{ symbol: string; underlyingType: string }>, nowMs: number) {
+      transaction(() => {
+        db.exec("DELETE FROM market_symbol_class");
+        const stmt = db.prepare("INSERT INTO market_symbol_class(symbol,underlying_type,updated_at) VALUES (?,?,?)");
+        const at = new Date(nowMs).toISOString();
+        for (const row of rows) stmt.run(row.symbol, row.underlyingType, at);
+      });
+    },
+    // Only non-crypto underlyings; anything absent is treated as a normal coin.
+    readSymbolClasses(): Record<string, string> {
+      const out: Record<string, string> = {};
+      for (const row of db.prepare("SELECT symbol, underlying_type FROM market_symbol_class WHERE underlying_type<>'COIN'").all() as Row[]) {
+        out[String(row.symbol)] = String(row.underlying_type);
+      }
+      return out;
+    },
     readAfter: outbox.readAfter,
     getBaseline: () => ({ lastSequence: outbox.getBaseline().lastSequence }),
     revalidate(event: PushEvent, nowMs: number) {
@@ -498,6 +524,7 @@ export type MarketSignalsSnapshot = {
   signals: MarketSignal[];
   stats: Record<MarketSignalKind, MarketSignalStats>;
   meta: ReturnType<MarketSignalsStore["readMeta"]>;
+  symbolClasses: Record<string, string>;
   rules: Pick<MarketSignalRules, "pullbackPct" | "maxPre24hPct" | "stopPct" | "btcShortWarningPct">;
 };
 
@@ -517,6 +544,7 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
         coil_watch: summarizeSignals(window, "coil_watch"),
       },
       meta: store.readMeta(),
+      symbolClasses: store.readSymbolClasses(),
       rules: { pullbackPct: rules.pullbackPct, maxPre24hPct: rules.maxPre24hPct, stopPct: rules.stopPct, btcShortWarningPct: rules.btcShortWarningPct },
     };
   } finally {

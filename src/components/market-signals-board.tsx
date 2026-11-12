@@ -80,6 +80,24 @@ function num(detail: BoardSignal["detail"], key: string) {
   return Number.isFinite(value) ? value : null;
 }
 
+const ASSET_LABEL: Record<string, string> = {
+  EQUITY: "美股",
+  HK_EQUITY: "港股",
+  KR_EQUITY: "韩股",
+  CN_EQUITY: "A股",
+  COMMODITY: "商品",
+  INDEX: "指数",
+  FX: "外汇",
+  PREMARKET: "盘前",
+};
+
+function AssetBadge({ type }: { type: string | undefined }) {
+  if (!type) return null;
+  const label = ASSET_LABEL[type] ?? type;
+  const className = type === "EQUITY" ? "border-sky-500/50 bg-sky-500/15 text-sky-500" : "border-line bg-workspace-canvas text-muted";
+  return <span title={`Binance 标的类型：${type}`} className={`shrink-0 rounded border px-1 text-[10px] font-semibold leading-4 ${className}`}>{label}</span>;
+}
+
 const DIRECTION_DOT: Record<Direction, string> = {
   up: "bg-success rounded-full",
   down: "bg-danger rounded-full",
@@ -108,7 +126,7 @@ function StatsLine({ live, backtest }: { live: string; backtest: string }) {
   );
 }
 
-function PullbackCard({ signal, ticker, nowMs }: { signal: BoardSignal; ticker: Ticker | undefined; nowMs: number }) {
+function PullbackCard({ signal, ticker, nowMs, asset }: { signal: BoardSignal; ticker: Ticker | undefined; nowMs: number; asset?: string }) {
   const stop = num(signal.detail, "stopPrice");
   const current = ticker?.price ?? null;
   const since = current ? (current / signal.refPrice - 1) * 100 : null;
@@ -126,7 +144,7 @@ function PullbackCard({ signal, ticker, nowMs }: { signal: BoardSignal; ticker: 
   return (
     <article id={`signal-${signal.symbol}`} className="rounded-md border border-line border-l-[3px] border-l-success bg-workspace-surface-raised p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-sm font-bold text-foreground">{base(signal.symbol)}</span>
+        <span className="flex items-center gap-1.5"><span className="font-mono text-sm font-bold text-foreground">{base(signal.symbol)}</span><AssetBadge type={asset} /></span>
         <span className="rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-semibold text-success">回调买点</span>
       </div>
       <dl className="mt-2 grid grid-cols-3 gap-1 text-[11px] text-muted">
@@ -143,12 +161,12 @@ function PullbackCard({ signal, ticker, nowMs }: { signal: BoardSignal; ticker: 
   );
 }
 
-function WatchRow({ signal, nowMs }: { signal: BoardSignal; nowMs: number }) {
+function WatchRow({ signal, nowMs, asset }: { signal: BoardSignal; nowMs: number; asset?: string }) {
   const funding = num(signal.detail, "funding");
   return (
     <li className="px-3 py-1.5 text-xs">
       <div className="flex items-center justify-between gap-2">
-      <span className="min-w-0 truncate font-mono font-semibold text-foreground">{base(signal.symbol)}</span>
+      <span className="flex min-w-0 items-center gap-1"><span className="truncate font-mono font-semibold text-foreground">{base(signal.symbol)}</span><AssetBadge type={asset} /></span>
       <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-muted">
         <span title="OI 24h 变化">OI {pct(num(signal.detail, "oi24hPct"), 0)}</span>
         <span title="资金费率" className={funding !== null && funding < 0 ? "text-danger" : undefined}>
@@ -207,7 +225,8 @@ function Lane({ events, startMs, endMs }: { events: BoardEvent[]; startMs: numbe
 
 const ROW_GRID = "grid grid-cols-[8.5rem_6rem_minmax(0,1fr)] items-center gap-x-2 sm:grid-cols-[minmax(0,1fr)_6.5rem_5rem_4.5rem_8rem_minmax(8rem,1.6fr)]";
 
-function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, endMs }: {
+function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, endMs, asset }: {
+  asset?: string;
   row: CoinRow;
   tag: { label: string; className: string };
   expanded: boolean;
@@ -228,6 +247,7 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
           <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-col items-start text-left">
             <span className="flex min-w-0 max-w-full items-center gap-1">
               <span className="truncate font-mono text-sm font-bold text-foreground">{base(row.symbol)}</span>
+              <AssetBadge type={asset} />
               <span className="hidden text-[10px] text-muted sm:inline">{row.events.length}次</span>
               <ChevronDown aria-hidden className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
             </span>
@@ -419,7 +439,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         <Section title="回调买点" hint="暴涨后回调再接，不追高">
           {pullbacks.length ? (
             <div className="grid gap-2 p-2.5 sm:grid-cols-2">
-              {pullbacks.map((signal) => <PullbackCard key={signal.id} signal={signal} ticker={tickers.get(signal.symbol)} nowMs={nowMs} />)}
+              {pullbacks.map((signal) => <PullbackCard key={signal.id} signal={signal} ticker={tickers.get(signal.symbol)} nowMs={nowMs} asset={data.assetClasses?.[signal.symbol]} />)}
             </div>
           ) : (
             <p className="px-3 py-5 text-xs leading-5 text-muted">
@@ -433,7 +453,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </Section>
         <Section title="蓄力（实验）" hint="OI 大增但价格没动">
           {coils.length ? (
-            <ul className="divide-y divide-line/70">{coils.map((signal) => <WatchRow key={signal.id} signal={signal} nowMs={nowMs} />)}</ul>
+            <ul className="divide-y divide-line/70">{coils.map((signal) => <WatchRow key={signal.id} signal={signal} nowMs={nowMs} asset={data.assetClasses?.[signal.symbol]} />)}</ul>
           ) : (
             <p className="px-3 py-5 text-xs leading-5 text-muted">过去 12h 暂无。条件：OI 24h ≥ +30%，价格 4h 横盘（±3% 内），24h 涨幅 &lt;10%。</p>
           )}
@@ -444,7 +464,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </Section>
         <Section title="大波动预警" hint="方向未定，不是做多信号">
           {volatiles.length ? (
-            <ul className="max-h-72 divide-y divide-line/70 overflow-y-auto">{volatiles.map((signal) => <WatchRow key={signal.id} signal={signal} nowMs={nowMs} />)}</ul>
+            <ul className="max-h-72 divide-y divide-line/70 overflow-y-auto">{volatiles.map((signal) => <WatchRow key={signal.id} signal={signal} nowMs={nowMs} asset={data.assetClasses?.[signal.symbol]} />)}</ul>
           ) : (
             <p className="px-3 py-5 text-xs leading-5 text-muted">过去 12h 暂无。条件：资金费率 ≤ -0.1%，或 OI 24h ≥ +30%。</p>
           )}
@@ -478,6 +498,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
                   onStar={() => toggleStar(row.symbol)}
                   startMs={startMs}
                   endMs={endMs}
+                  asset={data.assetClasses?.[row.symbol]}
                 />
               ))}
             </ul>
@@ -500,6 +521,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
                 <button type="button" onClick={() => { setExpanded(event.symbol); document.getElementById(`coin-${event.symbol}`)?.scrollIntoView({ block: "center" }); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-workspace-surface-raised">
                   <span className="font-mono text-muted">{clock(event.occurredAt)}</span>
                   <span className="font-mono font-semibold text-foreground">{base(event.symbol)}</span>
+                  <AssetBadge type={data.assetClasses?.[event.symbol]} />
                   <span className={directionOf(event) === "up" ? "text-success" : directionOf(event) === "down" ? "text-danger" : "text-warning"}>
                     {event.stage} · L{event.level}
                   </span>
