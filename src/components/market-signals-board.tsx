@@ -205,7 +205,7 @@ function Lane({ events, startMs, endMs }: { events: BoardEvent[]; startMs: numbe
   );
 }
 
-const ROW_GRID = "grid grid-cols-[7rem_6rem_minmax(0,1fr)] items-center gap-x-2 sm:grid-cols-[minmax(0,1fr)_6.5rem_5rem_4.5rem_8rem_minmax(8rem,1.6fr)]";
+const ROW_GRID = "grid grid-cols-[8.5rem_6rem_minmax(0,1fr)] items-center gap-x-2 sm:grid-cols-[minmax(0,1fr)_6.5rem_5rem_4.5rem_8rem_minmax(8rem,1.6fr)]";
 
 function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, endMs }: {
   row: CoinRow;
@@ -225,10 +225,18 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
           <button type="button" aria-label={starred ? `取消自选 ${base(row.symbol)}` : `加入自选 ${base(row.symbol)}`} aria-pressed={starred} onClick={onStar} className="shrink-0 text-muted hover:text-warning">
             <Star aria-hidden className={`h-3.5 w-3.5 ${starred ? "fill-warning text-warning" : ""}`} />
           </button>
-          <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 items-center gap-1 text-left">
-            <span className="truncate font-mono text-sm font-bold text-foreground">{base(row.symbol)}</span>
-            <span className="hidden text-[10px] text-muted sm:inline">{row.events.length}次</span>
-            <ChevronDown aria-hidden className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+          <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-col items-start text-left">
+            <span className="flex min-w-0 max-w-full items-center gap-1">
+              <span className="truncate font-mono text-sm font-bold text-foreground">{base(row.symbol)}</span>
+              <span className="hidden text-[10px] text-muted sm:inline">{row.events.length}次</span>
+              <ChevronDown aria-hidden className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+            </span>
+            <span className="max-w-full truncate font-mono text-[10px] text-muted sm:hidden">
+              {price(row.ticker?.price)} <span className={tone(row.ticker?.pct24h)}>{pct(row.ticker?.pct24h)}</span>
+            </span>
+            <span className="max-w-full truncate font-mono text-[10px] text-muted sm:hidden">
+              FDV {money(row.latest.fdvUsd ?? row.ticker?.fdvUsd)}
+            </span>
           </button>
         </div>
         <span className={`justify-self-start rounded-full px-2 py-0.5 text-[11px] font-semibold ${tag.className}`}>{tag.label}</span>
