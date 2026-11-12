@@ -34,7 +34,10 @@ let previousMinute=0;
 for(const minute of [12,17,22]) {
  pulse(db,previousMinute,minute);previousMinute=minute;
  await runXOwnedReaderCycle({accounts:['owned','primary'],config,db,nowMs:base+minute*60000,clock:()=>base+minute*60000,bridgeRunner:bridge,auditEvidenceProvider:async()=>({healthy:true,monitored:['primary'],tweetIds:[]})});
- if(minute<22)assert.equal(getXPipelineFeedItem(item.id,db),null,'audit does not silently turn all primary authors into VPS collectors');
+ if(minute<22) {
+  assert.equal(getXPipelineFeedItem(item.id,db)?.text,item.text,'first complete audit recovers the missing post');
+  assert.equal(getXAccountCoverageSnapshot(['owned','primary'],db,env,base+minute*60000).accounts[1].route,'monitor985','recovering a post does not migrate its author');
+ }
 }
 assert.equal(tasks[0].accounts[0].username,'owned','production authors have priority');
 assert.equal(tasks[0].accounts[1].purpose,'audit');
@@ -90,8 +93,8 @@ for(const minute of [2,12]) {
    await onEvent({version:1,runId:task.runId,type:'cycle_complete'});
   }});
 }
-assert.deepEqual(auditWindows,[[],["2026-10-04T03:00:00.000Z"]],
- 'do not spend audit requests before 985 has a usable live interval, or scan before the connection began');
+assert.deepEqual(auditWindows,[[],["2026-10-04T03:02:00.000Z"]],
+ 'wait for a usable 985 interval and keep recovery inside the subscription window');
 reconnectedDb.close();
 const interruptedDb=new DatabaseSync(':memory:');initXPipelineDb(interruptedDb);
 establishMonitoring(interruptedDb);
@@ -109,7 +112,7 @@ record985StreamState('heartbeat',interruptedDb,base+22*60000);
 assert.equal((await runInterrupted(22)).auditAttempted,0,'resumed traffic does not erase the preceding heartbeat gap');
 pulse(interruptedDb,22,32);
 await runInterrupted(32,async(task,_config,onEvent)=>{
- assert.equal(task.accounts.find(account=>account.purpose==='audit').fromAt,new Date(base+22*60000).toISOString());
+ assert.equal(task.accounts.find(account=>account.purpose==='audit').fromAt,new Date(base).toISOString(),'recovery can cover the earlier stream window');
  record985StreamState('connected',interruptedDb,base+32*60000+1);
  for(const account of task.accounts)await onEvent({version:1,runId:task.runId,type:'account_complete',username:account.username,userId:'321',complete:true,throughAt:account.throughAt,checkedAt:account.throughAt,pages:1,accepted:0,quarantined:0,reason:null,coverageKind:'posts-and-quotes',replyCoverageComplete:false,replyReason:'reply_page_budget_unavailable'});
  await onEvent({version:1,runId:task.runId,type:'cycle_complete'});
@@ -125,7 +128,7 @@ windowDb.prepare("update x_985_audit_state set last_successful_check_at=? where 
 windowDb.prepare("insert into x_985_audit_candidates values(?,?,?,?,?,1,'missing')")
  .run(item.id,'primary',item.createdAt,item.createdAt,item.createdAt);
 const afterOldCandidate=prepare985AuditAccounts(['owned','primary'],['owned'],windowDb,base+50*60000,1,0,base+20*60000);
-assert.equal(afterOldCandidate[0].fromAt,new Date(base+25*60000).toISOString(),'old-epoch missing samples do not reopen proven windows');
+assert.equal(afterOldCandidate[0].fromAt,new Date(base).toISOString(),'a missing post from a prior stream window is still eligible for recovery');
 record985RawPayload({content:{unknown:'format'}},windowDb,base+45*60000);
 assert.equal(prepare985AuditAccounts(['owned','primary'],['owned'],windowDb,base+50*60000,1,0,base+20*60000).length,0,'wait for a useful post-fault window');
 record985StreamState('connected',windowDb,base+20*60000);
@@ -137,7 +140,7 @@ assert.equal(waiting.auditAttempted,0,'membership checks do not spend X audit re
 assert.equal(windowDb.prepare("select monitored_since_at from x_985_author_monitoring where username_key='primary'").get().monitored_since_at,null,
  'still observe an unfollow when a parse fault blocks X audits');
 const afterFault=prepare985AuditAccounts(['owned','primary'],['owned'],windowDb,base+56*60000,1,0,base+20*60000);
-assert.equal(afterFault[0].fromAt,new Date(base+45*60000+1).toISOString(),'a known parse fault cannot poison all future windows');
+assert.equal(afterFault[0].fromAt,new Date(base).toISOString(),'a parse fault does not erase the pending recovery window');
 assert.equal(windowDb.prepare('select count(*) as n from x_985_audit_candidates').get().n,1,'preserve old evidence as history');
 windowDb.close();
-console.log('985 audit cycle: shared bridge, primary samples not ingested, confirmation raw commit and durable route/coverage passed.');
+console.log('985 audit cycle: shared bridge, immediate recovery, independent confirmations and durable route/coverage passed.');

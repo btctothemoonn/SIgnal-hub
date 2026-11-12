@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import { initXPipelineDb } from './x-pipeline-store.ts';
-import { initX985AuditDb, record985RawObservation, record985RawPayload, fetch985AuditEvidence, record985StreamState, prepare985AuditAccounts, sync985AuthorMonitoringEvidence, complete985Audit, get985AuditSnapshot, get985Promotions } from './x-985-audit.ts';
+import * as audit from './x-985-audit.ts';
+const { initX985AuditDb, record985RawObservation, record985RawPayload, fetch985AuditEvidence, record985StreamState, prepare985AuditAccounts, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, complete985Audit, get985AuditSnapshot, get985Promotions } = audit;
 
 const db=new DatabaseSync(':memory:');initXPipelineDb(db);initX985AuditDb(db);
 const base=Date.parse('2026-10-04T03:00:00Z');
@@ -149,4 +150,24 @@ await test('future non-post-looking events and malformed tweets still block abse
    assert.equal(faultsDb.prepare('select occurred_at from x_985_parse_fault where id=1').get().occurred_at,'2026-10-04T03:33:00.000Z','ignoring known follower metadata must preserve an earlier unknown-event fault');
   } finally {faultsDb.close();}
  }
+});
+
+await test('a reported public post gets one early check without counting as a 985 confirmation', () => {
+ const queueDb=new DatabaseSync(':memory:');initXPipelineDb(queueDb);
+ try {
+  const now=Date.parse('2026-11-12T05:45:00Z');
+  const postId='2120740120458559737';
+  const authors=['oldest','primary'];
+  sync985ConfiguredAuthors(authors,queueDb,now-2*3600_000);
+  assert.equal(audit.request985PostRecheck('not-configured',postId,queueDb,now),false);
+  assert.equal(audit.request985PostRecheck('primary',postId,queueDb,now+3*86400_000),false);
+  assert.equal(audit.request985PostRecheck('primary',postId,queueDb,now),true);
+  assert.equal(audit.request985PostRecheck('primary',postId,queueDb,now),false);
+  const recheck=prepare985AuditAccounts(authors,[],queueDb,now,1,600_000);
+  assert.equal(recheck.length,1);
+  assert.equal(recheck[0].username,'primary');
+  assert.ok(Date.parse(recheck[0].fromAt)<=Date.parse('2026-11-12T04:47:00.820Z'));
+  assert.deepEqual(get985Promotions(queueDb),[]);
+  assert.equal(prepare985AuditAccounts(authors,[],queueDb,now+600_000,1,600_000)[0].username,'oldest','a completed scheduling turn returns to fair rotation');
+ } finally {queueDb.close();}
 });

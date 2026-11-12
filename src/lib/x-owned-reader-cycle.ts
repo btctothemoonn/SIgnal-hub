@@ -91,14 +91,27 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       if(done.has(username) || (identities.has(username) && identities.get(username)!==event.userId)) throw new Error("protocol_invalid");
       if(auditItems.has(username)) {
         const items=auditItems.get(username)!;
-        const audited=complete985Audit(event,items,auditEvidence,db,Math.max(nowMs,clock()),liveAuditSince!);
-        if(audited.promotedIds.length) {
-          result.promotedUsernames.push(username);
-          for(const item of items.filter(value=>audited.promotedIds.includes(value.id))) {
-            upsertXPipelineRealtimeUpdate({eventType:item.eventType || (item.quotedTweet ? "NEW_TWEET_QUOTE" : "NEW_TWEET"),account:username,displayName:item.displayName,createdAt:item.createdAt,profileUrl:item.profileUrl,remark:"owned-reader",feedItem:item},db);result.ingested++;
+        let audited: ReturnType<typeof complete985Audit>;
+        let recovered=0;
+        db.exec("savepoint owned_reader_audit");
+        try {
+          audited=complete985Audit(event,items,auditEvidence,db,Math.max(nowMs,clock()),liveAuditSince!);
+          if(event.complete) {
+            const exists=db.prepare("select 1 from x_feed where id=?");
+            for(const item of items) {
+              if(exists.get(item.id)) continue;
+              upsertXPipelineRealtimeUpdate({eventType:item.eventType || (item.quotedTweet ? "NEW_TWEET_QUOTE" : "NEW_TWEET"),account:username,displayName:item.displayName,createdAt:item.createdAt,profileUrl:item.profileUrl,remark:"owned-reader",feedItem:item},db);
+              recovered++;
+            }
           }
-          recordXOwnedReaderRoutes(usernames,config,db,nowMs);
+          if(audited.promotedIds.length) recordXOwnedReaderRoutes(usernames,config,db,nowMs);
+          db.exec("release owned_reader_audit");
+        } catch {
+          db.exec("rollback to owned_reader_audit; release owned_reader_audit");
+          throw new Error("feed_write_failed");
         }
+        result.ingested+=recovered;
+        if(audited.promotedIds.length) result.promotedUsernames.push(username);
         done.add(username);auditPending.delete(username);
         if(event.complete && audited.status!=='unavailable')result.auditCompleted++;else result.auditIncomplete++;
         return;

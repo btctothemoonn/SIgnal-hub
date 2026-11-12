@@ -7,6 +7,7 @@ import { initXPipelineDb, getXPipelineFeedItem, getXPipelineHealth } from "./x-p
 import { getXOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXAccountCoverageSnapshot } from "./x-owned-reader-state.ts";
 import { runXOwnedReaderCycle } from "./x-owned-reader-cycle.ts";
+import { get985AuditSnapshot, get985Promotions, record985StreamState, sync985AuthorMonitoringEvidence, sync985ConfiguredAuthors } from "./x-985-audit.ts";
 
 const now=Date.parse("2026-10-04T02:00:00Z");
 const config=getXOwnedReaderConfig({X_OWNED_READER_ENABLED:"true",X_OWNED_READER_SESSION_DB:"/private/session.db",X_OWNED_READER_COOLDOWN_FILE:"/private/cooldown.json",X_OWNED_READER_INTERVAL_MS:"300000"});
@@ -165,4 +166,55 @@ let resumed=false;
 await runXOwnedReaderCycle({accounts:["semianalysis_"],config:structConfig,db:structDb,nowMs:successAt+1000,clock:()=>successAt+1000,bridgeRunner:async(task,_config,onEvent)=>{resumed=task.accounts.some(account=>account.username==="semianalysis_");await onEvent(completion(task,true));await onEvent({version:1,runId:task.runId,type:"cycle_complete",requests:1});}});
 assert.equal(resumed,true);
 structDb.close();
+
+for (const scenario of [
+  { name: "first miss", connectedMinutes: 60, monitored: true, auditStatus: "suspected_missing" },
+  { name: "stream reconnected after the post", connectedMinutes: 15, monitored: true, auditStatus: "verified" },
+  { name: "upstream does not cover the author", connectedMinutes: 60, monitored: false, auditStatus: "unavailable" },
+]) {
+  const auditDb = new DatabaseSync(":memory:");
+  initXPipelineDb(auditDb);
+  try {
+    const author = "primary";
+    const iso = (ms) => new Date(ms).toISOString();
+    const subscribedAt = now - 60 * 60_000;
+    const connectedAt = now - scenario.connectedMinutes * 60_000;
+    const evidence = { healthy: true, monitored: scenario.monitored ? [author] : [], tweetIds: [] };
+    sync985ConfiguredAuthors([author], auditDb, subscribedAt);
+    sync985AuthorMonitoringEvidence(evidence, auditDb, subscribedAt);
+    record985StreamState("connected", auditDb, connectedAt);
+    for (let minute = connectedAt + 60_000; minute <= now; minute += 60_000) {
+      record985StreamState("heartbeat", auditDb, minute);
+    }
+    const publicPost = { ...feedItem, id: "2106500000000000901", username: author,
+      profileUrl: `https://x.com/${author}`, tweetUrl: `https://x.com/${author}/status/2106500000000000901`,
+      createdAt: "2026-10-04T01:40:00.000Z" };
+    const runAudit = (cycleAt) => runXOwnedReaderCycle({
+      accounts: ["photoncap", author], config: { ...config, auditEnabled: true }, db: auditDb,
+      nowMs: cycleAt, clock: () => cycleAt, auditEvidenceProvider: async () => evidence,
+      bridgeRunner: async (task, _config, onEvent) => {
+        await onEvent({ ...completion(task, true), checkedAt: iso(cycleAt) });
+        const account = task.accounts.find((candidate) => candidate.purpose === "audit");
+        assert.equal(account?.username, author);
+        if (Date.parse(publicPost.createdAt) >= Date.parse(account.fromAt)) {
+          await onEvent({ version: 1, runId: task.runId, type: "tweet", account: { username: author, userId: "322" }, feedItem: publicPost,
+            evidence: { entryId: `tweet-${publicPost.id}`, entryType: "TimelineTimelineItem", selection: "standalone", tweetId: publicPost.id, userId: "322", pinned: false } });
+        }
+        await onEvent({ ...completion(task, true), username: author, userId: "322", throughAt: account.throughAt, checkedAt: iso(cycleAt) });
+        await onEvent({ version: 1, runId: task.runId, type: "cycle_complete", requests: 4 });
+      },
+    });
+    const result = await runAudit(now);
+    assert.equal(result.ingested, 1, `${scenario.name}: the verified public post must appear in the feed immediately`);
+    assert.equal(getXPipelineFeedItem(publicPost.id, auditDb)?.contentSource, "owned-reader");
+    assert.equal(get985AuditSnapshot(author, auditDb)?.status, scenario.auditStatus);
+    assert.deepEqual(get985Promotions(auditDb), [], "a recovery alone cannot change the author's route");
+    if (scenario.auditStatus === "suspected_missing") {
+      for (let minute = 1; minute <= 10; minute++) record985StreamState("heartbeat", auditDb, now + minute * 60_000);
+      const repeated = await runAudit(now + 600_000);
+      assert.equal(repeated.ingested, 0, "a second check cannot duplicate the recovered post");
+      assert.deepEqual(repeated.promotedUsernames, [author], "the independent recovery does not count as 985 receipt");
+    }
+  } finally { auditDb.close(); }
+}
 console.log("Owned cycle: fixed incomplete recovery, cap warning, raw-first commit, cooldown precheck, structural isolation and persistent cooldown passed.");

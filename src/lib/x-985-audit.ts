@@ -4,7 +4,7 @@ import { getXPipelineDb } from './x-pipeline-store.ts';
 import { normalizeXOwnedUsername } from './x-owned-reader-config.ts';
 import { buildMonitor985RequestHeaders, buildMonitor985RequestUrl } from './monitor985-auth.ts';
 import { parseMonitor985WatchConfig } from './monitor985-watch-config.ts';
-import { extractMonitor985Events } from './monitor985.ts';
+import { extractMonitor985Events, xSnowflakeCreatedAt } from './monitor985.ts';
 
 type Row=Record<string,unknown>;
 export type X985AuditEvidence={healthy:boolean;monitored:string[];tweetIds:string[]};
@@ -127,16 +127,31 @@ function get985ParseFaultAt(db:DatabaseSync) {
   const fault=db.prepare('select occurred_at from x_985_parse_fault where id=1').get() as Row|undefined;
   return Date.parse(String(fault?.occurred_at || ''));
 }
+export function request985PostRecheck(username:string,tweetId:string,db:DatabaseSync,nowMs=Date.now()) {
+  const key=normalizeXOwnedUsername(username);
+  const createdAt=validTweetId(tweetId) ? xSnowflakeCreatedAt(tweetId) : null;
+  const createdMs=createdAt ? Date.parse(createdAt) : NaN;
+  if(!key || !createdAt || createdMs>nowMs || createdMs<nowMs-48*HOUR)return false;
+  initX985AuditDb(db);
+  const author=db.prepare('select configured_since_at from x_985_author_monitoring where username_key=?').get(key);
+  if(!author || createdMs<Date.parse(String(author.configured_since_at)))return false;
+  const at=new Date(nowMs).toISOString();
+  const result=db.prepare(`insert or ignore into x_985_audit_candidates
+    (tweet_id,username_key,created_at,first_missing_at,last_missing_at,checks,status)
+    select ?,?,?,?,?,0,'reported' where not exists (select 1 from x_feed where id=?)`)
+    .run(tweetId,key,createdAt,at,at,tweetId);
+  return Number(result.changes)>0;
+}
 export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7,sweepIntervalMs=HOUR,liveSince=-Infinity) {
   initX985AuditDb(db);const assigned=new Set(owned.map(normalizeXOwnedUsername));const at=new Date(nowMs).toISOString();
   sync985ConfiguredAuthors(usernames,db,nowMs);
   const faultAt=Number.isFinite(liveSince) ? get985ParseFaultAt(db) : NaN;
   const proofFloor=Math.max(liveSince,Number.isFinite(faultAt) ? faultAt+1 : -Infinity);
   if(proofFloor>nowMs-AUDIT_DELAY_MS)return [];
-  const candidateAfter=Number.isFinite(proofFloor) ? new Date(proofFloor-1).toISOString() : '';
   const authors=[...new Set(usernames.map(normalizeXOwnedUsername).filter(Boolean))].filter(name=>!assigned.has(name));
   for(const name of authors)db.prepare("insert or ignore into x_985_audit_state(username_key,status) values(?,'never_checked')").run(name);
   const rows=authors.map(name=>db.prepare('select * from x_985_audit_state where username_key=?').get(name) as Row);
+  const recentFloor=new Date(nowMs-48*HOUR).toISOString();
   const rechecks=rows.filter(row=>row.status==='suspected_missing' && nowMs-Date.parse(String(row.last_attempt_at))>=600_000).sort((a,b)=>String(a.last_attempt_at).localeCompare(String(b.last_attempt_at))).slice(0,Math.min(2,batchLimit));
   const control=db.prepare('select last_sweep_at from x_985_audit_control where id=1').get() as Row|undefined;
   const due=!control || nowMs-Date.parse(String(control.last_sweep_at))>=sweepIntervalMs;
@@ -145,15 +160,27 @@ export function prepare985AuditAccounts(usernames:readonly string[],owned:readon
   const singleSlotSweep=due && batchLimit===1;
   const selected=singleSlotSweep ? [] : [...rechecks];
   if(due) {
+    if(selected.length<batchLimit) {
+      const reports=db.prepare(`select c.username_key from x_985_audit_candidates c join x_985_audit_state s using(username_key)
+        where c.status='reported' and c.created_at>=? and (s.last_attempt_at is null or s.last_attempt_at<c.first_missing_at)
+          and not exists (select 1 from x_feed f where f.id=c.tweet_id) order by c.first_missing_at`).all(recentFloor);
+      const priority=reports.map(report=>rows.find(row=>row.username_key===report.username_key)).find(row=>row && !selected.includes(row));
+      if(priority)selected.push(priority);
+    }
     selected.push(...rows.filter(row=>!selected.includes(row) && (!singleSlotSweep || row.status!=='suspected_missing' || nowMs-Date.parse(String(row.last_attempt_at))>=600_000)).sort((a,b)=>String(a.last_attempt_at || '').localeCompare(String(b.last_attempt_at || '')) || String(a.username_key).localeCompare(String(b.username_key))).slice(0,Math.max(0,batchLimit-selected.length)));
     db.prepare('insert into x_985_audit_control values(1,?) on conflict(id) do update set last_sweep_at=excluded.last_sweep_at').run(at);
   }
   return selected.map(row=>{
     const username=String(row.username_key);
-    const missing=db.prepare("select min(created_at) as created_at from x_985_audit_candidates where username_key=? and status='missing' and created_at>?").get(username,candidateAfter) as Row;
+    const missing=db.prepare(`select min(c.created_at) as created_at from x_985_audit_candidates c
+      where c.username_key=? and c.created_at>=? and (c.status='missing' or
+        (c.status in ('reported','monitoring_reset') and not exists (select 1 from x_feed f where f.id=c.tweet_id)))`)
+      .get(username,recentFloor) as Row;
     let fromMs=row.last_successful_check_at ? Date.parse(String(row.last_successful_check_at))-900_000 : nowMs-8*HOUR;
     if(missing.created_at)fromMs=Math.min(fromMs,Date.parse(String(missing.created_at))-60_000);
-    fromMs=Math.max(fromMs,nowMs-48*HOUR,proofFloor);
+    const monitoring=db.prepare('select configured_since_at from x_985_author_monitoring where username_key=?').get(username);
+    // Reconnects limit proof of 985 delivery, but older verified X posts can still be recovered.
+    fromMs=Math.max(fromMs,nowMs-48*HOUR,Date.parse(String(monitoring?.configured_since_at)) || 0);
     db.prepare('update x_985_audit_state set last_attempt_at=? where username_key=?').run(at,username);
     return {username,...(row.user_id?{userId:String(row.user_id)}:{}),fromAt:new Date(Math.min(fromMs,nowMs-1)).toISOString(),throughAt:at,purpose:'audit' as const};
   });

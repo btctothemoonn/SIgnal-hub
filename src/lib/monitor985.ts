@@ -90,7 +90,7 @@ function normalizeDate(raw: unknown, fallback = ""): string {
   return fallback || text;
 }
 
-function xSnowflakeCreatedAt(id: string): string | null {
+export function xSnowflakeCreatedAt(id: string): string | null {
   if (!/^\d{15,22}$/.test(id)) return null;
   try {
     const twitterEpochMs = BigInt("1288834974657");
