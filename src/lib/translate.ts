@@ -1,7 +1,9 @@
-import { request as httpRequest, type IncomingMessage } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { connect as tlsConnect } from "node:tls";
+import { createHash } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { recordAiProviderAttempt } from "./ai-usage.ts";
+import { getRuntimeDataPath } from "./runtime-storage.ts";
 import {
   isUsefulTranslation,
   shouldTranslateText,
@@ -19,178 +21,29 @@ export type TranslationNote = {
 const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 
-const translationCache = new Map<string, TranslationNote | null>();
+const translationCache = new Map<string, { result: TranslationNote | null; expiresAt: number }>();
 const inFlightTranslations = new Map<string, Promise<TranslationNote | null>>();
+
+function translationCooldown(key: string, until?: number) {
+  const path = getRuntimeDataPath(process.env, "translation-cooldown.sqlite");
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  try {
+    db.exec(`PRAGMA busy_timeout = 1000;
+      CREATE TABLE IF NOT EXISTS cooldown (key TEXT PRIMARY KEY, until_ms INTEGER NOT NULL)`);
+    if (until !== undefined) {
+      db.prepare(`INSERT INTO cooldown VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET until_ms = max(until_ms, excluded.until_ms)`).run(key, until);
+    }
+    return Number(db.prepare("SELECT until_ms FROM cooldown WHERE key = ?").get(key)?.until_ms ?? 0);
+  } finally {
+    db.close();
+  }
+}
 
 function positiveInt(raw: string | undefined, fallback: number) {
   const parsed = Number(raw?.trim());
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function proxyAuthorization(proxyUrl: URL): string | undefined {
-  if (!proxyUrl.username) {
-    return undefined;
-  }
-
-  return `Basic ${Buffer.from(
-    `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`,
-  ).toString("base64")}`;
-}
-
-function getTranslationProxyUrl(): URL | null {
-  const raw =
-    process.env.TRANSLATION_PROXY_URL?.trim() ||
-    process.env.TELEGRAM_PROXY_URL?.trim() ||
-    process.env.HTTPS_PROXY?.trim() ||
-    process.env.HTTP_PROXY?.trim() ||
-    "";
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed;
-    }
-    if (
-      ["socks:", "socks4:", "socks5:", "socks5h:"].includes(parsed.protocol) &&
-      parsed.hostname &&
-      parsed.port
-    ) {
-      return new URL(
-        `http://${parsed.username ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ""}@` : ""}${parsed.hostname}:${parsed.port}`,
-      );
-    }
-  } catch {}
-
-  return null;
-}
-
-function readJsonResponse(
-  response: IncomingMessage,
-  resolve: (value: unknown) => void,
-  reject: (reason?: unknown) => void,
-) {
-  const statusCode = response.statusCode ?? 0;
-  const chunks: Buffer[] = [];
-
-  response.on("data", (chunk) => {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  });
-
-  response.on("end", () => {
-    if (statusCode < 200 || statusCode >= 300) {
-      reject(new Error(`Translation HTTP ${statusCode}`));
-      return;
-    }
-
-    try {
-      resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function requestJsonDirect(url: URL, timeoutMs: number): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const request = httpsRequest(
-      url,
-      {
-        method: "GET",
-        headers: {
-          "User-Agent": "SignalHub/1.0",
-        },
-      },
-      (response) => {
-        readJsonResponse(response, resolve, reject);
-      },
-    );
-
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error("Translation request timeout"));
-    });
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-function requestJsonViaProxy(
-  url: URL,
-  proxyUrl: URL,
-  timeoutMs: number,
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const proxyAuth = proxyAuthorization(proxyUrl);
-    const connectRequest = httpRequest({
-      host: proxyUrl.hostname,
-      port: Number(proxyUrl.port || 80),
-      method: "CONNECT",
-      path: `${url.hostname}:443`,
-      headers: {
-        Host: `${url.hostname}:443`,
-        ...(proxyAuth ? { "Proxy-Authorization": proxyAuth } : {}),
-      },
-    });
-
-    connectRequest.setTimeout(timeoutMs, () => {
-      connectRequest.destroy(new Error("Translation proxy timeout"));
-    });
-    connectRequest.on("connect", (response, socket) => {
-      if ((response.statusCode ?? 0) < 200 || (response.statusCode ?? 0) >= 300) {
-        socket.destroy();
-        reject(new Error(`Translation proxy CONNECT ${response.statusCode ?? 0}`));
-        return;
-      }
-
-      const tlsSocket = tlsConnect({
-        socket,
-        servername: url.hostname,
-      });
-      const request = httpsRequest(
-        {
-          host: url.hostname,
-          servername: url.hostname,
-          method: "GET",
-          path: `${url.pathname}${url.search}`,
-          createConnection: () => tlsSocket,
-          headers: {
-            "User-Agent": "SignalHub/1.0",
-          },
-        },
-        (httpsResponse) => {
-          readJsonResponse(httpsResponse, resolve, reject);
-        },
-      );
-
-      request.setTimeout(timeoutMs, () => {
-        request.destroy(new Error("Translation request timeout"));
-      });
-      request.on("error", reject);
-      request.end();
-    });
-    connectRequest.on("error", reject);
-    connectRequest.end();
-  });
-}
-
-function requestJson(url: URL, timeoutMs = 8000): Promise<unknown> {
-  const proxyUrl = getTranslationProxyUrl();
-  if (proxyUrl && url.protocol === "https:") {
-    return requestJsonViaProxy(url, proxyUrl, timeoutMs).catch(() =>
-      requestJsonDirect(url, timeoutMs),
-    );
-  }
-
-  return requestJsonDirect(url, timeoutMs);
-}
-
-function guessSourceLanguage(text: string): string {
-  if (/\p{Script=Cyrillic}/u.test(text)) return "ru";
-  if (/\p{Script=Arabic}/u.test(text)) return "ar";
-  if (/\p{Script=Greek}/u.test(text)) return "el";
-  return "en";
 }
 
 export function cleanTranslationText(text: string): string {
@@ -220,77 +73,6 @@ export function cleanTranslationText(text: string): string {
     .replace(/^[“”"']+|[“”"']+$/g, "")
     .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
     .trim();
-}
-
-async function translateWithGoogle(
-  text: string,
-  targetLanguage: string,
-): Promise<TranslationNote | null> {
-  const url = new URL("https://translate.googleapis.com/translate_a/single");
-  url.searchParams.set("client", "gtx");
-  url.searchParams.set("sl", "auto");
-  url.searchParams.set("tl", targetLanguage);
-  url.searchParams.set("dt", "t");
-  url.searchParams.set("q", text);
-
-  const payload = (await requestJson(url, 5000)) as unknown[];
-  const segments = Array.isArray(payload[0]) ? (payload[0] as unknown[]) : [];
-  const translated = cleanTranslationText(segments
-    .map((segment) =>
-      Array.isArray(segment) && typeof segment[0] === "string" ? segment[0] : "",
-    )
-    .join("")
-    .trim());
-  const sourceLanguage = typeof payload[2] === "string" ? payload[2] : "unknown";
-
-  const note: TranslationNote = {
-    provider: "google-web",
-    sourceLanguage,
-    targetLanguage,
-    text: translated,
-  };
-
-  if (!isUsefulTranslation(text, note)) {
-    return null;
-  }
-
-  return note;
-}
-
-async function translateWithMyMemory(
-  text: string,
-  targetLanguage: string,
-): Promise<TranslationNote | null> {
-  const sourceLanguage = guessSourceLanguage(text);
-  const url = new URL("https://api.mymemory.translated.net/get");
-  url.searchParams.set("q", text);
-  url.searchParams.set("langpair", `${sourceLanguage}|${targetLanguage}`);
-
-  const payload = (await requestJson(url, 10000)) as Record<string, unknown>;
-  const responseData =
-    payload.responseData &&
-    typeof payload.responseData === "object" &&
-    !Array.isArray(payload.responseData)
-      ? (payload.responseData as Record<string, unknown>)
-      : null;
-  const translated = cleanTranslationText(
-    typeof responseData?.translatedText === "string"
-      ? responseData.translatedText.trim()
-      : "",
-  );
-
-  const note: TranslationNote = {
-    provider: "mymemory",
-    sourceLanguage,
-    targetLanguage,
-    text: translated,
-  };
-
-  if (!isUsefulTranslation(text, note)) {
-    return null;
-  }
-
-  return note;
 }
 
 function getMiniMaxTranslationBaseUrl() {
@@ -341,7 +123,10 @@ async function translateWithMiniMax(
   if (!apiKey) return null;
   const baseUrl = getMiniMaxTranslationBaseUrl();
   const model = getMiniMaxTranslationModel();
+  const cooldownKey = createHash("sha256").update(JSON.stringify([baseUrl, apiKey])).digest("hex");
+  if (translationCooldown(cooldownKey) > Date.now()) return null;
   let ok = false;
+  let failure = "network";
   try {
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -363,6 +148,7 @@ async function translateWithMiniMax(
         },
       ],
       temperature: 0.1,
+      max_tokens: 2048,
     }),
     signal: AbortSignal.timeout(
       positiveInt(process.env.AI_TRANSLATION_TIMEOUT_MS, 45_000),
@@ -373,14 +159,25 @@ async function translateWithMiniMax(
     string,
     unknown
   >;
-  ok = response.ok;
-  if (!response.ok) {
-    const error = payload.error as Record<string, unknown> | undefined;
-    throw new Error(
-      typeof error?.message === "string"
-        ? error.message
-        : `MiniMax translation HTTP ${response.status}`,
-    );
+  const error = payload.error as Record<string, unknown> | undefined;
+  const base = payload.base_resp as Record<string, unknown> | undefined;
+  const code = String(base?.status_code ?? error?.code ?? "");
+  const messageText = [base?.status_msg, error?.message, error?.type, code].join(" ");
+  if (!response.ok || error || (base?.status_code != null && code !== "0")) {
+    const quota = response.status === 402 ||
+      /insufficient[_ ](?:quota|balance|credits)|(?:quota|usage limit|token limit).{0,32}(?:exhausted|exceeded|reached)|(?:额度|余额).{0,12}(?:不足|用尽|超限)/i.test(messageText);
+    const rateLimit = response.status === 429 || /rate[_ ]limit|too many requests/i.test(messageText);
+    failure = quota ? "quota" : rateLimit ? "rate_limit" :
+      [401, 403].includes(response.status) ? "auth" :
+      response.status >= 500 ? "upstream" : "provider_error";
+    if (quota || rateLimit) {
+      const retryAfter = response.headers.get("retry-after");
+      const delay = retryAfter && /^\d+$/.test(retryAfter)
+        ? Number(retryAfter) * 1000
+        : retryAfter ? Date.parse(retryAfter) - Date.now() : 0;
+      translationCooldown(cooldownKey, Date.now() + Math.max(quota ? 30 * 60_000 : 60_000, delay || 0));
+    }
+    return null;
   }
 
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
@@ -397,11 +194,17 @@ async function translateWithMiniMax(
   };
 
   if (!isUsefulTranslation(text, note)) {
+    failure = "unusable_output";
     return null;
   }
 
+  ok = true;
   return note;
+  } catch (error) {
+    if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) failure = "timeout";
+    return null;
   } finally {
+    if (!ok) console.warn(JSON.stringify({ event: "minimax_translation_failure", model, failure }));
     try {
       recordAiProviderAttempt({ providerId: "minimax", model, ok });
     } catch {
@@ -410,41 +213,8 @@ async function translateWithMiniMax(
   }
 }
 
-async function translateWithProviders(
-  text: string,
-  targetLanguage: string,
-): Promise<TranslationNote | null> {
-  const providers = getTranslationProviderNames();
-
-  for (const provider of providers) {
-    try {
-      const result =
-        provider === "minimax"
-          ? await translateWithMiniMax(text, targetLanguage)
-          : provider === "google"
-          ? await translateWithGoogle(text, targetLanguage)
-          : provider === "mymemory"
-            ? await translateWithMyMemory(text, targetLanguage)
-            : null;
-      if (result) {
-        return result;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
 export function getTranslationProviderNames() {
-  const defaultProviders = getMiniMaxTranslationApiKey()
-    ? "google,minimax,mymemory"
-    : "google,mymemory";
-  return (process.env.TRANSLATION_PROVIDERS || defaultProviders)
-    .split(",")
-    .map((provider) => provider.trim().toLowerCase())
-    .filter(Boolean);
+  return ["minimax"];
 }
 
 export async function translateText(
@@ -464,8 +234,8 @@ export async function translateText(
   const cacheKey = `${cacheNamespace}:${targetLanguage}:${text}`;
   const cached = translationCache.get(cacheKey);
 
-  if (cached) {
-    return cached;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
   }
 
   const inFlight = inFlightTranslations.get(cacheKey);
@@ -475,8 +245,13 @@ export async function translateText(
 
   const request = (async (): Promise<TranslationNote | null> => {
     try {
-      const result = await translateWithProviders(text, targetLanguage);
-      translationCache.set(cacheKey, result);
+      const result = await translateWithMiniMax(text, targetLanguage).catch(() => null);
+      translationCache.delete(cacheKey);
+      translationCache.set(cacheKey, { result, expiresAt: result ? Infinity : Date.now() + 5 * 60_000 });
+      if (translationCache.size > 5000) {
+        const oldest = translationCache.keys().next().value;
+        if (oldest !== undefined) translationCache.delete(oldest);
+      }
       return result;
     } catch {
       translationCache.delete(cacheKey);

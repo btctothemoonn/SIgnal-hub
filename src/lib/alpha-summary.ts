@@ -132,13 +132,13 @@ const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_AI_SUMMARY_TIMEOUT_MS = 240_000;
-const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const DEFAULT_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
 const SIGNAL_SUMMARY_CONTENT_VERSION = 2;
 const DEFAULT_REFRESH_INTERVALS_MS: Record<AlphaSummaryScope, number> = {
   "12h": DEFAULT_REFRESH_INTERVAL_MS,
-  today: 60 * 60 * 1000,
-  "3d": 4 * 60 * 60 * 1000,
+  today: 2 * 60 * 60 * 1000,
+  "3d": 6 * 60 * 60 * 1000,
   "7d": 24 * 60 * 60 * 1000,
 };
 const MAX_ITEMS_FOR_AI_BY_SCOPE: Record<AlphaSummaryScope, number> = {
@@ -1511,6 +1511,16 @@ async function getOrCreateAlphaSummaryInternal({
 
     const { items, sourceCounts, coverage } = await collectAlphaSummaryItems(period, env);
     const inputHash = inputHashForItems(items);
+    if (
+      !force && cached?.status === "ready" && cached.period.key === period.key &&
+      cached.model === model && hasAlphaSummaryTargetGroups(cached.summary) &&
+      (!isSignals || cached.period.signalContentVersion === SIGNAL_SUMMARY_CONTENT_VERSION)
+    ) {
+      const previous = db.prepare(
+        "select input_hash from alpha_summary_cache where period_key = ?",
+      ).get(period.key) as DbRow | undefined;
+      if (previous?.input_hash === inputHash) return cached;
+    }
     if (items.length === 0) {
       return {
         success: true,
