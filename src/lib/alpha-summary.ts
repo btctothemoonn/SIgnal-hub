@@ -1512,7 +1512,7 @@ async function getOrCreateAlphaSummaryInternal({
     const { items, sourceCounts, coverage } = await collectAlphaSummaryItems(period, env);
     const inputHash = inputHashForItems(items);
     if (
-      !force && cached?.status === "ready" && cached.period.key === period.key &&
+      !force && cached?.status === "cached" && cached.period.key === period.key &&
       cached.model === model && hasAlphaSummaryTargetGroups(cached.summary) &&
       (!isSignals || cached.period.signalContentVersion === SIGNAL_SUMMARY_CONTENT_VERSION)
     ) {
