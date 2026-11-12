@@ -4,7 +4,7 @@ import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } fro
 import { normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO, X_OWNED_STRUCTURAL_ISOLATE_AFTER, X_OWNED_STRUCTURAL_RETRY_MS, xOwnedReaderSoftCooldownMs, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, readOwnedReaderCooldown, recordXOwnedReaderRoutes, safeXOwnedReason, X_OWNED_STRUCTURAL_REASONS, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
-import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
+import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, record985PostRecheckAttempt, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
 
 let inFlight=false;
@@ -95,7 +95,9 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
         let recovered=0;
         db.exec("savepoint owned_reader_audit");
         try {
-          audited=complete985Audit(event,items,auditEvidence,db,Math.max(nowMs,clock()),liveAuditSince!);
+          const checkedAt=Math.max(nowMs,clock());
+          audited=complete985Audit(event,items,auditEvidence,db,checkedAt,liveAuditSince!);
+          if(event.complete || (typeof event.pages==='number' && event.pages>0))record985PostRecheckAttempt(username,db,nowMs,checkedAt);
           if(event.complete) {
             const exists=db.prepare("select 1 from x_feed where id=?");
             for(const item of items) {

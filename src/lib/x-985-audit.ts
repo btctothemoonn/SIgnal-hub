@@ -26,6 +26,8 @@ export function initX985AuditDb(db:DatabaseSync=getXPipelineDb()) {
     create table if not exists x_985_audit_control(id integer primary key check(id=1),last_sweep_at text not null);
     create table if not exists x_985_parse_fault(id integer primary key check(id=1),occurred_at text not null);
     create table if not exists x_985_author_monitoring(username_key text primary key,configured_since_at text not null,monitored_since_at text);
+    create table if not exists x_985_recovery_state(username_key text primary key,covered_through_at text not null);
+    create table if not exists x_985_post_rechecks(tweet_id text primary key,username_key text not null,created_at text not null,requested_at text not null,scheduled_at text,attempted_at text);
   `);initialized.add(db);
 }
 export function record985RawObservation(update:Pick<TwitterRealtimeUpdate,'account'|'feedItem'>,db:DatabaseSync=getXPipelineDb(),nowMs=Date.now()) {
@@ -90,6 +92,8 @@ export function sync985ConfiguredAuthors(usernames:readonly string[],db:Database
     const username=String(row.username_key);
     if(configured.has(username))continue;
     db.prepare('delete from x_985_author_monitoring where username_key=?').run(username);
+    db.prepare('delete from x_985_recovery_state where username_key=?').run(username);
+    db.prepare('delete from x_985_post_rechecks where username_key=?').run(username);
     db.prepare("update x_985_audit_candidates set status='monitoring_reset' where username_key=? and status='missing'").run(username);
   }
   for(const username of configured)db.prepare('insert or ignore into x_985_author_monitoring values(?,?,null)').run(username,at);
@@ -136,11 +140,16 @@ export function request985PostRecheck(username:string,tweetId:string,db:Database
   const author=db.prepare('select configured_since_at from x_985_author_monitoring where username_key=?').get(key);
   if(!author || createdMs<Date.parse(String(author.configured_since_at)))return false;
   const at=new Date(nowMs).toISOString();
-  const result=db.prepare(`insert or ignore into x_985_audit_candidates
-    (tweet_id,username_key,created_at,first_missing_at,last_missing_at,checks,status)
-    select ?,?,?,?,?,0,'reported' where not exists (select 1 from x_feed where id=?)`)
-    .run(tweetId,key,createdAt,at,at,tweetId);
+  const result=db.prepare(`insert into x_985_post_rechecks(tweet_id,username_key,created_at,requested_at)
+    select ?,?,?,? where not exists (select 1 from x_feed where id=?)
+    on conflict(tweet_id) do update set requested_at=excluded.requested_at,attempted_at=null
+      where x_985_post_rechecks.attempted_at is not null and x_985_post_rechecks.username_key=excluded.username_key`)
+    .run(tweetId,key,createdAt,at,tweetId);
   return Number(result.changes)>0;
+}
+export function record985PostRecheckAttempt(username:string,db:DatabaseSync,scheduledMs:number,attemptedMs:number) {
+  db.prepare('update x_985_post_rechecks set attempted_at=? where username_key=? and scheduled_at=? and attempted_at is null')
+    .run(new Date(attemptedMs).toISOString(),username,new Date(scheduledMs).toISOString());
 }
 export function prepare985AuditAccounts(usernames:readonly string[],owned:readonly string[],db:DatabaseSync,nowMs:number,batchLimit=7,sweepIntervalMs=HOUR,liveSince=-Infinity) {
   initX985AuditDb(db);const assigned=new Set(owned.map(normalizeXOwnedUsername));const at=new Date(nowMs).toISOString();
@@ -159,13 +168,21 @@ export function prepare985AuditAccounts(usernames:readonly string[],owned:readon
   // misses cannot indefinitely consume every turn ahead of unvisited authors.
   const singleSlotSweep=due && batchLimit===1;
   const selected=singleSlotSweep ? [] : [...rechecks];
+  let priority: Row | undefined;
   if(due) {
-    if(selected.length<batchLimit) {
-      const reports=db.prepare(`select c.username_key from x_985_audit_candidates c join x_985_audit_state s using(username_key)
-        where c.status='reported' and c.created_at>=? and (s.last_attempt_at is null or s.last_attempt_at<c.first_missing_at)
-          and not exists (select 1 from x_feed f where f.id=c.tweet_id) order by c.first_missing_at`).all(recentFloor);
-      const priority=reports.map(report=>rows.find(row=>row.username_key===report.username_key)).find(row=>row && !selected.includes(row));
-      if(priority)selected.push(priority);
+    db.prepare('delete from x_985_post_rechecks where created_at<?').run(recentFloor);
+    const lastPriority=db.prepare('select max(scheduled_at) as at from x_985_post_rechecks').get();
+    // Leave a normal sweep between priority turns, including after an interrupted attempt.
+    if(selected.length<batchLimit && (!lastPriority?.at || String(lastPriority.at)<String(control?.last_sweep_at || ''))) {
+      const reports=db.prepare(`select r.* from x_985_post_rechecks r where r.attempted_at is null
+        and not exists (select 1 from x_feed f where f.id=r.tweet_id) order by r.requested_at,r.tweet_id`).all();
+      const next=reports.find(report=>rows.some(row=>row.username_key===report.username_key && !selected.includes(row) &&
+        (row.status!=='suspected_missing' || nowMs-Date.parse(String(row.last_attempt_at))>=AUDIT_DELAY_MS)));
+      if(next) {
+        priority=next;
+        selected.push(rows.find(row=>row.username_key===next.username_key)!);
+        db.prepare('update x_985_post_rechecks set scheduled_at=? where tweet_id=?').run(at,String(next.tweet_id));
+      }
     }
     selected.push(...rows.filter(row=>!selected.includes(row) && (!singleSlotSweep || row.status!=='suspected_missing' || nowMs-Date.parse(String(row.last_attempt_at))>=600_000)).sort((a,b)=>String(a.last_attempt_at || '').localeCompare(String(b.last_attempt_at || '')) || String(a.username_key).localeCompare(String(b.username_key))).slice(0,Math.max(0,batchLimit-selected.length)));
     db.prepare('insert into x_985_audit_control values(1,?) on conflict(id) do update set last_sweep_at=excluded.last_sweep_at').run(at);
@@ -174,10 +191,13 @@ export function prepare985AuditAccounts(usernames:readonly string[],owned:readon
     const username=String(row.username_key);
     const missing=db.prepare(`select min(c.created_at) as created_at from x_985_audit_candidates c
       where c.username_key=? and c.created_at>=? and (c.status='missing' or
-        (c.status in ('reported','monitoring_reset') and not exists (select 1 from x_feed f where f.id=c.tweet_id)))`)
+        (c.status='monitoring_reset' and not exists (select 1 from x_feed f where f.id=c.tweet_id)))`)
       .get(username,recentFloor) as Row;
-    let fromMs=row.last_successful_check_at ? Date.parse(String(row.last_successful_check_at))-900_000 : nowMs-8*HOUR;
+    const recovery=db.prepare('select covered_through_at from x_985_recovery_state where username_key=?').get(username);
+    const throughAt=recovery?.covered_through_at || row.last_successful_check_at;
+    let fromMs=throughAt ? Date.parse(String(throughAt))-900_000 : nowMs-8*HOUR;
     if(missing.created_at)fromMs=Math.min(fromMs,Date.parse(String(missing.created_at))-60_000);
+    if(priority?.username_key===username)fromMs=Math.min(fromMs,Date.parse(String(priority.created_at))-60_000);
     const monitoring=db.prepare('select configured_since_at from x_985_author_monitoring where username_key=?').get(username);
     // Reconnects limit proof of 985 delivery, but older verified X posts can still be recovered.
     fromMs=Math.max(fromMs,nowMs-48*HOUR,Date.parse(String(monitoring?.configured_since_at)) || 0);
@@ -230,15 +250,24 @@ export function complete985Audit(event:Record<string,unknown>,items:readonly Twi
         continue;
       }
       if(created<=eligibleSince)continue;
-      const separated=prior && nowMs-Date.parse(String(prior.last_missing_at))>=600_000;
-      const checks=prior?.status==='missing' ? Number(prior.checks)+(separated?1:0) : 1;
-      db.prepare(`insert into x_985_audit_candidates values(?,?,?,?,?,?,'missing') on conflict(tweet_id) do update set last_missing_at=case when ?=1 then excluded.last_missing_at else last_missing_at end,checks=excluded.checks,status='missing'`).run(item.id,username,item.createdAt,at,at,checks,separated?1:0);
+      const continuing=prior?.status==='missing';
+      const separated=continuing && nowMs-Date.parse(String(prior.last_missing_at))>=AUDIT_DELAY_MS;
+      const checks=continuing ? Number(prior.checks)+(separated?1:0) : 1;
+      db.prepare(`insert into x_985_audit_candidates values(?,?,?,?,?,?,'missing') on conflict(tweet_id) do update set
+        first_missing_at=case when status='missing' then first_missing_at else excluded.first_missing_at end,
+        last_missing_at=case when status<>'missing' or ?=1 then excluded.last_missing_at else last_missing_at end,
+        checks=excluded.checks,status='missing'`).run(item.id,username,item.createdAt,at,at,checks,separated?1:0);
       status='suspected_missing';reason='awaiting_second_check';
       if(checks>=2 && separated && nowMs-Date.parse(String(prior!.first_missing_at))>=600_000) {
         db.prepare("insert or ignore into x_985_promotions values(?,?,?,?,'confirmed_985_missing')").run(username,item.id,item.createdAt,at);
         promotedIds.push(item.id);status='confirmed_missing';reason='confirmed_985_missing';
       }
     }
+  }
+  const throughMs=typeof event.throughAt==='string' ? Date.parse(event.throughAt) : NaN;
+  if(event.complete && Number.isFinite(throughMs)) {
+    db.prepare(`insert into x_985_recovery_state values(?,?) on conflict(username_key) do update set
+      covered_through_at=max(covered_through_at,excluded.covered_through_at)`).run(username,new Date(throughMs).toISOString());
   }
   db.prepare(`update x_985_audit_state set user_id=coalesce(?,user_id),status=?,reason=?,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,checked_count=checked_count+1 where username_key=?`).run(typeof event.userId==='string'?event.userId:null,status,reason,event.complete && status!=='unavailable'?1:0,checkedAt,username);
   return {status,reason,promotedIds};

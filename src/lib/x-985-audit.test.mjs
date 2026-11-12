@@ -159,6 +159,8 @@ await test('a reported public post gets one early check without counting as a 98
   const postId='2120740120458559737';
   const authors=['oldest','primary'];
   sync985ConfiguredAuthors(authors,queueDb,now-2*3600_000);
+  queueDb.prepare("insert into x_985_audit_state(username_key,last_successful_check_at,status) values('primary',?,'verified')")
+    .run(new Date(now-20*60_000).toISOString());
   assert.equal(audit.request985PostRecheck('not-configured',postId,queueDb,now),false);
   assert.equal(audit.request985PostRecheck('primary',postId,queueDb,now+3*86400_000),false);
   assert.equal(audit.request985PostRecheck('primary',postId,queueDb,now),true);
@@ -168,6 +170,41 @@ await test('a reported public post gets one early check without counting as a 98
   assert.equal(recheck[0].username,'primary');
   assert.ok(Date.parse(recheck[0].fromAt)<=Date.parse('2026-11-12T04:47:00.820Z'));
   assert.deepEqual(get985Promotions(queueDb),[]);
-  assert.equal(prepare985AuditAccounts(authors,[],queueDb,now+600_000,1,600_000)[0].username,'oldest','a completed scheduling turn returns to fair rotation');
+  assert.equal(prepare985AuditAccounts(authors,[],queueDb,now+600_000,1,600_000)[0].username,'oldest','priority must alternate with ordinary rotation');
+  const retryAt=now+1200_000;
+  assert.equal(prepare985AuditAccounts(authors,[],queueDb,retryAt,1,600_000)[0].username,'primary','scheduling without a bridge result must not consume the request');
+  audit.record985PostRecheckAttempt('primary',queueDb,retryAt,retryAt+1000);
+  const ordinary=prepare985AuditAccounts(['primary'],[],queueDb,retryAt+600_000,1,600_000);
+  assert.ok(Date.parse(ordinary[0].fromAt)>Date.parse(recheck[0].fromAt),'a spent report no longer extends normal scans');
  } finally {queueDb.close();}
+});
+
+await test('a complete recovery advances its X window even without 985 proof', () => {
+ const db=new DatabaseSync(':memory:');initXPipelineDb(db);
+ try {
+  const now=base+600_000;
+  sync985ConfiguredAuthors(['primary'],db,base-2*3600_000);
+  complete985Audit({...completion,throughAt:new Date(now).toISOString()},[],{healthy:true,monitored:[],tweetIds:[]},db,now);
+  assert.equal(get985AuditSnapshot('primary',db).lastSuccessfulCheckAt,null);
+  assert.equal(prepare985AuditAccounts(['primary'],[],db,now+600_000,1,600_000)[0].fromAt,'2026-10-04T02:55:00.000Z');
+ } finally {db.close();}
+});
+
+await test('an old candidate timestamp cannot shorten the independent confirmation interval', () => {
+ const db=new DatabaseSync(':memory:');initXPipelineDb(db);initX985AuditDb(db);
+ try {
+  sync985ConfiguredAuthors(['primary'],db,base);
+  sync985AuthorMonitoringEvidence(evidence,db,base);
+  db.prepare('insert into x_985_audit_candidates values(?,?,?,?,?,1,?)')
+    .run(item.id,'primary',item.createdAt,new Date(base+8*60_000).toISOString(),new Date(base+8*60_000).toISOString(),'monitoring_reset');
+  record985StreamState('connected',db,base);
+  for(let minute=1;minute<=25;minute++) {
+   record985StreamState('heartbeat',db,base+minute*60_000);
+   if([12,19,25].includes(minute)) {
+    const now=base+minute*60_000;
+    const audit=complete985Audit({...completion,checkedAt:new Date(now).toISOString()},[item],evidence,db,now);
+    assert.deepEqual(audit.promotedIds,minute===25?[item.id]:[]);
+   }
+  }
+ } finally {db.close();}
 });
