@@ -9,7 +9,6 @@ import {
 } from "../src/lib/6551-twitter.ts";
 import {
   getXPipelineConfiguredAccounts,
-  getXPipelineConfiguredTruthAccounts,
 } from "../src/lib/x-pipeline-accounts.ts";
 import {
   getXPipelineConfig,
@@ -84,10 +83,7 @@ async function readRuntimeConfigFile() {
 
 async function syncConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
-  const accounts = [
-    ...getXPipelineConfiguredAccounts(runtimeConfig),
-    ...getXPipelineConfiguredTruthAccounts(),
-  ];
+  const accounts = getXPipelineConfiguredAccounts(runtimeConfig);
   for (const account of accounts) {
     upsertXPipelineAccount(account);
   }

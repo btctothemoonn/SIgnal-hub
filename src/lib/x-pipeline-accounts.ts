@@ -24,21 +24,6 @@ function makeAccount(username: string, tags: string[]): XPipelineAccountInput {
   };
 }
 
-function normalizeTruthHandle(raw: string): string {
-  return raw.trim().replace(/^truth:/i, "").replace(/^@+/, "");
-}
-
-function makeTruthAccount(handle: string): XPipelineAccountInput {
-  return {
-    username: `truth:${handle}`,
-    name: handle,
-    profileUrl: `https://truthsocial.com/@${handle}`,
-    avatar: "",
-    note: "985monitor truth config",
-    tags: ["truth"],
-  };
-}
-
 export function getXPipelineConfiguredAccounts(
   config: RuntimeConfig,
   env: NodeJS.ProcessEnv = process.env,
@@ -61,26 +46,6 @@ export function getXPipelineConfiguredAccounts(
 
   for (const account of splitList(env.TWITTER_WATCH_USERNAMES)) {
     add(account, []);
-  }
-
-  return result;
-}
-
-export function getXPipelineConfiguredTruthAccounts(
-  env: NodeJS.ProcessEnv = process.env,
-): XPipelineAccountInput[] {
-  if (env.MONITOR985_TRUTH_ENABLED?.trim().toLowerCase() !== "true") return [];
-  const raw = env.MONITOR985_TRUTH_ACCOUNTS?.trim() || "realDonaldTrump";
-  const result: XPipelineAccountInput[] = [];
-  const seen = new Set<string>();
-
-  for (const item of splitList(raw)) {
-    const handle = normalizeTruthHandle(item);
-    if (!handle) continue;
-    const key = handle.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(makeTruthAccount(handle));
   }
 
   return result;

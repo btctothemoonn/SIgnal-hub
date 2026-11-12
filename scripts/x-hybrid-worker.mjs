@@ -6,10 +6,7 @@ import {
   get6551TwitterTweetById,
   get6551TwitterUserTweets,
 } from "../src/lib/6551-twitter.ts";
-import {
-  getXPipelineConfiguredAccounts,
-  getXPipelineConfiguredTruthAccounts,
-} from "../src/lib/x-pipeline-accounts.ts";
+import { getXPipelineConfiguredAccounts } from "../src/lib/x-pipeline-accounts.ts";
 import {
   getTelegramPipelineConfig,
 } from "../src/lib/telegram-pipeline-config.ts";
@@ -250,14 +247,12 @@ let ignoredRemoteFingerprint = "";
 async function syncConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
   const localAccounts = getXPipelineConfiguredAccounts(runtimeConfig);
-  const truthAccounts = getXPipelineConfiguredTruthAccounts();
   const remoteAccounts = describeMonitor985AuthMode() !== "public"
     ? (await remoteWatchConfigCache.get()) ?? [] : [];
 
   const { accounts, allowedAccountKeys, ignoredRemoteAccounts } =
     resolveMonitor985AcceptedAccounts({
       localAccounts,
-      truthAccounts,
       remoteAccounts,
     });
 
@@ -311,8 +306,6 @@ async function runMonitor985PreflightCatchup(allowedAccountKeys) {
   const limit = getMonitor985HybridPreflightLimit();
   const payloads = await Promise.all([
     fetchMonitor985Json(`/api/twitter-live-events?limit=${limit}`),
-    ...(getXPipelineConfiguredTruthAccounts().length
-      ? [fetchMonitor985Json(`/api/truth-social-events?limit=${limit}`)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

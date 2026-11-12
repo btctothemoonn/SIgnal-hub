@@ -14,7 +14,7 @@ import {
   backfillMissingXTranslations,
   ensureXFeedItemTranslation,
 } from "./x-translation-backfill";
-import { getXPipelineConfiguredAccounts, getXPipelineConfiguredTruthAccounts } from "./x-pipeline-accounts";
+import { getXPipelineConfiguredAccounts } from "./x-pipeline-accounts";
 import { loadRuntimeConfig } from "./runtime-config";
 import { resolveMonitor985AcceptedAccounts } from "./monitor985-account-filter";
 import {
@@ -83,12 +83,11 @@ export async function runMonitor985ManualCatchup({
   const remoteAccounts = toMonitor985XPipelineAccounts(
     parseMonitor985WatchConfig(watchConfig),
   );
-  const truthAccounts = getXPipelineConfiguredTruthAccounts(env as NodeJS.ProcessEnv);
   const localAccounts = getXPipelineConfiguredAccounts(
     await loadRuntimeConfig(), env as NodeJS.ProcessEnv,
   );
   const { accounts, allowedAccountKeys: allowed } = resolveMonitor985AcceptedAccounts({
-    localAccounts, truthAccounts, remoteAccounts,
+    localAccounts, remoteAccounts,
   });
   const accountSource: Monitor985CatchupResult["accountSource"] = "local";
 
@@ -99,7 +98,6 @@ export async function runMonitor985ManualCatchup({
 
   const payloads = await Promise.all([
     fetchJson(`/api/twitter-live-events?limit=${limit}`, env),
-    ...(truthAccounts.length ? [fetchJson(`/api/truth-social-events?limit=${limit}`, env)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

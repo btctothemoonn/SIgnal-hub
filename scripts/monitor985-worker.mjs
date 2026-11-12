@@ -8,10 +8,7 @@ import {
   resolveMonitor985FullTweet,
   shouldRefreshMonitor985FeedItem,
 } from "../src/lib/monitor985-enrichment.ts";
-import {
-  getXPipelineConfiguredAccounts,
-  getXPipelineConfiguredTruthAccounts,
-} from "../src/lib/x-pipeline-accounts.ts";
+import { getXPipelineConfiguredAccounts } from "../src/lib/x-pipeline-accounts.ts";
 import { isMonitor985Enabled } from "../src/lib/x-pipeline-config.ts";
 import { record985RawPayload, record985StreamState } from "../src/lib/x-985-audit.ts";
 import {
@@ -51,7 +48,7 @@ const RUNTIME_CONFIG_PATH = resolve(process.cwd(), ".signal-hub", "runtime-confi
 const DEFAULT_BASE_URL = "https://985monitor.xyz";
 const DEFAULT_RECONNECT_MS = 5_000;
 const DEFAULT_CATCHUP_INTERVAL_MS = 60_000;
-const SSE_EVENT_TYPES = new Set(["twitter", ...(getXPipelineConfiguredTruthAccounts().length ? ["truth"] : [])]);
+const SSE_EVENT_TYPES = new Set(["twitter"]);
 
 let accountSyncTimer = null;
 let catchupTimer = null;
@@ -162,7 +159,6 @@ async function readRuntimeConfigFile() {
 async function refreshConfiguredAccounts() {
   const runtimeConfig = await readRuntimeConfigFile();
   const localAccounts = getXPipelineConfiguredAccounts(runtimeConfig);
-  const truthAccounts = getXPipelineConfiguredTruthAccounts();
   let remoteAccounts = [];
 
   if (describeMonitor985AuthMode() !== "public") {
@@ -182,7 +178,6 @@ async function refreshConfiguredAccounts() {
   const { accounts, allowedAccountKeys, ignoredRemoteAccounts } =
     resolveMonitor985AcceptedAccounts({
       localAccounts,
-      truthAccounts,
       remoteAccounts,
     });
 
@@ -355,8 +350,6 @@ async function ingestRawEvent(rawEvent, allowedAccountKeys) {
 async function bootstrapRecentEvents(allowedAccountKeys, reason = "bootstrap") {
   const payloads = await Promise.all([
     fetchJson(`/api/twitter-live-events?limit=${getBootstrapLimit()}`),
-    ...(getXPipelineConfiguredTruthAccounts().length
-      ? [fetchJson(`/api/truth-social-events?limit=${getBootstrapLimit()}`)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

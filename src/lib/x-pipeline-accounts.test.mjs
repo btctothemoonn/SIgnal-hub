@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  getXPipelineConfiguredAccounts,
-  getXPipelineConfiguredTruthAccounts,
-} from "./x-pipeline-accounts.ts";
+import { getXPipelineConfiguredAccounts } from "./x-pipeline-accounts.ts";
 
 const accounts = getXPipelineConfiguredAccounts(
   {
@@ -23,17 +20,5 @@ assert.deepEqual(
 );
 assert.deepEqual(accounts[0].tags, ["alpha"]);
 assert.equal(accounts[2].profileUrl, "https://x.com/Other");
-
-const truthAccounts = getXPipelineConfiguredTruthAccounts({
-  MONITOR985_TRUTH_ENABLED: "true",
-  MONITOR985_TRUTH_ACCOUNTS: "realDonaldTrump, truth:@realDonaldTrump, @OtherTruth",
-});
-assert.deepEqual(
-  truthAccounts.map((account) => account.username),
-  ["truth:realDonaldTrump", "truth:OtherTruth"],
-);
-assert.equal(truthAccounts[0].name, "realDonaldTrump");
-assert.equal(truthAccounts[0].profileUrl, "https://truthsocial.com/@realDonaldTrump");
-assert.equal(truthAccounts[0].note, "985monitor truth config");
 
 console.log("ok - x pipeline configured accounts are local-only and deduped");

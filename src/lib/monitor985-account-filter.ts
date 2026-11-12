@@ -28,14 +28,12 @@ export function shouldAcceptMonitor985Account(
 
 export function resolveMonitor985AcceptedAccounts({
   localAccounts,
-  truthAccounts,
   remoteAccounts = [],
 }: {
   localAccounts: XPipelineAccountInput[];
-  truthAccounts: XPipelineAccountInput[];
   remoteAccounts?: XPipelineAccountInput[];
 }) {
-  const accounts = [...localAccounts, ...truthAccounts];
+  const accounts = [...localAccounts];
   const allowedAccountKeys = new Set(
     accounts.map((account) => monitor985AccountKey(account.username)),
   );

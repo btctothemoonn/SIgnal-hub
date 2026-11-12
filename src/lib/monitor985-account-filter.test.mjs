@@ -15,16 +15,6 @@ const localAccounts = [
     tags: [],
   },
 ];
-const truthAccounts = [
-  {
-    username: "truth:realDonaldTrump",
-    name: "realDonaldTrump",
-    profileUrl: "https://truthsocial.com/@realDonaldTrump",
-    avatar: "",
-    note: "truth config",
-    tags: ["truth"],
-  },
-];
 const remoteAccounts = [
   {
     username: "bboczeng",
@@ -49,13 +39,12 @@ assert.equal(monitor985AccountKey("@_FORAB"), "_forab");
 {
   const result = resolveMonitor985AcceptedAccounts({
     localAccounts,
-    truthAccounts,
     remoteAccounts,
   });
 
   assert.deepEqual(
     result.accounts.map((account) => account.username),
-    ["bboczeng", "truth:realDonaldTrump"],
+    ["bboczeng"],
   );
   assert.deepEqual(
     result.ignoredRemoteAccounts.map((account) => account.username),
