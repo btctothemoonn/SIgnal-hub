@@ -23,11 +23,8 @@ const finalTranslation =
   "NVDA \u4f9b\u5e94\u5546\u68c0\u67e5\u4e0a\u4fee\uff0c\u4e91\u8d44\u672c\u5f00\u652f\u4ecd\u7136\u5f3a\u52b2\u3002";
 delete process.env.TRANSLATION_PROVIDERS;
 process.env.MINIMAX_API_KEY = "test-key";
-assert.deepEqual(translateModule.getTranslationProviderNames(), [
-  "google",
-  "minimax",
-  "mymemory",
-]);
+process.env.TRANSLATION_PROVIDERS = "google,minimax,mymemory";
+assert.deepEqual(translateModule.getTranslationProviderNames(), ["minimax"]);
 assert.equal(
   cleanTranslationText(
     "\u6700\u7ec8\u8bd1\u6587\uff1a\u201cNVDA \u4f9b\u5e94\u94fe\u9700\u6c42\u4ecd\u5f3a\u52b2\u3002\u201d",
@@ -112,6 +109,16 @@ try {
 
   assert.equal(translated, null);
   assert.equal(summaryOnlyRequests.length, 0);
+
+  process.env.AI_TRANSLATION_API_KEY = `test-quota-${Date.now()}`;
+  let quotaRequests = 0;
+  globalThis.fetch = async () => {
+    quotaRequests += 1;
+    return Response.json({ error: { code: "insufficient_quota" } }, { status: 429 });
+  };
+  assert.equal(await translateText("Crude oil futures rose after the inventory report."), null);
+  assert.equal(await translateText("Copper futures slipped ahead of the market open."), null);
+  assert.equal(quotaRequests, 1);
 } finally {
   globalThis.fetch = originalFetch;
   for (const [key, value] of Object.entries(originalEnv)) {
