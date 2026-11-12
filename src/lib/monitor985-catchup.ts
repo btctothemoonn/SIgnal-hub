@@ -99,7 +99,7 @@ export async function runMonitor985ManualCatchup({
 
   const payloads = await Promise.all([
     fetchJson(`/api/twitter-live-events?limit=${limit}`, env),
-    fetchJson(`/api/truth-social-events?limit=${limit}`, env),
+    ...(truthAccounts.length ? [fetchJson(`/api/truth-social-events?limit=${limit}`, env)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

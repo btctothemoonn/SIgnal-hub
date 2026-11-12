@@ -25,6 +25,7 @@ assert.deepEqual(accounts[0].tags, ["alpha"]);
 assert.equal(accounts[2].profileUrl, "https://x.com/Other");
 
 const truthAccounts = getXPipelineConfiguredTruthAccounts({
+  MONITOR985_TRUTH_ENABLED: "true",
   MONITOR985_TRUTH_ACCOUNTS: "realDonaldTrump, truth:@realDonaldTrump, @OtherTruth",
 });
 assert.deepEqual(

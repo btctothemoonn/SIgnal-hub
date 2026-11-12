@@ -69,6 +69,7 @@ export function getXPipelineConfiguredAccounts(
 export function getXPipelineConfiguredTruthAccounts(
   env: NodeJS.ProcessEnv = process.env,
 ): XPipelineAccountInput[] {
+  if (env.MONITOR985_TRUTH_ENABLED?.trim().toLowerCase() !== "true") return [];
   const raw = env.MONITOR985_TRUTH_ACCOUNTS?.trim() || "realDonaldTrump";
   const result: XPipelineAccountInput[] = [];
   const seen = new Set<string>();

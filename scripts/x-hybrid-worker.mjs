@@ -311,7 +311,8 @@ async function runMonitor985PreflightCatchup(allowedAccountKeys) {
   const limit = getMonitor985HybridPreflightLimit();
   const payloads = await Promise.all([
     fetchMonitor985Json(`/api/twitter-live-events?limit=${limit}`),
-    fetchMonitor985Json(`/api/truth-social-events?limit=${limit}`),
+    ...(getXPipelineConfiguredTruthAccounts().length
+      ? [fetchMonitor985Json(`/api/truth-social-events?limit=${limit}`)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

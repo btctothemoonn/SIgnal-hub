@@ -51,7 +51,7 @@ const RUNTIME_CONFIG_PATH = resolve(process.cwd(), ".signal-hub", "runtime-confi
 const DEFAULT_BASE_URL = "https://985monitor.xyz";
 const DEFAULT_RECONNECT_MS = 5_000;
 const DEFAULT_CATCHUP_INTERVAL_MS = 60_000;
-const SSE_EVENT_TYPES = new Set(["twitter", "truth"]);
+const SSE_EVENT_TYPES = new Set(["twitter", ...(getXPipelineConfiguredTruthAccounts().length ? ["truth"] : [])]);
 
 let accountSyncTimer = null;
 let catchupTimer = null;
@@ -355,7 +355,8 @@ async function ingestRawEvent(rawEvent, allowedAccountKeys) {
 async function bootstrapRecentEvents(allowedAccountKeys, reason = "bootstrap") {
   const payloads = await Promise.all([
     fetchJson(`/api/twitter-live-events?limit=${getBootstrapLimit()}`),
-    fetchJson(`/api/truth-social-events?limit=${getBootstrapLimit()}`),
+    ...(getXPipelineConfiguredTruthAccounts().length
+      ? [fetchJson(`/api/truth-social-events?limit=${getBootstrapLimit()}`)] : []),
   ]);
   const events = payloads.flatMap((payload) => extractMonitor985Events(payload));
   let accepted = 0;

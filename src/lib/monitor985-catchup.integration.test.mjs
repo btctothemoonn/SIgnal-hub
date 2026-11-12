@@ -31,7 +31,7 @@ globalThis.fetch = async url => {
 try {
   const { runMonitor985ManualCatchup } = await import(`data:text/javascript;base64,${Buffer.from(executable).toString("base64")}`);
   upsertXPipelineAccount({ username: "readeronly", name: "readeronly", tags: [] });
-  const result = await runMonitor985ManualCatchup({ env: { TWITTER_TRANSLATE_ENABLED: "false", MONITOR985_TRUTH_ACCOUNTS: "realDonaldTrump" } });
+  const result = await runMonitor985ManualCatchup({ env: { TWITTER_TRANSLATE_ENABLED: "false", MONITOR985_TRUTH_ENABLED: "true", MONITOR985_TRUTH_ACCOUNTS: "realDonaldTrump" } });
   const db = getXPipelineDb();
   assert.equal(db.prepare("select enabled from x_accounts where username_key = 'readeronly'").get()?.enabled, 1, "985 refresh must preserve local reader-only account");
   assert.equal(db.prepare("select count(*) as count from x_accounts where username_key = 'foreign985'").get().count, 0, "remote-only author must not become a local watched account");
