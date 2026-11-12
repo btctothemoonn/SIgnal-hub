@@ -13,7 +13,7 @@ assert.match(xStoreSource, /SNAPSHOT_FEED_OVERFETCH_FACTOR\s*=\s*5/);
 assert.match(xStoreSource, /SNAPSHOT_FEED_FETCH_LIMIT\s*=\s*10000/);
 assert.match(
   xStoreSource,
-  /order by f\.created_at desc,\s*f\.updated_at desc\s+limit \?/s,
+  /order by coalesce\(f\.low_frequency_collected_at, f\.created_at\) desc,\s*f\.updated_at desc\s+limit \?/s,
 );
 
 async function transpileToTemp() {
@@ -750,6 +750,25 @@ for (const update of [
     editDb,
   );
 }
+
+const lateDb = openXPipelineDb(":memory:");
+const oldPublication = "2026-09-01T00:00:00.000Z";
+const firstCollection = "2026-09-05T01:00:00.000Z";
+for (const collectedAt of [firstCollection, "2026-09-05T02:00:00.000Z"]) {
+  upsertXPipelineRealtimeUpdate({
+    eventType: "NEW_TWEET",
+    account: "bboczeng",
+    displayName: "bboczeng",
+    profileUrl: "https://x.com/bboczeng",
+    createdAt: oldPublication,
+    remark: "owned-reader",
+    feedItem: { ...editedTweetBase, id: "late", text: "Collected after publication", createdAt: oldPublication, lowFrequencyCollectedAt: collectedAt },
+  }, lateDb);
+}
+const [lateItem] = getXPipelineSnapshot(1, lateDb, { since: "2026-09-05T00:00:00.000Z" }).feed;
+assert.equal(lateItem.createdAt, oldPublication);
+assert.equal(lateItem.lowFrequencyCollectedAt, firstCollection);
+lateDb.close();
 
 assert.deepEqual(
   getXPipelineSnapshot(100, editDb).feed.map((item) => item.id),

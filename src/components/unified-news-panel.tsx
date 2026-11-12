@@ -57,6 +57,7 @@ import {
 import { classifyXFeedSource } from "@/lib/x-feed-source";
 import {
   aggregateSignalFeed,
+  compareSignalFeedTime,
   resolveSignalFeedRowId,
   signalFeedUnreadMemberCount,
   telegramOriginalAction,
@@ -122,6 +123,7 @@ type UnifiedQuotedTweet = {
 };
 
 type UnifiedNewsItem = {
+  lowFrequencyCollectedAt?: string;
   id: string;
   source: SignalFeedSource;
   createdAt: string;
@@ -216,10 +218,7 @@ function parseEventPayload<T>(event: Event): T | null {
 }
 
 function sortByCreatedAt<T extends { createdAt: string }>(items: T[]) {
-  return [...items].sort(
-    (left, right) =>
-      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
-  );
+  return [...items].sort(compareSignalFeedTime);
 }
 
 function limitNewsItems<T extends { createdAt: string }>(
@@ -255,7 +254,7 @@ function mergeTwitterWatchAccounts(
   return [...accountMap.values()];
 }
 
-function mergeFeeds<T extends { id: string; createdAt: string }>(
+function mergeFeeds<T extends { id: string; createdAt: string; lowFrequencyCollectedAt?: string }>(
   current: T[],
   incoming: T[],
   limit = MAX_ALL_NEWS_ITEMS,
@@ -263,7 +262,9 @@ function mergeFeeds<T extends { id: string; createdAt: string }>(
   const feedMap = new Map<string, T>();
 
   for (const item of [...current, ...incoming]) {
-    feedMap.set(item.id, item);
+    const lowFrequencyCollectedAt = feedMap.get(item.id)?.lowFrequencyCollectedAt;
+    feedMap.set(item.id, lowFrequencyCollectedAt && !item.lowFrequencyCollectedAt
+      ? { ...item, lowFrequencyCollectedAt } : item);
   }
 
   return limitNewsItems([...feedMap.values()], limit);
@@ -446,6 +447,7 @@ function toUnifiedTwitterItems(
       id: `x:${tweet.id}`,
       source,
       createdAt: tweet.createdAt,
+      lowFrequencyCollectedAt: tweet.lowFrequencyCollectedAt,
       eventType: tweet.eventType ?? null,
       sourceLabel:
         source === "truth" ? "Truth" : source === "monitor985" ? "X · 985 采集" : source === "owned-reader" ? "X · VPS 采集" : "X · 6551 历史",
@@ -2195,6 +2197,9 @@ export function UnifiedNewsPanel({
                       <span className="truncate text-muted">{item.subtitle}</span>
                     ) : null}
                     <span className="text-muted">·</span>
+                    {item.lowFrequencyCollectedAt ? (
+                      <span className="text-xs font-medium text-muted" title={`采集时间：${formatDisplayTime(item.lowFrequencyCollectedAt)}`}>低频新采集</span>
+                    ) : null}
                     <span className="shrink-0 text-muted">{formatDisplayTime(item.createdAt)}</span>
                     {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-success" />}
                   </div>

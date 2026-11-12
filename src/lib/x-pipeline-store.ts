@@ -152,7 +152,7 @@ function isoDateString(value: unknown): string {
 
 function compareFeedRowsByTime(left: DbRow, right: DbRow): number {
   return (
-    timeValue(right.created_at) - timeValue(left.created_at) ||
+    timeValue(right.low_frequency_collected_at ?? right.created_at) - timeValue(left.low_frequency_collected_at ?? left.created_at) ||
     timeValue(right.updated_at) - timeValue(left.updated_at)
   );
 }
@@ -669,9 +669,10 @@ export function initXPipelineDb(db: DatabaseSync) {
     db.exec("alter table x_feed add column quoted_tweet_json text");
   } catch {}
   const feedColumns = new Set(db.prepare("pragma table_info(x_feed)").all().map((row) => row.name));
-  for (const [name, sqlType] of [["content_source", "text"], ["content_complete", "integer"], ["content_version", "text"]]) {
+  for (const [name, sqlType] of [["content_source", "text"], ["content_complete", "integer"], ["content_version", "text"], ["low_frequency_collected_at", "text"]]) {
     if (!feedColumns.has(name)) db.exec(`alter table x_feed add column ${name} ${sqlType}`);
   }
+  db.exec("create index if not exists x_feed_display_time_idx on x_feed(coalesce(low_frequency_collected_at, created_at) desc, updated_at desc)");
 }
 
 export function getXHybridAccountFetchStatus(
@@ -1022,9 +1023,9 @@ function upsertFeedItem(
             user_avatar, tweet_url, text, created_at, event_type, origin,
             query_label, hashtags_json, likes, retweets, replies, quotes, views,
             media_json, quoted_tweet_json, translation_json, remark, raw_json,
-            inserted_at, updated_at, content_source, content_complete, content_version
+            inserted_at, updated_at, content_source, content_complete, content_version, low_frequency_collected_at
           )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
           account_username_key = excluded.account_username_key,
           username = excluded.username,
@@ -1091,6 +1092,7 @@ function upsertFeedItem(
       feedItem.contentSource || null,
       feedItem.contentComplete === undefined ? null : feedItem.contentComplete ? 1 : 0,
       feedItem.contentVersion || null,
+      observedItem.lowFrequencyCollectedAt ?? null,
     );
 
     run(
@@ -1434,6 +1436,7 @@ function toFeedItem(row: DbRow): TwitterFeedItem {
     ...(nullableString(row.content_source) ? { contentSource: stringValue(row.content_source) } : {}),
     ...(row.content_complete === 0 || row.content_complete === 1 ? { contentComplete: row.content_complete === 1 } : {}),
     ...(nullableString(row.content_version) ? { contentVersion: stringValue(row.content_version) } : {}),
+    ...(nullableString(row.low_frequency_collected_at) ? { lowFrequencyCollectedAt: stringValue(row.low_frequency_collected_at) } : {}),
     translation: isUsefulTranslation(text, translation) ? translation : null,
   };
 }
@@ -1479,18 +1482,18 @@ export function getXPipelineSnapshot(
     where a.enabled = 1
       ${
         since
-          ? "and f.created_at >= ? and f.created_at glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'"
+          ? "and (f.low_frequency_collected_at >= ? or (f.created_at >= ? and f.created_at glob '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'))"
           : ""
       }
       ${updatedSince ? "and f.updated_at >= ?" : ""}
-    order by f.created_at desc, f.updated_at desc
+    order by coalesce(f.low_frequency_collected_at, f.created_at) desc, f.updated_at desc
     limit ?
   `;
   const feedRows =
     feedFetchLimit > 0
       ? (db
           .prepare(feedSql)
-          .all(...(since ? [since] : []), ...(updatedSince ? [updatedSince] : []), feedFetchLimit) as DbRow[])
+          .all(...(since ? [since, since] : []), ...(updatedSince ? [updatedSince] : []), feedFetchLimit) as DbRow[])
       : [];
   const feed = collapseEditedTweetRevisionRows(
     feedRows.sort(compareFeedRowsByTime),

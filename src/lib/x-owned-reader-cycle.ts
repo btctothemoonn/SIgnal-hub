@@ -44,7 +44,8 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     }
     const ordered=[...usernames].sort((a,b)=>String(getXOwnedReaderAccountState(a,db)?.lastSuccessfulCheckAt || '').localeCompare(String(getXOwnedReaderAccountState(b,db)?.lastSuccessfulCheckAt || '')));
     const owned=selectXOwnedReaderAccounts(ordered,config);
-    const due=config.activityTiers && fullRoundCompleted ? owned.filter(name=>{const key=normalizeXOwnedUsername(name);return isXOwnedReaderCheckDue(getXOwnedReaderAccountState(key,db),xOwnedReaderCheckRounds(key,db,nowMs),config.intervalMs,nowMs);}) : owned;
+    const rounds=new Map(owned.map(name=>{const key=normalizeXOwnedUsername(name);return [key,config.activityTiers ? xOwnedReaderCheckRounds(key,db,nowMs) : 1] as const;}));
+    const due=fullRoundCompleted ? owned.filter(name=>{const key=normalizeXOwnedUsername(name);return isXOwnedReaderCheckDue(getXOwnedReaderAccountState(key,db),rounds.get(key) ?? 1,config.intervalMs,nowMs);}) : owned;
     result.deferredQuiet=owned.length-due.length;
     const queryAccounts=prepareXOwnedReaderAccounts(due,config,db,nowMs);
     result.attempted=queryAccounts.length;
@@ -93,6 +94,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
         identities.set(username,userId);
         const item=event.feedItem!;
         if(auditItems.has(username)) {auditItems.get(username)!.push(item);return;}
+        if((rounds.get(username) ?? 1)>1) item.lowFrequencyCollectedAt=new Date(Math.max(nowMs,clock())).toISOString();
         db.exec("savepoint owned_reader_feed");
         try {upsertXPipelineRealtimeUpdate({eventType:item.eventType || (item.quotedTweet?.relation === "reply" ? "NEW_TWEET_REPLY" : item.quotedTweet ? "NEW_TWEET_QUOTE" : "NEW_TWEET"),account:username,displayName:item.displayName,createdAt:item.createdAt,profileUrl:item.profileUrl,remark:"owned-reader",feedItem:item},db);db.prepare("update x_owned_reader_state set last_ingested_at=? where username_key=?").run(new Date(nowMs).toISOString(),username);db.exec("release owned_reader_feed");result.ingested++;}catch{db.exec("rollback to owned_reader_feed");db.exec("release owned_reader_feed");throw new Error("feed_write_failed");}
         return;

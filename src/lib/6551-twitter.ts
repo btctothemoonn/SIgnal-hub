@@ -158,6 +158,7 @@ export type TwitterQuotedTweet = {
 
 export type TwitterFeedItem = {
   id: string;
+  lowFrequencyCollectedAt?: string;
   text: string;
   createdAt: string;
   username: string;

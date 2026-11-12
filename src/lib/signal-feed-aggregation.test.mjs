@@ -12,6 +12,17 @@ function item(overrides = {}) {
   return { id: "x:1", text: "Analysis https://news.example/articles/one", link: "https://x.com/research/status/100", createdAt: "2026-10-02T01:00:00Z", quotedTweet: null, ...overrides };
 }
 
+test("a newly collected low-frequency member lifts its group without changing publication time", () => {
+  const original = item();
+  const newer = item({ id: "x:2", text: "Unrelated post", link: "https://x.com/research/status/200", createdAt: "2026-10-02T02:00:00Z" });
+  const delayed = item({ id: "x:3", lowFrequencyCollectedAt: "2026-10-02T03:00:00.000Z" });
+  const rows = aggregateSignalFeed([original, newer, delayed], aggregateSignalFeed([original, newer]));
+  assert.equal(rows[0].representativeId, original.id);
+  assert.equal(rows[0].createdAt, original.createdAt);
+  assert.equal(rows[0].lowFrequencyCollectedAt, delayed.lowFrequencyCollectedAt);
+  assert.equal(rows[1].representativeId, newer.id);
+});
+
 test("status aliases identify the same original without merging different status IDs", () => {
   for (const url of ["https://x.com/alice/status/123?s=20", "http://twitter.com/bob/status/123", "https://mobile.twitter.com/i/web/status/123", "https://www.x.com/i/status/123/photo/1"]) {
     assert.equal(canonicalSignalOriginalUrl(url), "https://x.com/i/status/123");

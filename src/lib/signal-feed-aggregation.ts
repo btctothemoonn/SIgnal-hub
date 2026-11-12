@@ -3,6 +3,7 @@ export type SignalFeedAggregationItem = {
   text: string;
   link: string;
   createdAt: string;
+  lowFrequencyCollectedAt?: string;
   quotedTweet?: { link: string; relation?: string } | null;
 };
 
@@ -123,16 +124,28 @@ export function aggregateSignalFeed<T extends SignalFeedAggregationItem>(
     const representative = retained || members.reduce((oldest, item) =>
       Date.parse(item.createdAt) < Date.parse(oldest.createdAt) ? item : oldest,
     );
+    const lowFrequencyCollectedAt = members.reduce<string | undefined>((latest, member) =>
+      member.lowFrequencyCollectedAt && (!latest || member.lowFrequencyCollectedAt > latest)
+        ? member.lowFrequencyCollectedAt : latest, undefined);
     return {
       ...representative,
       id,
       createdAt: retained ? earlier!.createdAt : representative.createdAt,
+      ...(lowFrequencyCollectedAt ? { lowFrequencyCollectedAt } : {}),
       originalUrl,
       representativeId: representative.id,
       members,
       aliases: members.map((member) => member.id),
     };
-  }).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  }).sort(compareSignalFeedTime);
+}
+
+export function compareSignalFeedTime(
+  left: Pick<SignalFeedAggregationItem, "createdAt" | "lowFrequencyCollectedAt">,
+  right: Pick<SignalFeedAggregationItem, "createdAt" | "lowFrequencyCollectedAt">,
+) {
+  return (Date.parse(right.lowFrequencyCollectedAt ?? "") || Date.parse(right.createdAt))
+    - (Date.parse(left.lowFrequencyCollectedAt ?? "") || Date.parse(left.createdAt));
 }
 
 export function resolveSignalFeedRowId<T extends SignalFeedAggregationItem>(
