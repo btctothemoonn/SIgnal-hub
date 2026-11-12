@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { getXPipelineDb } from "./x-pipeline-store.ts";
 import { getXOwnedReaderConfig, normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_STRUCTURAL_RETRY_MS, type XOwnedReaderConfig, type XOwnedReaderEnv } from "./x-owned-reader-config.ts";
 import { get985Promotions, get985AuditSnapshot } from "./x-985-audit.ts";
+import { xOwnedReaderCheckRounds, xOwnedReaderStaleAfterForRounds } from "./x-owned-reader-activity.ts";
 
 type Row = Record<string, unknown>;
 export type XOwnedReaderAccountState = {
@@ -226,16 +227,18 @@ export function getXAccountCoverageSnapshot(usernames: readonly string[], db: Da
     const checkAgeMs=Number.isFinite(checkedMs) && !invalidTimestamp ? Math.max(0,nowMs-checkedMs) : null;
     const coverageAgeMs=Number.isFinite(throughMs) && !invalidTimestamp ? Math.max(0,nowMs-throughMs) : null;
     const freshnessAgeMs=Math.max(checkAgeMs ?? Infinity,coverageAgeMs ?? 0);
-    const baseStale=route === "owned-reader" && freshnessAgeMs>config.staleAfterMs;
+    const checkRounds=route === "owned-reader" && config.activityTiers ? xOwnedReaderCheckRounds(key,db,nowMs) : 1;
+    const staleAfterMs=xOwnedReaderStaleAfterForRounds(config.staleAfterMs,config.intervalMs,checkRounds);
+    const baseStale=route === "owned-reader" && freshnessAgeMs>staleAfterMs;
     const rateLimitPause=Boolean(pauseActive && pause && X_OWNED_RATE_LIMIT_LIKE_REASONS.has(pause.reason));
     const cooling=route === "owned-reader" && rateLimitPause && checkAgeMs !== null;
-    const stale=baseStale && (!cooling || freshnessAgeMs>config.staleAfterMs+config.intervalMs);
+    const stale=baseStale && (!cooling || freshnessAgeMs>staleAfterMs+config.intervalMs);
     const structuralIncomplete=route === "owned-reader" && isStructuralOwnedFailure(state);
     const structuralIsolated=Boolean(structuralIncomplete && shouldIsolateOwnedReaderAccount(state, config, nowMs));
     const paused=route === "owned-reader" && (!config.enabled || pauseActive);
     let lastIngestedAt=state?.lastIngestedAt || null;
     if (!lastIngestedAt && tableExists(db,"x_feed")) lastIngestedAt=text((db.prepare("select max(inserted_at) as inserted_at from x_feed where account_username_key=?").get(key) as Row)?.inserted_at);
-    return [{username,route,routeReason:routeReason(key,route==='owned-reader',db),audit:get985AuditSnapshot(key,db),...evidence,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,historyGapFromAt:state?.historyGapFromAt ?? null,historyGapThroughAt:state?.historyGapThroughAt ?? null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,cooling,structuralIncomplete,structuralIsolated,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,lastIncompleteReason:state?.lastIncompleteReason ?? null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
+    return [{username,route,routeReason:routeReason(key,route==='owned-reader',db),audit:get985AuditSnapshot(key,db),...evidence,checkRounds,bootstrapFromAt:state?.bootstrapFromAt || null,pendingThroughAt:state?.pendingThroughAt || null,coveredThroughAt:state?.coveredThroughAt || null,historyGapFromAt:state?.historyGapFromAt ?? null,historyGapThroughAt:state?.historyGapThroughAt ?? null,lastAttemptAt:state?.lastAttemptAt || null,lastSuccessfulCheckAt:state?.lastSuccessfulCheckAt || null,lastIngestedAt,checkAgeMs,stale,cooling,structuralIncomplete,structuralIsolated,status:paused ? "paused" : invalidTimestamp ? "error" : state?.status || (route === "owned-reader" ? "starting" : "primary"),reason:paused ? config.enabled ? pause?.reason || "session_cooldown" : "disabled" : invalidTimestamp ? "invalid_check_timestamp" : state?.reason || (route === "owned-reader" ? "never_checked" : null),nextRetryAt:pauseActive ? pause?.nextRetryAt || null : state?.nextRetryAt || null,lastIncompleteReason:state?.lastIncompleteReason ?? null,incompleteCount:state?.incompleteCount || 0,coverageKind:state?.coverageKind || null,replyCoverageComplete:state?.replyCoverageComplete ?? null,replyReason:state?.replyReason || null,subscriberContentExcluded:state?.subscriberContentExcluded || 0,subscriberExcludedTweetIds:state?.subscriberExcludedTweetIds || []}];
   });
   return {generatedAt:new Date(nowMs).toISOString(),enabled:config.enabled,trial:true,counts:{total:accounts.length,monitor985:accounts.filter(a=>a.route === "monitor985").length,ownedReader:accounts.filter(a=>a.route === "owned-reader").length,covered:accounts.filter(a=>a.evidence === "covered").length,unmonitored:accounts.filter(a=>a.evidence === "unmonitored").length,unverified:accounts.filter(a=>a.evidence === "unverified").length,stale:accounts.filter(a=>a.stale).length,cooling:accounts.filter(a=>a.cooling).length,incomplete:accounts.filter(a=>a.route === "owned-reader" && a.status === "incomplete" && !a.structuralIncomplete).length,structuralIncomplete:accounts.filter(a=>a.structuralIncomplete).length,paused:accounts.filter(a=>a.route === "owned-reader" && a.status === "paused").length,replyIncomplete:accounts.filter(a=>a.route === "owned-reader" && a.replyCoverageComplete===false).length},accounts};
 }

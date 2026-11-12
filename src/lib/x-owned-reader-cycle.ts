@@ -4,15 +4,19 @@ import { getXPipelineDb, setXPipelineHealth, upsertXPipelineRealtimeUpdate } fro
 import { normalizeXOwnedUsername, selectXOwnedReaderAccounts, X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO, X_OWNED_STRUCTURAL_ISOLATE_AFTER, X_OWNED_STRUCTURAL_RETRY_MS, xOwnedReaderSoftCooldownMs, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { getXOwnedReaderAccountState, getXOwnedReaderPause, initXOwnedReaderStateDb, pauseXOwnedReader, prepareXOwnedReaderAccounts, readOwnedReaderCooldown, recordXOwnedReaderRoutes, safeXOwnedReason, X_OWNED_STRUCTURAL_REASONS, getEffectiveXOwnedReaderConfig } from "./x-owned-reader-state.ts";
 import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask, type XOwnedReaderEvent } from "./x-owned-reader-protocol.ts";
+import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds } from "./x-owned-reader-activity.ts";
 import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, record985PostRecheckAttempt, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
 
 let inFlight=false;
+// The first round after a process start checks every author so deploy readiness
+// sees fresh checks for the whole sample; later rounds defer quiet authors.
+let fullRoundCompleted=false;
 type BridgeRunner=(task:XOwnedReaderTask,config:XOwnedReaderConfig,onEvent:(event:XOwnedReaderEvent)=>unknown|Promise<unknown>)=>Promise<void>;
 type CycleOptions={accounts:readonly (string|{username:string})[];config:XOwnedReaderConfig;db?:DatabaseSync;nowMs?:number;clock?:()=>number;bridgeRunner?:BridgeRunner;auditEvidenceProvider?:()=>Promise<X985AuditEvidence>};
 
 export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),nowMs=Date.now(),clock=Date.now,bridgeRunner=runOwnedReaderBridge,auditEvidenceProvider=fetch985AuditEvidence}:CycleOptions) {
-  const result={status:"live",runId:randomUUID(),attempted:0,completed:0,incomplete:0,ingested:0,requests:null as number|null,auditAttempted:0,auditCompleted:0,auditIncomplete:0,promotedUsernames:[] as string[],reason:null as string|null,nextRetryAt:null as string|null};
+  const result={status:"live",runId:randomUUID(),attempted:0,completed:0,incomplete:0,ingested:0,requests:null as number|null,deferredQuiet:0,auditAttempted:0,auditCompleted:0,auditIncomplete:0,promotedUsernames:[] as string[],reason:null as string|null,nextRetryAt:null as string|null};
   if(inFlight) return {...result,status:"skipped",reason:"in_progress"};
   inFlight=true;
   const pending=new Set<string>();const done=new Set<string>();const identities=new Map<string,string>();let cycleComplete=false;let globalPaused=false;let task:XOwnedReaderTask;
@@ -39,10 +43,17 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       setXPipelineHealth({scope:"owned-reader",status:"paused",detail:result.reason},db);return result;
     }
     const ordered=[...usernames].sort((a,b)=>String(getXOwnedReaderAccountState(a,db)?.lastSuccessfulCheckAt || '').localeCompare(String(getXOwnedReaderAccountState(b,db)?.lastSuccessfulCheckAt || '')));
-    const queryAccounts=prepareXOwnedReaderAccounts(ordered,config,db,nowMs);
+    const owned=selectXOwnedReaderAccounts(ordered,config);
+    const due=config.activityTiers && fullRoundCompleted ? owned.filter(name=>{const key=normalizeXOwnedUsername(name);return isXOwnedReaderCheckDue(getXOwnedReaderAccountState(key,db),xOwnedReaderCheckRounds(key,db,nowMs),config.intervalMs,nowMs);}) : owned;
+    result.deferredQuiet=owned.length-due.length;
+    const queryAccounts=prepareXOwnedReaderAccounts(due,config,db,nowMs);
     result.attempted=queryAccounts.length;
     queryAccounts.forEach(account=>pending.add(account.username));
     if(!queryAccounts.length) {
+      if(!due.length && owned.length) {
+        result.reason="quiet_authors_not_due";
+        setXPipelineHealth({scope:"owned-reader",status:"live",detail:`no checks due; ${result.deferredQuiet} quiet authors deferred`},db);return result;
+      }
       const isolated=selectXOwnedReaderAccounts(ordered,config).length>0;
       result.status="paused";result.reason=isolated ? "structural_isolated" : null;
       setXPipelineHealth({scope:"owned-reader",status:"paused",detail:isolated ? "structural_isolated" : "no configured owned-reader accounts"},db);return result;
@@ -130,6 +141,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     if(!cycleComplete) throw new Error("bridge_missing_completion");
     if(pending.size && !globalPaused) {result.incomplete+=pending.size;if(result.status!=="error")result.status="incomplete";result.reason ||= "account_missing_completion";}
     if(result.incomplete && result.status==="live")result.status="incomplete";
+    if(result.status==="live" && !result.deferredQuiet && result.attempted>0 && result.completed===result.attempted)fullRoundCompleted=true;
     const softMs=xOwnedReaderSoftCooldownMs(config);
     if(softMs && !globalPaused && (result.status==="live" || result.status==="incomplete") && typeof result.requests==="number" && result.requests>=config.maxRequests*X_OWNED_SOFT_COOLDOWN_REQUEST_RATIO) {
       const endMs=Math.max(nowMs,clock());

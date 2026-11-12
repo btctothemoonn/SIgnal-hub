@@ -10,6 +10,8 @@ Signal Hub 的 X 链路是 985 加 Linux VPS 自有读者。6551 请求已关闭
 
 自有读者未设置 `X_OWNED_READER_INTERVAL_MS` 时默认 10 分钟，代码下限仍是 5 分钟。生产环境自 2026-11-12 起设为 960000（16 分钟）：X 的 UserTweets 配额约每 15 分钟 50 次，28 位作者每轮约 28 次，10 分钟间隔会让两轮落进同一窗口而被限流，详见 docs/x-owned-reader-operations.md。不要为了通过发布检查关掉读者或放宽 readiness。
 
+生产环境开启 `X_OWNED_READER_ACTIVITY_TIERS=true`：低频作者每 2 或 3 轮查一次，用来在 80 次单轮预算内容纳更多 VPS 作者。不要用多个 X 账号或并发来扩容。VPS 的 SSH 只开 22022 端口，用 `.private-handoffs/signal-hub-grokbot-2026-10-30/private-access` 下的 `SSH_CONFIG` 连接（`ssh -F ./SSH_CONFIG signal-hub-vps-grokbot`），直接 `ssh ubuntu@43.128.146.48` 会连到已关闭的 22 端口。
+
 ## 完成汇报
 
 每次完成工作时，主动明确说明验证结果、GitHub 推送状态和 VPS 部署状态。仅本地完成、仅推送仓库、部署进行中与已验证上线应分别说明；未核对 VPS 实际运行版本和服务健康时，不宣称部署完成。发布受阻时说明原因和下一步，不等用户追问。
