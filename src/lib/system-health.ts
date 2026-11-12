@@ -358,8 +358,16 @@ type XOwnedCoverageHealthInput = {
     historyGapThroughAt?: string | null;
     replyCoverageComplete?: boolean | null;
     subscriberContentExcluded?: number;
+    cooling?: boolean;
+    nextRetryAt?: string | null;
   }[];
 };
+
+function shanghaiClock(value: string | null | undefined) {
+  const ms = Date.parse(value ?? "");
+  if (!Number.isFinite(ms)) return null;
+  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(new Date(ms));
+}
 
 function ownedCoverageAccountStale(account: { stale?: boolean; lastSuccessfulCheckAt: string | null }, now: Date, staleAfterMs: number) {
   if (typeof account.stale === "boolean") return account.stale;
@@ -380,7 +388,10 @@ export function summarizeXOwnedReaderCoverage({
   if (!snapshot.enabled) return null;
   const assigned = snapshot.accounts.filter(account => account.route === "owned-reader");
   const staleCount = assigned.filter(account => ownedCoverageAccountStale(account, now, staleAfterMs)).length;
-  const failedCount = assigned.filter(account => ["error", "paused", "failed"].includes(account.status)).length;
+  // A rate-limit cooldown whose last checks are still within the freshness window is waiting, not failing.
+  const cooling = assigned.filter(account => account.cooling === true && account.status === "paused" && !ownedCoverageAccountStale(account, now, staleAfterMs));
+  const coolingSet = new Set(cooling);
+  const failedCount = assigned.filter(account => !coolingSet.has(account) && ["error", "paused", "failed"].includes(account.status)).length;
   const structuralCount = assigned.filter(ownedCoverageStructural).length;
   const historyGapCount = assigned.filter(account => account.historyGapThroughAt).length;
   const incompleteCount = assigned.filter(account => account.status === "incomplete" && !ownedCoverageStructural(account)).length;
@@ -395,13 +406,15 @@ export function summarizeXOwnedReaderCoverage({
     : structuralCount ? `自有补采结构隔离 ${structuralCount} 位`
     : `自有补采试运行：${assigned.length} 位公开主帖与引用检查正常`;
   const structuralNote = structuralCount && (failedCount || staleCount || incompleteCount) ? ` · 结构隔离 ${structuralCount} 位` : "";
+  const resumeAt = shanghaiClock(cooling.map(account => account.nextRetryAt).find(Boolean));
+  const coolingNote = cooling.length ? ` · X 限流冷却中，主帖检查仍在时效内${resumeAt ? `，约 ${resumeAt} 恢复` : ""}` : "";
   return {
     id: "x-owned-reader", label: "X VPS 采集",
     status: failedCount ? "error" : staleCount || incompleteCount || structuralCount || historyGapCount || subscriberContentExcluded || !assigned.length ? "warning" : "ok",
-    detail: detail + structuralNote + (failedCount && staleCount ? ` · ${staleCount} 位检查逾期` : "") + (historyGapCount ? ` · ${historyGapCount} 位有未核实历史缺口` : "") + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
+    detail: detail + structuralNote + coolingNote + (failedCount && staleCount ? ` · ${staleCount} 位检查逾期` : "") + (historyGapCount ? ` · ${historyGapCount} 位有未核实历史缺口` : "") + (replyIncomplete ? ` · ${replyIncomplete} 位回复覆盖待确认` : "") + (subscriberContentExcluded ? ` · ${subscriberContentExcluded} 条付费订阅正文未覆盖` : ""),
     updatedAt: successfulTimes.length === assigned.length ? oldest : null,
     stale: staleCount > 0,
-    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, incompleteCount, structuralIncomplete: structuralCount, historyGapCount, replyIncomplete, subscriberContentExcluded },
+    meta: { trial: true, accountCount: assigned.length, staleCount, failedCount, coolingCount: cooling.length, incompleteCount, structuralIncomplete: structuralCount, historyGapCount, replyIncomplete, subscriberContentExcluded },
   };
 }
 
