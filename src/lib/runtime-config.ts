@@ -14,6 +14,7 @@ export type RuntimeWatchItem = { ref: string; tags: string[] };
 export type RuntimeConfig = {
   telegramChannels: RuntimeWatchItem[];
   twitterAccounts: RuntimeWatchItem[];
+  // Keep retired watch settings on disk for old releases without exposing them in Settings.
   douyinCreators: RuntimeWatchItem[];
   douyinEnabled: boolean;
   hynixPremiumAlert: HynixPremiumAlertSettings;
@@ -298,48 +299,6 @@ export async function setTwitterAccountTags(
   return mutate((current) => ({
     ...current,
     twitterAccounts: setItemTags(current.twitterAccounts, username, tags),
-  }));
-}
-
-export async function addDouyinCreator(ref: string): Promise<RuntimeConfig> {
-  return mutate((current) => ({
-    ...current,
-    douyinCreators: addItem(current.douyinCreators, ref),
-  }));
-}
-
-export async function addDouyinCreators(
-  refs: string[],
-): Promise<RuntimeConfig> {
-  return mutate((current) => ({
-    ...current,
-    douyinCreators: addItems(current.douyinCreators, refs),
-  }));
-}
-
-export async function removeDouyinCreator(
-  ref: string,
-): Promise<RuntimeConfig> {
-  return mutate((current) => ({
-    ...current,
-    douyinCreators: removeItem(current.douyinCreators, ref),
-  }));
-}
-
-export async function setDouyinCreatorTags(
-  ref: string,
-  tags: string[],
-): Promise<RuntimeConfig> {
-  return mutate((current) => ({
-    ...current,
-    douyinCreators: setItemTags(current.douyinCreators, ref, tags),
-  }));
-}
-
-export async function setDouyinEnabled(enabled: boolean): Promise<RuntimeConfig> {
-  return mutate((current) => ({
-    ...current,
-    douyinEnabled: enabled,
   }));
 }
 

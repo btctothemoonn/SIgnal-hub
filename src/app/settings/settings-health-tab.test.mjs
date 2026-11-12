@@ -6,13 +6,9 @@ const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 assert.match(source, /SystemHealthPanel/);
 assert.match(
   source,
-  /type Kind = "telegram" \| "twitter" \| "douyin" \| "ai" \| "health" \| "general"/,
+  /type Kind = "telegram" \| "twitter" \| "ai" \| "health" \| "general"/,
 );
-assert.match(source, /kind: "douyin"/);
-assert.match(source, /douyinCreators/);
-assert.match(source, /action: "douyin\.add"/);
-assert.match(source, /action: "douyin\.remove"/);
-assert.match(source, /action: "douyin\.setTags"/);
+assert.doesNotMatch(source, /douyin|抖音/);
 assert.match(source, /kind: "health"/);
 assert.match(source, /activeKind === "health"/);
 assert.match(source, /kind: "ai"/);
@@ -38,4 +34,4 @@ assert.match(
 assert.match(source, /lg:grid-cols-\[15rem_minmax\(0,1fr\)\]/);
 assert.match(source, /overflow-x-auto/);
 
-console.log("ok - settings includes health and douyin tabs");
+console.log("ok - settings keeps health and removes retired watchlist");

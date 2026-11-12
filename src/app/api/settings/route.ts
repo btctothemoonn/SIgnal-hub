@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  addDouyinCreator,
-  addDouyinCreators,
   addTelegramChannel,
   addTelegramChannels,
   addTwitterAccount,
   addTwitterAccounts,
   loadRuntimeConfig,
-  removeDouyinCreator,
   removeTelegramChannel,
   removeTwitterAccount,
-  setDouyinCreatorTags,
-  setDouyinEnabled,
   setHynixPremiumAlert,
   setTelegramChannelTags,
   setTwitterAccountTags,
@@ -48,11 +43,6 @@ type ActionBody =
   | { action: "twitter.remove"; username: string }
   | { action: "twitter.batchAdd"; usernames: string[] }
   | { action: "twitter.setTags"; username: string; tags: string[] }
-  | { action: "douyin.add"; ref: string }
-  | { action: "douyin.remove"; ref: string }
-  | { action: "douyin.batchAdd"; refs: string[] }
-  | { action: "douyin.setTags"; ref: string; tags: string[] }
-  | { action: "douyin.setEnabled"; enabled: boolean }
   | {
       action: "hynixPremiumAlert.set";
       enabled: boolean;
@@ -61,11 +51,15 @@ type ActionBody =
 
 type TwitterSyncResult = { username: string; warning: string | null };
 
+function settingsConfig({ telegramChannels, twitterAccounts, hynixPremiumAlert }: RuntimeConfig) {
+  return { telegramChannels, twitterAccounts, hynixPremiumAlert };
+}
+
 export async function GET() {
   const config = await loadRuntimeConfig();
   return NextResponse.json({
     success: true,
-    config,
+    config: settingsConfig(config),
     configuration: getSettingsConfigurationStatus(),
   });
 }
@@ -323,58 +317,6 @@ export async function POST(request: Request) {
         config = await setTwitterAccountTags(body.username, tags);
         break;
       }
-      case "douyin.add": {
-        if (!body.ref?.trim()) {
-          return NextResponse.json(
-            { success: false, error: "抖音博主链接不能为空。" },
-            { status: 400 },
-          );
-        }
-        config = await addDouyinCreator(body.ref);
-        break;
-      }
-      case "douyin.remove": {
-        if (!body.ref?.trim()) {
-          return NextResponse.json(
-            { success: false, error: "抖音博主链接不能为空。" },
-            { status: 400 },
-          );
-        }
-        config = await removeDouyinCreator(body.ref);
-        break;
-      }
-      case "douyin.batchAdd": {
-        const refs = sanitizeStringList(body.refs);
-        if (refs.length === 0) {
-          return NextResponse.json(
-            { success: false, error: "没有可添加的抖音博主。" },
-            { status: 400 },
-          );
-        }
-        config = await addDouyinCreators(refs);
-        break;
-      }
-      case "douyin.setTags": {
-        if (!body.ref?.trim()) {
-          return NextResponse.json(
-            { success: false, error: "抖音博主链接不能为空。" },
-            { status: 400 },
-          );
-        }
-        const tags = Array.isArray(body.tags) ? body.tags : [];
-        config = await setDouyinCreatorTags(body.ref, tags);
-        break;
-      }
-      case "douyin.setEnabled": {
-        if (typeof body.enabled !== "boolean") {
-          return NextResponse.json(
-            { success: false, error: "抖音模块开关必须是布尔值。" },
-            { status: 400 },
-          );
-        }
-        config = await setDouyinEnabled(body.enabled);
-        break;
-      }
       case "hynixPremiumAlert.set": {
         if (typeof body.enabled !== "boolean") {
           return NextResponse.json(
@@ -404,7 +346,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      config,
+      config: settingsConfig(config),
       warning,
       ...(syncResults ? { syncResults } : {}),
     });

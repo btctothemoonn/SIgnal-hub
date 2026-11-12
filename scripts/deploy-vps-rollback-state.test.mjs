@@ -15,6 +15,7 @@ try {
 previous_release="$PWD/old"
 services=(signal-hub-web signal-hub-web-push)
 scripts=("" web-push-worker.mjs)
+retirement_started=0
 printf 1 > enabled
 printf 1 > active
 sudo() { shift; systemctl "$@"; }

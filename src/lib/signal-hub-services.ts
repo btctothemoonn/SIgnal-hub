@@ -59,12 +59,6 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
     required: true,
   },
   {
-    name: "signal-hub-douyin",
-    label: "抖音采集",
-    category: "collector",
-    required: true,
-  },
-  {
     name: "signal-hub-market-volatility-rest",
     label: "暴涨暴跌 REST",
     category: "collector",

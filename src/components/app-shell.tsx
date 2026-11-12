@@ -6,9 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ChartNoAxesCombined,
-  Clapperboard,
   LogOut,
-  MessagesSquare,
   Radar,
   Settings,
   Sparkles,
@@ -26,8 +24,6 @@ export type AppShellNavKey =
   | "intel"
   | "holding"
   | "stocks"
-  | "douyin"
-  | "wecom"
   | "settings";
 
 export type AppShellStatusPill = {
@@ -57,8 +53,6 @@ const shellNavItems: readonly ShellNavItemConfig[] = [
   },
   { key: "holding", label: "Holding", href: "/holding", icon: WalletCards },
   { key: "stocks", label: "STOCKS", href: "/stocks", icon: ChartNoAxesCombined },
-  { key: "douyin", label: "抖音", href: "/douyin", icon: Clapperboard },
-  { key: "wecom", label: "企业微信", mobileLabel: "企微", href: "/wecom", icon: MessagesSquare },
   { key: "settings", label: "设置", href: "/settings", icon: Settings },
 ] as const;
 
@@ -289,7 +283,7 @@ export function AppShell({
         aria-label="Mobile primary navigation"
         className="fixed bottom-0 left-0 right-0 z-50 border-t border-workspace-line-strong bg-workspace-toolbar/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.35rem)] pt-1.5 backdrop-blur-xl lg:hidden"
       >
-        <div className="mx-auto grid max-w-xl grid-cols-7 gap-1">
+        <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">
           {mobileShellNavItems.map((item) => {
             const active = item.key === displayedActiveNav;
             const mobileLabel = item.mobileLabel ?? item.label;

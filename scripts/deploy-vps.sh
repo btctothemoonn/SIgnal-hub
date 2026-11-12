@@ -61,14 +61,14 @@ ln -s "$APP_DIR/.signal-hub" "$release/.signal-hub"
 services=(
   signal-hub-web signal-hub-stocks-cache signal-hub-alpha-summary
   signal-hub-daily-brief signal-hub-telegram
-  signal-hub-monitor985 signal-hub-tiger-holdings signal-hub-douyin
+  signal-hub-monitor985 signal-hub-tiger-holdings
   signal-hub-market-volatility-rest signal-hub-market-volatility-ws
   signal-hub-market-squeeze signal-hub-market-opportunity
 )
 scripts=(
   "" stocks-cache-worker.mjs alpha-summary-worker.mjs daily-brief-worker.mjs
   telegram-pipeline-worker.mjs monitor985-worker.mjs
-  tiger-holdings-worker.mjs douyin-worker.mjs market-volatility-rest-worker.mjs
+  tiger-holdings-worker.mjs market-volatility-rest-worker.mjs
   market-volatility-ws-worker.mjs market-squeeze-worker.mjs market-opportunity-worker.mjs
 )
 
@@ -77,13 +77,6 @@ if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'const enabled=v=>[
   hybrid_enabled=1
   services+=(signal-hub-x-hybrid)
   scripts+=(x-hybrid-worker.mjs)
-fi
-
-wecom_enabled=0
-if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(process.env.WECOM_SYNC_ENABLED === "true" ? 0 : 1)'; then
-  wecom_enabled=1
-  services+=(signal-hub-wecom-receiver)
-  scripts+=(wecom-receiver.mjs)
 fi
 
 push_enabled=0
@@ -108,6 +101,21 @@ activate() {
   mv -Tf "$pending_link" "$CURRENT_LINK"
 }
 
+retired_services=()
+retired_enabled=()
+retired_active=()
+retirement_started=0
+for service in signal-hub-douyin signal-hub-wecom-receiver; do
+  if ! systemctl cat "$service" >/dev/null 2>&1; then continue; fi
+  retired_services+=("$service")
+  if [[ "$(systemctl is-enabled "$service" 2>/dev/null || true)" == "enabled" ]]; then
+    retired_enabled+=("$service")
+  fi
+  if systemctl is-active --quiet "$service"; then
+    retired_active+=("$service")
+  fi
+done
+
 rollback() {
   local result="${1:-$?}"
   trap - ERR
@@ -130,8 +138,9 @@ rollback() {
     activate "$previous_release"
     sudo systemctl daemon-reload
     sudo systemctl restart "${rollback_services[@]}" || true
-    if [[ ! -f "$previous_release/scripts/wecom-receiver.mjs" ]]; then
-      sudo systemctl disable --now signal-hub-wecom-receiver || true
+    if [[ "$retirement_started" == "1" ]]; then
+      if (( ${#retired_enabled[@]} )); then sudo systemctl enable "${retired_enabled[@]}" || true; fi
+      if (( ${#retired_active[@]} )); then sudo systemctl start "${retired_active[@]}" || true; fi
     fi
   fi
   exit "$result"
@@ -172,21 +181,6 @@ EnvironmentFile=-$APP_DIR/.env.local
 ExecStart=
 ExecStart=$command
 EOF
-  if [[ "$service" == "signal-hub-wecom-receiver" ]]; then
-    sudo tee "/etc/systemd/system/$service.service.d/resources.conf" >/dev/null <<EOF
-[Service]
-MemoryMax=192M
-CPUQuota=25%
-TasksMax=32
-UMask=0077
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=$APP_DIR/.signal-hub
-Restart=on-failure
-RestartSec=5
-EOF
-  fi
   if [[ "$service" == "signal-hub-x-owned-reader" ]]; then
     owned_private_dir="$("$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'const p=require("node:path"); process.stdout.write(p.dirname(process.env.X_OWNED_READER_SESSION_DB || "/home/ubuntu/signal-hub-owned-reader-pilot/accounts.db"));')"
     sudo tee "/etc/systemd/system/$service.service.d/resources.conf" >/dev/null <<EOF
@@ -216,9 +210,6 @@ if ! "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1
 fi
 sudo systemctl enable "${services[@]}" >/dev/null
 sudo systemctl restart "${services[@]}"
-if [[ "$wecom_enabled" == "0" ]] && systemctl cat signal-hub-wecom-receiver >/dev/null 2>&1; then
-  sudo systemctl stop signal-hub-wecom-receiver
-fi
 if [[ "$push_enabled" == "0" ]] && systemctl cat signal-hub-web-push >/dev/null 2>&1; then
   sudo systemctl disable --now signal-hub-web-push
 fi
@@ -248,6 +239,10 @@ wait_for_services() {
   return 1
 }
 wait_for_services
+retirement_started=1
+for service in "${retired_services[@]}"; do
+  sudo systemctl disable --now "$service"
+done
 trap - ERR
 trap - TERM INT
 echo "Active release: $release"

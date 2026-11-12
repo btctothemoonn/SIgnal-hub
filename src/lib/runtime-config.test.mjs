@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -36,17 +36,6 @@ try {
     thresholdPct: 50,
     pushRevision: 1,
   });
-
-  const withDouyin = await runtimeConfig.addDouyinCreator(
-    "https://www.douyin.com/user/MS4wLjABAAAAcreator",
-  );
-  assert.deepEqual(
-    withDouyin.douyinCreators.map((item) => item.ref),
-    ["https://www.douyin.com/user/MS4wLjABAAAAcreator"],
-  );
-  const disabledDouyin = await runtimeConfig.setDouyinEnabled(false);
-  assert.equal(disabledDouyin.douyinEnabled, false);
-  assert.equal(disabledDouyin.douyinCreators.length, 1);
 
   const customPremiumAlert = await runtimeConfig.setHynixPremiumAlert({
     enabled: false,
@@ -86,6 +75,11 @@ try {
     pushRevision: 1,
   });
   assert.deepEqual(runtimeConfig.getCachedRuntimeConfig(), second);
+
+  await runtimeConfig.addTelegramChannel("retirement_check");
+  const saved = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual(saved.douyinCreators, second.douyinCreators);
+  assert.equal(saved.douyinEnabled, false);
 
   await new Promise((resolve) => setTimeout(resolve, 20));
   await writeFile(

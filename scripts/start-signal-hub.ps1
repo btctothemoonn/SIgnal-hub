@@ -191,6 +191,8 @@ try {
     -Arguments @("scripts\start-next-dev-inline.mjs") `
     -SkipWhenWebReady
 
+  Stop-ManagedNodeProcess -Name "signal-hub-douyin"
+
   if (-not $WithWorkers) {
     Stop-ManagedNodeProcess -Name "signal-hub-telegram"
     Stop-ManagedNodeProcess -Name "signal-hub-x-hybrid"
@@ -198,7 +200,6 @@ try {
     Stop-ManagedNodeProcess -Name "signal-hub-alpha-summary"
     Stop-ManagedNodeProcess -Name "signal-hub-daily-brief"
     Stop-ManagedNodeProcess -Name "signal-hub-stocks-cache"
-    Stop-ManagedNodeProcess -Name "signal-hub-douyin"
     Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-rest"
     Stop-ManagedNodeProcess -Name "signal-hub-market-volatility-ws"
     Stop-ManagedNodeProcess -Name "signal-hub-market-squeeze"
@@ -257,16 +258,6 @@ try {
         -RestartExisting
     } else {
       Write-Host "signal-hub-stocks-cache disabled (STOCKS_CACHE_PREWARM_ENABLED=false)"
-    }
-
-    $douyinWorkerEnabled = Get-ProjectEnvValue "DOUYIN_WORKER_ENABLED"
-    if (-not $douyinWorkerEnabled -or (Test-EnvEnabled $douyinWorkerEnabled)) {
-      Start-ManagedNodeProcess `
-        -Name "signal-hub-douyin" `
-        -Arguments @("--experimental-strip-types", "--experimental-transform-types", "scripts\douyin-worker.mjs") `
-        -RestartExisting
-    } else {
-      Write-Host "signal-hub-douyin disabled (DOUYIN_WORKER_ENABLED=false)"
     }
 
     $marketAlertsEnabled = Get-ProjectEnvValue "MARKET_ALERTS_ENABLED"

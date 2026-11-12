@@ -14,7 +14,6 @@ const env = {
 };
 process.env.ADMIN_PASSWORD = env.ADMIN_PASSWORD;
 process.env.ADMIN_SESSION_SECRET = env.ADMIN_SESSION_SECRET;
-delete process.env.WECOM_PUBLIC_READ;
 
 function request(path, token = null) {
   const headers = new Headers();
@@ -54,12 +53,6 @@ assert.deepEqual(await apiResponse.json(), {
 
 const dailyBriefApiResponse = proxy(request("/api/daily-brief"));
 assert.equal(dailyBriefApiResponse.status, 401);
-for (const path of ["/api/wecom/reports", "/api/wecom/ca-alerts", "/api/wecom/status", "/api/wecom/ingest"]) {
-  assert.equal(proxy(request(path)).status, 401);
-}
-assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest", {method:"POST"})).headers.get("x-middleware-next"), "1");
-assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest/other", {method:"POST"})).status, 401);
-assert.equal(proxy(new NextRequest("https://hub.example/api/wecom/ingest", {method:"PUT"})).status, 401);
 
 const dottedApiResponse = proxy(request("/api/telegram/media/channel-1/file.jpg"));
 assert.equal(dottedApiResponse.status, 401);
@@ -70,17 +63,16 @@ assert.equal(authenticatedResponse.status, 200);
 assert.equal(authenticatedResponse.headers.get("x-middleware-next"), "1");
 
 process.env.WECOM_PUBLIC_READ = "true";
-for (const path of ["/wecom", "/api/wecom/reports", "/api/wecom/ca-alerts", "/api/wecom/status"]) {
- for (const method of ["GET", "HEAD"]) {
-  assert.equal(proxy(new NextRequest(`https://hub.example${path}`, {method})).headers.get("x-middleware-next"), "1");
- }
- assert.notEqual(proxy(new NextRequest(`https://hub.example${path}`, {method:"POST"})).headers.get("x-middleware-next"), "1");
+for (const path of ["/api/wecom", "/api/wecom/reports", "/api/wecom/ingest", "/api/douyin", "/api/douyin/refresh"]) {
+  for (const method of ["GET", "POST"]) {
+    const response = proxy(new NextRequest(`https://hub.example${path}`, { method }));
+    assert.equal(response.status, 410, `${method} ${path} is retired`);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("x-middleware-next"), null);
+  }
 }
-for (const path of ["/api/settings", "/api/holdings", "/api/wecom/ingest", "/api/wecom/reports/extra"]) {
- assert.equal(proxy(request(path)).status, 401);
-}
-assert.equal(proxy(request("/settings")).status, 307);
-assert.equal(proxy(request("/wecom/extra")).status, 307);
+assert.equal(proxy(request("/api/wecom-unrelated")).status, 401);
+assert.equal(proxy(request("/api/holdings")).status, 401);
 delete process.env.WECOM_PUBLIC_READ;
 assert.equal(proxy(request("/wecom")).status, 307);
 

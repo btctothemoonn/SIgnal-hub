@@ -7,14 +7,12 @@ const items = [
   { key: "intel", label: "AI情报" },
   { key: "holding", label: "Holding" },
   { key: "stocks", label: "STOCKS" },
-  { key: "douyin", label: "抖音" },
-  { key: "wecom", label: "企微" },
   { key: "settings", label: "设置" },
 ];
 
 assert.deepEqual(
   primaryMobileNavItems(items).map((item) => item.key),
-  ["signals", "alerts", "intel", "holding", "stocks", "douyin", "wecom"],
+  ["signals", "alerts", "intel", "holding", "stocks"],
 );
 assert.deepEqual(items.map((item) => item.key), [
   "signals",
@@ -22,8 +20,6 @@ assert.deepEqual(items.map((item) => item.key), [
   "intel",
   "holding",
   "stocks",
-  "douyin",
-  "wecom",
   "settings",
 ]);
 

@@ -49,10 +49,9 @@ assert.match(serviceRegistry, /signal-hub-market-opportunity/);
 assert.match(source, /signal-hub-market-opportunity/);
 assert.match(source, /market-opportunity-worker\.mjs/);
 assert.match(source, /signal-hub-wecom-receiver/);
-assert.match(source, /wecom-receiver\.mjs/);
-assert.match(source, /WECOM_SYNC_ENABLED/);
-assert.match(source, /MemoryMax=192M/);
-assert.match(source, /CPUQuota=25%/);
+assert.doesNotMatch(source, /wecom-receiver\.mjs|douyin-worker\.mjs|WECOM_SYNC_ENABLED/);
+assert.match(source, /systemctl disable --now "\$service"/);
+assert.doesNotMatch(Object.keys(packageJson.scripts).join(" "), /douyin:|wecom:/);
 assert.equal(packageJson.scripts["market:opportunity"].includes("market-opportunity-worker.mjs"), true);
 assert.equal(packageJson.scripts["market:opportunity:once"].includes("--once"), true);
 

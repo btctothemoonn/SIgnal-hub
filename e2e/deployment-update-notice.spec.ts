@@ -10,7 +10,7 @@ async function loginToSettings(page: Page) {
   await page.route("**/api/settings", (route) => route.fulfill({
     json: {
       success: true,
-      config: { telegramChannels: [], twitterAccounts: [], douyinCreators: [] },
+      config: { telegramChannels: [], twitterAccounts: [] },
       configuration: { summaryConfigured: false, translationConfigured: false, adminAccessConfigured: true },
     },
   }));

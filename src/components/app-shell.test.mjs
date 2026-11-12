@@ -22,9 +22,7 @@ assert.match(source, /min-h-14 items-center justify-between/);
 assert.match(source, /hidden truncate text-xs text-muted sm:block/);
 assert.match(source, /\{subtitle \? \(/);
 assert.match(source, /router\.prefetch\("\/settings"\)/);
-assert.match(source, /label: "抖音"/);
-assert.match(source, /href: "\/douyin"/);
-assert.match(source, /"douyin"/);
+assert.doesNotMatch(source, /抖音|企业微信|\/douyin|\/wecom/);
 assert.match(source, /label: "AI\+币圈情报站"/);
 assert.match(source, /mobileLabel: "AI情报"/);
 assert.match(source, /href: "\/intel"/);
@@ -36,8 +34,7 @@ assert.match(
   source,
   /item\.key === "intel"[\s\S]*event\.preventDefault\(\)[\s\S]*window\.location\.assign\(item\.href\)/,
 );
-assert.match(source, /grid-cols-7/);
-assert.match(source, /key: "wecom", label: "企业微信", mobileLabel: "企微", href: "\/wecom"/);
+assert.match(source, /grid-cols-5/);
 assert.match(source, /mobileShellNavItems\.map/);
 assert.match(source, /item\.mobileLabel \?\? item\.label/);
 assert.doesNotMatch(source, /requestIdleCallback/);

@@ -5,7 +5,6 @@ const routes = [
   ["./loading.tsx", "signals"],
   ["./holding/loading.tsx", "holding"],
   ["./stocks/loading.tsx", "stocks"],
-  ["./douyin/loading.tsx", "douyin"],
 ];
 
 for (const [path, activeNav] of routes) {

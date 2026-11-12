@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server.js";
 import { ADMIN_SESSION_COOKIE, verifyAdminSessionToken } from "./lib/admin-auth.ts";
-import { isPublicWecomRead } from "./lib/wecom-access.ts";
 
 const PUBLIC_PATHS = new Set([
   "/apple-touch-icon.png",
@@ -32,16 +31,11 @@ function nextPath(request: NextRequest): string {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Only this machine POST bypasses the login redirect; the handler still requires HMAC.
-  if (pathname === "/api/wecom/ingest" && request.method === "POST") {
-    return NextResponse.next();
-  }
-
-  if (isPublicWecomRead(request)) {
-    const response = NextResponse.next();
-    response.headers.set("Cache-Control", "private, no-store");
-    response.headers.set("X-Robots-Tag", "noindex, noarchive");
-    return response;
+  if (/^\/api\/(douyin|wecom)(\/|$)/.test(pathname)) {
+    return NextResponse.json(
+      { success: false, error: "Integration retired" },
+      { status: 410, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   if (isPublicPath(pathname)) {
@@ -56,7 +50,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: "Unauthorized", success: false },
-      { status: 401, headers: pathname.startsWith("/api/wecom/") || pathname.startsWith("/api/push/") ? { "Cache-Control": "private, no-store" } : undefined },
+      { status: 401, headers: pathname.startsWith("/api/push/") ? { "Cache-Control": "private, no-store" } : undefined },
     );
   }
 
