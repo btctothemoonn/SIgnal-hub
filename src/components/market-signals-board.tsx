@@ -10,6 +10,8 @@ import type { MarketSignalsBoardData } from "@/lib/market-signals-view";
 type BoardEvent = MarketSignalsBoardData["events"][number];
 type BoardSignal = MarketSignalsBoardData["signals"]["signals"][number];
 type Ticker = MarketSignalsBoardData["tickers"][number];
+type OutcomeGroup = MarketSignalsBoardData["signals"]["alertOutcomeStats"]["groups"][number];
+type RecentOutcomes = MarketSignalsBoardData["signals"]["recentAlertOutcomes"];
 type Direction = "up" | "down" | "squeeze";
 type DirectionFilter = "all" | Direction | "watch";
 type WindowKey = "1h" | "4h" | "24h";
@@ -126,6 +128,63 @@ function StatsLine({ live, backtest }: { live: string; backtest: string }) {
   );
 }
 
+const OUTCOME_CATEGORY_LABEL: Record<OutcomeGroup["category"], string> = { pump: "暴涨", crash: "暴跌", squeeze: "轧空" };
+const OUTCOME_HORIZONS = ["1h", "4h", "24h"] as const;
+const OUTCOME_MIN_SAMPLE = 10;
+
+function winTone(stat: OutcomeGroup["horizons"]["1h"]) {
+  if (stat.winRate === null || stat.n < OUTCOME_MIN_SAMPLE) return "text-muted";
+  if (stat.winRate >= 0.55) return "text-success";
+  if (stat.winRate <= 0.45) return "text-danger";
+  return "text-foreground";
+}
+
+function AlertOutcomeTable({ groups, windowDays }: { groups: OutcomeGroup[]; windowDays: number }) {
+  return (
+    <Section title={`预警后续表现 · 近 ${windowDays} 天`} hint="胜率 = 价格继续朝预警方向走（暴跌看跌）· 中位为同方向收益">
+      {groups.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-xs">
+            <thead className="bg-workspace-surface-raised text-[10px] font-medium text-muted">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium">触发条件</th>
+                <th className="px-2 py-1.5 text-right font-medium">次数</th>
+                {OUTCOME_HORIZONS.map((key) => <th key={key} className="px-2 py-1.5 text-right font-medium">{key} 胜率 · 中位</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) => {
+                const summary = group.group === "全部";
+                return (
+                  <tr key={`${group.category}:${group.group}`} className={summary ? "border-t border-workspace-line-strong bg-workspace-canvas/60" : "border-t border-line/60"}>
+                    <td className={`px-3 py-1.5 ${summary ? "font-semibold text-foreground" : "pl-6 text-foreground/90"}`}>
+                      {summary ? OUTCOME_CATEGORY_LABEL[group.category] : group.group}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono text-muted">{group.total}</td>
+                    {OUTCOME_HORIZONS.map((key) => {
+                      const stat = group.horizons[key];
+                      return (
+                        <td key={key} className="px-2 py-1.5 text-right font-mono" title={`${key} 已完成 ${stat.n} 条`}>
+                          <span className={`font-semibold ${winTone(stat)}`}>{rate(stat.winRate)}</span>
+                          <span className={`ml-1.5 ${stat.n < OUTCOME_MIN_SAMPLE ? "text-muted" : tone(stat.medianPct)}`}>{pct(stat.medianPct)}</span>
+                          <span className="ml-1 text-[10px] text-muted">n{stat.n}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-3 py-5 text-xs text-muted">样本积累中，每条预警满 1h / 4h / 24h 后自动记录。</p>
+      )}
+      <p className="border-t border-line px-3 py-1.5 text-[11px] text-muted">灰色 = 样本少于 {OUTCOME_MIN_SAMPLE} 条。</p>
+    </Section>
+  );
+}
+
 function PullbackCard({ signal, ticker, nowMs, asset }: { signal: BoardSignal; ticker: Ticker | undefined; nowMs: number; asset?: string }) {
   const stop = num(signal.detail, "stopPrice");
   const current = ticker?.price ?? null;
@@ -225,8 +284,20 @@ function Lane({ events, startMs, endMs }: { events: BoardEvent[]; startMs: numbe
 
 const ROW_GRID = "grid grid-cols-[8.5rem_6rem_minmax(0,1fr)] items-center gap-x-2 sm:grid-cols-[minmax(0,1fr)_6.5rem_5rem_4.5rem_8rem_minmax(8rem,1.6fr)]";
 
-function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, endMs, asset }: {
+function OutcomeChips({ outcome }: { outcome: RecentOutcomes[string] | undefined }) {
+  if (!outcome) return null;
+  return (
+    <span className="ml-1.5 text-[10px]">
+      {OUTCOME_HORIZONS.filter((key) => outcome[key] !== null).map((key) => (
+        <span key={key} className="ml-1">{key} <span className={tone(outcome[key])}>{pct(outcome[key])}</span></span>
+      ))}
+    </span>
+  );
+}
+
+function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, endMs, asset, outcomes }: {
   asset?: string;
+  outcomes: RecentOutcomes;
   row: CoinRow;
   tag: { label: string; className: string };
   expanded: boolean;
@@ -271,7 +342,7 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
         <div className="grid gap-3 border-t border-line bg-workspace-canvas/60 px-3 py-2.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
           <ol className="space-y-1 text-xs">
             {row.events.map((event) => (
-              <li key={event.id} className="flex items-center justify-between gap-2">
+              <li key={event.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <i className={`inline-block h-1.5 w-1.5 shrink-0 ${DIRECTION_DOT[directionOf(event)]}`} />
                   <span className="font-mono text-muted">{clock(event.occurredAt)}</span>
@@ -281,6 +352,7 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
                   <span className={tone(directionOf(event) === "down" ? -Math.abs(event.changePct ?? 0) : event.changePct)}>{pct(event.changePct)}</span>
                   {event.volumeRatio ? ` · 量比 ${event.volumeRatio.toFixed(1)}x` : ""}
                   {` · ${price(event.price)}`}
+                  <OutcomeChips outcome={outcomes[event.id]} />
                 </span>
               </li>
             ))}
@@ -499,6 +571,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
                   startMs={startMs}
                   endMs={endMs}
                   asset={data.assetClasses?.[row.symbol]}
+                  outcomes={data.signals.recentAlertOutcomes ?? {}}
                 />
               ))}
             </ul>
@@ -532,6 +605,8 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
           </ol>
         </details>
       </div>
+
+      <AlertOutcomeTable groups={data.signals.alertOutcomeStats?.groups ?? []} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
 
       <p className="text-right text-[11px] text-muted">
         规则依据与回测见 docs/market-signals.md · <Link href="/alerts/legacy" className="underline hover:text-foreground">打开旧版异动页</Link>

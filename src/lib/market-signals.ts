@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
 import type { EnvLike, PushEvent } from "./important-push-types.ts";
+import { createAlertOutcomeRepo, summarizeAlertOutcomes, type AlertOutcomeGroupStats } from "./market-alert-outcomes.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 // Rules come from the 2026-08-31..11-11 backtest documented in docs/market-signals.md.
@@ -345,6 +346,7 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
   // busy_timeout must be set first: several processes open this file at startup and the WAL switch needs a lock.
   db.exec("PRAGMA busy_timeout=10000; PRAGMA journal_mode=WAL;");
   const outbox = createImportantPushOutbox(db);
+  const alertOutcomes = createAlertOutcomeRepo(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_signals (
       id TEXT PRIMARY KEY,
@@ -399,6 +401,7 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
   }
 
   return {
+    alertOutcomes,
     anchorStatuses(eventIds: string[]) {
       const out = new Map<string, string>();
       const stmt = db.prepare("SELECT status FROM market_signal_anchors WHERE event_id=?");
@@ -525,8 +528,13 @@ export type MarketSignalsSnapshot = {
   stats: Record<MarketSignalKind, MarketSignalStats>;
   meta: ReturnType<MarketSignalsStore["readMeta"]>;
   symbolClasses: Record<string, string>;
+  alertOutcomeStats: { windowDays: number; groups: AlertOutcomeGroupStats[] };
+  // Raw (not direction-adjusted) follow-up % per alert id for alerts in the last 24h.
+  recentAlertOutcomes: Record<string, { "1h": number | null; "4h": number | null; "24h": number | null }>;
   rules: Pick<MarketSignalRules, "pullbackPct" | "maxPre24hPct" | "stopPct" | "btcShortWarningPct">;
 };
+
+export const ALERT_OUTCOME_STATS_DAYS = 14;
 
 export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; nowMs?: number; env?: EnvLike } = {}): MarketSignalsSnapshot {
   const env = input.env ?? process.env;
@@ -535,6 +543,13 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
   const store = input.store ?? openMarketSignalsStore(marketSignalsDbPath(env));
   try {
     const window = store.listSignals(nowMs - rules.statsWindowMs);
+    const outcomeRows = store.alertOutcomes.list(nowMs - ALERT_OUTCOME_STATS_DAYS * 24 * HOUR_MS);
+    const recentAlertOutcomes: MarketSignalsSnapshot["recentAlertOutcomes"] = {};
+    for (const row of outcomeRows) {
+      if (Date.parse(row.occurredAt) < nowMs - 25 * HOUR_MS) break;
+      if (row.ret1hPct === null) continue;
+      recentAlertOutcomes[row.eventId] = { "1h": row.ret1hPct, "4h": row.ret4hPct, "24h": row.ret24hPct };
+    }
     return {
       generatedAt: new Date(nowMs).toISOString(),
       signals: window.filter((signal) => Date.parse(signal.signalAt) >= nowMs - 24 * HOUR_MS),
@@ -545,6 +560,11 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
       },
       meta: store.readMeta(),
       symbolClasses: store.readSymbolClasses(),
+      alertOutcomeStats: {
+        windowDays: ALERT_OUTCOME_STATS_DAYS,
+        groups: summarizeAlertOutcomes(outcomeRows),
+      },
+      recentAlertOutcomes,
       rules: { pullbackPct: rules.pullbackPct, maxPre24hPct: rules.maxPre24hPct, stopPct: rules.stopPct, btcShortWarningPct: rules.btcShortWarningPct },
     };
   } finally {

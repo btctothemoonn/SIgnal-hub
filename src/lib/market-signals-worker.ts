@@ -3,6 +3,7 @@ import { isStableOrFiatBase } from "./market-alerts-core.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 import type { EnvLike } from "./important-push-types.ts";
 import { generateSignalNote } from "./market-signals-ai.ts";
+import { ALERT_OUTCOME_BAR_MS, fillAlertOutcome, seedFromEvent, type AlertOutcomeRow } from "./market-alert-outcomes.ts";
 import {
   buildPullbackPushEvent,
   classifyPositioning,
@@ -24,6 +25,13 @@ const HOUR_MS = 60 * 60_000;
 const BAR_15M_MS = 15 * 60_000;
 const MAX_PULLBACK_SYMBOLS_PER_CYCLE = 40;
 const MAX_OUTCOMES_PER_CYCLE = 20;
+// Alert follow-up tracking: one 5m kline request per symbol, bounded per cycle to stay well inside Binance weight.
+const MAX_ALERT_OUTCOME_SYMBOLS_PER_CYCLE = 20;
+const MAX_ALERT_OUTCOME_ROWS_PER_CYCLE = 600;
+const ALERT_OUTCOME_BACKFILL_MS = 7 * 24 * HOUR_MS;
+const ALERT_OUTCOME_SEED_OVERLAP_MS = 2 * HOUR_MS;
+const ALERT_OUTCOME_SEED_PAGES = 20;
+const ALERT_OUTCOME_FINAL_MS = 24 * HOUR_MS;
 // Positioning is read a few minutes after each hour so the 1h bar and OI point have settled.
 const POSITIONING_SETTLE_MS = 3 * 60_000;
 const SYMBOL_CLASS_REFRESH_MS = 6 * HOUR_MS;
@@ -40,6 +48,7 @@ export type MarketSignalsCycleResult = {
   filled: number;
   pushed: number;
   outcomes: number;
+  alertOutcomes: { seeded: number; updated: number; symbols: number };
   positioning: { hourMs: number; symbols: number; volatile: number; coil: number } | null;
   notes: number;
   errors: string[];
@@ -166,6 +175,58 @@ function excludedSymbol(symbol: string) {
   if (!symbol.endsWith("USDT")) return true;
   const base = symbol.slice(0, -4);
   return isStableOrFiatBase(base) || base === "BTC" || base === "ETH";
+}
+
+async function runAlertOutcomes(input: {
+  alerts: AlertsStore;
+  signals: MarketSignalsStore;
+  client: BinanceMarketClient;
+  nowMs: number;
+  result: MarketSignalsCycleResult;
+}) {
+  const { alerts, signals, client, nowMs, result } = input;
+  const repo = signals.alertOutcomes;
+  // Seed new alerts; the overlap re-reads alerts recorded slightly out of order.
+  const latest = repo.latestSeededAt();
+  const fromMs = Math.max(nowMs - ALERT_OUTCOME_BACKFILL_MS, latest === null ? 0 : latest - ALERT_OUTCOME_SEED_OVERLAP_MS);
+  const from = new Date(fromMs).toISOString();
+  const now = new Date(nowMs).toISOString();
+  for (let page = 1; page <= ALERT_OUTCOME_SEED_PAGES; page += 1) {
+    const events = alerts.getMarketAlertsSnapshot({ from, to: now, limit: 200, page, now }).events;
+    const rows = events.map((event) => seedFromEvent(event)).filter((row): row is AlertOutcomeRow => row !== null);
+    result.alertOutcomes.seeded += repo.seed(rows, nowMs);
+    if (events.length < 200) break;
+  }
+
+  if (!client.getKlinesSince) return;
+  const bySymbol = new Map<string, AlertOutcomeRow[]>();
+  for (const row of repo.due(nowMs, MAX_ALERT_OUTCOME_ROWS_PER_CYCLE)) {
+    const list = bySymbol.get(row.symbol);
+    if (list) list.push(row);
+    else if (bySymbol.size < MAX_ALERT_OUTCOME_SYMBOLS_PER_CYCLE) bySymbol.set(row.symbol, [row]);
+  }
+  for (const [symbol, rows] of bySymbol) {
+    const startMs = Math.floor(Date.parse(rows[0].occurredAt) / ALERT_OUTCOME_BAR_MS) * ALERT_OUTCOME_BAR_MS;
+    const endMs = Math.min(nowMs, Math.max(...rows.map((row) => Date.parse(row.occurredAt))) + ALERT_OUTCOME_FINAL_MS);
+    const limit = Math.max(2, Math.min(1500, Math.ceil((endMs - startMs) / ALERT_OUTCOME_BAR_MS) + 2));
+    let bars;
+    try {
+      bars = normalizeKlines(await client.getKlinesSince(symbol, "5m", startMs, limit));
+    } catch (error) {
+      result.errors.push(`alert outcome ${symbol}: ${safeError(error)}`);
+      for (const row of rows) {
+        const given = fillAlertOutcome(row, [], nowMs);
+        repo.save({ ...(given ?? row), attempts: row.attempts + 1 }, nowMs);
+      }
+      continue;
+    }
+    result.alertOutcomes.symbols += 1;
+    for (const row of rows) {
+      const next = fillAlertOutcome(row, bars, nowMs);
+      if (next) result.alertOutcomes.updated += 1;
+      repo.save({ ...(next ?? row), attempts: row.attempts + 1 }, nowMs);
+    }
+  }
 }
 
 // Binance labels each contract's underlying (COIN, EQUITY, HK_EQUITY, COMMODITY, ...); the board badges non-crypto ones.
@@ -298,10 +359,19 @@ export async function runMarketSignalsCycle(input: {
   const alerts = input.alerts ?? openMarketAlertsStore();
   const signals = input.signals ?? openMarketSignalsStore(marketSignalsDbPath(env));
   const client = input.client ?? createBinanceFuturesClient({}, { rateLimitStore: alerts });
-  const result: MarketSignalsCycleResult = { anchors: 0, symbolsChecked: 0, filled: 0, pushed: 0, outcomes: 0, positioning: null, notes: 0, errors: [] };
+  const result: MarketSignalsCycleResult = {
+    anchors: 0, symbolsChecked: 0, filled: 0, pushed: 0, outcomes: 0,
+    alertOutcomes: { seeded: 0, updated: 0, symbols: 0 },
+    positioning: null, notes: 0, errors: [],
+  };
   try {
     await runPullbackChecks({ alerts, signals, client, nowMs, rules, result });
     await runOutcomes({ signals, client, nowMs, rules, result });
+    try {
+      await runAlertOutcomes({ alerts, signals, client, nowMs, result });
+    } catch (error) {
+      result.errors.push(`alert outcomes: ${safeError(error)}`);
+    }
     try {
       await runPositioning({ signals, client, nowMs, rules, result });
     } catch (error) {

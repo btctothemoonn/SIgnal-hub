@@ -54,6 +54,7 @@
 - `/api/market-signals` 只读本地 SQLite，页面在 SSE 有更新时（最多 15 秒一次）和每 60 秒刷新一次。
 - 旧的 opportunity / squeeze 行情推送继续产生，但发送前按新规则过滤：所有做多方向（追涨、轧空做多）一律拦截；做空方向在 BTC 24h 已跌超 1.7% 时拦截。被拦截的投递记为 `source_no_longer_qualified`。`MARKET_SIGNAL_LEGACY_PUSH_FILTER=false` 可恢复旧行为。
 - 页面每类信号都显示"实盘近 30 天"战绩与回测参考，规则失效时可以直接看出来。
+- 预警后续表现（`src/lib/market-alert-outcomes.ts`，表 `signals.sqlite/market_alert_outcomes`）：每条暴涨 / 暴跌 / 轧空预警按触发价记录 1h、4h、24h 后的涨跌，以及 24h 内最大涨幅和最大跌幅。同时记下触发条件（A趋势 / B加速 / C阶梯 / D先行 / A+B，轧空按阶段）、等级和触发时的 24h 涨幅。数据来自 5m K 线，每轮最多 20 个币，首次上线回补 7 天。页面底部按触发条件展示近 14 天的胜率和同方向中位收益，暴跌预警以继续下跌算赢。
 
 ## 可调参数（环境变量，均有默认值）
 

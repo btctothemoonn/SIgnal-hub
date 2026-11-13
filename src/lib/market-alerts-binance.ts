@@ -42,7 +42,7 @@ export interface BinanceMarketClient {
   getMarketValuations?(markets: MarketValuationRequest[]): Promise<MarketValuation[]>;
   getPremiumIndex?(): Promise<JsonRecord[]>;
   getOpenInterestHistory?(symbol: string): Promise<JsonRecord[]>;
-  getKlinesSince?(symbol: string, interval: "15m" | "1h", startTime: number, limit: number): Promise<KlineRow[]>;
+  getKlinesSince?(symbol: string, interval: "5m" | "15m" | "1h", startTime: number, limit: number): Promise<KlineRow[]>;
   getHourlyOpenInterest?(symbol: string, limit: number): Promise<JsonRecord[]>;
   getGlobalLongShortRatio?(symbol: string): Promise<number | null>;
   getTopTraderPositionRatio?(symbol: string): Promise<number | null>;
