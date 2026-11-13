@@ -1,4 +1,4 @@
-const SKIP_TRANSLATION_CHANNELS = new Set(["bwetradfi"]);
+const SKIP_TRANSLATION_CHANNELS = new Set(["bwetradfi", "bwenews"]);
 
 function normalizeChannelKey(value: string | null | undefined) {
   return (value || "").trim().replace(/^@+/, "").toLowerCase();
@@ -16,6 +16,6 @@ export function shouldSkipTelegramChannelTranslation(channel: {
   return (
     SKIP_TRANSLATION_CHANNELS.has(username) ||
     SKIP_TRANSLATION_CHANNELS.has(ref) ||
-    title.includes("bwetradfi")
+    [...SKIP_TRANSLATION_CHANNELS].some((key) => title.includes(key))
   );
 }

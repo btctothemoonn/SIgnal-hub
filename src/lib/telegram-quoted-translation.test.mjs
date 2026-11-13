@@ -22,6 +22,7 @@ const message = {
 assert.deepEqual(convert({ channels: [], feed: [message] })[0].quotedTweet.translation, translation);
 assert.equal(convert({ channels: [], feed: [{ ...message, quotedMessage: { ...message.quotedMessage, translation: null } }] })[0].quotedTweet.translation, null);
 assert.equal(convert({ channels: [], feed: [{ ...message, channelUsername: "bwetradfi", channelRef: "@bwetradfi" }] })[0].quotedTweet.translation, null);
+assert.equal(convert({ channels: [], feed: [{ ...message, channelUsername: "BWEnews", channelRef: "@BWEnews" }] })[0].quotedTweet.translation, null);
 assert.equal(convert({ channels: [], feed: [{ ...message, quotedMessage: { ...message.quotedMessage, translation: { ...translation, text: message.quotedMessage.text } } }] })[0].quotedTweet.translation, null);
 
 const worker = await readFile(new URL("../../scripts/telegram-pipeline-worker.mjs", import.meta.url), "utf8");

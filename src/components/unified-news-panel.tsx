@@ -673,6 +673,7 @@ export function UnifiedNewsPanel({
     [storedAuthorFavorites],
   );
   const [authorMenuOpen, setAuthorMenuOpen] = useState(false);
+  const [authorSearch, setAuthorSearch] = useState("");
   const [readItems, setReadItems] = useState<Set<string>>(new Set());
   const [feedRenderWindow, setFeedRenderWindow] = useState({
     key: "",
@@ -1141,6 +1142,13 @@ export function UnifiedNewsPanel({
         return 0;
       }),
     [authorFilterOptions, authorFavorites],
+  );
+
+  const authorSearchKey = authorSearch.trim().toLowerCase().replace(/^@+/, "");
+  const visibleAuthorOptions = sortedAuthorFilterOptions.filter(
+    (option) => !authorSearchKey || [option.label, option.value].some(
+      (value) => value.toLowerCase().includes(authorSearchKey),
+    ),
   );
 
   const selectedAuthorLabel =
@@ -1837,7 +1845,10 @@ export function UnifiedNewsPanel({
                 type="button"
                 aria-label="按博主或频道筛选"
                 aria-expanded={authorMenuOpen}
-                onClick={() => setAuthorMenuOpen((open) => !open)}
+                onClick={() => {
+                  setAuthorSearch("");
+                  setAuthorMenuOpen((open) => !open);
+                }}
                 className="flex h-9 w-full items-center justify-between gap-2 rounded-[6px] border border-workspace-line-strong bg-workspace-surface px-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-workspace-surface-raised focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent-soft"
               >
                 <span className="min-w-0 truncate">{selectedAuthorLabel}</span>
@@ -1866,6 +1877,16 @@ export function UnifiedNewsPanel({
 
               {authorMenuOpen ? (
                 <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 max-h-80 w-full overflow-y-auto rounded-[6px] border border-workspace-line-strong bg-workspace-surface-raised p-1">
+                  <div className="sticky top-0 z-10 bg-workspace-surface-raised p-1">
+                    <input
+                      type="search"
+                      aria-label="搜索博主或频道"
+                      placeholder="搜索博主或频道"
+                      value={authorSearch}
+                      onChange={(event) => setAuthorSearch(event.target.value)}
+                      className="h-8 w-full rounded-md border border-workspace-line-strong bg-workspace-surface px-2 text-xs text-foreground focus:border-accent focus:outline-none"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -1881,13 +1902,13 @@ export function UnifiedNewsPanel({
                     <span>全部博主 / 频道</span>
                     <span>{authorFilterOptions.length}</span>
                   </button>
-                  {favoriteAuthorCount > 0 ? (
+                  {!authorSearchKey && favoriteAuthorCount > 0 ? (
                     <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-accent/80">
                       收藏优先显示
                     </div>
                   ) : null}
-                  {sortedAuthorFilterOptions.length > 0 ? (
-                    sortedAuthorFilterOptions.map((option) => {
+                  {visibleAuthorOptions.length > 0 ? (
+                    visibleAuthorOptions.map((option) => {
                       const isActive = option.value === effectiveAuthorFilter;
                       const isFavorite = authorFavorites.has(option.value);
                       return (
@@ -1950,7 +1971,7 @@ export function UnifiedNewsPanel({
                     })
                   ) : (
                     <div className="px-2 py-3 text-center text-xs text-muted">
-                      暂无博主 / 频道
+                      {authorSearchKey ? "没有匹配的博主或频道" : "暂无博主 / 频道"}
                     </div>
                   )}
                 </div>
