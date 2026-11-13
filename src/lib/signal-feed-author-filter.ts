@@ -28,7 +28,7 @@ function handleFromSubtitle(subtitle: string | null) {
 }
 
 function sourceBucket(source: SignalFeedSource) {
-  return source === "monitor985" ? "x" : source;
+  return source === "monitor985" || source === "owned-reader" ? "x" : source;
 }
 
 export function signalFeedAuthorKey(item: SignalFeedAuthorFilterItem) {
@@ -48,6 +48,7 @@ export function signalFeedAuthorLabel(item: SignalFeedAuthorFilterItem) {
 
 export function buildSignalFeedAuthorOptions(
   items: SignalFeedAuthorFilterItem[],
+  subscriptions: SignalFeedAuthorFilterItem[] = [],
 ): SignalFeedAuthorOption[] {
   const options = new Map<string, SignalFeedAuthorOption>();
   for (const item of items) {
@@ -62,6 +63,12 @@ export function buildSignalFeedAuthorOptions(
       label: signalFeedAuthorLabel(item),
       count: 1,
     });
+  }
+  for (const subscription of subscriptions) {
+    const value = signalFeedAuthorKey(subscription);
+    if (!options.has(value)) {
+      options.set(value, { value, label: signalFeedAuthorLabel(subscription), count: 0 });
+    }
   }
   return [...options.values()].sort(
     (left, right) => right.count - left.count || left.label.localeCompare(right.label),

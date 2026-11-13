@@ -1125,8 +1125,24 @@ export function UnifiedNewsPanel({
             matchesSignalFeedTab(item, activeTab) &&
             matchesSignalFeedCollector(item, collectorFilter),
         ),
+        [
+          ...(activeTab === "all" || activeTab === "x"
+            ? xSnapshot.watchAccounts.filter((account) => !isTruthUsername(account.username)).map((account) => ({
+                source: "x" as const,
+                title: account.name || account.username,
+                subtitle: formatXAuthorSubtitle(account.username, null),
+              }))
+            : []),
+          ...((activeTab === "all" || activeTab === "telegram") && collectorFilter === "all"
+            ? telegramSnapshot.channels.map((channel) => ({
+                source: "telegram" as const,
+                title: channel.title || channel.ref,
+                subtitle: channel.username ? `@${channel.username}` : null,
+              }))
+            : []),
+        ],
       ),
-    [unifiedFeed, activeTab, collectorFilter],
+    [unifiedFeed, activeTab, collectorFilter, xSnapshot.watchAccounts, telegramSnapshot.channels],
   );
   const effectiveAuthorFilter = effectiveSignalFeedAuthorFilter(
     authorFilter,
