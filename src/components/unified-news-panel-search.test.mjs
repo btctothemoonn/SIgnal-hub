@@ -81,7 +81,7 @@ test("Collector selection combines with translated search and author filtering",
     item({ id: "vps-3", source: "owned-reader", translation: null }),
   ];
   assert.deepEqual(
-    filterFeed(rows, "协议", "x", "owned-reader:research", "latest", "owned-reader").map((row) => row.id),
+    filterFeed(rows, "协议", "x", "x:research", "latest", "owned-reader").map((row) => row.id),
     ["vps-1"],
   );
 });
