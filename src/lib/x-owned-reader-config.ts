@@ -22,6 +22,7 @@ export type XOwnedReaderConfig = {
   structuralRetryMs: number;
   auditEnabled: boolean;
   activityTiers: boolean;
+  failoverEnabled: boolean;
 };
 export type XOwnedReaderEnv = Record<string, string | undefined>;
 
@@ -86,6 +87,7 @@ export function getXOwnedReaderConfig(env: XOwnedReaderEnv = process.env): XOwne
     structuralRetryMs: positive(env.X_OWNED_READER_STRUCTURAL_RETRY_MS, X_OWNED_STRUCTURAL_RETRY_MS),
     auditEnabled: ["1", "true", "yes", "on"].includes(env.X_985_AUDIT_ENABLED?.trim().toLowerCase() || ""),
     activityTiers: enabledFlag(env.X_OWNED_READER_ACTIVITY_TIERS, false),
+    failoverEnabled: enabledFlag(env.X_985_FAILOVER_ENABLED, true) && enabledFlag(env.MONITOR985_ENABLED, true),
   };
 }
 

@@ -103,7 +103,7 @@ async def run(task,emit):
         emit('cycle_complete',requests=0,completedAccounts=0,reason=None); return
     gate=core.RequestGate(task['cooldownFilePath'],max_requests=task['maxRequests'],deadline_ms=task['deadlineMs'],min_interval_ms=task['minIntervalMs'])
     completed=0; completed_owned=0
-    required_owned={account['username'].lower() for account in task['accounts'] if account.get('purpose')!='audit'}
+    required_owned={account['username'].lower() for account in task['accounts'] if account.get('purpose') not in ('audit','failover')}
     session_context=ExitStack()
     try:
         session_context.enter_context(reader_session_lock(task['sessionDbPath']))
@@ -151,7 +151,8 @@ async def run(task,emit):
                     emit('account_complete',**{key:value for key,value in result.items() if key not in ('tweets','fromAt') and not key.startswith('_')})
                     completed+=int(result['complete'])
                     completed_owned+=int(result['complete'] and result['username'].lower() in required_owned)
-                await core.scan_cycle(task['accounts'],resolve,fetch,task['maxPages'],lambda event:emit('tweet',**event),finish,detail,lambda:gate.limit_requests(6))
+                await core.scan_cycle(task['accounts'],resolve,fetch,task['maxPages'],lambda event:emit('tweet',**event),finish,detail,
+                    lambda:gate.limit_requests(6),lambda:gate.limit_requests(12,'failover_request_budget_reached'))
     except core.ReaderStop as stopped:
         if completed_owned!=len(required_owned) or stopped.reason not in ('request_budget_reached','cycle_deadline_reached'):
             emit('paused',reason=stopped.reason,nextRetryAt=stopped.next_retry_at)

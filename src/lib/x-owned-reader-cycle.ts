@@ -7,6 +7,7 @@ import { runOwnedReaderBridge, validateXOwnedReaderEvent, type XOwnedReaderTask,
 import { isXOwnedReaderCheckDue, xOwnedReaderCheckRounds, xOwnedReaderSpreadQuietChecks } from "./x-owned-reader-activity.ts";
 import { prepare985AuditAccounts, complete985Audit, fetch985AuditEvidence, get985AuditLiveSince, record985PostRecheckAttempt, sync985ConfiguredAuthors, sync985AuthorMonitoringEvidence, type X985AuditEvidence } from "./x-985-audit.ts";
 import type { TwitterFeedItem } from "./6551-twitter.ts";
+import { get985FailoverStatus, select985FailoverAccounts } from './x-985-failover.ts';
 
 let inFlight=false;
 // The first round after a process start checks every author so deploy readiness
@@ -16,15 +17,18 @@ type BridgeRunner=(task:XOwnedReaderTask,config:XOwnedReaderConfig,onEvent:(even
 type CycleOptions={accounts:readonly (string|{username:string})[];config:XOwnedReaderConfig;db?:DatabaseSync;nowMs?:number;clock?:()=>number;bridgeRunner?:BridgeRunner;auditEvidenceProvider?:()=>Promise<X985AuditEvidence>};
 
 export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),nowMs=Date.now(),clock=Date.now,bridgeRunner=runOwnedReaderBridge,auditEvidenceProvider=fetch985AuditEvidence}:CycleOptions) {
-  const result={status:"live",runId:randomUUID(),attempted:0,completed:0,incomplete:0,ingested:0,requests:null as number|null,deferredQuiet:0,auditAttempted:0,auditCompleted:0,auditIncomplete:0,promotedUsernames:[] as string[],reason:null as string|null,nextRetryAt:null as string|null};
+  const result={status:"live",runId:randomUUID(),attempted:0,completed:0,incomplete:0,ingested:0,requests:null as number|null,deferredQuiet:0,failoverActive:false,failoverAttempted:0,failoverCompleted:0,failoverIncomplete:0,auditAttempted:0,auditCompleted:0,auditIncomplete:0,promotedUsernames:[] as string[],reason:null as string|null,nextRetryAt:null as string|null};
   if(inFlight) return {...result,status:"skipped",reason:"in_progress"};
   inFlight=true;
   const pending=new Set<string>();const done=new Set<string>();const identities=new Map<string,string>();let cycleComplete=false;let globalPaused=false;let task:XOwnedReaderTask;
   const auditItems=new Map<string,TwitterFeedItem[]>();const auditPending=new Set<string>();let auditEvidence:X985AuditEvidence={healthy:false,monitored:[],tweetIds:[]};
+  const failoverPending=new Set<string>();const failoverNames=new Set<string>();
   try {
     initXOwnedReaderStateDb(db);
     config=getEffectiveXOwnedReaderConfig(config,db);
     const usernames=accounts.map(account=>typeof account === "string" ? account : account.username);
+    const failover=get985FailoverStatus(db,nowMs);
+    result.failoverActive=config.failoverEnabled && failover.active;
     if(config.auditEnabled)sync985ConfiguredAuthors(usernames,db,nowMs);
     recordXOwnedReaderRoutes(usernames,config,db,nowMs);
     const pause=getXOwnedReaderPause(db);
@@ -52,7 +56,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     const queryAccounts=prepareXOwnedReaderAccounts(due,config,db,nowMs);
     result.attempted=queryAccounts.length;
     queryAccounts.forEach(account=>pending.add(account.username));
-    if(!queryAccounts.length) {
+    if(!queryAccounts.length && !result.failoverActive) {
       if(!due.length && owned.length) {
         result.reason="quiet_authors_not_due";
         setXPipelineHealth({scope:"owned-reader",status:"live",detail:`no checks due; ${result.deferredQuiet} quiet authors deferred`},db);return result;
@@ -76,7 +80,13 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       }
     }
     result.auditAttempted=auditAccounts.length;auditAccounts.forEach(account=>{auditPending.add(account.username);auditItems.set(account.username,[]);});
-    task={version:1,runId:result.runId,sessionDbPath:config.sessionDbPath,cooldownFilePath:config.cooldownFilePath,maxRequests:config.maxRequests,deadlineMs:config.deadlineMs,minIntervalMs:config.minIntervalMs,maxPages:config.maxPages,accounts:[...queryAccounts,...auditAccounts]};
+    const fallbackNames=result.failoverActive ? select985FailoverAccounts(usernames,config.allowlist,db,nowMs) : [];
+    const fallbackAccounts=prepareXOwnedReaderAccounts(fallbackNames,{...config,allowlist:fallbackNames},db,nowMs)
+      .map(account=>({...account,purpose:'failover' as const}));
+    result.failoverAttempted=fallbackAccounts.length;
+    fallbackAccounts.forEach(account=>{failoverNames.add(account.username);failoverPending.add(account.username);});
+    if(!queryAccounts.length && !auditAccounts.length && !fallbackAccounts.length) {result.reason='quiet_authors_not_due';return result;}
+    task={version:1,runId:result.runId,sessionDbPath:config.sessionDbPath,cooldownFilePath:config.cooldownFilePath,maxRequests:config.maxRequests,deadlineMs:config.deadlineMs,minIntervalMs:config.minIntervalMs,maxPages:config.maxPages,accounts:[...queryAccounts,...auditAccounts,...fallbackAccounts]};
     setXPipelineHealth({scope:"owned-reader",status:"connecting",detail:`checking ${queryAccounts.length} trial accounts`},db);
     await bridgeRunner(task,config,async(raw)=>{
       const event=validateXOwnedReaderEvent(raw,task);
@@ -140,7 +150,10 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
       const reason=event.complete ? null : isolate ? "structural_isolated" : incompleteCount>=3 && ["page_limit_reached","request_budget_reached","cycle_deadline_reached"].includes(String(event.reason)) ? "backlog_limit_repeated" : eventReason;
       const nextRetryAt=isolate ? new Date(nowMs+(config.structuralRetryMs || X_OWNED_STRUCTURAL_RETRY_MS)).toISOString() : null;
       db.prepare(`update x_owned_reader_state set user_id=?,status=?,reason=?,next_retry_at=?,incomplete_count=?,last_incomplete_reason=?,coverage_kind=?,reply_coverage_complete=?,reply_reason=?,subscriber_content_excluded=?,subscriber_excluded_tweet_ids_json=?,covered_through_at=case when ?=1 then ? else covered_through_at end,last_successful_check_at=case when ?=1 then ? else last_successful_check_at end,pending_through_at=case when ?=1 then null else pending_through_at end,updated_at=? where username_key=?`).run(String(event.userId),event.complete ? "complete" : "incomplete",reason,nextRetryAt,incompleteCount,event.complete ? null : eventReason,"posts-and-quotes",event.replyCoverageComplete ? 1 : 0,event.replyReason as string|null,Number(event.subscriberContentExcluded),JSON.stringify(event.subscriberExcludedTweetIds),event.complete ? 1 : 0,String(event.throughAt),event.complete ? 1 : 0,String(event.checkedAt),event.complete ? 1 : 0,new Date(nowMs).toISOString(),username);
-      done.add(username);pending.delete(username);if(event.complete)result.completed++;else result.incomplete++;
+      done.add(username);
+      if(failoverNames.has(username)) {
+        failoverPending.delete(username);if(event.complete)result.failoverCompleted++;else result.failoverIncomplete++;
+      } else {pending.delete(username);if(event.complete)result.completed++;else result.incomplete++;}
     });
     if(!cycleComplete) throw new Error("bridge_missing_completion");
     if(pending.size && !globalPaused) {result.incomplete+=pending.size;if(result.status!=="error")result.status="incomplete";result.reason ||= "account_missing_completion";}
@@ -155,6 +168,13 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
   } catch(error) {result.status="error";result.reason=safeXOwnedReason(error instanceof Error ? error.message : null,"bridge_failed");}
   finally {
     inFlight=false;
+    for(const username of failoverPending) {
+      db.prepare("update x_owned_reader_state set status='incomplete',reason=?,next_retry_at=?,updated_at=? where username_key=?")
+        .run(result.reason || 'request_budget_reached',result.nextRetryAt,new Date(nowMs).toISOString(),username);
+      result.failoverIncomplete++;
+    }
+    setXPipelineHealth({scope:'985-failover',status:result.failoverActive ? result.status==='paused' ? 'paused' : result.status==='error' ? 'error' : 'live' : 'closed',
+      detail:result.failoverActive ? `985 临时接管：本轮完成 ${result.failoverCompleted}/${result.failoverAttempted} 位，未完成 ${result.failoverIncomplete} 位` : '985 临时接管待命'},db);
     for(const username of auditPending) {
       complete985Audit({username,complete:false,reason:result.reason || "account_missing_completion"},[],auditEvidence,db,nowMs);result.auditIncomplete++;
     }

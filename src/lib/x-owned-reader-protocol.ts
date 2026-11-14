@@ -3,7 +3,7 @@ import type { TwitterFeedItem } from "./6551-twitter.ts";
 import { normalizeXOwnedUsername, type XOwnedReaderConfig } from "./x-owned-reader-config.ts";
 import { safeXOwnedReason } from "./x-owned-reader-state.ts";
 
-export type XOwnedReaderTaskAccount = {username:string;userId?:string;fromAt:string;throughAt:string;purpose?:"audit"};
+export type XOwnedReaderTaskAccount = {username:string;userId?:string;fromAt:string;throughAt:string;purpose?:"audit"|"failover"};
 export type XOwnedReaderTask = {version:1;runId:string;sessionDbPath:string;cooldownFilePath:string;maxRequests:number;deadlineMs:number;minIntervalMs:number;maxPages:number;accounts:XOwnedReaderTaskAccount[];mode?:"doctor"};
 export type XOwnedReaderEvent = Record<string,unknown> & {version:1;runId:string;type:string;feedItem?:TwitterFeedItem;account?:{username:string;userId:string}};
 const LINE_LIMIT=512*1024;

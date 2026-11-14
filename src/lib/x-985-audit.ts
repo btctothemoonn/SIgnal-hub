@@ -5,6 +5,7 @@ import { normalizeXOwnedUsername } from './x-owned-reader-config.ts';
 import { buildMonitor985RequestHeaders, buildMonitor985RequestUrl } from './monitor985-auth.ts';
 import { parseMonitor985WatchConfig } from './monitor985-watch-config.ts';
 import { extractMonitor985Events, xSnowflakeCreatedAt } from './monitor985.ts';
+import { record985FailoverStream } from './x-985-failover.ts';
 
 type Row=Record<string,unknown>;
 export type X985AuditEvidence={healthy:boolean;monitored:string[];tweetIds:string[]};
@@ -67,6 +68,7 @@ export function record985RawPayload(raw:unknown,db:DatabaseSync=getXPipelineDb()
   else db.prepare('insert into x_985_parse_fault values(1,?) on conflict(id) do update set occurred_at=excluded.occurred_at').run(at);
 }
 export function record985StreamState(state:'connected'|'heartbeat'|'disconnected',db:DatabaseSync=getXPipelineDb(),nowMs=Date.now()) {
+  record985FailoverStream(state,db,nowMs);
   initX985AuditDb(db);const at=new Date(nowMs).toISOString();
   if(state==='connected')db.prepare(`insert into x_985_stream values(1,?,?) on conflict(id) do update set connected_since_at=excluded.connected_since_at,last_activity_at=excluded.last_activity_at`).run(at,at);
   else if(state==='disconnected')db.prepare(`insert into x_985_stream values(1,null,?) on conflict(id) do update set connected_since_at=null,last_activity_at=excluded.last_activity_at`).run(at);

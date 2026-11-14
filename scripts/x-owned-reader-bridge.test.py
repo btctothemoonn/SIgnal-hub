@@ -413,6 +413,19 @@ class Scanning(unittest.IsolatedAsyncioTestCase):
         audit=next(result for result in completed if result['username']=='Audit')
         self.assertTrue(audit['complete']); self.assertEqual(audit['purpose'],'audit')
         self.assertEqual(audit['pages'],1); self.assertFalse(audit['replyCoverageComplete'])
+
+    async def test_failover_runs_after_owned_replies_and_never_reads_replies(self):
+        window={'userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
+        accounts=[{'username':'Backup',**window,'purpose':'failover'},{'username':'Owned',**window}]
+        operations=[]; completed=[]
+        async def resolve(account): return account
+        async def fetch(account,kind,cur):
+            operations.append((account['username'],kind))
+            return page([cursor('')])
+        await self.c.scan_cycle(accounts,resolve,fetch,on_complete=completed.append)
+        self.assertEqual(operations,[('Owned','posts'),('Owned','replies'),('Backup','posts')])
+        backup=next(r for r in completed if r['username']=='Backup')
+        self.assertTrue(backup['complete']); self.assertFalse(backup['replyCoverageComplete'])
     async def test_audit_gets_a_turn_before_busy_owned_windows_exhaust_budget(self):
         window={'userId':'7','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'}
         accounts=[{'username':name,**window} for name in ('First','Busy')]
@@ -621,6 +634,26 @@ class Transport(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(self.c.ReaderStop): await self.get(gate)
                 self.assertEqual(len(self.received),before+1)
                 self.assertNotIn('secret-value',self.path.read_text())
+
+    async def test_failover_wire_cap_shares_global_budget(self):
+        self.replies=[(200,{},b'{"data":{}}')]*20
+        gate=self.gate(max_requests=80)
+        # Only this local socket test disables waiting; production gate keeps 2s spacing.
+        gate.min_interval=0
+        await self.get(gate)
+        with gate.limit_requests(12,'failover_request_budget_reached'):
+            for _ in range(12): await self.get(gate)
+            with self.assertRaises(self.c.ReaderStop) as stopped: await self.get(gate)
+        self.assertEqual(stopped.exception.reason,'failover_request_budget_reached')
+        self.assertEqual(gate.count,13)
+        self.assertFalse(self.path.exists())
+        gate=self.gate(max_requests=2); gate.min_interval=0
+        await self.get(gate)
+        with gate.limit_requests(12,'failover_request_budget_reached'):
+            await self.get(gate)
+            with self.assertRaises(self.c.ReaderStop) as stopped: await self.get(gate)
+        self.assertEqual(stopped.exception.reason,'request_budget_reached')
+        self.assertEqual(gate.count,2)
     async def test_cross_origin_and_auth_redirects_never_follow(self):
         for location,want in [('https://evil.test/','unexpected_cross_origin_redirect'),('/i/flow/login','login_or_access_challenge')]:
             if self.path.exists(): self.path.unlink()
@@ -698,7 +731,7 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(active,0); self.assertEqual(message,'Owned reader authentication check failed')
         locks=json.loads(locks); self.assertEqual(locks['UnrelatedEndpoint'],other)
         self.assertIn('UserTweets',locks)
-    async def bridge_main_first_fixture(self,incomplete=False,audit_budget=False,audit_rate_limit=False):
+    async def bridge_main_first_fixture(self,incomplete=False,audit_budget=False,audit_rate_limit=False,failover_budget=False,failover_rate=False):
         try: import twscrape
         except ImportError: self.skipTest('requires pinned twscrape Linux venv')
         from unittest.mock import patch
@@ -706,14 +739,15 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         bridge=load_bridge(); operations=[]; events=[]
         accounts=[{'username':'Alice'+str(index),'userId':str(7+index),'fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'} for index in range(7)]
         if audit_budget or audit_rate_limit: accounts.append({'username':'Audit','userId':'14','purpose':'audit','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'})
+        if failover_budget or failover_rate: accounts.append({'username':'Backup','userId':'14','purpose':'failover','fromAt':'2026-10-03T00:00:00Z','throughAt':'2026-10-04T01:00:00Z'})
         task={'version':1,'runId':'fixture','sessionDbPath':str(Path(self.temp.name)/'offline-unused.db'),'cooldownFilePath':str(self.path),'maxRequests':80,'deadlineMs':180000,'minIntervalMs':2000,'maxPages':5,'accounts':accounts}
         class FixtureAPI:
             def __init__(self,*args,**kwargs): pass
             async def _gql_item(self,operation,variables):
                 kind='posts' if operation.endswith('/UserTweets') else 'replies'
                 index=int(variables['userId'])-7; operations.append((kind,index))
-                if index==7: raise bridge.core.ReaderStop('rate_limited' if audit_rate_limit else 'audit_request_budget_reached','2026-10-04T02:00:00Z')
-                if kind=='replies': raise bridge.core.ReaderStop('request_budget_reached','2026-10-04T02:00:00Z')
+                if index==7: raise bridge.core.ReaderStop('rate_limited' if audit_rate_limit or failover_rate else 'failover_request_budget_reached' if failover_budget else 'audit_request_budget_reached','2026-10-04T02:00:00Z')
+                if kind=='replies' and not (failover_budget or failover_rate): raise bridge.core.ReaderStop('request_budget_reached','2026-10-04T02:00:00Z')
                 body={'data':{}} if incomplete and index==3 else page([item(tweet(str(100+index),username='Alice'+str(index),user_id=str(7+index))),cursor('')])
                 return SimpleNamespace(json=lambda:body)
         def emit(kind,**fields): events.append({'type':kind,**fields})
@@ -751,6 +785,20 @@ class Transport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operations,[('posts',0),('posts',7)])
         pauses=[event for event in events if event['type']=='paused']
         self.assertEqual(len(pauses),1); self.assertEqual(pauses[0]['reason'],'rate_limited')
+        self.assertEqual(events[-1]['type'],'cycle_complete')
+
+    async def test_bridge_failover_local_budget_does_not_pause_completed_primary(self):
+        operations,events=await self.bridge_main_first_fixture(failover_budget=True)
+        self.assertEqual(operations,[('posts',i) for i in range(7)]+[('replies',i) for i in range(7)]+[('posts',7)])
+        primary=[e for e in events if e['type']=='account_complete' and e.get('purpose')!='failover']
+        self.assertEqual(len(primary),7); self.assertTrue(all(e['complete'] for e in primary))
+        self.assertFalse(any(e['type']=='paused' for e in events))
+        self.assertEqual(events[-1]['type'],'cycle_complete')
+
+    async def test_bridge_failover_rate_limit_still_pauses_globally(self):
+        operations,events=await self.bridge_main_first_fixture(failover_rate=True)
+        self.assertEqual(operations[-1],('posts',7))
+        self.assertEqual([e['reason'] for e in events if e['type']=='paused'],['rate_limited'])
         self.assertEqual(events[-1]['type'],'cycle_complete')
 
 if __name__ == '__main__': unittest.main(verbosity=2)

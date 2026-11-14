@@ -37,7 +37,7 @@ def validate_task(task):
     names = set()
     for account in accounts:
         if not isinstance(account, dict) or not USERNAME.fullmatch(account.get('username', '')): raise ValueError('invalid_account')
-        if 'purpose' in account and account['purpose']!='audit': raise ValueError('invalid_account_purpose')
+        if 'purpose' in account and account['purpose'] not in ('audit','failover'): raise ValueError('invalid_account_purpose')
         name = account['username'].lower()
         if name in names: raise ValueError('duplicate_account')
         names.add(name)
@@ -435,7 +435,7 @@ async def scan_coverage(fetch_page,account,max_pages=5,on_tweet=None,fetch_detai
         main['replyCoverageComplete']=reply['complete']; main['replyReason']=reply['reason']; main['checkedAt']=reply['checkedAt']
     return main
 
-async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_tweet=None,on_complete=None,fetch_detail=None,audit_scope=nullcontext):
+async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_tweet=None,on_complete=None,fetch_detail=None,audit_scope=nullcontext,failover_scope=nullcontext):
     """Give a bounded audit turn after the first owned author, before replies."""
     contexts=[]; seen=set(); stopped_reason=None
     def emit(event):
@@ -451,7 +451,7 @@ async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_twee
         record_subscriber_exclusions(result,[])
         return result
     try:
-        owned=[account for account in accounts if account.get('purpose')!='audit']
+        owned=[account for account in accounts if account.get('purpose') not in ('audit','failover')]
         audits=[account for account in accounts if account.get('purpose')=='audit']
         for requested in [*owned[:1],*audits,*owned[1:]]:
             account=dict(requested)
@@ -497,6 +497,23 @@ async def scan_cycle(accounts,resolve_account,fetch_timeline,max_pages=5,on_twee
             result['accepted']=sum(name==username for name,_ in seen)
             if stopped_reason and not result['replyCoverageComplete'] and result['replyReason']=='reply_page_budget_unavailable': result['replyReason']=stopped_reason
             if on_complete: on_complete(result)
+    # Takeover only spends what remains after ordinary posts AND replies.
+    with failover_scope():
+        for requested in [a for a in accounts if a.get('purpose')=='failover'][:4]:
+            account=dict(requested)
+            async def detail(identifier): return await fetch_detail(account,identifier)
+            async def posts(cursor): return await fetch_timeline(account,'posts',cursor)
+            try:
+                account=await resolve_account(account)
+                if account.get('_skip_reason'):
+                    result={**account,'complete':False,'pages':0,'accepted':0,'quarantined':0,'reason':account['_skip_reason'],'checkedAt':iso_now(),'tweets':[]}
+                else:
+                    result=await scan_account(posts,account,min(max_pages,2),emit,detail if fetch_detail else None,{})
+            except ReaderStop as stopped:
+                if stopped.account_result is not None and on_complete: on_complete(shape(stopped.account_result))
+                if stopped.reason=='failover_request_budget_reached': break
+                raise
+            if on_complete: on_complete(shape(result))
     return [context['result'] for context in contexts]
 
 class ReaderStop(BaseException):
@@ -525,7 +542,7 @@ class RequestGate:
     def __init__(self,cooldown_path,max_requests=80,deadline_ms=180000,min_interval_ms=2000,allowed_origins=None):
         self.cooldown_path=Path(cooldown_path); self.max_requests=min(max_requests,80); self.deadline=time.monotonic()+min(deadline_ms,180000)/1000
         self.min_interval=max(min_interval_ms,2000)/1000; self.count=0; self.last=None; self.stopped=None; self.next_retry_at=None; self.lock=asyncio.Lock()
-        self.scope_limit=None
+        self.scope_limit=None; self.scope_reason='audit_request_budget_reached'
         self.allowed_origins=allowed_origins or {('https',host,None) for host in ('x.com','www.x.com','api.x.com','twitter.com','api.twitter.com','abs.twimg.com','pbs.twimg.com')}
         state=cooldown_state(self.cooldown_path)
         if state:
@@ -550,13 +567,14 @@ class RequestGate:
         if self.count>=self.max_requests: self.stop('request_budget_reached',time.time()+60,persist=False)
         if time.monotonic()>=self.deadline: self.stop('cycle_deadline_reached',time.time()+60,persist=False)
         if self.scope_limit is not None and self.count>=self.scope_limit:
-            raise ReaderStop('audit_request_budget_reached')
+            raise ReaderStop(self.scope_reason)
     @contextmanager
-    def limit_requests(self,count):
-        previous=self.scope_limit
+    def limit_requests(self,count,reason='audit_request_budget_reached'):
+        previous=self.scope_limit; previous_reason=self.scope_reason
+        self.scope_reason=reason
         self.scope_limit=self.count+count if previous is None else min(previous,self.count+count)
         try: yield
-        finally: self.scope_limit=previous
+        finally: self.scope_limit=previous; self.scope_reason=previous_reason
     async def request(self,send,method,url,**kwargs):
         async with self.lock:
             for _ in range(5):

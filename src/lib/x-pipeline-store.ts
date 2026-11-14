@@ -10,6 +10,8 @@ import type {
   TwitterWatchAccount,
 } from "@/lib/6551-twitter";
 import type { TranslationNote } from "./translate.ts";
+import { get985FailoverStatus } from './x-985-failover.ts';
+import { getXOwnedReaderConfig } from './x-owned-reader-config.ts';
 import {
   matchesXFeedTranslationSnapshot,
   isStaleXFeedTranslation,
@@ -1508,6 +1510,14 @@ export function getXPipelineSnapshot(
   const healthStatus = stringValue(health?.status);
   const errors =
     healthStatus === "error" ? [stringValue(health?.detail)].filter(Boolean) : [];
+  const readerConfig=getXOwnedReaderConfig();
+  if(readerConfig.enabled && readerConfig.failoverEnabled && get985FailoverStatus(db,Date.now()).active) {
+    const takeover=db.prepare("select status,detail,updated_at from x_health where scope='985-failover'").get();
+    const fresh=Date.now()-Date.parse(String(takeover?.updated_at || '')) < readerConfig.intervalMs+readerConfig.deadlineMs;
+    errors.push(fresh && takeover?.status!=='closed'
+      ? `${String(takeover?.detail)}${takeover?.status==='paused' ? '（等待冷却）' : takeover?.status==='error' ? '（采集异常）' : ''}；暂未完成的账号仍可能延迟。`
+      : '985 持续断线，等待 VPS 下一轮限额补采。');
+  }
 
   return {
     provider: "x-pipeline",

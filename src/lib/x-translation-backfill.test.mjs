@@ -26,6 +26,8 @@ async function transpileToTemp() {
   )
     .replace('from "@/lib/6551-twitter"', 'from "./6551-twitter.mjs"')
     .replace('from "./x-pipeline-config.ts"', 'from "./x-pipeline-config.mjs"')
+    .replace("from './x-985-failover.ts'", `from ${JSON.stringify(new URL('./x-985-failover.ts', import.meta.url).href)}`)
+    .replace("from './x-owned-reader-config.ts'", `from ${JSON.stringify(new URL('./x-owned-reader-config.ts', import.meta.url).href)}`)
     .replace('from "./x-api-usage.ts"', 'from "./x-api-usage.mjs"')
     .replace('from "./translate.ts"', 'from "./translate.mjs"')
     .replace('from "./translation-quality.ts"', 'from "./translation-quality.mjs"');
