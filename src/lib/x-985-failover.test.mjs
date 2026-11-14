@@ -5,11 +5,12 @@ import { getXOwnedReaderConfig } from './x-owned-reader-config.ts';
 import { getXAccountCoverageSnapshot, pauseXOwnedReader } from './x-owned-reader-state.ts';
 import { record985StreamState } from './x-985-audit.ts';
 import { runXOwnedReaderCycle } from './x-owned-reader-cycle.ts';
+import { get985FailoverStatus } from './x-985-failover.ts';
 
 const db = new DatabaseSync(':memory:');
 initXPipelineDb(db);
 const base = Date.parse('2026-11-13T00:00:00Z');
-const env = { X_OWNED_READER_ENABLED:'true', X_985_AUDIT_ENABLED:'true', X_OWNED_READER_USERNAMES:'owned',
+const env = { MONITOR985_ENABLED:'true', X_OWNED_READER_ENABLED:'true', X_985_AUDIT_ENABLED:'true', X_OWNED_READER_USERNAMES:'owned',
   X_OWNED_READER_INTERVAL_MS:'960000', X_OWNED_READER_SESSION_DB:'/private/session.db', X_OWNED_READER_COOLDOWN_FILE:'/private/absent.json' };
 const config = getXOwnedReaderConfig(env);
 const accounts = ['owned','a','b','c','d','e','f'];
@@ -64,6 +65,10 @@ assert.equal(getXAccountCoverageSnapshot(accounts,db,env,base+64*60000).failover
 // No heartbeat for over ten minutes also qualifies; no restart is required.
 await cycle(80);
 assert.equal(tasks.at(-1).accounts.filter(a=>a.purpose==='failover').length,4);
+const staleSince=get985FailoverStatus(db,base+80*60000).unavailableSinceAt;
+record985StreamState('disconnected',db,base+81*60000);
+assert.equal(get985FailoverStatus(db,base+81*60000).active,true,'explicit disconnect must not reset an existing heartbeat outage');
+assert.equal(get985FailoverStatus(db,base+81*60000).unavailableSinceAt,staleSince);
 await cycle(96,{config:{...config,failoverEnabled:false}});
 assert.ok(tasks.at(-1).accounts.every(a=>a.purpose!=='failover'));
 db.close();

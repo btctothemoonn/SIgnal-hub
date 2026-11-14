@@ -3,6 +3,10 @@ import { getXOwnedReaderConfig, ownedReaderStaleAfterMs, selectXOwnedReaderAccou
 
 const disabled = getXOwnedReaderConfig({});
 assert.equal(disabled.enabled, false);
+for (const MONITOR985_ENABLED of [undefined, '', 'false']) {
+  assert.equal(getXOwnedReaderConfig({X_OWNED_READER_ENABLED:'true',MONITOR985_ENABLED}).failoverEnabled,false,'985 must be explicitly enabled for takeover');
+}
+assert.equal(getXOwnedReaderConfig({MONITOR985_ENABLED:'true'}).failoverEnabled,true);
 assert.deepEqual(selectXOwnedReaderAccounts(["Hzzzz666", "PHOTONCAP", "Established985", "newAuthor"], disabled), ["Hzzzz666", "PHOTONCAP"]);
 const enabled = getXOwnedReaderConfig({ X_OWNED_READER_ENABLED: "true", X_OWNED_READER_USERNAMES: "@PhotonCap,newAuthor", X_OWNED_READER_MAX_REQUESTS: "900", X_OWNED_READER_DEADLINE_MS: "999999", X_OWNED_READER_MIN_INTERVAL_MS: "1", X_OWNED_READER_MAX_PAGES: "90", X_OWNED_READER_INTERVAL_MS: "1" });
 assert.equal(enabled.enabled, true);

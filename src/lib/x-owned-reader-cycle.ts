@@ -28,7 +28,7 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
     config=getEffectiveXOwnedReaderConfig(config,db);
     const usernames=accounts.map(account=>typeof account === "string" ? account : account.username);
     const failover=get985FailoverStatus(db,nowMs);
-    result.failoverActive=config.failoverEnabled && failover.active;
+    result.failoverActive=config.enabled && config.failoverEnabled && failover.active;
     if(config.auditEnabled)sync985ConfiguredAuthors(usernames,db,nowMs);
     recordXOwnedReaderRoutes(usernames,config,db,nowMs);
     const pause=getXOwnedReaderPause(db);

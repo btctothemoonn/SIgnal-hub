@@ -12,9 +12,11 @@ function exists(db: DatabaseSync, name: string) {
 export function record985FailoverStream(state: 'connected' | 'heartbeat' | 'disconnected', db: DatabaseSync, nowMs: number) {
   db.exec('create table if not exists x_985_failover_control (id integer primary key check(id=1), unavailable_since_at text)');
   if (state === 'disconnected') {
+    const inferred = Date.parse(get985FailoverStatus(db,nowMs).unavailableSinceAt ?? '');
+    const since = Number.isFinite(inferred) ? Math.min(nowMs,inferred) : nowMs;
     db.prepare(`insert into x_985_failover_control values(1,?) on conflict(id) do update
       set unavailable_since_at=coalesce(unavailable_since_at,excluded.unavailable_since_at)`)
-      .run(new Date(nowMs).toISOString());
+      .run(new Date(since).toISOString());
   } else if (state === 'connected') {
     db.prepare('insert into x_985_failover_control values(1,null) on conflict(id) do update set unavailable_since_at=null').run();
   }
