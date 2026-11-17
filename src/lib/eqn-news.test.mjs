@@ -16,11 +16,21 @@ assert.equal(core.normalizeEqnNews({ news_title: "WS", source_name: "BWENEWS", t
 assert.equal(core.normalizeEqnNews({ time: "broken", zh: "bad" }, "mcp"), null);
 assert.equal(core.normalizeEqnNews({ news_title: "x".repeat(50000), timestamp: 1794826821 }, "ws").title.length, 16000);
 assert.equal(core.normalizeEqnNews({ ...raw(1), images: ["/image/a.jpg", "javascript:bad"] }, "mcp").images[0], "https://eqn.news/image/a.jpg");
+const textCoins = (zh, en = zh) => core.normalizeEqnNews({ no: 9, time: "2026-11-17T09:00:00Z", zh, en, source: "Price Monitor", coins: [] }, "mcp").coins.map((coin) => coin.symbol);
+assert.deepEqual(textCoins("Bybit.P 监控：LONGXIAUSDT 在过去 10 秒内下跌了 6.5%"), ["LONGXIA"]);
+assert.deepEqual(textCoins("价格监测：龙虾USDT (龙虾) 在过去 10 秒内下跌 5.4%。"), ["龙虾"]);
+assert.deepEqual(textCoins("🟢 [龙虾USDT] 多头进场", "PREDICTUSDT and 1000PEPEUSDT"), ["龙虾", "PREDICT", "PEPE"]);
+assert.deepEqual(textCoins("OKX将上线代币化股票xAVGO的USDC交易对", "USDT rewards for BTC holders"), [], "bare words and lowercase tokens are not guessed");
+assert.deepEqual(textCoins("币安将上线新币龙虾USDT永续合约"), [], "long Han prose glued to a pair is not a ticker");
+assert.deepEqual(core.normalizeEqnNews({ ...raw(2), zh: "ETHUSDT surges" }, "mcp").coins.map((coin) => coin.symbol), ["BTC"], "exchange-provided coins win");
+assert.equal(core.isEqnSymbol("龙虾"), true);
+assert.equal(core.isEqnSymbol("BAD/COIN"), false);
 
 const dir = mkdtempSync(join(tmpdir(), "eqn-news-"));
 let store;
 try {
   store = openEqnNewsStore(join(dir, "news.sqlite"));
+  assert.equal(store.getState("migration:textCoins:v1"), true);
   const placeholder = core.normalizeEqnNews({ news_title: "WS", source_name: "BWENEWS", timestamp: 1794826821, url: "https://example.com/15258" }, "ws");
   store.upsert(placeholder);
   store.upsert(item);
@@ -144,6 +154,45 @@ try {
   assert.equal(hlEquity.candles[0].open, 100);
   assert.equal(hl.tradable, true);
   assert.equal((await market.getMarket({ symbol: "BT", venue: "binance", interval: "1m" })).pair, null);
+
+  const cjk = { symbol: "龙虾USDT", baseAsset: "龙虾", quoteAsset: "USDT", status: "TRADING", contractType: "PERPETUAL" };
+  assert.deepEqual(resolveEqnAsset("龙虾", "binance", [cjk]), { symbol: "龙虾", pair: "龙虾USDT", multiplier: 1, tradable: false }, "CJK perpetual charts but the ASCII-only trader cannot sign it");
+  assert.equal(resolveEqnAsset("LONGXIA", "binance", [cjk]).pair, "龙虾USDT", "explicit Bybit name alias");
+  let releaseSlow;
+  const slow = new Promise((resolve) => { releaseSlow = resolve; });
+  const urls = [];
+  const fast = createEqnMarketClient({ fetch: async (url) => {
+    urls.push(decodeURIComponent(String(url)));
+    if (String(url).includes("exchangeInfo")) return Response.json({ symbols: [cjk] });
+    if (String(url).includes("klines")) return Response.json([[1794826800000, "0.01", "0.02", "0.009", "0.0163", "4"]]);
+    await slow;
+    return Response.json({ lastPrice: "1" });
+  }, valuations: () => ({ marketCap: null, fdv: null, ticker: { price: 0.0164, change24h: 18.7, volume24h: 1e8, updatedAt: Date.now() } }), rateLimit: null, optionalWaitMs: 20 });
+  const started = Date.now();
+  const quick = await fast.getMarket({ symbol: "龙虾", venue: "binance", interval: "5m" });
+  assert.ok(Date.now() - started < 1500, "slow ticker/funding/OI do not block the chart");
+  assert.equal(quick.error, null);
+  assert.equal(quick.price, 0.0163, "live candle close is the fallback price");
+  assert.equal(quick.change24h, 18.7, "fresh market-alert snapshot fills 24h stats");
+  assert.equal(quick.candles.length, 1);
+  assert.ok(urls.some((url) => url.includes("symbol=龙虾USDT") && url.includes("limit=500")), "recent window requests exactly 500 bars");
+  releaseSlow();
+
+  const marks = [];
+  const limiter = { next: Date.now() + 8000, reserve(nowMs, priority) { marks.push(priority); const ready = Math.max(nowMs, priority ? Math.min(this.next, nowMs + 1000) : this.next); return ready - nowMs; }, defer() {} };
+  const waits = [];
+  const prioritized = createEqnMarketClient({ fetch: async (url) => String(url).includes("exchangeInfo") ? Response.json({ symbols: metadata }) : Response.json([]), rateLimit: limiter, sleep: async (ms) => { waits.push(ms); }, valuations: () => ({ marketCap: null, fdv: null }), optionalWaitMs: 1 });
+  await prioritized.getCandles({ symbol: "BTC", venue: "binance", interval: "1m" });
+  assert.ok(marks.every(Boolean), "metadata and candles are interactive requests");
+  assert.ok(waits.every((ms) => ms <= 1000), "interactive charts wait at most 1s behind background market-alert work");
+
+  const legacy = { ...core.normalizeEqnNews({ no: 501, time: "2026-11-17T09:00:00Z", zh: "价格监测：龙虾USDT (龙虾) 下跌", source: "Price Monitor" }, "mcp"), coins: [] };
+  store.upsert(legacy);
+  store.setState("migration:textCoins:v1", null);
+  store.close();
+  store = openEqnNewsStore(join(dir, "news.sqlite"));
+  assert.deepEqual(store.get("501").coins.map((coin) => coin.symbol), ["龙虾"], "stored legacy rows are repaired once");
+  assert.equal(store.feed({ coin: "龙虾" }).items[0].id, "501");
   console.log("eqn-news protocol, store, gap fill, mapping, reaction and market tests passed");
 } finally {
   store?.close();

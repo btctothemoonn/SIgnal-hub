@@ -1,4 +1,5 @@
 import type { NewsDetail, NewsItem, NewsMarket } from "./news-terminal-types.ts";
+import { isEqnSymbol } from "./eqn-news-core.ts";
 import { calculateEqnReactions, getEqnMarketClient, readEqnMarketContext } from "./eqn-news-market.ts";
 import { getEqnNewsStore } from "./eqn-news-store.ts";
 import { readEqnRelatedSignals } from "./eqn-news-related.ts";
@@ -8,7 +9,7 @@ export type EqnDetailSelection = { coin?: string; venue?: NewsMarket["venue"] };
 export function parseEqnDetailQuery(params: URLSearchParams): EqnDetailSelection {
   const coin = params.has("coin") ? params.get("coin")!.trim().toUpperCase() : undefined;
   const venue = params.get("venue");
-  if (coin !== undefined && !/^[A-Z0-9][A-Z0-9._-]{0,31}$/.test(coin)) throw new Error("Invalid coin");
+  if (coin !== undefined && !isEqnSymbol(coin)) throw new Error("Invalid coin");
   if (venue !== null && venue !== "binance" && venue !== "hyperliquid") throw new Error("Invalid venue");
   return { coin, ...(venue !== null ? { venue } : {}) };
 }

@@ -80,6 +80,33 @@ const DEFAULT_DRAFT: OrderDraft = {
   takeProfit: "",
 };
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const SYMBOL_INPUT = /^[A-Z0-9\p{Script=Han}]{1,25}$/u;
+const MARKET_CACHE_KEY = "signal-hub:news-market-cache:v1";
+const MARKET_CACHE_LIMIT = 8;
+const marketMemory = new Map<string, NewsMarket>();
+
+// Last successful chart per symbol/venue/interval. It is display-only: the error marker keeps trading disabled.
+function readCachedMarket(key: string): NewsMarket | null {
+  if (marketMemory.has(key)) return marketMemory.get(key)!;
+  try {
+    const saved = JSON.parse(localStorage.getItem(MARKET_CACHE_KEY) || "[]") as [string, NewsMarket][];
+    for (const [savedKey, market] of saved) if (!marketMemory.has(savedKey)) marketMemory.set(savedKey, market);
+  } catch {
+    /* Cache is optional. */
+  }
+  return marketMemory.get(key) ?? null;
+}
+function writeCachedMarket(key: string, market: NewsMarket) {
+  if (!market.pair || !market.candles.length) return;
+  marketMemory.delete(key);
+  marketMemory.set(key, market);
+  while (marketMemory.size > MARKET_CACHE_LIMIT * 4) marketMemory.delete(marketMemory.keys().next().value!);
+  try {
+    localStorage.setItem(MARKET_CACHE_KEY, JSON.stringify([...marketMemory.entries()].slice(-MARKET_CACHE_LIMIT)));
+  } catch {
+    /* Storage quota is optional. */
+  }
+}
 
 function newsTime(timestamp: number) {
   return new Date(timestamp).toLocaleString("zh-CN", {
@@ -176,10 +203,10 @@ export function NewsTerminal() {
         const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
         if (
           typeof prefs.symbol === "string" &&
-          /^[A-Za-z0-9]{1,25}$/.test(prefs.symbol)
+          SYMBOL_INPUT.test(prefs.symbol.toUpperCase())
         ) {
-          setSymbol(prefs.symbol);
-          setSymbolDraft(prefs.symbol);
+          setSymbol(prefs.symbol.toUpperCase());
+          setSymbolDraft(prefs.symbol.toUpperCase());
         }
         if (prefs.venue === "binance" || prefs.venue === "hyperliquid")
           setVenue(prefs.venue);
@@ -316,6 +343,13 @@ export function NewsTerminal() {
   useEffect(() => {
     const controller = new AbortController();
     let inFlight = false;
+    const cacheKey = `${symbol}|${venue}|${assetId}|${interval}`;
+    const cachedMarket = readCachedMarket(cacheKey);
+    if (cachedMarket) {
+      setMarket({ ...cachedMarket, error: "缓存行情，正在刷新" });
+      setMarketContext(`${symbol}|${venue}|${assetId}`);
+      setMarketError(null);
+    }
     async function load() {
       if (inFlight) return;
       inFlight = true;
@@ -329,6 +363,7 @@ export function NewsTerminal() {
           setMarket(data);
           setMarketContext(`${symbol}|${venue}|${assetId}`);
           setMarketError(data.error);
+          if (!data.error) writeCachedMarket(cacheKey, data);
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -1126,7 +1161,7 @@ export function NewsTerminal() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   const next = symbolDraft.trim().toUpperCase();
-                  if (/^[A-Z0-9]{1,25}$/.test(next)) selectSymbol(next);
+                  if (SYMBOL_INPUT.test(next)) selectSymbol(next);
                 }}
               >
                 <input

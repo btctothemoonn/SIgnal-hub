@@ -54,17 +54,21 @@ try {
   const related = collectEqnRelatedSignals(["BTC"], [{ text: "$BTC rising", createdAt: new Date(now).toISOString(), tweetUrl: "https://x.com/a/status/1" }, { text: "ABTC unrelated", createdAt: new Date(now).toISOString(), tweetUrl: "https://x.com/a/status/2" }, { text: "BTC old", createdAt: new Date(now - 2 * 86400000).toISOString(), messageUrl: "https://t.me/a/3" }], now);
   assert.equal(related.length, 1, "X/TG association uses exact token boundaries and 24h window");
   assert.equal(related[0].url, "https://x.com/a/status/1");
-  let time = now; let failTicker = false;
+  let time = now; let failTicker = false; let failCandles = false;
   const market = createEqnMarketClient({ now: () => time, sleep: async (ms) => { time += ms; }, rateLimit: null, fetch: async (url) => {
     if (String(url).includes("exchangeInfo")) return Response.json({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING", contractType: "PERPETUAL" }] });
     if (String(url).includes("24hr")) return failTicker ? new Response(null, { status: 503 }) : Response.json({ lastPrice: "100", priceChangePercent: "1", quoteVolume: "1000" });
-    if (String(url).includes("klines")) return Response.json([[now, 100, 102, 99, 101, 1]]);
+    if (String(url).includes("klines")) return failCandles ? new Response(null, { status: 503 }) : Response.json([[now, 100, 102, 99, 101, 1]]);
     return Response.json({ lastFundingRate: ".01", openInterest: "4" });
-  } });
+  }, optionalWaitMs: 50 });
   await market.getMarket({ symbol: "BTC", venue: "binance", interval: "1m" });
   time += 20000; failTicker = true;
+  const tickerDown = await market.getMarket({ symbol: "BTC", venue: "binance", interval: "1m" });
+  assert.equal(tickerDown.price, 101, "a failed display ticker falls back to the freshly fetched live candle close");
+  assert.equal(tickerDown.error, null);
+  time += 20000; failCandles = true;
   const partial = await market.getMarket({ symbol: "BTC", venue: "binance", interval: "1m" });
-  assert.equal(partial.price, 100);
+  assert.equal(partial.price, 101);
   assert.match(partial.error, /Partial\/stale/);
   assert.equal(partial.candles[0].time, Math.floor(now / 1000), "stale fallback must not double-convert chart times");
   store.prune(now + 31 * 86400000);

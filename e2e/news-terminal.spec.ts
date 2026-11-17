@@ -156,6 +156,23 @@ test("news sources can be blocked and restored from settings", async ({ page }, 
   await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
 });
 
+test("reopened chart renders the last cached candles while a slow refresh is pending", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page);
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  await page.route("**/api/eqn-news/market?*", async route => {
+    await new Promise(resolve => setTimeout(resolve, 6_000));
+    await route.fallback();
+  });
+  await page.reload();
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible({ timeout: 2_000 });
+  await page.getByLabel("交易 PIN", { exact: true }).fill("123456");
+  await page.getByRole("button", { name: "解锁", exact: true }).click();
+  await expect(page.getByRole("button", { name: "开多", exact: true })).toBeDisabled();
+});
+
 test("failed market refresh disables opening with retained chart data", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const orders = await setup(page);

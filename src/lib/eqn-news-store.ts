@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
-import { eqnArray, eqnNumber, eqnObject, eqnText, scoreEqnNews } from "./eqn-news-core.ts";
+import { eqnArray, eqnNumber, eqnObject, eqnText, extractEqnTextCoins, scoreEqnNews } from "./eqn-news-core.ts";
 import type { EqnFeedQuery, EqnRecord } from "./eqn-news-core.ts";
 import type { NewsFeed, NewsItem, NewsSourceSummary, NewsWorkerStatus } from "./news-terminal-types.ts";
 
@@ -155,6 +155,18 @@ export function openEqnNewsStore(path = eqnNewsDbPath()) {
     updated.score = scoreEqnNews(updated);
     if (JSON.stringify(updated) === JSON.stringify(found)) return false;
     return transaction(() => { write(updated); bump(); return true; });
+  }
+  // One-time repair for rows stored before text pair extraction existed. Existing exchange-provided coins win.
+  if (!getState("migration:textCoins:v1")) {
+    transaction(() => {
+      const rows = db.prepare("SELECT json FROM eqn_news WHERE json_array_length(json_extract(json,'$.coins'))=0").all().map((row) => decode(row)!);
+      for (const row of rows) {
+        const coins = extractEqnTextCoins(row.title, row.original).map((symbol) => ({ symbol, assetId: null, marketCapAtPublish: null }));
+        if (coins.length) { const updated = { ...row, coins }; updated.score = scoreEqnNews(updated); write(updated); }
+      }
+      db.prepare("INSERT INTO eqn_news_state VALUES('migration:textCoins:v1','true') ON CONFLICT(key) DO NOTHING").run();
+      bump();
+    });
   }
   return {
     upsert, augment, getState, setState, status, feed, sources, blockedSources,
