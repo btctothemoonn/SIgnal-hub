@@ -1,0 +1,36 @@
+[Unit]
+Description=Signal Hub isolated manual perpetual trader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=signal-hub-trader
+Group=signal-hub-trader
+WorkingDirectory=/home/ubuntu/signal-hub-current
+EnvironmentFile=/etc/signal-hub/trader.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TRADER_DB_PATH=/var/lib/signal-hub-trader/trades.sqlite
+ExecStart=/home/ubuntu/signal-hub/trader/.venv/bin/python -m trader.server
+Restart=on-failure
+RestartSec=5
+StateDirectory=signal-hub-trader
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LimitCORE=0
+MemoryMax=512M
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

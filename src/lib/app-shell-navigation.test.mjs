@@ -4,6 +4,7 @@ import { primaryMobileNavItems } from "./app-shell-navigation.ts";
 const items = [
   { key: "signals", label: "信号" },
   { key: "alerts", label: "异动" },
+  { key: "news", label: "新闻交易" },
   { key: "intel", label: "AI情报" },
   { key: "holding", label: "Holding" },
   { key: "stocks", label: "STOCKS" },
@@ -12,11 +13,12 @@ const items = [
 
 assert.deepEqual(
   primaryMobileNavItems(items).map((item) => item.key),
-  ["signals", "alerts", "intel", "holding", "stocks"],
+  ["signals", "alerts", "news", "intel", "holding", "stocks"],
 );
 assert.deepEqual(items.map((item) => item.key), [
   "signals",
   "alerts",
+  "news",
   "intel",
   "holding",
   "stocks",

@@ -1,0 +1,150 @@
+import { expect, test, type Page } from "@playwright/test";
+import type { NewsFeed, NewsMarket, TradeStatus } from "../src/lib/news-terminal-types";
+
+const now = Date.now();
+const feed: NewsFeed = {
+  items: [{
+    id: "fixture-news-1", no: 1001, publishedAt: now - 60_000, receivedAt: now,
+    channels: ["main", "binance"], kind: "listing", source: "binance_listing", sourceName: "币安公告",
+    title: "币安新增 SOL 永续合约交易支持", original: "Binance announces new SOL perpetual trading support",
+    url: "https://www.binance.com/en/support/announcement", images: [],
+    coins: [{ symbol: "SOL", assetId: "solana", marketCapAtPublish: 70_000_000_000 }],
+    digest: ["永续合约交易开放", "请关注资金费率变化"], score: 85,
+  }], nextCursor: null,
+  status: { enabled: true, connected: true, updatedAt: now, lastMessageAt: now, error: null },
+};
+const status: TradeStatus = {
+  enabled: true, mode: "live", unlocked: false, csrfToken: "fixture-csrf",
+  accounts: ["binance", "hyperliquid"].map(venue => ({
+    venue: venue as "binance" | "hyperliquid", configured: true, connected: true,
+    availableBalance: 500, equity: 550,
+    positions: [{ symbol: "SOL", side: "long", size: 1, notional: 150, entryPrice: 145, markPrice: 150, unrealizedPnl: 5, liquidationPrice: 110, leverage: 3 }],
+    orders: [], error: null, updatedAt: now,
+  })),
+  limits: { maxOrderNotional: 500, maxSymbolNotional: 1000, maxTotalNotional: 3000, maxLeverage: 5, maxDailyLoss: 200, slippagePct: 1 },
+  logs: [], error: null,
+};
+
+async function setup(page: Page) {
+  let unlocked = false;
+  const orders: Record<string, unknown>[] = [];
+  await page.route("**/api/eqn-news**", async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/stream")) {
+      await route.fulfill({ contentType: "text/event-stream", body: ": ready\n\n" });
+      return;
+    }
+    if (url.pathname.endsWith("/market")) {
+      const symbol = url.searchParams.get("symbol") || "BTC";
+      const venue = url.searchParams.get("venue") || "binance";
+      if (symbol === "SOL") expect(url.searchParams.get("assetId")).toBe("solana");
+      const candles = Array.from({ length: 100 }, (_, index) => {
+        const open = 145 + Math.sin(index / 5) * 4 + index / 20;
+        return { time: Math.floor(now / 300_000) * 300 - (99 - index) * 300, open, high: open + 1.5, low: open - 1.4, close: open + Math.sin(index) * .7, volume: 100 + index };
+      });
+      const market: NewsMarket = { symbol, pair: venue === "binance" ? `${symbol}USDT` : symbol, venue: venue as "binance" | "hyperliquid", price: 150, change24h: 4.2, marketCap: 70e9, fdv: 80e9, volume24h: 4e9, fundingRate: .0001, openInterest: 5e8, candles, fetchedAt: Date.now(), error: null };
+      await route.fulfill({ json: market });
+      return;
+    }
+    if (url.pathname.endsWith("fixture-news-1")) {
+      await route.fulfill({ json: { item: feed.items[0], relatedNews: feed.items, reactions: [{ minutes: 1, change: 1.5 }, { minutes: 5, change: null }], signals: [{ title: "SOL 暴涨预警", occurredAt: new Date(now).toISOString(), url: "/alerts" }] } });
+      return;
+    }
+    await route.fulfill({ json: feed });
+  });
+  await page.route("**/api/trade/**", async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("status")) { await route.fulfill({ json: { ...status, unlocked } }); return; }
+    expect(request.headers()["x-csrf-token"]).toBe("fixture-csrf");
+    if (path.endsWith("unlock")) { unlocked = true; await route.fulfill({ json: { success: true } }); return; }
+    if (path.endsWith("order")) orders.push(request.postDataJSON());
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.goto("/login?next=%2Fnews");
+  await page.locator('input[name="password"]').fill(process.env.SIGNAL_E2E_PASSWORD!);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/news$/);
+  return orders;
+}
+
+test("news desktop links story to chart, verifies nonblank canvas, and submits one confirmed order", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const orders = await setup(page);
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("SOL");
+  const chart = page.locator("[data-news-chart]");
+  await expect(chart.locator("canvas").first()).toBeVisible();
+  await expect.poll(async () => {
+    expect(errors).toEqual([]);
+    return chart.locator("canvas").evaluateAll(canvases => canvases.some(canvas => {
+    const context = (canvas as HTMLCanvasElement).getContext("2d");
+    if (!context) return false;
+    const pixels = context.getImageData(0, 0, (canvas as HTMLCanvasElement).width, (canvas as HTMLCanvasElement).height).data;
+    let up = 0, down = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 3] < 240) continue;
+      if (pixels[index] === 73 && pixels[index + 1] === 198 && pixels[index + 2] === 141) up++;
+      if (pixels[index] === 239 && pixels[index + 1] === 107 && pixels[index + 2] === 115) down++;
+    }
+    return up > 100 && down > 100;
+  }));
+  }).toBe(true);
+  await page.getByLabel("交易 PIN", { exact: true }).fill("123456");
+  await page.getByRole("button", { name: "解锁", exact: true }).click();
+  const openLong = page.getByRole("button", { name: "开多", exact: true });
+  await expect(openLong).toBeEnabled();
+  await openLong.click();
+  expect(orders).toHaveLength(0);
+  await page.getByRole("button", { name: "确认开多", exact: true }).click();
+  await expect.poll(() => orders.length).toBe(1);
+  expect(orders[0]).toMatchObject({ venue: "binance", symbol: "SOL", notional: 200, leverage: 3, type: "market", side: "buy" });
+  expect(orders[0].clientOrderId).toMatch(/^[a-f0-9]{32}$/);
+  await page.getByRole("combobox", { name: "交易账户" }).selectOption("hyperliquid");
+  await expect(page.getByRole("combobox", { name: "交易账户" })).toHaveValue("hyperliquid");
+  await expect(page.locator("[data-news-terminal]")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("news-desktop.png"), fullPage: true });
+  expect(errors).toEqual([]);
+});
+
+test("news mobile fits viewport and opens and closes the trading detail sheet", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setup(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("news-mobile-feed.png"), fullPage: true });
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.getByRole("button", { name: "返回新闻列表" })).toBeVisible();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("news-mobile-trade.png"), fullPage: true });
+  await page.getByRole("button", { name: "返回新闻列表" }).click();
+  await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
+});
+
+test("news and trading data require website login", async ({ request }) => {
+  const news = await request.get("/api/eqn-news");
+  const trade = await request.get("/api/trade/status");
+  expect(news.status()).toBe(401);
+  expect(trade.status()).toBe(401);
+});
+
+test("failed market refresh disables opening with retained chart data", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const orders = await setup(page);
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await page.getByLabel("交易 PIN", { exact: true }).fill("123456");
+  await page.getByRole("button", { name: "解锁", exact: true }).click();
+  const openLong = page.getByRole("button", { name: "开多", exact: true });
+  await expect(openLong).toBeEnabled();
+  await page.route("**/api/eqn-news/market?*", route => route.fulfill({
+    status: 503, json: { error: "测试行情暂不可用" },
+  }));
+  await page.getByRole("button", { name: "刷新新闻与行情" }).click();
+  await expect(page.getByText("测试行情暂不可用")).toBeVisible();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  await expect(openLong).toBeDisabled();
+  expect(orders).toHaveLength(0);
+});

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+const result = spawnSync(process.execPath, ['scripts/trader-pin-hash.mjs'], { input: '987654\n', encoding: 'utf8' });
+assert.equal(result.status, 0);
+assert.match(result.stdout.trim(), /^scrypt\$[a-f0-9]{32}\$[a-f0-9]{64}$/);
+assert.ok(!result.stdout.includes('987654'));
+assert.equal(spawnSync(process.execPath, ['scripts/trader-pin-hash.mjs'], { input: 'short\n' }).status, 1);
+const publicCheck = readFileSync('scripts/trader-public-check.mjs', 'utf8');
+assert.ok(!publicCheck.includes('/order'));
+assert.ok(!publicCheck.includes('process.env'));
+console.log('ok - hidden PIN hash tool and credential-free public testnet probe');

@@ -1,0 +1,30 @@
+[Unit]
+Description=Signal Hub independent EquationNews reader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/signal-hub-current
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=EQN_NEWS_ENABLED=false
+Environment=SIGNAL_HUB_RUNTIME_DIR=/home/ubuntu/signal-hub/.signal-hub
+EnvironmentFile=-/etc/signal-hub/eqn-news.env
+ExecStart=/usr/bin/env node --experimental-strip-types --experimental-transform-types scripts/eqn-news-worker.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/signal-hub/.signal-hub
+MemoryHigh=256M
+MemoryMax=384M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
