@@ -6,7 +6,7 @@ import {
   type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time, type UTCTimestamp,
 } from "lightweight-charts";
 import { chartNewsMarkers, formatNewsPrice, newsExecutionSymbol, newsPriceMinMove } from "@/lib/news-terminal-client";
-import type { NewsItem, NewsMarket, TradeFill } from "@/lib/news-terminal-types";
+import type { NewsCandle, NewsItem, NewsMarket, TradeFill } from "@/lib/news-terminal-types";
 
 function chartTime(time: Time) {
   return new Date(Number(time) * 1000).toLocaleString("zh-CN", {
@@ -26,6 +26,7 @@ export function NewsCandleChart({ market, news, selected, fills = [] }: {
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const markerRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const fitted = useRef(false);
+  const displayedBars = useRef<NewsCandle[]>([]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -67,19 +68,37 @@ export function NewsCandleChart({ market, news, selected, fills = [] }: {
     return () => {
       observer.disconnect(); chart.remove(); chartRef.current = null;
       candleRef.current = null; volumeRef.current = null; markerRef.current = null;
+      displayedBars.current = [];
     };
   }, []);
 
   useEffect(() => {
     if (!market.candles.length) return;
-    candleRef.current?.applyOptions({ priceFormat: { type: "custom", minMove: newsPriceMinMove(market.price), formatter: formatNewsPrice } });
-    candleRef.current?.setData(market.candles.map(candle => ({ ...candle, time: candle.time as UTCTimestamp })));
-    volumeRef.current?.setData(market.candles.map(candle => ({
-      time: candle.time as UTCTimestamp, value: candle.volume,
-      color: candle.close >= candle.open ? "rgba(73,198,141,.25)" : "rgba(239,107,115,.25)",
-    })));
+    const previous = displayedBars.current;
+    const bars = market.candles;
+    const last = bars.at(-1)!;
+    const volumePoint = (candle: NewsCandle) => ({ time: candle.time as UTCTimestamp, value: candle.volume,
+      color: candle.close >= candle.open ? "rgba(73,198,141,.25)" : "rgba(239,107,115,.25)" });
+    const tailOnly = previous.length > 0 && previous.length <= bars.length && bars.length <= previous.length + 1
+      && previous.slice(0, -1).every((candle, index) => candle === bars[index])
+      && previous.at(-1)!.time <= last.time;
+    if (tailOnly) {
+      // The last open candle may be finalized at the same time a new candle arrives.
+      for (const candle of bars.slice(previous.length - 1)) {
+        candleRef.current?.update({ ...candle, time: candle.time as UTCTimestamp });
+        volumeRef.current?.update(volumePoint(candle));
+      }
+    } else {
+      candleRef.current?.setData(bars.map(candle => ({ ...candle, time: candle.time as UTCTimestamp })));
+      volumeRef.current?.setData(bars.map(volumePoint));
+    }
+    displayedBars.current = bars;
     if (!fitted.current) { chartRef.current?.timeScale().fitContent(); fitted.current = true; }
-  }, [market]);
+  }, [market.candles]);
+
+  useEffect(() => {
+    candleRef.current?.applyOptions({ priceFormat: { type: "custom", minMove: newsPriceMinMove(market.price), formatter: formatNewsPrice } });
+  }, [market.price]);
 
   useEffect(() => {
     const bars = market.candles;

@@ -120,7 +120,7 @@ try {
     if (body.type === "metaAndAssetCtxs") return Response.json([{ universe: [{ name: "BTC" }, { name: "kPEPE" }] }, [{ markPx: "110", prevDayPx: "100", dayNtlVlm: "1000", funding: "0.0001", openInterest: "12" }, { markPx: "0.011", prevDayPx: "0.01", dayNtlVlm: "1000", funding: "0.0001", openInterest: "12" }]]);
     if (body.type === "candleSnapshot") return Response.json([{ t: 1794826800000, o: "100", h: "120", l: "90", c: "110", v: "4" }]);
     throw new Error(`unexpected ${url}`);
-  }, valuations: () => ({ marketCap: 42, fdv: 84 }), rateLimit: null });
+  }, now: () => 1794826800000, sleep: async () => {}, valuations: () => ({ marketCap: 42, fdv: 84 }), rateLimit: null });
   const binance = await market.getMarket({ symbol: "BTC", venue: "binance", interval: "1m" });
   assert.equal(binance.pair, "BTCUSDT");
   assert.equal(binance.marketCap, 42);
@@ -167,7 +167,7 @@ try {
     if (String(url).includes("klines")) return Response.json([[1794826800000, "0.01", "0.02", "0.009", "0.0163", "4"]]);
     await slow;
     return Response.json({ lastPrice: "1" });
-  }, valuations: () => ({ marketCap: null, fdv: null, ticker: { price: 0.0164, change24h: 18.7, volume24h: 1e8, updatedAt: Date.now() } }), rateLimit: null, optionalWaitMs: 20 });
+  }, now: () => 1794826800000, sleep: async () => {}, valuations: () => ({ marketCap: null, fdv: null, ticker: { price: 0.0164, change24h: 18.7, volume24h: 1e8, updatedAt: 1794826800000 } }), rateLimit: null, optionalWaitMs: 20 });
   const started = Date.now();
   const quick = await fast.getMarket({ symbol: "龙虾", venue: "binance", interval: "5m" });
   assert.ok(Date.now() - started < 1500, "slow ticker/funding/OI do not block the chart");

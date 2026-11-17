@@ -36,7 +36,6 @@ import type {
   NewsDetail,
   NewsFeed,
   NewsItem,
-  NewsMarket,
   NewsSourceSummary,
   TradeRequest,
   TradeStatus,
@@ -48,6 +47,8 @@ import {
   type OrderDraft,
 } from "./news-trade-panel";
 import styles from "./news-terminal.module.css";
+import { prefetchNewsMarket } from "@/lib/news-market-client";
+import { useNewsMarket } from "./use-news-market";
 
 const NewsCandleChart = dynamic(
   () => import("./news-candle-chart").then((module) => module.NewsCandleChart),
@@ -81,32 +82,6 @@ const DEFAULT_DRAFT: OrderDraft = {
 };
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const SYMBOL_INPUT = /^[A-Z0-9\p{Script=Han}]{1,25}$/u;
-const MARKET_CACHE_KEY = "signal-hub:news-market-cache:v1";
-const MARKET_CACHE_LIMIT = 8;
-const marketMemory = new Map<string, NewsMarket>();
-
-// Last successful chart per symbol/venue/interval. It is display-only: the error marker keeps trading disabled.
-function readCachedMarket(key: string): NewsMarket | null {
-  if (marketMemory.has(key)) return marketMemory.get(key)!;
-  try {
-    const saved = JSON.parse(localStorage.getItem(MARKET_CACHE_KEY) || "[]") as [string, NewsMarket][];
-    for (const [savedKey, market] of saved) if (!marketMemory.has(savedKey)) marketMemory.set(savedKey, market);
-  } catch {
-    /* Cache is optional. */
-  }
-  return marketMemory.get(key) ?? null;
-}
-function writeCachedMarket(key: string, market: NewsMarket) {
-  if (!market.pair || !market.candles.length) return;
-  marketMemory.delete(key);
-  marketMemory.set(key, market);
-  while (marketMemory.size > MARKET_CACHE_LIMIT * 4) marketMemory.delete(marketMemory.keys().next().value!);
-  try {
-    localStorage.setItem(MARKET_CACHE_KEY, JSON.stringify([...marketMemory.entries()].slice(-MARKET_CACHE_LIMIT)));
-  } catch {
-    /* Storage quota is optional. */
-  }
-}
 
 function newsTime(timestamp: number) {
   return new Date(timestamp).toLocaleString("zh-CN", {
@@ -159,10 +134,6 @@ export function NewsTerminal() {
   const [detail, setDetail] = useState<NewsDetail | null>(null);
   const [detailContext, setDetailContext] = useState("");
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [market, setMarket] = useState<NewsMarket | null>(null);
-  const [marketContext, setMarketContext] = useState("");
-  const [marketLoading, setMarketLoading] = useState(false);
-  const [marketError, setMarketError] = useState<string | null>(null);
   const [trade, setTrade] = useState<TradeStatus | null>(null);
   const [draft, setDraft] = useState<OrderDraft>(DEFAULT_DRAFT);
   const [sideTab, setSideTab] = useState("trade");
@@ -191,8 +162,7 @@ export function NewsTerminal() {
   const audioRef = useRef<AudioContext | null>(null);
   const previousLatest = useRef<string | null>(null);
   const assetId = selected?.coins.find(coin => coin.symbol === symbol)?.assetId || "";
-  const marketKey = `${symbol}|${venue}|${assetId}`;
-  const matchingMarket = market?.symbol === symbol && market.venue === venue && marketContext === marketKey ? market : null;
+  const { market: matchingMarket, loading: marketLoading, error: marketError, live: marketLive } = useNewsMarket({ symbol, venue, interval, assetId }, revision);
   const currentAccount = trade?.accounts.find(
     (account) => account.venue === venue,
   );
@@ -341,51 +311,24 @@ export function NewsTerminal() {
   }, [channel, searchQuery, source, revision]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    let inFlight = false;
-    const cacheKey = `${symbol}|${venue}|${assetId}|${interval}`;
-    const cachedMarket = readCachedMarket(cacheKey);
-    if (cachedMarket) {
-      setMarket({ ...cachedMarket, error: "缓存行情，正在刷新" });
-      setMarketContext(`${symbol}|${venue}|${assetId}`);
-      setMarketError(null);
-    }
-    async function load() {
-      if (inFlight) return;
-      inFlight = true;
-      setMarketLoading(true);
-      try {
-        const data = await readNewsJson<NewsMarket>(
-          `/api/eqn-news/market?${new URLSearchParams({ symbol, interval, venue, ...(assetId ? { assetId } : {}) })}`,
-          { signal: controller.signal },
-        );
-        if (!controller.signal.aborted) {
-          setMarket(data);
-          setMarketContext(`${symbol}|${venue}|${assetId}`);
-          setMarketError(data.error);
-          if (!data.error) writeCachedMarket(cacheKey, data);
+    if (!window.matchMedia("(max-width: 760px)").matches || !listRef.current) return;
+    const root = listRef.current;
+    let count = 0;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting || count >= 2) continue;
+        const button = entry.target as HTMLElement;
+        if (button.dataset.marketSymbol !== symbol) {
+          prefetchNewsMarket({ symbol: button.dataset.marketSymbol!, assetId: button.dataset.marketAsset, venue, interval });
+          count++;
         }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setMarketError(
-            error instanceof Error ? error.message : "行情加载失败",
-          );
-          setMarket(previous => previous ? { ...previous, error: "行情刷新失败，请刷新后再下单" } : null);
-        }
-      } finally {
-        inFlight = false;
-        if (!controller.signal.aborted) setMarketLoading(false);
+        observer.unobserve(button);
       }
-    }
-    void load();
-    const timer = window.setInterval(() => {
-      if (!document.hidden) void load();
-    }, 30_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [symbol, interval, venue, assetId, revision]);
+      if (count >= 2) observer.disconnect();
+    }, { root, threshold: 0.5 });
+    root.querySelectorAll("[data-market-symbol]").forEach((button) => observer.observe(button));
+    return () => observer.disconnect();
+  }, [feed, venue, interval, symbol]);
 
   useEffect(() => {
     if (!selected) return;
@@ -1002,6 +945,10 @@ export function NewsTerminal() {
                       <button
                         className={styles.coinLabel}
                         title={`查看 ${coin.symbol} 行情`}
+                        data-market-symbol={coin.symbol}
+                        data-market-asset={coin.assetId || ""}
+                        onPointerEnter={() => prefetchNewsMarket({ symbol: coin.symbol, assetId: coin.assetId, venue, interval })}
+                        onFocus={() => prefetchNewsMarket({ symbol: coin.symbol, assetId: coin.assetId, venue, interval })}
                         onClick={() => selectStory(item, coin.symbol)}
                       >
                         <span className={styles.coinMonogram}>
@@ -1247,6 +1194,7 @@ export function NewsTerminal() {
                 <Circle size={7} fill="currentColor" />
                 新闻标记
               </span>
+              <span data-news-market-status>{marketLive ? "实时" : "轮询"}</span>
               {marketLoading ? (
                 <LoaderCircle className={styles.spinning} size={12} />
               ) : null}

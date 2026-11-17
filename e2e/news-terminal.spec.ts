@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import type { NewsFeed, NewsMarket, TradeStatus } from "../src/lib/news-terminal-types";
 
 const now = Date.now();
@@ -25,10 +25,11 @@ const status: TradeStatus = {
   logs: [], error: null,
 };
 
-async function setup(page: Page) {
+async function setup(page: Page, options: { statsGate?: Promise<void>; onSocket?: (socket: WebSocketRoute) => void } = {}) {
   let unlocked = false;
   const orders: Record<string, unknown>[] = [];
   let blocked: string[] = [];
+  await page.routeWebSocket(/wss:\/\//, (socket) => { options.onSocket?.(socket); });
   await page.route("**/api/eqn-news**", async route => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/stream")) {
@@ -42,6 +43,7 @@ async function setup(page: Page) {
       return;
     }
     if (url.pathname.endsWith("/market")) {
+      if (url.searchParams.get("view") === "stats") await options.statsGate;
       const symbol = url.searchParams.get("symbol") || "BTC";
       const venue = url.searchParams.get("venue") || "binance";
       if (symbol === "SOL") expect(url.searchParams.get("assetId")).toBe("solana");
@@ -49,7 +51,8 @@ async function setup(page: Page) {
         const open = 145 + Math.sin(index / 5) * 4 + index / 20;
         return { time: Math.floor(now / 300_000) * 300 - (99 - index) * 300, open, high: open + 1.5, low: open - 1.4, close: open + Math.sin(index) * .7, volume: 100 + index };
       });
-      const market: NewsMarket = { symbol, pair: venue === "binance" ? `${symbol}USDT` : symbol, venue: venue as "binance" | "hyperliquid", tradable: true, price: 150, change24h: 4.2, marketCap: 70e9, fdv: 80e9, volume24h: 4e9, fundingRate: .0001, openInterest: 5e8, candles, fetchedAt: Date.now(), error: null };
+      const view = url.searchParams.get("view");
+      const market: NewsMarket = { symbol, pair: venue === "binance" ? `${symbol}USDT` : symbol, venue: venue as "binance" | "hyperliquid", tradable: true, price: 150, change24h: view === "chart" ? null : 4.2, marketCap: view === "chart" ? null : 70e9, fdv: view === "chart" ? null : 80e9, volume24h: view === "chart" ? null : 4e9, fundingRate: view === "chart" ? null : .0001, openInterest: view === "chart" ? null : 5e8, candles: view === "stats" ? [] : candles, fetchedAt: Date.now(), error: null };
       await route.fulfill({ json: market });
       return;
     }
@@ -189,4 +192,101 @@ test("failed market refresh disables opening with retained chart data", async ({
   await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
   await expect(openLong).toBeDisabled();
   expect(orders).toHaveLength(0);
+});
+
+test("chart renders before slow display statistics and keeps its candles when they arrive", async ({ page }) => {
+  let release!: () => void;
+  const statsGate = new Promise<void>(resolve => { release = resolve; });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page, { statsGate });
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("SOL");
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible({ timeout: 2_000 });
+  await expect(page.locator("[data-news-market-status]")).toHaveText("轮询");
+  release();
+  await expect(page.getByText("FDV", { exact: false }).first()).toContainText("80B");
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+});
+
+test("hover preloads one chart and selecting it reuses the same request", async ({ page }) => {
+  const requests: string[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/eqn-news/market") && url.searchParams.get("symbol") === "SOL" && url.searchParams.get("view") === "chart") requests.push(url.href);
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page);
+  const coin = page.getByTitle("查看 SOL 行情", { exact: true });
+  await coin.hover();
+  await expect.poll(() => requests.length).toBe(1);
+  await coin.click();
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("SOL");
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  expect(requests).toHaveLength(1);
+});
+
+test("live candles update price, reconnect fills history, and switching coin closes the old socket", async ({ page }) => {
+  await page.clock.install();
+  const sockets: WebSocketRoute[] = [];
+  let solCharts = 0;
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/eqn-news/market") && url.searchParams.get("symbol") === "SOL" && url.searchParams.get("view") === "chart") solCharts++;
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page, { onSocket: socket => sockets.push(socket) });
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect.poll(() => sockets.filter(socket => socket.url().includes("solusdt")).length).toBe(1);
+  const send = (socket: WebSocketRoute, price: string) => socket.send(JSON.stringify({ e: "kline", E: Date.now(), s: "SOLUSDT", k: { s: "SOLUSDT", i: "5m", t: Math.floor(Date.now() / 300_000) * 300_000, o: "150", h: "170", l: "149", c: price, v: "200" } }));
+  const first = sockets.find(socket => socket.url().includes("solusdt"))!;
+  send(first, "160");
+  await expect(page.locator("[data-news-market-status]")).toHaveText("实时");
+  await expect(page.getByTitle("查看 SOL 行情", { exact: true })).toContainText("160");
+  const before = solCharts;
+  await page.clock.fastForward(31_000);
+  expect(solCharts).toBe(before);
+  first.close({ code: 1001, reason: "test reconnect" });
+  await page.clock.runFor(1_100);
+  await expect.poll(() => sockets.filter(socket => socket.url().includes("solusdt")).length).toBe(2);
+  await expect.poll(() => solCharts).toBeGreaterThan(before);
+  const second = sockets.filter(socket => socket.url().includes("solusdt"))[1];
+  send(second, "165");
+  await expect(page.getByTitle("查看 SOL 行情", { exact: true })).toContainText("165");
+  let closed = false;
+  second.onClose(() => { closed = true; });
+  await page.getByRole("textbox", { name: "行情币种" }).fill("BTC");
+  await page.getByRole("textbox", { name: "行情币种" }).press("Enter");
+  await expect.poll(() => closed).toBe(true);
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("BTC");
+});
+
+test("unavailable live candles fall back to REST without losing the chart", async ({ page }) => {
+  await page.clock.install();
+  let requests = 0;
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/eqn-news/market") && url.searchParams.get("symbol") === "SOL" && url.searchParams.get("view") === "chart") requests++;
+  });
+  await setup(page);
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  expect(requests).toBe(1);
+  await page.clock.fastForward(31_000);
+  await expect.poll(() => requests).toBe(2);
+  await expect(page.locator("[data-news-market-status]")).toHaveText("轮询");
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+});
+
+test("mobile preloads the visible coin chart without fetching its display statistics", async ({ page }) => {
+  const views: string[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/eqn-news/market") && url.searchParams.get("symbol") === "SOL") views.push(url.searchParams.get("view") || "full");
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setup(page);
+  await expect.poll(() => views).toEqual(["chart"]);
+  await page.getByRole("button", { name: feed.items[0].title, exact: true }).click();
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  expect(views.filter(view => view === "chart")).toHaveLength(1);
 });

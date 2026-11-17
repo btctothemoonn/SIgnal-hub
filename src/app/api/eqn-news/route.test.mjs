@@ -25,6 +25,7 @@ try {
   assert.equal((await feed(new Request("https://hub.example/api/eqn-news?before=bad"))).status, 400);
   assert.equal((await detail(new Request("https://hub.example/api/eqn-news/404"), { params: Promise.resolve({ id: "404" }) })).status, 404);
   assert.equal((await market(new Request("https://hub.example/api/eqn-news/market?venue=bad"))).status, 400);
+  assert.equal((await market(new Request("https://hub.example/api/eqn-news/market?view=bad"))).status, 400);
   const item = normalizeEqnNews({ timestamp: 1794826821, news_title: "WS temporary", source_name: "BWENEWS", coins_included: [] }, "ws");
   getEqnNewsStore().upsert(item);
   assert.equal((await detail(new Request(`https://hub.example/api/eqn-news/${encodeURIComponent(item.id)}?venue=bad`), { params: Promise.resolve({ id: item.id }) })).status, 400);

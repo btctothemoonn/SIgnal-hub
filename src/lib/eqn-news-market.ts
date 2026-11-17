@@ -7,6 +7,7 @@ import type { NewsCandle, NewsMarket, NewsReaction } from "./news-terminal-types
 
 export const EQN_MARKET_INTERVALS = { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000 } as const;
 export type EqnMarketRequest = { symbol: string; venue: "binance" | "hyperliquid"; interval: keyof typeof EQN_MARKET_INTERVALS; assetId?: string | null };
+export type EqnMarketView = "full" | "chart" | "stats";
 export type EqnAsset = { symbol: string; pair: string; multiplier: number; tradable: boolean };
 // Only cross-name/asset-id equivalences live here. New exact venue tickers do not need a registry entry.
 const ASSET_IDS: Record<string, string[]> = {
@@ -162,6 +163,7 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
   const cache = new Map<string, { expires: number; value: unknown }>();
   const flights = new Map<string, Promise<unknown>>();
   const stale = new Map<string, unknown>();
+  const recentCandles = new Map<string, NewsCandle[]>();
   const cooldown = { binance: 0, hyperliquid: 0 };
   let queue = Promise.resolve();
   let nextAt = 0;
@@ -238,26 +240,46 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
     if (!mapping) return [];
     const endTime = end ?? now();
     const step = EQN_MARKET_INTERVALS[request.interval];
-    const startTime = start ?? endTime - step * 499;
+    const windowStart = Math.floor(endTime / step) * step - step * 499;
+    const historyKey = `${request.venue}:${mapping.pair}:${request.interval}`;
+    const previous = start === undefined && end === undefined ? recentCandles.get(historyKey) : undefined;
+    // Re-fetch the last open candle too. A long absence naturally falls back to the full window.
+    const startTime = start ?? Math.max(windowStart, previous?.at(-1)?.time ?? windowStart);
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime || endTime - startTime > step * 1440) throw new Error("Invalid candle window");
     const key = `candles:${request.venue}:${mapping.pair}:${request.interval}:${start === undefined ? "recent" : startTime}:${end === undefined ? "now" : endTime}`;
     return cached(key, 15000, async () => {
-      const limit = String(Math.min(1500, Math.max(1, Math.ceil((endTime - startTime) / step) + 1)));
+      const limit = String(Math.min(1500, Math.max(1, Math.floor(endTime / step) - Math.ceil(startTime / step) + 1)));
       const response = request.venue === "binance"
         ? await binance(`klines?${new URLSearchParams({ symbol: mapping.pair, interval: request.interval, limit, startTime: String(Math.floor(startTime)), endTime: String(Math.floor(endTime)) })}`, true)
         : await hl({ type: "candleSnapshot", req: { coin: mapping.pair, interval: request.interval, startTime: Math.floor(startTime), endTime: Math.floor(endTime) } });
       if (!Array.isArray(response)) throw new EqnUpstreamError("Candle data unavailable");
       const candles = response.slice(0, 1440).map((row) => normalizeCandle(row, request.venue)).filter((x): x is NewsCandle => x !== null);
-      return [...new Map(candles.map((x) => [x.time, x])).values()].sort((a, b) => a.time - b.time);
+      if (!candles.length) return [];
+      const merged = [...new Map([...(previous ?? []), ...candles].map((candle) => [candle.time, candle])).values()]
+        .filter((candle) => candle.time >= (start ?? windowStart) && candle.time <= endTime)
+        .sort((a, b) => a.time - b.time);
+      if (start === undefined && end === undefined) {
+        recentCandles.delete(historyKey);
+        recentCandles.set(historyKey, merged.slice(-500));
+        while (recentCandles.size > 64) recentCandles.delete(recentCandles.keys().next().value!);
+      }
+      return merged;
     });
   }
-  async function loadMarket(request: EqnMarketRequest): Promise<NewsMarket> {
+  async function loadMarket(request: EqnMarketRequest, view: EqnMarketView): Promise<NewsMarket> {
     const result: NewsMarket = { symbol: request.symbol, pair: null, venue: request.venue, tradable: false, price: null, change24h: null, marketCap: null, fdv: null, volume24h: null, fundingRate: null, openInterest: null, candles: [], fetchedAt: now(), error: null };
     const errors: string[] = [];
     try {
       const { mapping, meta } = await asset(request);
       if (!mapping) { result.error = `${request.venue === "binance" ? "币安" : "Hyperliquid"}暂无 ${request.symbol} 合约行情`; return result; }
       result.pair = mapping.pair; result.tradable = mapping.tradable;
+      if (view === "chart") {
+        result.candles = (await getCandles(request)).map((candle) => ({ ...candle, time: Math.floor(candle.time / 1000) }));
+        result.price = result.candles.at(-1)?.close ?? null;
+        result.error = result.candles.length ? null : "Candles empty";
+        result.fetchedAt = now();
+        return result;
+      }
       const valuationPair = request.venue === "binance" ? mapping.pair : `${SCALED[request.symbol]?.binance ?? request.symbol}USDT`;
       const valuation = (runtime.valuations ?? readEqnMarketContext)(valuationPair);
       result.marketCap = valuation.marketCap; result.fdv = valuation.fdv;
@@ -270,7 +292,7 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
         const task = fn().then((value) => { if (!settled) apply(value); }, () => {});
         return Promise.race([task, new Promise<void>((resolve) => setTimeout(resolve, runtime.optionalWaitMs ?? 1200))]);
       };
-      const candles = capture("Candles", () => getCandles(request), (value) => { result.candles = value; if (!value.length) errors.push("Candles empty"); });
+      const candles = view === "stats" ? Promise.resolve() : capture("Candles", () => getCandles(request), (value) => { result.candles = value; if (!value.length) errors.push("Candles empty"); });
       if (request.venue === "binance") {
         await Promise.all([
           candles,
@@ -284,7 +306,7 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
         ]);
         settled = true;
         // The current candle close is live; the market-alert snapshot fills 24h stats while the ticker cache warms.
-        result.price ??= result.candles.at(-1)?.close ?? null;
+        result.price ??= result.candles.at(-1)?.close ?? (valuation.ticker && now() - valuation.ticker.updatedAt < 180000 ? valuation.ticker.price : null);
         if (result.change24h === null && valuation.ticker && now() - valuation.ticker.updatedAt < 180000) {
           result.change24h = valuation.ticker.change24h; result.volume24h = valuation.ticker.volume24h;
         }
@@ -310,12 +332,12 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
   return {
     resolve: async (request: EqnMarketRequest) => (await asset(request)).mapping,
     getCandles,
-    async getMarket(request: EqnMarketRequest): Promise<NewsMarket> {
-      const key = `market:${request.venue}:${request.symbol}:${request.interval}:${request.assetId ?? ""}`;
+    async getMarket(request: EqnMarketRequest, view: EqnMarketView = "full"): Promise<NewsMarket> {
+      const key = `market:${view}:${request.venue}:${request.symbol}:${request.interval}:${request.assetId ?? ""}`;
       const entry = cache.get(key)?.value as NewsMarket | undefined;
       try {
         return await cached(key, 15000, async () => {
-          const fresh = await loadMarket(request);
+          const fresh = await loadMarket(request, view);
           if (fresh.error && entry?.pair && now() - entry.fetchedAt < 120000 && fresh.pair === entry.pair) {
             return { ...fresh, price: fresh.price ?? entry.price, change24h: fresh.change24h ?? entry.change24h, volume24h: fresh.volume24h ?? entry.volume24h, candles: fresh.candles.length ? fresh.candles : entry.candles, fetchedAt: entry.fetchedAt, error: `Partial/stale market data: ${fresh.error}` };
           }
