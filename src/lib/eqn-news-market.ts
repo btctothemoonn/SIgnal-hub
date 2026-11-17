@@ -191,12 +191,16 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
     return cached(key, ttl, fn);
   }
   async function json(venue: EqnMarketRequest["venue"], url: string, body?: unknown, priority = false): Promise<unknown> {
+    const blocked = cooldown[venue] - now();
+    if (blocked > 0) throw new EqnUpstreamError("Market upstream cooling down", 429, cooldown[venue]);
+    // Background reservations wait outside the dispatch queue so they cannot hold an interactive chart behind them.
+    const reservedWait = venue === "binance" ? rateLimit?.reserve(now(), priority) ?? 0 : 0;
+    if (reservedWait >= 10000) throw new EqnUpstreamError("Market upstream busy; retry later", 429);
+    if (reservedWait > 0) await sleep(reservedWait);
     const reservation = queue.then(async () => {
-      const blocked = cooldown[venue] - now();
-      if (blocked > 0) throw new EqnUpstreamError("Market upstream cooling down", 429, cooldown[venue]);
-      const wait = Math.max(0, nextAt - now(), venue === "binance" ? rateLimit?.reserve(now(), priority) ?? 0 : 0);
-      if (wait >= 10000) throw new EqnUpstreamError("Market upstream busy; retry later", 429);
+      const wait = Math.max(0, nextAt - now());
       if (wait) await sleep(wait);
+      if (cooldown[venue] > now()) throw new EqnUpstreamError("Market upstream cooling down", 429, cooldown[venue]);
       nextAt = now() + 200;
     });
     queue = reservation.catch(() => {});
@@ -290,19 +294,20 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
       // Display-only fields must not hold the chart hostage. Late results still warm the cache for the next poll.
       const optional = <T>(fn: () => Promise<T>, apply: (value: T) => void) => {
         const task = fn().then((value) => { if (!settled) apply(value); }, () => {});
+        if (view === "stats") return task;
         return Promise.race([task, new Promise<void>((resolve) => setTimeout(resolve, runtime.optionalWaitMs ?? 1200))]);
       };
       const candles = view === "stats" ? Promise.resolve() : capture("Candles", () => getCandles(request), (value) => { result.candles = value; if (!value.length) errors.push("Candles empty"); });
       if (request.venue === "binance") {
         await Promise.all([
           candles,
-          optional(() => cached(`ticker:${mapping.pair}`, 15000, () => binance(`ticker/24hr?symbol=${encodeURIComponent(mapping.pair)}`)), (value) => {
+          optional(() => cached(`ticker:${mapping.pair}`, 15000, () => binance(`ticker/24hr?symbol=${encodeURIComponent(mapping.pair)}`, view === "stats")), (value) => {
             const ticker = eqnObject(value);
             result.price = eqnNumber(ticker.lastPrice);
             result.change24h = eqnNumber(ticker.priceChangePercent); result.volume24h = eqnNumber(ticker.quoteVolume);
           }),
-          optional(() => cached(`funding:${mapping.pair}`, 30000, () => binance(`premiumIndex?symbol=${encodeURIComponent(mapping.pair)}`)), (value) => { result.fundingRate = eqnNumber(eqnObject(value).lastFundingRate); }),
-          optional(() => cached(`oi:${mapping.pair}`, 30000, () => binance(`openInterest?symbol=${encodeURIComponent(mapping.pair)}`)), (value) => { result.openInterest = eqnNumber(eqnObject(value).openInterest); }),
+          optional(() => cached(`funding:${mapping.pair}`, 30000, () => binance(`premiumIndex?symbol=${encodeURIComponent(mapping.pair)}`, view === "stats")), (value) => { result.fundingRate = eqnNumber(eqnObject(value).lastFundingRate); }),
+          optional(() => cached(`oi:${mapping.pair}`, 30000, () => binance(`openInterest?symbol=${encodeURIComponent(mapping.pair)}`, view === "stats")), (value) => { result.openInterest = eqnNumber(eqnObject(value).openInterest); }),
         ]);
         settled = true;
         // The current candle close is live; the market-alert snapshot fills 24h stats while the ticker cache warms.

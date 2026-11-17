@@ -68,3 +68,48 @@ assert.match(failed.error, /Partial\/stale/);
 assert.deepEqual(failed.candles, longGap.candles);
 assert.equal(failed.fetchedAt, longGap.fetchedAt, "failed updates retain the original freshness timestamp");
 console.log("eqn chart/stats separation, incremental tail, gaps, retention and failed refresh passed");
+
+let releaseBackground;
+let markBackground;
+const backgroundGate = new Promise(resolve => { releaseBackground = resolve; });
+const backgroundStarted = new Promise(resolve => { markBackground = resolve; });
+const priority = createEqnMarketClient({
+  now: () => now,
+  valuations: () => ({ marketCap: null, fdv: null }),
+  rateLimit: { reserve: (_now, interactive) => interactive ? 0 : 9000, defer() {} },
+  sleep: async ms => { if (ms === 9000) { markBackground(); await backgroundGate; } },
+  fetch: async input => {
+    if (String(input).includes("exchangeInfo")) return Response.json({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING", contractType: "PERPETUAL" }] });
+    if (String(input).includes("klines")) return Response.json([bar(Math.floor(now / step) * step)]);
+    return Response.json({ lastPrice: "101", lastFundingRate: ".0001", openInterest: "12" });
+  },
+});
+const full = priority.getMarket(request);
+await backgroundStarted;
+let timer;
+try {
+  const chart = await Promise.race([
+    priority.getMarket({ ...request, interval: "15m" }, "chart"),
+    new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("interactive chart waited behind background reservation")), 200); }),
+  ]);
+  assert.equal(chart.error, null);
+  assert.ok(chart.candles.length);
+} finally {
+  clearTimeout(timer);
+  releaseBackground();
+  await full;
+}
+
+const statsClient = createEqnMarketClient({
+  now: () => now, rateLimit: null, sleep: async () => {}, optionalWaitMs: 1,
+  valuations: () => ({ marketCap: null, fdv: null }),
+  fetch: async input => {
+    if (String(input).includes("exchangeInfo")) return Response.json({ symbols: [{ symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset: "USDT", status: "TRADING", contractType: "PERPETUAL" }] });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return Response.json({ lastPrice: "101", lastFundingRate: ".0001", openInterest: "12" });
+  },
+});
+const completedStats = await statsClient.getMarket(request, "stats");
+assert.equal(completedStats.fundingRate, .0001);
+assert.equal(completedStats.openInterest, 1212, "separate stats response waits for its own data after the chart is already visible");
+console.log("interactive charts bypass waiting background reservations; separate stats return late metrics");
