@@ -37,6 +37,7 @@ import type {
   NewsFeed,
   NewsItem,
   NewsMarket,
+  NewsSourceSummary,
   TradeRequest,
   TradeStatus,
   TradeVenue,
@@ -121,6 +122,8 @@ export function NewsTerminal() {
   const [immediate, setImmediate] = useState(false);
   const [sound, setSound] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [sourceList, setSourceList] = useState<NewsSourceSummary[]>([]);
+  const [sourceSaving, setSourceSaving] = useState(false);
   const [symbol, setSymbol] = useState("BTC");
   const [symbolDraft, setSymbolDraft] = useState("BTC");
   const [venue, setVenue] = useState<TradeVenue>("binance");
@@ -368,6 +371,37 @@ export function NewsTerminal() {
     const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 30_000);
     return () => { controller.abort(); window.clearInterval(timer); };
   }, [selected, symbol, venue, revision]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    readNewsJson<{ sources: NewsSourceSummary[] }>("/api/eqn-news/sources", { signal: controller.signal })
+      .then((data) => setSourceList(data.sources))
+      .catch(() => { /* The feed-derived source list remains available. */ });
+    return () => controller.abort();
+  }, [showSettings]);
+
+  async function toggleSource(target: NewsSourceSummary) {
+    if (sourceSaving) return;
+    const previous = sourceList;
+    const next = sourceList.map((item) => item.source === target.source ? { ...item, blocked: !item.blocked } : item);
+    setSourceList(next);
+    setSourceSaving(true);
+    try {
+      const data = await readNewsJson<{ sources: NewsSourceSummary[] }>("/api/eqn-news/sources", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blocked: next.filter((item) => item.blocked).map((item) => item.source) }),
+      });
+      setSourceList(data.sources);
+      if (!target.blocked && source.toLowerCase() === target.source.toLowerCase()) setSource("");
+      setRevision((value) => value + 1);
+    } catch (error) {
+      setSourceList(previous);
+      notify(error instanceof Error ? error.message : "来源设置保存失败", true);
+    } finally {
+      setSourceSaving(false);
+    }
+  }
 
   const refreshTrade = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -618,11 +652,14 @@ export function NewsTerminal() {
   const items = (feed?.items || []).filter(
     (item) => !onlyCoins || item.coins.length > 0,
   );
-  const sources = [
-    ...new Map(
-      (feed?.items || []).map((item) => [item.source, item.sourceName]),
-    ).entries(),
-  ];
+  const sources: [string, string][] = sourceList.length
+    ? sourceList.filter((item) => !item.blocked).map((item) => [item.source, item.name])
+    : [
+        ...new Map(
+          (feed?.items || []).map((item) => [item.source, item.sourceName]),
+        ).entries(),
+      ];
+  const blockedCount = sourceList.filter((item) => item.blocked).length;
   const currentDetail = selected && detailContext === `${selected.id}|${symbol}|${venue}` ? detail : null;
   const newsForChart = currentDetail?.relatedNews || feed?.items || [];
   const newCount =
@@ -776,6 +813,35 @@ export function NewsTerminal() {
               </option>
             ))}
           </select>
+          <section className={styles.sourceManager} aria-label="新闻来源接入">
+            <header>
+              <strong>新闻来源</strong>
+              <span>
+                {sourceList.length - blockedCount} 接入 · {blockedCount} 屏蔽
+                {sourceSaving ? <LoaderCircle className={styles.spinning} size={12} /> : null}
+              </span>
+            </header>
+            <div className={styles.sourceGrid}>
+              {sourceList.map((item) => (
+                <label
+                  key={item.source}
+                  className={item.blocked ? styles.sourceBlocked : undefined}
+                  title={item.lastAt ? `最近 ${new Date(item.lastAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}` : "暂无近期消息"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!item.blocked}
+                    disabled={sourceSaving}
+                    aria-label={`${item.blocked ? "接入" : "屏蔽"} ${item.name}`}
+                    onChange={() => void toggleSource(item)}
+                  />
+                  <span>{item.name}</span>
+                  <small title="24 小时 / 30 天消息数">{item.count24h}/{item.count}</small>
+                </label>
+              ))}
+              {!sourceList.length ? <span className={styles.sourceEmpty}>暂无来源</span> : null}
+            </div>
+          </section>
         </div>
       ) : null}
       {notice ? (

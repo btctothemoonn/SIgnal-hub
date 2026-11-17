@@ -4,10 +4,20 @@ import { DatabaseSync } from "node:sqlite";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 import { eqnArray, eqnNumber, eqnObject, eqnText, scoreEqnNews } from "./eqn-news-core.ts";
 import type { EqnFeedQuery, EqnRecord } from "./eqn-news-core.ts";
-import type { NewsFeed, NewsItem, NewsWorkerStatus } from "./news-terminal-types.ts";
+import type { NewsFeed, NewsItem, NewsSourceSummary, NewsWorkerStatus } from "./news-terminal-types.ts";
 
 export function eqnNewsEnabled(env: Record<string, string | undefined> = process.env) { return /^(1|true|yes|on)$/i.test(env.EQN_NEWS_ENABLED?.trim() || ""); }
 export function eqnNewsDbPath() { return process.env.EQN_NEWS_DB?.trim() || getRuntimeDataPath(process.env, "eqn-news", "news.sqlite"); }
+export const EQN_MAX_BLOCKED_SOURCES = 200;
+export const eqnSourceKey = (source: string) => source.trim().toLowerCase();
+export function normalizeEqnBlockedSources(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > EQN_MAX_BLOCKED_SOURCES) throw new Error("Invalid blocked sources");
+  const keys = value.map((source) => {
+    if (typeof source !== "string" || !source.trim() || source.length > 120) throw new Error("Invalid blocked sources");
+    return eqnSourceKey(source);
+  });
+  return [...new Set(keys)].sort();
+}
 const publicItem = (record: EqnRecord): NewsItem => {
   const { id, no, publishedAt, receivedAt, channels, kind, source, sourceName, title, original, url, images, coins, digest, score } = record;
   return { id, no, publishedAt, receivedAt, channels, kind, source, sourceName, title, original, url, images, coins, digest, score };
@@ -54,6 +64,20 @@ export function openEqnNewsStore(path = eqnNewsDbPath()) {
     const result = db.prepare("INSERT INTO eqn_news_state VALUES(?,?) ON CONFLICT(key) DO UPDATE SET json=excluded.json WHERE json!=excluded.json").run(key, json);
     if (result.changes) bump();
   }
+  // Shared by the web process and the worker process through SQLite, so a change applies to both immediately.
+  const blockedSources = () => { try { return normalizeEqnBlockedSources(getState("blockedSources") ?? []); } catch { return []; } };
+  const blockedJson = () => JSON.stringify(blockedSources());
+  function sources(now = Date.now()): NewsSourceSummary[] {
+    const blocked = new Set(blockedSources());
+    // With MAX(), SQLite takes bare columns (source/name) from the newest row in each group.
+    const rows = db.prepare(`SELECT lower(source) AS key, source, json_extract(json,'$.sourceName') AS name, MAX(published) AS last,
+        COUNT(*) AS total, SUM(published>=?) AS day FROM eqn_news GROUP BY lower(source) ORDER BY total DESC, key`).all(now - 86400000);
+    const summaries = rows.map((row): NewsSourceSummary => ({ source: String(row.source), name: eqnText(row.name, 160) || String(row.source),
+      count: Number(row.total), count24h: Number(row.day ?? 0), lastAt: eqnNumber(row.last), blocked: blocked.has(String(row.key)) }));
+    const known = new Set(summaries.map((item) => eqnSourceKey(item.source)));
+    for (const key of blocked) if (!known.has(key)) summaries.push({ source: key, name: key, count: 0, count24h: 0, lastAt: null, blocked: true });
+    return summaries;
+  }
   function record(id: string) {
     return decode(db.prepare("SELECT json FROM eqn_news WHERE id=? OR no=? OR id=(SELECT id FROM eqn_news_alias WHERE alias=?) LIMIT 1").get(id, /^\d+$/.test(id) ? Number(id) : -1, id));
   }
@@ -66,6 +90,7 @@ export function openEqnNewsStore(path = eqnNewsDbPath()) {
     for (const ch of item.channels) db.prepare("INSERT OR IGNORE INTO eqn_news_channels VALUES(?,?)").run(item.id, ch);
   }
   function upsert(incoming: EqnRecord) {
+    if (blockedSources().includes(eqnSourceKey(incoming.source))) return false;
     return transaction(() => {
       const second = Math.floor(incoming.publishedAt / 1000) * 1000;
       const bilingualMatch = () => db.prepare("SELECT json FROM eqn_news WHERE published>=? AND published<? AND source=? COLLATE NOCASE AND (no IS NULL OR ? IS NULL) LIMIT 20")
@@ -104,8 +129,8 @@ export function openEqnNewsStore(path = eqnNewsDbPath()) {
   }
   function feed(query: EqnFeedQuery = {}): NewsFeed {
     const limit = Math.min(200, Math.max(1, Math.floor(query.limit || 100)));
-    const conditions: string[] = [];
-    const args: (string | number)[] = [];
+    const conditions = ["NOT EXISTS(SELECT 1 FROM json_each(?) b WHERE b.value=lower(n.source))"];
+    const args: (string | number)[] = [blockedJson()];
     if (query.before) { const [time, id] = decodeCursor(query.before); conditions.push("(n.published<? OR (n.published=? AND n.id<?))"); args.push(time, time, id); }
     if (query.channel && query.channel !== "all") { conditions.push("EXISTS(SELECT 1 FROM eqn_news_channels c WHERE c.id=n.id AND c.channel=?)"); args.push(query.channel); }
     if (query.coin) { conditions.push("EXISTS(SELECT 1 FROM eqn_news_coins c WHERE c.id=n.id AND c.symbol=?)"); args.push(query.coin.toUpperCase()); }
@@ -132,7 +157,8 @@ export function openEqnNewsStore(path = eqnNewsDbPath()) {
     return transaction(() => { write(updated); bump(); return true; });
   }
   return {
-    upsert, augment, getState, setState, status, feed,
+    upsert, augment, getState, setState, status, feed, sources, blockedSources,
+    setBlockedSources: (value: unknown) => { const blocked = normalizeEqnBlockedSources(value); setState("blockedSources", blocked); return blocked; },
     get: (id: string) => { const item = record(id); return item ? publicItem(item) : null; },
     revision: () => Number(db.prepare("SELECT revision FROM eqn_news_revision WHERE id=1").get()!.revision),
     pendingDetails: (limit = 10, now = Date.now()) => db.prepare(`

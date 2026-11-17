@@ -32,6 +32,14 @@ export type NewsFeed = {
   nextCursor: string | null;
   status: NewsWorkerStatus;
 };
+export type NewsSourceSummary = {
+  source: string;
+  name: string;
+  count: number;
+  count24h: number;
+  lastAt: number | null;
+  blocked: boolean;
+};
 export type NewsCandle = {
   time: number;
   open: number;

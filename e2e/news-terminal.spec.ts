@@ -28,10 +28,17 @@ const status: TradeStatus = {
 async function setup(page: Page) {
   let unlocked = false;
   const orders: Record<string, unknown>[] = [];
+  let blocked: string[] = [];
   await page.route("**/api/eqn-news**", async route => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/stream")) {
       await route.fulfill({ contentType: "text/event-stream", body: ": ready\n\n" });
+      return;
+    }
+    if (url.pathname.endsWith("/sources")) {
+      if (route.request().method() === "PUT") blocked = route.request().postDataJSON().blocked.map((value: string) => value.toLowerCase());
+      const sources = [["binance_listing", "币安公告", 12], ["Price Monitor", "Price Monitor", 2166]].map(([source, name, count]) => ({ source, name, count, count24h: 3, lastAt: now, blocked: blocked.includes(String(source).toLowerCase()) }));
+      await route.fulfill({ json: { sources, blocked } });
       return;
     }
     if (url.pathname.endsWith("/market")) {
@@ -50,7 +57,7 @@ async function setup(page: Page) {
       await route.fulfill({ json: { item: feed.items[0], relatedNews: feed.items, reactions: [{ minutes: 1, change: 1.5 }, { minutes: 5, change: null }], signals: [{ title: "SOL 暴涨预警", occurredAt: new Date(now).toISOString(), url: "/alerts" }] } });
       return;
     }
-    await route.fulfill({ json: feed });
+    await route.fulfill({ json: { ...feed, items: feed.items.filter(item => !blocked.includes(item.source.toLowerCase())) } });
   });
   await page.route("**/api/trade/**", async route => {
     const request = route.request();
@@ -126,9 +133,27 @@ test("news mobile fits viewport and opens and closes the trading detail sheet", 
 
 test("news and trading data require website login", async ({ request }) => {
   const news = await request.get("/api/eqn-news");
+  const sources = await request.get("/api/eqn-news/sources");
   const trade = await request.get("/api/trade/status");
   expect(news.status()).toBe(401);
+  expect(sources.status()).toBe(401);
   expect(trade.status()).toBe(401);
+});
+
+test("news sources can be blocked and restored from settings", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page);
+  await page.getByRole("button", { name: "显示与交易设置" }).click();
+  const manager = page.getByRole("region", { name: "新闻来源接入" });
+  await expect(manager.getByText("2 接入 · 0 屏蔽")).toBeVisible();
+  const binance = manager.getByLabel("屏蔽 币安公告");
+  await binance.uncheck();
+  await expect(manager.getByText("1 接入 · 1 屏蔽")).toBeVisible();
+  await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("新闻来源", { exact: true }).locator("option", { hasText: "币安公告" })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("news-source-manager.png") });
+  await manager.getByLabel("接入 币安公告").check();
+  await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
 });
 
 test("failed market refresh disables opening with retained chart data", async ({ page }) => {

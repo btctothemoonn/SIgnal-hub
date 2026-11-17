@@ -138,6 +138,56 @@
 .preferences input {
   accent-color: var(--accent);
 }
+.sourceManager {
+  flex: 1 0 100%;
+  min-width: 0;
+  border-top: 1px solid var(--news-border);
+  padding-top: 10px;
+}
+.sourceManager header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.sourceManager header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.sourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.preferences .sourceGrid label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.sourceGrid label:hover {
+  background: var(--workspace-surface-raised);
+}
+.sourceGrid label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sourceGrid small,
+.sourceEmpty {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.sourceBlocked span {
+  color: var(--muted);
+  text-decoration: line-through;
+}
 .workspace {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
