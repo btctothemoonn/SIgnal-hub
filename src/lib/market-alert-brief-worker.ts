@@ -26,7 +26,7 @@ function templateExplanation(report: MarketBriefSnapshot): Explanation {
     }),
   };
 }
-const RETROSPECTIVE_NARRATION_INTERVAL_MS = 3 * 60 * 60_000;
+const RETROSPECTIVE_NARRATION_INTERVAL_MS = 210 * 60_000;
 const text = (value: unknown, max: number) => typeof value === "string" && value.trim().length <= max && !/<think>|```/i.test(value) ? value.trim() : "";
 // These sentences survive small data changes. Keep all numeric claims in the
 // deterministic evidence, which is rebuilt from the latest cache on every check.
@@ -193,7 +193,7 @@ export async function runMarketBriefCheck({
     if (!report.items.length) { report.status = "empty"; continue; }
     if (reuseNarration(report,old)) continue;
     // Retrospective facts refresh every check; its optional AI commentary has a
-    // separate ceiling, so a busy feed cannot cause a new call every ten minutes.
+    // separate ceiling, so a busy feed cannot cause a new call on every check.
     const narrationNextMs = Date.parse(old?.narrationNextAt ?? "");
     if (scope === "24h" && Number.isFinite(narrationNextMs) && narrationNextMs > nowMs) {
       report.status = "ready";

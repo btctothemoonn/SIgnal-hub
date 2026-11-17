@@ -85,14 +85,16 @@ try {
   assert.equal(store.claimMarketBriefCheck(now+9*minute),false);
   store.close(); store=openMarketAlertsStore(path);
   assert.equal(store.claimMarketBriefCheck(now+9*minute),false,'restart preserves cooldown');
-  assert.equal(store.claimMarketBriefCheck(now+10*minute),true);
+  assert.equal(store.claimMarketBriefCheck(now+10*minute),false,'the previous cadence must remain cached');
+  assert.equal(store.claimMarketBriefCheck(now+700000-1),false,'new cadence is enforced across restarts');
+  assert.equal(store.claimMarketBriefCheck(now+700000),true);
   enrich('FRESHUSDT',{volumeRatio5m:3,pct5m:3},-10*minute);
   enrich('FADEUSDT',{pct5m:-2,pct15m:-4},-10*minute);
   const next=store.getMarketBriefInput(now+10*minute);
   assert.equal(next['3h'].items[0].tracking.state,'strengthening');
   assert.deepEqual(next['3h'].changes.added,[]);
   assert.deepEqual(next['3h'].changes.downgraded,['FADEUSDT']);
-  store.saveMarketBriefCache(next,'next',now+10*minute,true);
+  store.saveMarketBriefCache(next,'next',now+700000,true);
   assert.equal(store.saveMarketBriefCache(input,'late',now),false,'late AI result cannot overwrite a newer claimed cycle');
   assert.equal(store.readMarketBriefCache(now+10*minute).reports['3h'].stale,false,'AI outage does not stale fresh rule evidence');
   assert.equal(store.readMarketBriefCache(now+40*minute).reports['3h'].stale,true);

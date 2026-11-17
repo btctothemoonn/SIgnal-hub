@@ -31,7 +31,7 @@ assert.deepEqual(getAlphaSummaryPrewarmScopes({}), [
   "7d",
 ]);
 assert.deepEqual(getAlphaSummaryPrewarmAudiences({}), ["signals"]);
-assert.equal(getAlphaSummaryPrewarmIntervalMs({}), 30 * 60 * 1000);
+assert.equal(getAlphaSummaryPrewarmIntervalMs({}), 35 * 60 * 1000);
 assert.equal(
   isAlphaSummaryPrewarmEnabled({ AI_SUMMARY_PREWARM_ENABLED: "false" }),
   false,

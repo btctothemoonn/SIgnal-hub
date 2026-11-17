@@ -132,14 +132,14 @@ const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_AI_SUMMARY_TIMEOUT_MS = 240_000;
-const DEFAULT_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_REFRESH_INTERVAL_MS = 140 * 60 * 1000;
 const AI_SUMMARY_INPUT_BUDGET_VERSION = 4;
 const SIGNAL_SUMMARY_CONTENT_VERSION = 2;
 const DEFAULT_REFRESH_INTERVALS_MS: Record<AlphaSummaryScope, number> = {
   "12h": DEFAULT_REFRESH_INTERVAL_MS,
-  today: 2 * 60 * 60 * 1000,
-  "3d": 6 * 60 * 60 * 1000,
-  "7d": 24 * 60 * 60 * 1000,
+  today: DEFAULT_REFRESH_INTERVAL_MS,
+  "3d": 7 * 60 * 60 * 1000,
+  "7d": 28 * 60 * 60 * 1000,
 };
 const MAX_ITEMS_FOR_AI_BY_SCOPE: Record<AlphaSummaryScope, number> = {
   "12h": 48,
@@ -1483,18 +1483,17 @@ async function getOrCreateAlphaSummaryInternal({
   try {
     const isSignals = normalizedAudience === "signals";
     let cached = readCachedSummary(period.key, db);
-    if (isSignals && !cached?.summary) {
+    if (!cached?.summary) {
       const previous = db.prepare(`
         select period_key from alpha_summary_cache
         where summary_json is not null and json_extract(period_json, '$.scope') = ?
-          and coalesce(json_extract(period_json, '$.audience'), 'signals') = 'signals'
+          and coalesce(json_extract(period_json, '$.audience'), 'signals') = ?
         order by updated_at desc limit 1
-      `).get(normalizedScope) as DbRow | undefined;
+      `).get(normalizedScope, normalizedAudience) as DbRow | undefined;
       if (previous) cached = readCachedSummary(stringValue(previous.period_key), db) ?? cached;
     }
     if (
       cached &&
-      cached.period.key === period.key &&
       (!isSignals || cached.period.signalContentVersion === SIGNAL_SUMMARY_CONTENT_VERSION) &&
       (hasAlphaSummaryTargetGroups(cached.summary) || cached.status === "error") &&
       !force &&

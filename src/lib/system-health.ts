@@ -481,10 +481,11 @@ function currentSummaryRows(dbPath: string, keys: string[]) {
         `
         select period_key, model, item_count, status, error, generated_at, updated_at
         from alpha_summary_cache
-        where period_key in (${keys.map(() => "?").join(",")})
+        where ${keys.map(() => "period_key like ?").join(" or ")}
+        order by updated_at desc
       `,
       )
-      .all(...keys) as Record<string, unknown>[];
+      .all(...keys.map((key) => `${key.slice(0, key.lastIndexOf(":") + 1)}%`)) as Record<string, unknown>[];
   } finally {
     db?.close();
   }
@@ -532,7 +533,9 @@ export function summaryHealthItem({
     return healthErrorItem(`summary-${audience}`, label, error);
   }
   const checks = periods.map((period) => {
-    const row = rows.find((entry) => entry.period_key === period.key);
+    const prefix = period.key.slice(0, period.key.lastIndexOf(":") + 1);
+    const row = rows.find((entry) => entry.period_key === period.key)
+      ?? rows.find((entry) => stringValue(entry.period_key).startsWith(prefix));
     const updatedAt = stringValue(row?.updated_at) || stringValue(row?.generated_at) || null;
     const staleMs = Math.max(DEFAULT_STALE_MS.summary,
       getAlphaSummaryRefreshIntervalMs(env, period.scope) + getAlphaSummaryPrewarmIntervalMs(env));

@@ -7,7 +7,7 @@ import {runMarketBriefCheck,parseMarketBriefResponse} from './market-alert-brief
 
 const dir=mkdtempSync(join(tmpdir(),'market-brief-worker-'));
 const now=Date.parse('2026-09-18T06:00:00Z');
-const interval=10*60000;
+const interval=700000;
 const iso=ms=>new Date(ms).toISOString();
 const env={MINIMAX_API_KEY:'test',AI_SUMMARY_MODEL:'MiniMax-M3'};
 const makeStore=name=>()=>openMarketAlertsStore(join(dir,`${name}.sqlite`));
@@ -199,7 +199,7 @@ try {
   assert.deepEqual(calls[4],['3h'],'failed unchanged evidence retries at the next scheduled check');
 
   // Updating the retrospective facts must not slide its original narration deadline.
-  assert.equal((await runMarketBriefCheck({nowMs:now+3*3600000,openStore,env,fetchImpl})).status,'generated');
+  assert.equal((await runMarketBriefCheck({nowMs:now+210*60000,openStore,env,fetchImpl})).status,'generated');
   assert.deepEqual(calls[5],['24h']);
 
   const concurrentStore=makeStore('concurrent');

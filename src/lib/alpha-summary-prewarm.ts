@@ -29,7 +29,7 @@ type GenerateSummary = (request: {
   audience: AlphaSummaryAudience;
 }) => Promise<AlphaSummarySnapshot>;
 
-const DEFAULT_PREWARM_INTERVAL_MS = 30 * 60 * 1000;
+const DEFAULT_PREWARM_INTERVAL_MS = 35 * 60 * 1000;
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
 function positiveInt(raw: string | undefined, fallback: number) {

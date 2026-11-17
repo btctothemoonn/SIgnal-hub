@@ -7,7 +7,7 @@ import {openMarketAlertsStore} from './market-alerts-store.ts';
 import {runMarketBriefCheck,parseMarketBriefResponse} from './market-alert-brief-worker.ts';
 
 const now=Date.parse('2026-10-03T03:00:00Z');
-const interval=10*60000;
+const interval=700000;
 const iso=ms=>new Date(ms).toISOString();
 const env={MINIMAX_API_KEY:'fixture-key',AI_SUMMARY_MODEL:'MiniMax-M3'};
 const current={scope:'3h',windowStart:iso(now-3*3600000),windowEnd:iso(now),generatedAt:null,checkedAt:iso(now),model:null,status:'ready',stale:false,headline:'规则概况',totals:{symbols:1,total:1,pump:1,crash:0,squeeze:0},risks:[],items:[{symbol:'AAAUSDT',pump:1,crash:0,squeeze:0,total:1,latestAt:iso(now-1000),latestPrice:1,latestChangePct:5,maxLevel:1,direction:'up',reason:'量价仍待确认。',figures:{fast:-.25,slow:.7,vol:1.1}}]};

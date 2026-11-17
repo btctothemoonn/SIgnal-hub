@@ -1,4 +1,4 @@
-export const MARKET_BRIEF_INTERVAL_MS = 10 * 60_000;
+export const MARKET_BRIEF_INTERVAL_MS = 700_000;
 export const MARKET_BRIEF_STALE_AFTER_MS = 20 * 60_000;
 
 export type MarketBriefScope = "3h" | "24h";

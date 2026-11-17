@@ -7,6 +7,7 @@ import {
   getAlphaSummaryModel,
   getAlphaSummaryProviderCandidates,
   getAlphaSummaryPeriod,
+  getAlphaSummaryRefreshIntervalMs,
   isDeepSeekBaseUrl,
   isMiniMaxBaseUrl,
   isStockSummaryRelevantItem,
@@ -19,6 +20,14 @@ const source = readFileSync(new URL("./alpha-summary.ts", import.meta.url), "utf
 assert.doesNotMatch(source, /function shanghaiLocalToUtcIso/);
 
 const now = new Date("2026-05-07T04:00:00.000Z");
+
+for (const [scope, interval] of [["12h", 8_400_000], ["today", 8_400_000], ["3d", 25_200_000], ["7d", 100_800_000]]) {
+  assert.equal(getAlphaSummaryRefreshIntervalMs({}, scope), interval);
+  const snapshot = { success: true, generatedAt: now.toISOString(), period: {} };
+  assert.equal(shouldReuseCachedAlphaSummary({ snapshot, now: new Date(now.getTime() + interval - 1), env: {}, scope }), true);
+  assert.equal(shouldReuseCachedAlphaSummary({ snapshot, now: new Date(now.getTime() + interval), env: {}, scope }), false);
+}
+assert.equal(getAlphaSummaryRefreshIntervalMs({ AI_SUMMARY_REFRESH_INTERVAL_MS: "9000000" }), 9_000_000);
 
 assert.equal(normalizeAlphaSummaryAudience("stocks"), "stocks");
 assert.equal(normalizeAlphaSummaryAudience("bad"), "signals");

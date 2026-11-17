@@ -70,6 +70,26 @@ try {
   assert.deepEqual(persisted.summary.events, first.summary.events, "source links must survive SQLite cache reads");
   assert.equal(calls, 1, "reading a fresh result should not regenerate it");
 
+  const rolloverEnv = { ...env, SIGNAL_SUMMARY_DB: join(directory, "rollover.sqlite") };
+  const rolloverMessages = openTelegramPipelineDb(env.TELEGRAM_PIPELINE_DB);
+  upsertTelegramPipelineMessage({ ...message(99), createdAt: "2026-10-02T15:30:00.000Z" }, rolloverMessages);
+  rolloverMessages.close();
+  summary.events[0].sourceIds = ["telegram:100:99"];
+  for (const scope of ["12h", "today", "3d", "7d"]) {
+    const nearMidnight = new Date("2026-10-02T15:59:00.000Z");
+    const before = await getOrCreateAlphaSummary({ now: nearMidnight, env: rolloverEnv, scope, force: true });
+    assert.equal(before.status, "generated");
+    const beforeCalls = calls;
+    const afterMidnight = new Date("2026-10-02T16:01:00.000Z");
+    assert.notEqual(getAlphaSummaryPeriod({ now: afterMidnight, scope }).key, before.period.key);
+    const after = await getOrCreateAlphaSummary({ now: afterMidnight, env: rolloverEnv, scope });
+    assert.equal(calls, beforeCalls, `${scope} must respect the generation interval across a date/bucket change`);
+    assert.equal(after.generatedAt, before.generatedAt);
+    assert.equal(after.period.key, before.period.key, "cached content retains its actual source period");
+  }
+  summary.events[0].sourceIds = ["telegram:100:1"];
+  calls = 1;
+
   const updatedTelegram = openTelegramPipelineDb(env.TELEGRAM_PIPELINE_DB);
   upsertTelegramPipelineMessage(message(2), updatedTelegram);
   updatedTelegram.close();
