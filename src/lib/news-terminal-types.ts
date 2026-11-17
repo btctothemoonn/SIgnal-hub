@@ -44,6 +44,7 @@ export type NewsMarket = {
   symbol: string;
   pair: string | null;
   venue: "binance" | "hyperliquid";
+  tradable: boolean;
   price: number | null;
   change24h: number | null;
   marketCap: number | null;

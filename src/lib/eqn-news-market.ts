@@ -7,7 +7,7 @@ import type { NewsCandle, NewsMarket, NewsReaction } from "./news-terminal-types
 
 export const EQN_MARKET_INTERVALS = { "1m": 60000, "5m": 300000, "15m": 900000, "1h": 3600000, "4h": 14400000, "1d": 86400000 } as const;
 export type EqnMarketRequest = { symbol: string; venue: "binance" | "hyperliquid"; interval: keyof typeof EQN_MARKET_INTERVALS; assetId?: string | null };
-export type EqnAsset = { symbol: string; pair: string; multiplier: number };
+export type EqnAsset = { symbol: string; pair: string; multiplier: number; tradable: boolean };
 // Only cross-name/asset-id equivalences live here. New exact venue tickers do not need a registry entry.
 const ASSET_IDS: Record<string, string[]> = {
   BTC: ["bitcoin"], ETH: ["ethereum"], SOL: ["solana"], BNB: ["binancecoin"], XRP: ["ripple"], DOGE: ["dogecoin"],
@@ -31,12 +31,16 @@ export function resolveEqnAsset(symbol: string, venue: EqnMarketRequest["venue"]
   // asset_id namespace must be known. Do not silently equate unrelated assets sharing a ticker.
   if (assetId && !ASSET_IDS[canonical]?.includes(assetId.replace(/^coingecko:/, ""))) return null;
   const rows = metadata.map(eqnObject);
-  const candidates = [canonical, SCALED[canonical]?.[venue]].filter(Boolean);
-  for (const candidate of candidates) {
+  const candidates = [canonical, SCALED[canonical]?.[venue]].filter((value): value is string => Boolean(value));
+  // Crypto perpetuals are tradable. Equity/TradFi markets are chart-only until the trader explicitly supports them.
+  const kinds = venue === "binance"
+    ? [{ market: "PERPETUAL", tradable: true }, { market: "TRADIFI_PERPETUAL", tradable: false }]
+    : [{ market: "", tradable: true }, { market: "xyz", tradable: false }];
+  for (const kind of kinds) for (const candidate of candidates) {
     const matches = rows.filter((row) => venue === "binance"
-      ? row.baseAsset === candidate && row.quoteAsset === "USDT" && row.status === "TRADING" && row.contractType === "PERPETUAL" && row.symbol === `${candidate}USDT`
-      : row.name === candidate && row.isDelisted !== true && !String(row.name).includes(":"));
-    if (matches.length === 1) return { symbol: canonical, pair: venue === "binance" ? String(matches[0].symbol) : String(matches[0].name), multiplier: candidate === canonical ? 1 : 1000 };
+      ? row.baseAsset === candidate && row.quoteAsset === "USDT" && row.status === "TRADING" && row.contractType === kind.market && row.symbol === `${candidate}USDT`
+      : row.name === (kind.market ? `${kind.market}:${candidate}` : candidate) && row.isDelisted !== true);
+    if (matches.length === 1) return { symbol: canonical, pair: venue === "binance" ? String(matches[0].symbol) : String(matches[0].name), multiplier: candidate === canonical ? 1 : 1000, tradable: kind.tradable };
   }
   return null;
 }
@@ -190,10 +194,16 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
       return { rows: value.symbols, contexts: [] as unknown[] };
     });
     return cached("metadata:hyperliquid", 15000, async () => {
-      const value = eqnArray(await hl({ type: "metaAndAssetCtxs" }));
-      const rows = eqnObject(value[0]).universe;
-      if (!Array.isArray(rows) || !Array.isArray(value[1])) throw new EqnUpstreamError("Hyperliquid metadata unavailable");
-      return { rows, contexts: value[1] as unknown[] };
+      const read = async (dex?: string) => {
+        const value = eqnArray(await hl(dex ? { type: "metaAndAssetCtxs", dex } : { type: "metaAndAssetCtxs" }));
+        const rows = eqnObject(value[0]).universe;
+        if (!Array.isArray(rows) || !Array.isArray(value[1]) || rows.length !== value[1].length) throw new EqnUpstreamError("Hyperliquid metadata unavailable");
+        return { rows: rows as unknown[], contexts: value[1] as unknown[] };
+      };
+      const main = await read();
+      // The HIP-3 xyz dex carries equity charts such as xyz:NVDA; main-market crypto must keep working if it is unavailable.
+      const xyz = await read("xyz").catch(() => ({ rows: [] as unknown[], contexts: [] as unknown[] }));
+      return { rows: [...main.rows, ...xyz.rows], contexts: [...main.contexts, ...xyz.contexts] };
     });
   }
   async function asset(request: EqnMarketRequest) {
@@ -218,12 +228,12 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
     });
   }
   async function loadMarket(request: EqnMarketRequest): Promise<NewsMarket> {
-    const result: NewsMarket = { symbol: request.symbol, pair: null, venue: request.venue, price: null, change24h: null, marketCap: null, fdv: null, volume24h: null, fundingRate: null, openInterest: null, candles: [], fetchedAt: now(), error: null };
+    const result: NewsMarket = { symbol: request.symbol, pair: null, venue: request.venue, tradable: false, price: null, change24h: null, marketCap: null, fdv: null, volume24h: null, fundingRate: null, openInterest: null, candles: [], fetchedAt: now(), error: null };
     const errors: string[] = [];
     try {
       const { mapping, meta } = await asset(request);
-      if (!mapping) { result.error = "No verified asset mapping for this venue"; return result; }
-      result.pair = mapping.pair;
+      if (!mapping) { result.error = `${request.venue === "binance" ? "币安" : "Hyperliquid"}暂无 ${request.symbol} 合约行情`; return result; }
+      result.pair = mapping.pair; result.tradable = mapping.tradable;
       const valuationPair = request.venue === "binance" ? mapping.pair : `${SCALED[request.symbol]?.binance ?? request.symbol}USDT`;
       const valuation = (runtime.valuations ?? readEqnMarketContext)(valuationPair);
       result.marketCap = valuation.marketCap; result.fdv = valuation.fdv;
@@ -275,7 +285,7 @@ export function createEqnMarketClient(runtime: MarketRuntime = {}) {
           }
           return fresh;
         });
-      } catch { return { symbol: request.symbol, pair: null, venue: request.venue, price: null, change24h: null, marketCap: null, fdv: null, volume24h: null, fundingRate: null, openInterest: null, candles: [], fetchedAt: now(), error: "Market capacity reached; retry later" }; }
+      } catch { return { symbol: request.symbol, pair: null, venue: request.venue, tradable: false, price: null, change24h: null, marketCap: null, fdv: null, volume24h: null, fundingRate: null, openInterest: null, candles: [], fetchedAt: now(), error: "Market capacity reached; retry later" }; }
     },
   };
 }

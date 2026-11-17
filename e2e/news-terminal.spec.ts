@@ -42,7 +42,7 @@ async function setup(page: Page) {
         const open = 145 + Math.sin(index / 5) * 4 + index / 20;
         return { time: Math.floor(now / 300_000) * 300 - (99 - index) * 300, open, high: open + 1.5, low: open - 1.4, close: open + Math.sin(index) * .7, volume: 100 + index };
       });
-      const market: NewsMarket = { symbol, pair: venue === "binance" ? `${symbol}USDT` : symbol, venue: venue as "binance" | "hyperliquid", price: 150, change24h: 4.2, marketCap: 70e9, fdv: 80e9, volume24h: 4e9, fundingRate: .0001, openInterest: 5e8, candles, fetchedAt: Date.now(), error: null };
+      const market: NewsMarket = { symbol, pair: venue === "binance" ? `${symbol}USDT` : symbol, venue: venue as "binance" | "hyperliquid", tradable: true, price: 150, change24h: 4.2, marketCap: 70e9, fdv: 80e9, volume24h: 4e9, fundingRate: .0001, openInterest: 5e8, candles, fetchedAt: Date.now(), error: null };
       await route.fulfill({ json: market });
       return;
     }

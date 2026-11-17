@@ -86,6 +86,12 @@ try {
   assert.equal(resolveEqnAsset("NEWTOKEN", "binance", [listing], "unknown-project"), null);
   assert.equal(resolveEqnAsset("NEWTOKEN", "binance", [listing, listing]), null, "ambiguous metadata fails closed");
   assert.equal(resolveEqnAsset("PEPE", "binance", [{ ...metadata[0], status: "BREAK" }]), null);
+  assert.equal(resolveEqnAsset("BTC", "binance", metadata).tradable, true);
+  const equity = { symbol: "NVDAUSDT", baseAsset: "NVDA", quoteAsset: "USDT", status: "TRADING", contractType: "TRADIFI_PERPETUAL" };
+  assert.deepEqual(resolveEqnAsset("NVDA", "binance", [equity]), { symbol: "NVDA", pair: "NVDAUSDT", multiplier: 1, tradable: false }, "TradFi perpetuals are chart-only");
+  assert.deepEqual(resolveEqnAsset("NVDA", "hyperliquid", [{ name: "xyz:NVDA" }]), { symbol: "NVDA", pair: "xyz:NVDA", multiplier: 1, tradable: false }, "HIP-3 equity markets are chart-only");
+  assert.equal(resolveEqnAsset("NVDA", "hyperliquid", [{ name: "flx:NVDA" }]), null, "only the xyz builder dex is trusted");
+  assert.equal(resolveEqnAsset("BTC", "hyperliquid", [{ name: "BTC" }, { name: "xyz:BTC" }]).pair, "BTC", "main crypto perpetual wins");
   const candles = [0, 60000, 120000, 180000].map((time, i) => ({ time, open: 100 + i * 10, close: 109 + i * 10, high: 120 + i * 10, low: 90 + i * 10, volume: 1 }));
   const reaction = calculateEqnReactions(30000, candles, 190000, [1, 5]);
   assert.equal(reaction[0].change, (120 / 110 - 1) * 100, "uses first candle open at/after publication and target, not pre-publication OHLC");
@@ -100,6 +106,7 @@ try {
     if (String(url).includes("premiumIndex")) return Response.json({ lastFundingRate: "0.0001" });
     if (String(url).includes("openInterest")) return Response.json({ openInterest: "12" });
     const body = JSON.parse(opts.body);
+    if (body.type === "metaAndAssetCtxs" && body.dex === "xyz") return Response.json([{ universe: [{ name: "xyz:NVDA" }] }, [{ markPx: "157", prevDayPx: "150", dayNtlVlm: "1000", funding: "0.0001", openInterest: "2" }]]);
     if (body.type === "metaAndAssetCtxs") return Response.json([{ universe: [{ name: "BTC" }, { name: "kPEPE" }] }, [{ markPx: "110", prevDayPx: "100", dayNtlVlm: "1000", funding: "0.0001", openInterest: "12" }, { markPx: "0.011", prevDayPx: "0.01", dayNtlVlm: "1000", funding: "0.0001", openInterest: "12" }]]);
     if (body.type === "candleSnapshot") return Response.json([{ t: 1794826800000, o: "100", h: "120", l: "90", c: "110", v: "4" }]);
     throw new Error(`unexpected ${url}`);
@@ -109,7 +116,7 @@ try {
   assert.equal(binance.marketCap, 42);
   assert.equal(binance.candles[0].close, 110);
   assert.equal(binance.candles[0].time, 1794826800, "public NewsMarket candle time is UNIX seconds");
-  assert.deepEqual(Object.keys(binance).sort(), ["symbol", "pair", "venue", "price", "change24h", "marketCap", "fdv", "volume24h", "fundingRate", "openInterest", "candles", "fetchedAt", "error"].sort());
+  assert.deepEqual(Object.keys(binance).sort(), ["symbol", "pair", "venue", "tradable", "price", "change24h", "marketCap", "fdv", "volume24h", "fundingRate", "openInterest", "candles", "fetchedAt", "error"].sort());
   const scaled = await market.getMarket({ symbol: "PEPE", venue: "binance", interval: "1m" });
   assert.equal(scaled.symbol, "PEPE");
   assert.equal(scaled.pair, "1000PEPEUSDT");
@@ -130,6 +137,12 @@ try {
   assert.equal(hlScaled.price, 0.011, "Hyperliquid scaled instrument price is native too");
   assert.equal(hlScaled.openInterest, 12 * 0.011);
   assert.equal(hlScaled.candles[0].open, 100);
+  const hlEquity = await market.getMarket({ symbol: "NVDA", venue: "hyperliquid", interval: "1m" });
+  assert.equal(hlEquity.pair, "xyz:NVDA");
+  assert.equal(hlEquity.tradable, false);
+  assert.equal(hlEquity.price, 157, "xyz contexts stay aligned after main universe rows");
+  assert.equal(hlEquity.candles[0].open, 100);
+  assert.equal(hl.tradable, true);
   assert.equal((await market.getMarket({ symbol: "BT", venue: "binance", interval: "1m" })).pair, null);
   console.log("eqn-news protocol, store, gap fill, mapping, reaction and market tests passed");
 } finally {

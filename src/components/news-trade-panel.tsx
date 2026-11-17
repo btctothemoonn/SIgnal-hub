@@ -54,6 +54,7 @@ export function NewsTradePanel({
     status.unlocked &&
     account?.connected &&
     market?.pair &&
+    market.tradable &&
     market.symbol === symbol &&
     market.venue === venue &&
     !market.error;
@@ -254,7 +255,9 @@ export function NewsTradePanel({
                 ? "账户连接中断"
                 : !market?.pair
                   ? "当前账户暂无此合约"
-                  : !status.unlocked
+                  : !market.tradable
+                    ? "此合约暂仅支持看盘"
+                    : !status.unlocked
                     ? "输入交易 PIN 后可下单"
                     : `单笔上限 ${status.limits.maxOrderNotional} · 滑点 ${status.limits.slippagePct}%`}
       </p>

@@ -506,6 +506,7 @@ export function NewsTerminal() {
     if (
       !order.reduceOnly &&
       (!matchingMarket?.pair ||
+        !matchingMarket.tradable ||
         matchingMarket.error ||
         marketError ||
         Date.now() - matchingMarket.fetchedAt > 60_000 ||
