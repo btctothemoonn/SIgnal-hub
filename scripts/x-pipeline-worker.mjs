@@ -1,266 +1,148 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+
+import { existsSync } from "node:fs";
 import {
   get6551TwitterToken,
   get6551TwitterWebSocketUrl,
-  has6551TwitterToken,
-  is6551TwitterConnectorEnabled,
-  normalize6551RealtimeEvent,
+  normalize6551PushedTweet,
 } from "../src/lib/6551-twitter.ts";
-import {
-  getXPipelineConfiguredAccounts,
-} from "../src/lib/x-pipeline-accounts.ts";
-import {
-  getXPipelineConfig,
-} from "../src/lib/x-pipeline-config.ts";
-import {
-  disableXPipelineAccountsExcept,
-  setXPipelineHealth,
-  upsertXPipelineAccount,
-  upsertXPipelineRealtimeUpdate,
-} from "../src/lib/x-pipeline-store.ts";
+import { loadRuntimeConfig } from "../src/lib/runtime-config.ts";
+import { getXPipelineConfiguredAccounts } from "../src/lib/x-pipeline-accounts.ts";
+import { getXPipelineConfig, isX6551WsEnabled } from "../src/lib/x-pipeline-config.ts";
+import { setXPipelineHealth, upsertXPipelineRealtimeUpdate } from "../src/lib/x-pipeline-store.ts";
 
-const RUNTIME_CONFIG_PATH = resolve(process.cwd(), ".signal-hub", "runtime-config.json");
-const ACCOUNT_SYNC_INTERVAL_MS = 60_000;
-const MAX_RECONNECT_MS = 30_000;
+const MAX_RECONNECT_MS = 60_000;
+const SUBSCRIBE_TIMEOUT_MS = 15_000;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const SUBSCRIBE_ID = 1;
 
 let reconnectAttempts = 0;
-let reconnectTimer = null;
-let accountSyncTimer = null;
-let activeSocket = null;
+let reconnectTimer;
+let activeSocket;
+let stopping = false;
 
-function log(event, data = {}) {
-  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...data }));
-}
-
-async function loadEnvFile(filePath) {
-  try {
-    const content = await readFile(filePath, "utf8");
-    for (const line of content.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIndex = trimmed.indexOf("=");
-      if (eqIndex === -1) continue;
-      const key = trimmed.slice(0, eqIndex).trim();
-      const value = trimmed.slice(eqIndex + 1).trim().replace(/^["']|["']$/g, "");
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
-    }
-  } catch {}
-}
-
-function normalizeRuntimeConfig(raw) {
-  const items = Array.isArray(raw?.twitterAccounts) ? raw.twitterAccounts : [];
-  return {
-    telegramChannels: [],
-    twitterAccounts: items
-      .map((item) => {
-        if (typeof item === "string") {
-          return { ref: item, tags: [] };
-        }
-        if (item && typeof item.ref === "string") {
-          return {
-            ref: item.ref,
-            tags: Array.isArray(item.tags)
-              ? item.tags.filter((tag) => typeof tag === "string")
-              : [],
-          };
-        }
-        return null;
-      })
-      .filter(Boolean),
-  };
-}
-
-async function readRuntimeConfigFile() {
-  try {
-    return normalizeRuntimeConfig(JSON.parse(await readFile(RUNTIME_CONFIG_PATH, "utf8")));
-  } catch {
-    return { telegramChannels: [], twitterAccounts: [] };
-  }
-}
-
-async function syncConfiguredAccounts() {
-  const runtimeConfig = await readRuntimeConfigFile();
-  const accounts = getXPipelineConfiguredAccounts(runtimeConfig);
-  for (const account of accounts) {
-    upsertXPipelineAccount(account);
-  }
-  disableXPipelineAccountsExcept(accounts.map((account) => account.username));
-  log("x_accounts_synced", { count: accounts.length });
-  return accounts;
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  const maxAttempts = getXPipelineConfig().maxReconnectAttempts;
-  if (reconnectAttempts >= maxAttempts) {
-    markHealth(
-      "error",
-      `6551 websocket failed ${maxAttempts} times; check token plan or WS access`,
-    );
-    log("x_reconnect_stopped", { attempts: reconnectAttempts });
-    return;
-  }
-  const delay = Math.min(MAX_RECONNECT_MS, 1000 * 2 ** reconnectAttempts);
-  reconnectAttempts += 1;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectUpstream();
-  }, delay);
+function log(event, fields = {}) {
+  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
 }
 
 function markHealth(status, detail) {
-  setXPipelineHealth({ scope: "collector", status, detail });
+  setXPipelineHealth({ scope: "6551-wss", status, detail });
 }
 
-function closeActiveSocket() {
-  if (activeSocket && activeSocket.readyState < WebSocket.CLOSING) {
-    activeSocket.close(1000, "restart");
-  }
-  activeSocket = null;
+function scheduleReconnect(url) {
+  const exponent = Math.min(reconnectAttempts++, getXPipelineConfig().maxReconnectAttempts);
+  const delay = Math.min(MAX_RECONNECT_MS, 1000 * 2 ** exponent);
+  reconnectTimer = setTimeout(() => connectUpstream(url), delay);
 }
 
-function connectUpstream() {
-  if (!is6551TwitterConnectorEnabled()) {
-    markHealth("paused", "TWITTER_CONNECTOR_ENABLED is paused");
-    log("x_pipeline_paused");
-    return;
-  }
-
-  if (!has6551TwitterToken()) {
-    markHealth("needs_token", "TWITTER_TOKEN is not configured");
-    log("x_pipeline_needs_token");
-    return;
-  }
-
-  if (typeof WebSocket === "undefined") {
-    markHealth("error", "Node WebSocket runtime is unavailable");
-    log("x_pipeline_websocket_unavailable");
-    return;
-  }
-
-  if (
-    activeSocket &&
-    (activeSocket.readyState === WebSocket.OPEN ||
-      activeSocket.readyState === WebSocket.CONNECTING)
-  ) {
-    return;
-  }
-
-  const webSocketUrl = new URL(get6551TwitterWebSocketUrl());
-  webSocketUrl.searchParams.set("token", get6551TwitterToken());
-
+function connectUpstream(url) {
   markHealth("connecting", "connecting to 6551 websocket");
-  const socket = new WebSocket(webSocketUrl);
+  const socket = new WebSocket(url);
   activeSocket = socket;
+  let subscribed = false;
+  let waitingForPong = false;
+  let heartbeat;
+  const once = process.argv.includes("--once");
+  const deadline = setTimeout(() => {
+    log("x_6551_subscribe_timeout");
+    socket.close(4000, "subscribe timeout");
+  }, SUBSCRIBE_TIMEOUT_MS);
 
   socket.addEventListener("open", () => {
-    reconnectAttempts = 0;
-    markHealth("connected", "6551 websocket connected");
-    socket.send(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "twitter.subscribe",
-      }),
-    );
-    log("x_websocket_open");
+    socket.send(JSON.stringify({ jsonrpc: "2.0", id: SUBSCRIBE_ID, method: "twitter.subscribe" }));
   });
 
-  socket.addEventListener("message", async (event) => {
-    if (typeof event.data !== "string") return;
+  socket.addEventListener("message", async ({ data }) => {
+    if (stopping || typeof data !== "string") return;
+    if (data === "pong") {
+      waitingForPong = false;
+      return;
+    }
 
     try {
-      const payload = JSON.parse(event.data);
-      if (payload?.result?.success && payload.id === 1) {
+      const payload = JSON.parse(data);
+      if (!subscribed && payload?.id === SUBSCRIBE_ID) {
+        if (payload.result?.success !== true) {
+          log("x_6551_subscribe_rejected");
+          socket.close(4001, "subscription rejected");
+          return;
+        }
+        subscribed = true;
+        reconnectAttempts = 0;
+        clearTimeout(deadline);
         markHealth("subscribed", "6551 twitter.subscribe active");
-        log("x_websocket_subscribed");
+        log("x_6551_subscribed");
+        if (once) {
+          socket.close(1000, "subscription verified");
+          return;
+        }
+        heartbeat = setInterval(() => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          if (waitingForPong) {
+            log("x_6551_heartbeat_timeout");
+            socket.close(4002, "heartbeat timeout");
+            return;
+          }
+          waitingForPong = true;
+          socket.send("ping");
+        }, HEARTBEAT_INTERVAL_MS);
         return;
       }
-
-      if (payload?.error?.message) {
-        markHealth("error", String(payload.error.message));
-        log("x_websocket_rpc_error", { error: String(payload.error.message) });
-        return;
-      }
-
-      if (payload?.method === "twitter.event") {
-        const update = await normalize6551RealtimeEvent(payload.params);
-        if (!update) return;
-        upsertXPipelineRealtimeUpdate(update);
-        markHealth("live", `received ${update.eventType} from @${update.account}`);
-        log("x_realtime_event", {
-          account: update.account,
-          eventType: update.eventType,
-          id: update.feedItem.id,
-        });
-      }
-    } catch (error) {
-      markHealth("error", `failed to parse websocket message: ${String(error)}`);
-      log("x_websocket_message_failed", { error: String(error) });
+      if (!subscribed || once || payload?.method !== "twitter.event") return;
+      const update = normalize6551PushedTweet(payload.params);
+      if (!update) return;
+      const runtime = await loadRuntimeConfig();
+      const allowed = getXPipelineConfiguredAccounts(runtime).some(
+        ({ username }) => username.toLowerCase() === update.account.toLowerCase(),
+      );
+      if (!allowed || stopping || activeSocket !== socket) return;
+      upsertXPipelineRealtimeUpdate(update);
+      markHealth("live", "received a tweet from 6551");
+      log("x_6551_tweet_observed", { id: update.feedItem.id, eventType: update.eventType });
+    } catch {
+      // Error objects and close reasons can contain the token-bearing URL or raw payload.
+      log("x_6551_message_failed");
     }
   });
 
-  socket.addEventListener("error", () => {
-    markHealth("error", "6551 websocket error");
-    log("x_websocket_error");
-  });
-
-  socket.addEventListener("close", (event) => {
-    if (activeSocket === socket) {
-      activeSocket = null;
-    }
-    markHealth("closed", `6551 websocket closed code=${event.code}`);
-    log("x_websocket_closed", {
-      code: event.code,
-      clean: event.wasClean,
-      reason: event.reason || "",
-    });
-    scheduleReconnect();
+  socket.addEventListener("error", () => log("x_6551_websocket_error"));
+  socket.addEventListener("close", ({ code }) => {
+    clearTimeout(deadline);
+    clearInterval(heartbeat);
+    activeSocket = undefined;
+    if (stopping) return;
+    if (once && subscribed) return;
+    markHealth("closed", "6551 websocket closed, code=" + code);
+    log("x_6551_websocket_closed", { code });
+    if (once) process.exitCode = 1;
+    else scheduleReconnect(url);
   });
 }
 
-async function main() {
-  await loadEnvFile(resolve(process.cwd(), ".env.local"));
-  await loadEnvFile(resolve(process.cwd(), ".env"));
-
-  const once = process.argv.includes("--once");
-  markHealth("starting", "X pipeline starting");
-  await syncConfiguredAccounts();
-
-  if (once) {
-    markHealth("live", "X pipeline account sync completed");
-    return;
+function stop() {
+  stopping = true;
+  clearTimeout(reconnectTimer);
+  if (activeSocket?.readyState < WebSocket.CLOSING) {
+    activeSocket.close(1000, "shutdown");
   }
-
-  accountSyncTimer = setInterval(() => {
-    void syncConfiguredAccounts().catch((error) => {
-      markHealth("error", `account sync failed: ${String(error)}`);
-      log("x_account_sync_failed", { error: String(error) });
-    });
-  }, ACCOUNT_SYNC_INTERVAL_MS);
-
-  connectUpstream();
 }
 
-process.on("SIGINT", () => {
-  if (accountSyncTimer) clearInterval(accountSyncTimer);
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  closeActiveSocket();
-  process.exit(0);
-});
+process.once("SIGINT", stop);
+process.once("SIGTERM", stop);
 
-process.on("SIGTERM", () => {
-  if (accountSyncTimer) clearInterval(accountSyncTimer);
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  closeActiveSocket();
-  process.exit(0);
-});
-
-main().catch((error) => {
-  markHealth("error", String(error));
-  log("x_pipeline_worker_failed", { error: String(error) });
-  process.exit(1);
-});
+try {
+  for (const path of [".env.local", ".env"]) {
+    if (existsSync(path)) process.loadEnvFile(path);
+  }
+  if (isX6551WsEnabled()) {
+    const token = get6551TwitterToken();
+    const url = new URL(get6551TwitterWebSocketUrl());
+    if (!token || url.protocol !== "wss:") throw new Error("Invalid 6551 WSS configuration");
+    url.searchParams.set("token", token);
+    connectUpstream(url);
+  } else {
+    log("x_6551_paused");
+  }
+} catch {
+  log("x_6551_startup_failed");
+  process.exitCode = 1;
+}

@@ -124,11 +124,13 @@ export async function runXOwnedReaderCycle({accounts,config,db=getXPipelineDb(),
           audited=complete985Audit(event,items,auditEvidence,db,checkedAt,liveAuditSince!);
           if(event.complete || (typeof event.pages==='number' && event.pages>0))record985PostRecheckAttempt(username,db,nowMs,checkedAt);
           if(event.complete) {
-            const exists=db.prepare("select 1 from x_feed where id=?");
-            for(const item of items) {
-              if(exists.get(item.id)) continue;
+            const lookup = db.prepare("select first_source, content_source, content_complete from x_feed where id=?");
+            for (const item of items) {
+              const existing = lookup.get(item.id);
+              const cameFrom6551 = existing?.first_source === "6551" || existing?.content_source === "6551";
+              if (existing && (!cameFrom6551 || existing.content_complete === 1)) continue;
               upsertXPipelineRealtimeUpdate({eventType:item.eventType || (item.quotedTweet ? "NEW_TWEET_QUOTE" : "NEW_TWEET"),account:username,displayName:item.displayName,createdAt:item.createdAt,profileUrl:item.profileUrl,remark:"owned-reader",feedItem:item},db);
-              recovered++;
+              if (!existing) recovered++;
             }
           }
           if(audited.promotedIds.length) recordXOwnedReaderRoutes(usernames,config,db,nowMs);

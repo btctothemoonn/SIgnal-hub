@@ -145,7 +145,12 @@ export function mergeXFeedItems(existing: TwitterFeedItem | null, input: XFeedWi
   const sameText = incoming.text === prior.text;
   let retainOriginal = staleTranslation || rank < 0 || revision === -1;
   if (!retainOriginal && !sameText && revision !== 1 && rank <= 0) {
-    retainOriginal = prior.contentSource === "monitor985" && incoming.contentSource !== "monitor985" ||
+    const involves6551Wss = prior.firstSource === "6551" ||
+      prior.queryLabel.startsWith("6551 WSS / ") || incoming.queryLabel.startsWith("6551 WSS / ");
+    const priorPrefix = prior.text.replace(/(?:\.\.\.|…)(?:\s+https?:\/\/\S+)?$/, "").trimEnd();
+    const extendsPrior = incoming.text.length > prior.text.length && incoming.text.startsWith(priorPrefix);
+    retainOriginal = (involves6551Wss && prior.contentSource !== incoming.contentSource && !extendsPrior) ||
+      prior.contentSource === "monitor985" && incoming.contentSource !== "monitor985" ||
       (prior.contentComplete === true && incoming.contentSource !== "monitor985");
   }
   // A partial observation cannot supersede a complete body even if it carries a

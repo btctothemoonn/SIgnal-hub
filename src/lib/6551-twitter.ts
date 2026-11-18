@@ -7,6 +7,7 @@ import {
 } from "./runtime-config.ts";
 import { createSnapshotCache } from "./snapshot-cache.ts";
 import { isXPipelineEnabled } from "./x-pipeline-config.ts";
+import { isLikelyAbruptlyCutText, isCompleteReferencedTweet } from "./x-hybrid-tweet-quality.ts";
 import {
   deletePersistedTwitterSnapshot,
   mergePersistedRealtimeTwitterUpdate,
@@ -158,6 +159,7 @@ export type TwitterQuotedTweet = {
 
 export type TwitterFeedItem = {
   id: string;
+  firstSource?: string;
   lowFrequencyCollectedAt?: string;
   text: string;
   createdAt: string;
@@ -781,6 +783,60 @@ function buildRealtimeSummary(
   }
 
   return `@${account} 触发了 ${getEventTypeLabel(eventType)} 事件`;
+}
+
+// The persistent collector only accepts real posts with a lossless X ID.
+export function normalize6551PushedTweet(payload: unknown): TwitterRealtimeUpdate | null {
+  if (!isRecord(payload)) return null;
+  const params = payload as RawRealtimeEventParams;
+  const upstreamType = pickString(params.eventType);
+  if (!TWEET_EVENT_TYPES.has(upstreamType)) return null;
+
+  const account = sanitizeUsername(pickString(params.twAccount));
+  if (!/^[a-z0-9_]{1,15}$/i.test(account)) return null;
+
+  let rawContent = params.content;
+  if (typeof rawContent === "string") {
+    try {
+      rawContent = JSON.parse(rawContent);
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(rawContent)) return null;
+  if (typeof rawContent.id === "number" && !Number.isSafeInteger(rawContent.id)) return null;
+  const id = toId(rawContent.id);
+  if (!/^[1-9]\d{0,19}$/.test(id)) return null;
+
+  const rawTweet = rawContent as RawTweet;
+  const timestamp = Date.parse(pickString(rawTweet.createdAt));
+  if (!Number.isFinite(timestamp)) return null;
+  const createdAt = new Date(timestamp).toISOString();
+  const eventType = upstreamType !== "CA" ? upstreamType
+    : rawContent.isReply === true ? "NEW_TWEET_REPLY"
+    : rawContent.isQuote === true ? "NEW_TWEET_QUOTE" : "NEW_TWEET";
+  const feedItem = normalizeTweet({
+    ...rawTweet,
+    id,
+    twAccount: account,
+    twUserName: pickString(params.twUserName, account),
+    profileUrl: pickString(params.profileUrl, rawTweet.profileUrl),
+    createdAt,
+  }, "watch", "6551 WSS / " + getEventTypeLabel(eventType));
+  if (!feedItem || feedItem.username.toLowerCase() !== account.toLowerCase()) return null;
+
+  const needsContext = eventType === "NEW_TWEET_REPLY" || eventType === "NEW_TWEET_QUOTE" || Boolean(feedItem.quotedTweet);
+  const contentComplete = rawContent.truncated !== true && !isLikelyAbruptlyCutText(feedItem.text) &&
+    (!needsContext || isCompleteReferencedTweet(feedItem.quotedTweet));
+  return {
+    eventType,
+    account,
+    displayName: feedItem.displayName,
+    createdAt,
+    profileUrl: feedItem.profileUrl,
+    feedItem: { ...feedItem, contentSource: "6551", contentComplete },
+    remark: "6551 WSS",
+  };
 }
 
 export async function normalize6551RealtimeEvent(

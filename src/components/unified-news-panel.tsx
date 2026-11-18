@@ -82,6 +82,7 @@ const SIGNAL_FEED_COLLECTOR_OPTIONS: Array<{
   label: string;
 }> = [
   { id: "all", label: "全部" },
+  { id: "6551", label: "6551" },
   { id: "monitor985", label: "985" },
   { id: "owned-reader", label: "VPS" },
 ];
@@ -450,7 +451,7 @@ function toUnifiedTwitterItems(
       lowFrequencyCollectedAt: tweet.lowFrequencyCollectedAt,
       eventType: tweet.eventType ?? null,
       sourceLabel:
-        source === "truth" ? "Truth" : source === "monitor985" ? "X · 985 采集" : source === "owned-reader" ? "X · VPS 采集" : "X · 6551 历史",
+        source === "truth" ? "Truth" : `X · ${getXSourceBadgeLabel(source)}`,
       title: tweet.displayName || `@${displayUsername}`,
       titleUrl: tweet.profileUrl,
       subtitle: formatXAuthorSubtitle(displayUsername, tweet.queryLabel),
@@ -599,6 +600,7 @@ type PendingFeedNavigation =
 const SOURCE_ICON: Record<string, { letter: string; tone: string }> = {
   telegram: { letter: "T", tone: "bg-info text-background" },
   x: { letter: "X", tone: "bg-foreground text-background" },
+  "6551": { letter: "X", tone: "bg-info text-background" },
   monitor985: { letter: "985", tone: "bg-accent text-accent-contrast" },
   "owned-reader": { letter: "X", tone: "bg-info text-background" },
   truth: { letter: "TS", tone: "bg-foreground text-background" },

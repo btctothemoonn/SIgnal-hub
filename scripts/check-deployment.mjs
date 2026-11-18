@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
 import { ADMIN_SESSION_COOKIE, createAdminSessionToken } from "../src/lib/admin-auth.ts";
 import { webPushHealthItem } from "../src/lib/system-health.ts";
+import { isX6551WsEnabled } from "../src/lib/x-pipeline-config.ts";
+import { getXPipelineHealth } from "../src/lib/x-pipeline-store.ts";
 import { evaluateOwnedReaderReadiness } from "./owned-reader-readiness.mjs";
 
 if (existsSync(".env.local")) process.loadEnvFile(".env.local");
@@ -42,6 +44,11 @@ for (let attempt = 0; attempt < 15 && Date.now() < readinessDeadline; attempt +=
     const login = await fetch(`${base}/login`, { signal: AbortSignal.timeout(5000) });
     if (!login.ok) throw new Error(`login HTTP ${login.status}`);
     if (process.env.WEB_PUSH_ENABLED === "true" && webPushHealthItem().status !== "ok") throw new Error("push_readiness_failed");
+    if (isX6551WsEnabled()) {
+      const wss = getXPipelineHealth("6551-wss");
+      const subscribed = wss?.status === "subscribed" || wss?.status === "live";
+      if (!subscribed || wss.updatedAt < activatedAt) throw new Error("6551_wss_subscription_not_ready");
+    }
     await waitForOwnedReader();
     console.log("Deployment ready: authenticated feed and login page respond successfully.");
     process.exit(0);

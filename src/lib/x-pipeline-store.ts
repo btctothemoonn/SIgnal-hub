@@ -10,6 +10,7 @@ import type {
   TwitterWatchAccount,
 } from "@/lib/6551-twitter";
 import type { TranslationNote } from "./translate.ts";
+import { classifyXFeedSource } from "./x-feed-source.ts";
 import { get985FailoverStatus } from './x-985-failover.ts';
 import { getXOwnedReaderConfig } from './x-owned-reader-config.ts';
 import {
@@ -30,6 +31,7 @@ import {
 import {
   getXPipelineConfig,
   getXPipelineTrackedKeywords,
+  isX6551WsEnabled,
   hasXPipelineDataSource,
 } from "./x-pipeline-config.ts";
 
@@ -582,7 +584,8 @@ export function initXPipelineDb(db: DatabaseSync) {
       remark text not null default '',
       raw_json text not null default '{}',
       inserted_at text not null,
-      updated_at text not null
+      updated_at text not null,
+      first_source text
     );
 
     create table if not exists x_health (
@@ -673,6 +676,16 @@ export function initXPipelineDb(db: DatabaseSync) {
   const feedColumns = new Set(db.prepare("pragma table_info(x_feed)").all().map((row) => row.name));
   for (const [name, sqlType] of [["content_source", "text"], ["content_complete", "integer"], ["content_version", "text"], ["low_frequency_collected_at", "text"]]) {
     if (!feedColumns.has(name)) db.exec(`alter table x_feed add column ${name} ${sqlType}`);
+  }
+  if (!feedColumns.has("first_source")) {
+    try {
+      db.exec("alter table x_feed add column first_source text");
+    } catch (error) {
+      // Several workers can open the same pre-rollout database at startup.
+      if (!db.prepare("pragma table_info(x_feed)").all().some((row) => row.name === "first_source")) {
+        throw error;
+      }
+    }
   }
   db.exec("create index if not exists x_feed_display_time_idx on x_feed(coalesce(low_frequency_collected_at, created_at) desc, updated_at desc)");
 }
@@ -967,6 +980,18 @@ function upsertFeedItem(
     // which already have an outer transaction.
     db.prepare("update x_feed set id = id where id = ?").run(feedItem.id);
     let existing = getXPipelineFeedItem(feedItem.id, db);
+    const incomingSource = classifyXFeedSource(observedItem);
+    let firstSource = existing ? classifyXFeedSource(existing) : incomingSource;
+    if (existing && !existing.firstSource && firstSource !== "truth") {
+      const earliest = db.prepare(`
+        select source from x_feed_observations where tweet_id = ?
+        order by first_seen_at, (source = ?) desc, source limit 1
+      `).get(feedItem.id, firstSource === "x" ? "6551" : firstSource);
+      if (earliest) {
+        firstSource = earliest.source === "monitor985" || earliest.source === "owned-reader" ? earliest.source : "x";
+      }
+    }
+    const involves6551Wss = firstSource === "6551" || incomingSource === "6551";
     const cachedQuote = feedItem.quotedTweet?.id ? getXPipelineQuotedTweet(feedItem.quotedTweet.id, db) : null;
     if (isStaleXFeedTranslation(existing, feedItem)) {
       // Reject stale model input before it can participate in either the root
@@ -1003,7 +1028,9 @@ function upsertFeedItem(
     const usefulTranslation = isUsefulTranslation(feedItem.text, feedItem.translation)
       ? feedItem.translation
       : null;
-    const createdAt = isoDateString(feedItem.createdAt);
+    const createdAt = isoDateString((involves6551Wss && existing?.createdAt) || feedItem.createdAt);
+    const storedEventType = involves6551Wss && eventType === "NEW_TWEET" && existing?.eventType
+      ? existing.eventType : eventType;
     run(db.prepare(`
       insert into x_feed_observations(tweet_id, source, author_username, first_seen_at, last_seen_at, content_complete)
       values (?, ?, ?, ?, ?, ?)
@@ -1025,9 +1052,9 @@ function upsertFeedItem(
             user_avatar, tweet_url, text, created_at, event_type, origin,
             query_label, hashtags_json, likes, retweets, replies, quotes, views,
             media_json, quoted_tweet_json, translation_json, remark, raw_json,
-            inserted_at, updated_at, content_source, content_complete, content_version, low_frequency_collected_at
+            inserted_at, updated_at, content_source, content_complete, content_version, low_frequency_collected_at, first_source
           )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict(id) do update set
           account_username_key = excluded.account_username_key,
           username = excluded.username,
@@ -1064,6 +1091,7 @@ function upsertFeedItem(
           content_source = excluded.content_source,
           content_complete = excluded.content_complete,
           content_version = excluded.content_version,
+          first_source = coalesce(x_feed.first_source, excluded.first_source),
           updated_at = excluded.updated_at
       `),
       feedItem.id,
@@ -1075,7 +1103,7 @@ function upsertFeedItem(
       feedItem.tweetUrl || fallbackProfileUrl(username),
       feedItem.text,
       createdAt,
-      eventType,
+      storedEventType,
       feedItem.origin,
       feedItem.queryLabel,
       jsonString(feedItem.hashtags),
@@ -1095,6 +1123,7 @@ function upsertFeedItem(
       feedItem.contentComplete === undefined ? null : feedItem.contentComplete ? 1 : 0,
       feedItem.contentVersion || null,
       observedItem.lowFrequencyCollectedAt ?? null,
+      firstSource,
     );
 
     run(
@@ -1191,17 +1220,19 @@ export function upsertXPipelineRealtimeUpdate(
   update: TwitterRealtimeUpdate,
   db = getXPipelineDb(),
 ) {
-  upsertXPipelineAccount(
-    {
-      username: update.account || update.feedItem.username,
+  const username = update.account || update.feedItem.username;
+  const preservesAccount = classifyXFeedSource(update.feedItem) === "6551" &&
+    db.prepare("select 1 from x_accounts where username_key = ?").get(accountKey(username));
+  if (!preservesAccount) {
+    upsertXPipelineAccount({
+      username,
       name: update.displayName || update.feedItem.displayName,
       profileUrl: update.profileUrl || update.feedItem.profileUrl,
       avatar: update.feedItem.userAvatar,
       note: update.remark || "",
       tags: [],
-    },
-    db,
-  );
+    }, db);
+  }
   upsertFeedItem(
     update.feedItem,
     update.eventType,
@@ -1435,6 +1466,7 @@ function toFeedItem(row: DbRow): TwitterFeedItem {
     origin: stringValue(row.origin) === "search" ? "search" : "watch",
     queryLabel: stringValue(row.query_label),
     eventType: stringValue(row.event_type),
+    ...(nullableString(row.first_source) ? { firstSource: stringValue(row.first_source) } : {}),
     ...(nullableString(row.content_source) ? { contentSource: stringValue(row.content_source) } : {}),
     ...(row.content_complete === 0 || row.content_complete === 1 ? { contentComplete: row.content_complete === 1 } : {}),
     ...(nullableString(row.content_version) ? { contentVersion: stringValue(row.content_version) } : {}),
@@ -1529,7 +1561,9 @@ export function getXPipelineSnapshot(
     trackedKeywords: getXPipelineTrackedKeywords(),
     feed,
     note:
-      "X 信息流由 985 与 VPS 采集写入本地数据库。",
+      (isX6551WsEnabled()
+        ? "X 信息流由 6551 实时推送、985 与 VPS 采集写入本地数据库。"
+        : "X 信息流由 985 与 VPS 采集写入本地数据库。"),
     errors,
   };
 }

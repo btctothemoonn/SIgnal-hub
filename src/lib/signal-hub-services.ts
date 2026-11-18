@@ -1,4 +1,4 @@
-import { isXHybridEnabled } from "./x-pipeline-config.ts";
+import { isX6551WsEnabled, isXHybridEnabled } from "./x-pipeline-config.ts";
 
 export type SignalHubSystemdService = {
   name: string;
@@ -8,6 +8,7 @@ export type SignalHubSystemdService = {
 };
 
 export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
+  { name: "signal-hub-x-pipeline", label: "6551 实时推送", category: "collector", required: false },
   { name: "signal-hub-x-owned-reader", label: "X VPS 采集", category: "collector", required: false },
   { name: "signal-hub-web-push", label: "重要通知", category: "collector", required: false },
   {
@@ -85,6 +86,7 @@ export const SIGNAL_HUB_SYSTEMD_SERVICES: SignalHubSystemdService[] = [
 ];
 
 export function isSignalHubServiceEnabled(name: string, env: Record<string, string | undefined> = process.env) {
+  if (name === "signal-hub-x-pipeline") return isX6551WsEnabled(env);
   if (name === "signal-hub-x-hybrid") return isXHybridEnabled(env);
   if (name === "signal-hub-x-owned-reader") {
     return ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || "");

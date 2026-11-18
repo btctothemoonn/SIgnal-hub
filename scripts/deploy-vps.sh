@@ -86,6 +86,17 @@ if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(proce
   scripts+=(web-push-worker.mjs)
 fi
 
+wss_enabled=0
+wss_was_active=0
+wss_was_enabled=0
+if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1","true","yes","on"].includes((process.env.X_6551_WS_ENABLED||"").trim().toLowerCase()) ? 0 : 1)'; then
+  wss_enabled=1
+  services+=(signal-hub-x-pipeline)
+  scripts+=(x-pipeline-worker.mjs)
+  if systemctl is-active --quiet signal-hub-x-pipeline; then wss_was_active=1; fi
+  if systemctl is-enabled --quiet signal-hub-x-pipeline; then wss_was_enabled=1; fi
+fi
+
 owned_reader_enabled=0
 if "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1", "true", "yes", "on"].includes((process.env.X_OWNED_READER_ENABLED || "").trim().toLowerCase()) ? 0 : 1)'; then
   owned_reader_enabled=1
@@ -126,6 +137,13 @@ rollback() {
     for index in "${!services[@]}"; do
       service="${services[$index]}"
       if [[ "$service" == "signal-hub-web" ]]; then continue; fi
+      if [[ "$service" == "signal-hub-x-pipeline" ]]; then
+        if [[ "$wss_was_enabled" == 0 ]]; then sudo systemctl disable "$service" || true; fi
+        if [[ "$wss_was_active" == 0 ]]; then
+          sudo systemctl stop "$service" || true
+          continue
+        fi
+      fi
       if [[ -f "$previous_release/scripts/${scripts[$index]}" ]]; then
         rollback_services+=("$service")
       else
@@ -205,7 +223,7 @@ sudo systemctl daemon-reload
 if [[ "$hybrid_enabled" == "0" ]] && systemctl cat signal-hub-x-hybrid >/dev/null 2>&1; then
   sudo systemctl disable --now signal-hub-x-hybrid
 fi
-if ! "$NODE_BIN" --env-file-if-exists="$APP_DIR/.env.local" -e 'process.exit(["1","true","yes","on"].includes((process.env.TWITTER_CONNECTOR_ENABLED||"").trim().toLowerCase()) ? 0 : 1)' && systemctl cat signal-hub-x-pipeline >/dev/null 2>&1; then
+if [[ "$wss_enabled" == "0" ]] && systemctl cat signal-hub-x-pipeline >/dev/null 2>&1; then
   sudo systemctl disable --now signal-hub-x-pipeline
 fi
 sudo systemctl enable "${services[@]}" >/dev/null

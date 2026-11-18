@@ -57,8 +57,13 @@ export function isXHybridEnabled(env: Record<string, string | undefined> = proce
 export function hasXPipelineDataSource(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return (isXPipelineEnabled(env) && hasXPipelineToken(env)) || isMonitor985Enabled(env) ||
+  return ((isXPipelineEnabled(env) || isX6551WsEnabled(env)) && hasXPipelineToken(env)) || isMonitor985Enabled(env) ||
     ["1", "true", "yes", "on"].includes(env.X_OWNED_READER_ENABLED?.trim().toLowerCase() || "");
+}
+
+export function isX6551WsEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  const raw = env.X_6551_WS_ENABLED?.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(raw || "");
 }
 
 export function isXPipelineEnabled(env: Record<string, string | undefined> = process.env): boolean {

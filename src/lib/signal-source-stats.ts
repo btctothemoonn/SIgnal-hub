@@ -10,6 +10,7 @@ type MinimalXFeedItem = {
   username?: string;
   queryLabel?: string;
   contentSource?: string;
+  firstSource?: string;
 };
 
 type MinimalXSnapshot = {
@@ -44,7 +45,7 @@ export function buildSignalSourceStats(input: {
       counts[classifyXFeedSource(item)] += 1;
       return counts;
     },
-    { x: 0, monitor985: 0, "owned-reader": 0, truth: 0 },
+    { x: 0, "6551": 0, monitor985: 0, "owned-reader": 0, truth: 0 },
   );
 
   return {
@@ -54,11 +55,11 @@ export function buildSignalSourceStats(input: {
     telegramItems: Array.isArray(input.telegram.feed)
       ? input.telegram.feed.length
       : 0,
-    xItems: sourceCounts.x + sourceCounts["owned-reader"],
+    xItems: sourceCounts.x + sourceCounts["6551"] + sourceCounts["owned-reader"],
     monitor985Items: sourceCounts.monitor985,
     truthItems: sourceCounts.truth,
     telegramStatus: normalizeStatus(input.telegram.status, true),
-    xStatus: normalizeStatus(input.x.status, sourceCounts.x + sourceCounts["owned-reader"] > 0),
+    xStatus: normalizeStatus(input.x.status, sourceCounts.x + sourceCounts["6551"] + sourceCounts["owned-reader"] > 0),
     truthStatus: sourceCounts.truth > 0 ? "在线" : "待信号",
   };
 }

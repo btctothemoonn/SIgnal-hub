@@ -4,7 +4,7 @@
 
 现行数据流：
 
-- X：985 采集加上 Linux VPS 自有读者。`TWITTER_CONNECTOR_ENABLED` 和 `X_HYBRID_ENABLED` 关闭，`X_OWNED_READER_ENABLED` 开启。作者数量以生产库和 `/api/x/coverage` 为准，不是旧文档里的「7 位 VPS / 42 位 985」。
+- X：`X_6551_WS_ENABLED` 控制 6551 实时推送，985 和 Linux VPS 自有读者用于核对补漏。三路按推文 ID 合并，保留首采来源。`TWITTER_CONNECTOR_ENABLED` 和 `X_HYBRID_ENABLED` 关闭，自有读者在生产维持 16 分钟间隔。作者数量以生产库和 `/api/x/coverage` 为准。
 - 自有读者未设置 `X_OWNED_READER_INTERVAL_MS` 时默认 10 分钟，代码下限 5 分钟。生产环境使用 600000。不要把间隔改到 10 分钟以下。回复补采使用主帖之后剩下的请求，不单独加大请求量。
 - Telegram：MTProto 用户会话和独立 worker。
 - AI：只使用 MiniMax-M3。不要恢复 DeepSeek，也不要加付费回退。
