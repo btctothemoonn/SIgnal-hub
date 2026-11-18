@@ -2,6 +2,7 @@ import { createBinanceFuturesClient, type BinanceMarketClient } from "./market-a
 import { isStableOrFiatBase } from "./market-alerts-core.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 import type { EnvLike } from "./important-push-types.ts";
+import { AiProvidersBlockedError, isQuotaExhaustedError } from "./ai-provider-fallback.ts";
 import { generateSignalNote } from "./market-signals-ai.ts";
 import { ALERT_OUTCOME_BAR_MS, fillAlertOutcome, seedFromEvent, type AlertOutcomeRow } from "./market-alert-outcomes.ts";
 import {
@@ -34,7 +35,8 @@ const ALERT_OUTCOME_SEED_PAGES = 20;
 const ALERT_OUTCOME_FINAL_MS = 24 * HOUR_MS;
 // Positioning is read a few minutes after each hour so the 1h bar and OI point have settled.
 const POSITIONING_SETTLE_MS = 3 * 60_000;
-const SYMBOL_CLASS_REFRESH_MS = 6 * HOUR_MS;
+// Keep the official classification current for newly listed contracts.
+const SYMBOL_CLASS_REFRESH_MS = 15 * 60_000;
 
 type AlertsStore = ReturnType<typeof openMarketAlertsStore>;
 
@@ -61,13 +63,14 @@ async function runPullbackChecks(input: {
   nowMs: number;
   rules: MarketSignalRules;
   result: MarketSignalsCycleResult;
+  coinSymbols: Set<string>;
 }) {
-  const { alerts, signals, client, nowMs, rules, result } = input;
-  if (!client.getKlinesSince) return;
+  const { alerts, signals, client, nowMs, rules, result, coinSymbols } = input;
+  if (!client.getKlinesSince || !coinSymbols.size) return;
   const since = new Date(nowMs - rules.pullbackWindowMs - HOUR_MS).toISOString();
   const events = alerts
     .getMarketAlertsSnapshot({ type: "volatility", from: since, limit: 200, now: new Date(nowMs).toISOString() })
-    .events.filter((event) => event.side === "LONG");
+    .events.filter((event) => event.side === "LONG" && coinSymbols.has(event.symbol));
   const statuses = signals.anchorStatuses(events.map((event) => event.id));
   const open = events.filter((event) => !statuses.has(event.id));
   result.anchors = open.length;
@@ -249,9 +252,10 @@ async function runPositioning(input: {
   nowMs: number;
   rules: MarketSignalRules;
   result: MarketSignalsCycleResult;
+  coinSymbols: Set<string>;
 }) {
-  const { signals, client, nowMs, rules, result } = input;
-  if (!client.getKlinesSince || !client.getHourlyOpenInterest || !client.getPremiumIndex) return;
+  const { signals, client, nowMs, rules, result, coinSymbols } = input;
+  if (!client.getKlinesSince || !client.getHourlyOpenInterest || !client.getPremiumIndex || !coinSymbols.size) return;
   // The last fully closed hourly bar opened one hour before the current hour.
   const hourMs = Math.floor((nowMs - POSITIONING_SETTLE_MS) / HOUR_MS) * HOUR_MS - HOUR_MS;
   const meta = signals.readMeta();
@@ -266,7 +270,7 @@ async function runPositioning(input: {
   const universe = tickers
     .filter((row) => Number(row.quoteVolume) >= rules.positioningMinQuoteVolume)
     .map((row) => String(row.symbol))
-    .filter((symbol) => !excludedSymbol(symbol));
+    .filter((symbol) => coinSymbols.has(symbol) && !excludedSymbol(symbol));
 
   let volatile = 0, coil = 0, stored = 0;
   for (const symbol of universe) {
@@ -329,7 +333,7 @@ async function runNotes(input: {
 }) {
   const { alerts, signals, nowMs, rules, result } = input;
   const generate = input.generate ?? generateSignalNote;
-  const pending = signals.pendingNotes(["pullback_long", "coil_watch"], nowMs - rules.aiNoteWindowMs, rules.aiMaxAttempts, rules.aiNotesPerCycle);
+  const pending = signals.pendingNotes(nowMs, nowMs - rules.aiNoteWindowMs, rules.aiMaxAttempts, rules.aiNotesPerCycle);
   for (const signal of pending) {
     let note: string | null = null;
     try {
@@ -337,8 +341,10 @@ async function runNotes(input: {
         .getMarketAlertsSnapshot({ symbol: signal.symbol, from: new Date(nowMs - 24 * HOUR_MS).toISOString(), limit: 12, now: new Date(nowMs).toISOString() })
         .events.map((event) => ({ occurredAt: event.occurredAt, stage: event.stage, level: event.level, changePct: event.changePct === null ? null : Math.round(event.changePct * 10) / 10 }));
       note = await generate({ context: { signal, recentEvents }, env: input.env });
+      if (note === null) break;
     } catch (error) {
-      result.errors.push(`note ${signal.symbol}: ${safeError(error)}`);
+      if (error instanceof AiProvidersBlockedError || isQuotaExhaustedError(error) || /\bHTTP 429\b/.test(safeError(error))) break;
+      result.errors.push("note " + signal.symbol + ": " + safeError(error));
     }
     signals.recordNoteAttempt(signal.id, note);
     if (note) result.notes += 1;
@@ -365,7 +371,13 @@ export async function runMarketSignalsCycle(input: {
     positioning: null, notes: 0, errors: [],
   };
   try {
-    await runPullbackChecks({ alerts, signals, client, nowMs, rules, result });
+    try {
+      await refreshSymbolClasses({ signals, client, nowMs });
+    } catch (error) {
+      result.errors.push(`symbol classes: ${safeError(error)}`);
+    }
+    const coinSymbols = signals.readCoinSymbols();
+    await runPullbackChecks({ alerts, signals, client, nowMs, rules, result, coinSymbols });
     await runOutcomes({ signals, client, nowMs, rules, result });
     try {
       await runAlertOutcomes({ alerts, signals, client, nowMs, result });
@@ -373,14 +385,9 @@ export async function runMarketSignalsCycle(input: {
       result.errors.push(`alert outcomes: ${safeError(error)}`);
     }
     try {
-      await runPositioning({ signals, client, nowMs, rules, result });
+      await runPositioning({ signals, client, nowMs, rules, result, coinSymbols });
     } catch (error) {
       result.errors.push(`positioning: ${safeError(error)}`);
-    }
-    try {
-      await refreshSymbolClasses({ signals, client, nowMs });
-    } catch (error) {
-      result.errors.push(`symbol classes: ${safeError(error)}`);
     }
     if (rules.aiEnabled) await runNotes({ alerts, signals, nowMs, rules, result, env, generate: input.generateNote });
     signals.markCycle({ nowMs, error: result.errors.length ? result.errors.slice(0, 3).join("; ") : null });

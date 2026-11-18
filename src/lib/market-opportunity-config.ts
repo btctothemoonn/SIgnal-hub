@@ -1,3 +1,7 @@
+export function isMarketLegacyAiEnabled(env: Record<string, string | undefined> = process.env) {
+  return env.MARKET_LEGACY_AI_ENABLED?.trim().toLowerCase() === "true";
+}
+
 export const MARKET_OPPORTUNITY_RULES = {
   observeScore: 70,
   actionableScore: 80,

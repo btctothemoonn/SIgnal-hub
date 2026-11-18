@@ -1,5 +1,5 @@
 import { getAlphaSummaryProviderCandidates } from "./alpha-summary.ts";
-import { runWithAiProviderFallback, type AiProviderConfig } from "./ai-provider-fallback.ts";
+import { aiChatResponseError, runWithAiProviderFallback, type AiProviderConfig } from "./ai-provider-fallback.ts";
 import type { EnvLike } from "./important-push-types.ts";
 import type { MarketSignal } from "./market-signals.ts";
 
@@ -77,8 +77,12 @@ export async function generateSignalNote(input: {
         }),
         signal: AbortSignal.timeout(30_000),
       });
-      const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!response.ok) throw new Error(`Signal note AI HTTP ${response.status}`);
+      const raw = await response.text();
+      let body: Record<string, unknown> = {};
+      try { body = JSON.parse(raw) ?? {}; }
+      catch { if (!response.ok) body = { message: raw }; }
+      const providerError = aiChatResponseError(body, response.status, "Signal note AI");
+      if (providerError) throw providerError;
       const choices = Array.isArray(body.choices) ? body.choices : [];
       const message = (choices[0] as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined;
       const content = typeof message?.content === "string" ? message.content : "";

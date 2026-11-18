@@ -23,7 +23,7 @@ try {
     market = openMarketAlertsStore();
     hynix = openHynixPremiumPushStore();
     signals = openMarketSignalsStore();
-    const marketSource = createMarketPushSource(market), newsSource = createNewsPushSource(), hynixSource = createHynixPushSource(hynix), signalsSource = createSignalsPushSource(signals); const sender = createWebPushSender(config);
+    const marketSource = createMarketPushSource(market, signals), newsSource = createNewsPushSource(), hynixSource = createHynixPushSource(hynix), signalsSource = createSignalsPushSource(signals); const sender = createWebPushSender(config);
     let nextNewsAt = 0;
     do {
       const nowMs = Date.now();

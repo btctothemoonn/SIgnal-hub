@@ -68,10 +68,11 @@ try {
   store.commitSqueezePushScan({ pushObservations: [squeeze({})], scannedAt: pushNow });
   const episode = store.getMarketPushBaseline().episodes[0];
   const event = { source: 'market', episodeId: episode.episodeId, stage: 'squeeze_acceleration', expiresAt: new Date(pushNowMs + 120000).toISOString() };
-  assert.equal(createMarketPushSource(store).revalidate(event, pushNowMs), true);
+  assert.equal(createMarketPushSource(store, { isCoinSymbol: () => false }).revalidate(event, pushNowMs), false, "non-crypto market notifications are blocked before delivery");
+  assert.equal(createMarketPushSource(store, { isCoinSymbol: () => true }).revalidate(event, pushNowMs), true);
   const stale = squeeze({ candleWindow: { ...candleWindow, openAt: oldAt, closeAt: new Date(pushNowMs - 3300001).toISOString() } });
   // Simulate a persisted older producer claiming qualification: sender must check its evidence again.
   store.commitSqueezePushScan({ pushObservations: [{ ...stale, scanId: 'stale-persisted', classification: 'qualified' }], scannedAt: pushNow });
-  assert.equal(createMarketPushSource(store).revalidate(event, pushNowMs), false);
+  assert.equal(createMarketPushSource(store, { isCoinSymbol: () => true }).revalidate(event, pushNowMs), false);
 } finally { store.close(); }
 console.log('market push source freshness regressions passed');

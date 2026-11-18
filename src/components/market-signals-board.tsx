@@ -32,6 +32,19 @@ function base(symbol: string) {
   return symbol.replace(/USDT$/, "");
 }
 
+function MarketSymbolLink({ symbol, className }: { symbol: string; className: string }) {
+  return (
+    <Link
+      href={`/news?symbol=${encodeURIComponent(symbol)}`}
+      prefetch={false}
+      aria-label={`查看 ${base(symbol)} 实时行情`}
+      className={`${className} hover:text-accent hover:underline`}
+    >
+      {base(symbol)}
+    </Link>
+  );
+}
+
 function clock(value: string | null | undefined) {
   if (!value) return "—";
   const date = new Date(value);
@@ -203,7 +216,7 @@ function PullbackCard({ signal, ticker, nowMs, asset }: { signal: BoardSignal; t
   return (
     <article id={`signal-${signal.symbol}`} className="rounded-md border border-line border-l-[3px] border-l-success bg-workspace-surface-raised p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5"><span className="font-mono text-sm font-bold text-foreground">{base(signal.symbol)}</span><AssetBadge type={asset} /></span>
+        <span className="flex items-center gap-1.5"><MarketSymbolLink symbol={signal.symbol} className="font-mono text-sm font-bold text-foreground" /><AssetBadge type={asset} /></span>
         <span className="rounded-full bg-success-soft px-2 py-0.5 text-[11px] font-semibold text-success">回调买点</span>
       </div>
       <dl className="mt-2 grid grid-cols-3 gap-1 text-[11px] text-muted">
@@ -225,7 +238,7 @@ function WatchRow({ signal, nowMs, asset }: { signal: BoardSignal; nowMs: number
   return (
     <li className="px-3 py-1.5 text-xs">
       <div className="flex items-center justify-between gap-2">
-      <span className="flex min-w-0 items-center gap-1"><span className="truncate font-mono font-semibold text-foreground">{base(signal.symbol)}</span><AssetBadge type={asset} /></span>
+      <span className="flex min-w-0 items-center gap-1"><MarketSymbolLink symbol={signal.symbol} className="min-w-0 truncate font-mono font-semibold text-foreground" /><AssetBadge type={asset} /></span>
       <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] text-muted">
         <span title="OI 24h 变化">OI {pct(num(signal.detail, "oi24hPct"), 0)}</span>
         <span title="资金费率" className={funding !== null && funding < 0 ? "text-danger" : undefined}>
@@ -248,9 +261,10 @@ type CoinRow = {
   pullback: BoardSignal | undefined;
 };
 
-function rowTag(row: CoinRow, btcWarning: boolean, maxPre24hPct: number) {
-  if (row.pullback && !row.pullback.outcome) return { label: "回调买点", className: "bg-success-soft text-success" };
+function rowTag(row: CoinRow, isCoin: boolean, btcWarning: boolean, maxPre24hPct: number) {
   const direction = directionOf(row.latest);
+  if (!isCoin) return { label: direction === "up" ? "暴涨" : direction === "down" ? "暴跌" : "轧空", className: "bg-workspace-canvas text-muted" };
+  if (row.pullback && !row.pullback.outcome) return { label: "回调买点", className: "bg-success-soft text-success" };
   if (direction === "squeeze") return { label: "轧空 · 高波动", className: "bg-warning-soft text-warning" };
   if (direction === "up") {
     return (row.ticker?.pct24h ?? 0) >= maxPre24hPct
@@ -315,12 +329,14 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
           <button type="button" aria-label={starred ? `取消自选 ${base(row.symbol)}` : `加入自选 ${base(row.symbol)}`} aria-pressed={starred} onClick={onStar} className="shrink-0 text-muted hover:text-warning">
             <Star aria-hidden className={`h-3.5 w-3.5 ${starred ? "fill-warning text-warning" : ""}`} />
           </button>
-          <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-col items-start text-left">
+          <div className="flex min-w-0 flex-col items-start">
             <span className="flex min-w-0 max-w-full items-center gap-1">
-              <span className="truncate font-mono text-sm font-bold text-foreground">{base(row.symbol)}</span>
+              <MarketSymbolLink symbol={row.symbol} className="truncate font-mono text-sm font-bold text-foreground" />
               <AssetBadge type={asset} />
-              <span className="hidden text-[10px] text-muted sm:inline">{row.events.length}次</span>
-              <ChevronDown aria-hidden className={`h-3.5 w-3.5 shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+              <button type="button" aria-label={`${expanded ? "收起" : "展开"} ${base(row.symbol)} 触发`} aria-expanded={expanded} onClick={onToggle} className="flex shrink-0 items-center gap-0.5 rounded px-0.5 py-1 text-muted hover:text-foreground">
+                <span className="hidden text-[10px] sm:inline">{row.events.length}次</span>
+                <ChevronDown aria-hidden className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+              </button>
             </span>
             <span className="max-w-full truncate font-mono text-[10px] text-muted sm:hidden">
               {price(row.ticker?.price)} <span className={tone(row.ticker?.pct24h)}>{pct(row.ticker?.pct24h)}</span>
@@ -328,7 +344,7 @@ function CoinRowView({ row, tag, expanded, onToggle, starred, onStar, startMs, e
             <span className="max-w-full truncate font-mono text-[10px] text-muted sm:hidden">
               FDV {money(row.latest.fdvUsd ?? row.ticker?.fdvUsd)}
             </span>
-          </button>
+          </div>
         </div>
         <span className={`justify-self-start rounded-full px-2 py-0.5 text-[11px] font-semibold ${tag.className}`}>{tag.label}</span>
         <span className="hidden text-right font-mono text-xs text-foreground sm:block">{price(row.ticker?.price)}</span>
@@ -373,6 +389,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const [nowMs, setNowMs] = useState(() => Date.parse(initialData.generatedAt));
   const [connection, setConnection] = useState<"live" | "retrying">("live");
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("all");
+  const [includeTradFi, setIncludeTradFi] = useState(false);
   const [windowKey, setWindowKey] = useState<WindowKey>("24h");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -437,9 +454,14 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const tickers = useMemo(() => new Map(data.tickers.map((ticker) => [ticker.symbol, ticker])), [data.tickers]);
   const btc24h = tickers.get("BTCUSDT")?.pct24h ?? null;
   const btcWarning = btc24h !== null && btc24h <= data.signals.rules.btcShortWarningPct;
-  const pullbacks = useMemo(() => data.signals.signals.filter((signal) => signal.kind === "pullback_long"), [data.signals.signals]);
-  const coils = data.signals.signals.filter((signal) => signal.kind === "coil_watch" && nowMs - Date.parse(signal.signalAt) <= WATCH_SHOW_MS);
-  const volatiles = data.signals.signals.filter((signal) => signal.kind === "volatile_watch" && nowMs - Date.parse(signal.signalAt) <= WATCH_SHOW_MS);
+  const coinSymbols = useMemo(() => new Set(data.signals.coinSymbols), [data.signals.coinSymbols]);
+  const scopedSignals = useMemo(
+    () => data.signals.signals.filter(signal => coinSymbols.has(signal.symbol)),
+    [data.signals.signals, coinSymbols],
+  );
+  const pullbacks = useMemo(() => scopedSignals.filter(signal => signal.kind === "pullback_long"), [scopedSignals]);
+  const coils = scopedSignals.filter(signal => signal.kind === "coil_watch" && nowMs - Date.parse(signal.signalAt) <= WATCH_SHOW_MS);
+  const volatiles = scopedSignals.filter(signal => signal.kind === "volatile_watch" && nowMs - Date.parse(signal.signalAt) <= WATCH_SHOW_MS);
   const activePullback = useMemo(() => {
     const map = new Map<string, BoardSignal>();
     for (const signal of pullbacks) if (!map.has(signal.symbol)) map.set(signal.symbol, signal);
@@ -448,13 +470,15 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
 
   const endMs = nowMs;
   const startMs = nowMs - WINDOW_MS[windowKey];
+  const visibleEvents = useMemo(() => data.events.filter((event) => {
+    if (!includeTradFi && !coinSymbols.has(event.symbol)) return false;
+    if (Date.parse(event.occurredAt) < startMs) return false;
+    if (directionFilter === "watch") return watchlist.includes(event.symbol);
+    return directionFilter === "all" || directionOf(event) === directionFilter;
+  }), [data.events, startMs, directionFilter, watchlist, coinSymbols, includeTradFi]);
   const rows = useMemo(() => {
     const bySymbol = new Map<string, BoardEvent[]>();
-    for (const event of data.events) {
-      const t = Date.parse(event.occurredAt);
-      if (t < startMs) continue;
-      if (directionFilter !== "all" && directionFilter !== "watch" && directionOf(event) !== directionFilter) continue;
-      if (directionFilter === "watch" && !watchlist.includes(event.symbol)) continue;
+    for (const event of visibleEvents) {
       bySymbol.set(event.symbol, [...(bySymbol.get(event.symbol) ?? []), event]);
     }
     return [...bySymbol.entries()]
@@ -467,12 +491,12 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         const bp = b.pullback && !b.pullback.outcome ? 1 : 0;
         return bp - ap || b.latest.occurredAt.localeCompare(a.latest.occurredAt);
       });
-  }, [data.events, startMs, directionFilter, watchlist, tickers, activePullback]);
+  }, [visibleEvents, tickers, activePullback]);
 
   const liveWorkers = Object.values(data.health).filter((heartbeat) => getMarketAlertWorkerView(heartbeat, nowMs).online).length;
   const signalsStale = !data.signals.meta.lastSuccessAt || nowMs - Date.parse(data.signals.meta.lastSuccessAt) > SIGNALS_STALE_MS;
-  const stats = data.signals.stats;
-  const feed = data.events.filter((event) => Date.parse(event.occurredAt) >= startMs).slice(0, 30);
+  const stats = data.signals.cryptoStats;
+  const feed = visibleEvents.slice(0, 30);
 
   return (
     <div className="grid min-w-0 gap-3">
@@ -487,6 +511,11 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
           {connection === "retrying" ? <span className="text-warning">· 连接重试中</span> : null}
         </p>
         <div className="flex flex-wrap gap-1.5">
+          <div role="group" aria-label="标的类别" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
+            {([["仅加密", false], ["含美股商品", true]] as const).map(([label, value]) => (
+              <button key={label} type="button" aria-pressed={includeTradFi === value} onClick={() => setIncludeTradFi(value)} className={`rounded px-2.5 py-1 text-xs font-semibold ${includeTradFi === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
+            ))}
+          </div>
           <div role="group" aria-label="方向" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
             {([["all", "全部"], ["up", "涨"], ["down", "跌"], ["squeeze", "轧空"], ["watch", `★ ${watchlist.length}`]] as const).map(([key, label]) => (
               <button key={key} type="button" aria-pressed={directionFilter === key} onClick={() => setDirectionFilter(key)} className={`rounded px-2.5 py-1 text-xs font-semibold ${directionFilter === key ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
@@ -548,7 +577,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
       </div>
 
       <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <Section title={`币种 · ${windowKey}`} hint="一行一个币，点击展开每次触发">
+        <Section title={`币种 · ${windowKey}`} hint="点击币种看实时行情，点击箭头展开触发记录">
           <div className={`${ROW_GRID} border-b border-line bg-workspace-surface-raised px-3 py-1.5 text-[10px] font-medium text-muted`}>
             <span>币种</span>
             <span>状态</span>
@@ -563,7 +592,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
                 <CoinRowView
                   key={row.symbol}
                   row={row}
-                  tag={rowTag(row, btcWarning, data.signals.rules.maxPre24hPct)}
+                  tag={rowTag(row, coinSymbols.has(row.symbol), btcWarning, data.signals.rules.maxPre24hPct)}
                   expanded={expanded === row.symbol}
                   onToggle={() => setExpanded((current) => (current === row.symbol ? null : row.symbol))}
                   starred={watchlist.includes(row.symbol)}
@@ -590,15 +619,20 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
           </summary>
           <ol className="max-h-[70vh] divide-y divide-line/70 overflow-y-auto border-t border-line">
             {feed.length ? feed.map((event) => (
-              <li key={event.id}>
-                <button type="button" onClick={() => { setExpanded(event.symbol); document.getElementById(`coin-${event.symbol}`)?.scrollIntoView({ block: "center" }); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-workspace-surface-raised">
-                  <span className="font-mono text-muted">{clock(event.occurredAt)}</span>
-                  <span className="font-mono font-semibold text-foreground">{base(event.symbol)}</span>
-                  <AssetBadge type={data.assetClasses?.[event.symbol]} />
+              <li key={event.id} className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-xs">
+                <span className="font-mono text-muted">{clock(event.occurredAt)}</span>
+                <MarketSymbolLink symbol={event.symbol} className="min-w-0 truncate font-mono font-semibold text-foreground" />
+                <AssetBadge type={data.assetClasses?.[event.symbol]} />
+                <button
+                  type="button"
+                  aria-label={`展开 ${base(event.symbol)} 的触发记录`}
+                  onClick={() => { setExpanded(event.symbol); document.getElementById(`coin-${event.symbol}`)?.scrollIntoView({ block: "center" }); }}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded text-left hover:bg-workspace-surface-raised"
+                >
                   <span className={directionOf(event) === "up" ? "text-success" : directionOf(event) === "down" ? "text-danger" : "text-warning"}>
                     {event.stage} · L{event.level}
                   </span>
-                  <span className="ml-auto font-mono text-[11px] text-muted">{pct(event.changePct)}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted">{pct(event.changePct)}</span>
                 </button>
               </li>
             )) : <li className="px-3 py-6 text-center text-xs text-muted">暂无</li>}
@@ -606,7 +640,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </details>
       </div>
 
-      <AlertOutcomeTable groups={data.signals.alertOutcomeStats?.groups ?? []} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
+      <AlertOutcomeTable groups={includeTradFi ? data.signals.alertOutcomeStats.groups : data.signals.cryptoAlertOutcomeGroups} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
 
       <p className="text-right text-[11px] text-muted">
         规则依据与回测见 docs/market-signals.md · <Link href="/alerts/legacy" className="underline hover:text-foreground">打开旧版异动页</Link>

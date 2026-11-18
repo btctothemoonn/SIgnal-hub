@@ -1,4 +1,5 @@
 import { getMarketAlertsConfig } from "../src/lib/market-alerts-config.ts";
+import { isMarketLegacyAiEnabled } from "../src/lib/market-opportunity-config.ts";
 import { runMarketOpportunityScan } from "../src/lib/market-opportunity-worker.ts";
 import { runMarketBriefCheck } from "../src/lib/market-alert-brief-worker.ts";
 import { MARKET_BRIEF_INTERVAL_MS } from "../src/lib/market-alert-brief-types.ts";
@@ -27,7 +28,7 @@ if (!config.enabled) {
 }
 
 // Independent async loop: summarization must not delay the market scan cadence.
-const briefTask = (async () => {
+const briefTask = isMarketLegacyAiEnabled() ? (async () => {
   do {
     let nextCheckAt = Date.now() + MARKET_BRIEF_INTERVAL_MS;
     try {
@@ -39,7 +40,7 @@ const briefTask = (async () => {
     }
     if (!once) await waitFor(Math.max(1000, nextCheckAt - Date.now()), controller.signal);
   } while (!once && !controller.signal.aborted);
-})();
+})() : null;
 
 // Rule-based signals (pullback entries, positioning watches, outcome tracking) on their own cadence.
 const SIGNALS_INTERVAL_MS = 5 * 60_000;

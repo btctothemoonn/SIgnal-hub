@@ -169,7 +169,16 @@ try {
   );
   assert.equal(store.getMarketAlertsSnapshot({ limit: 5 }).health.opportunity?.status, "live");
   assert.match(store.getMarketAlertsSnapshot({ limit: 5 }).health.opportunity?.detail ?? "", /selected=5/);
-  assert.equal(aiCalls, 1, "the whole Top 5 must be explained in one AI batch");
+  assert.equal(aiCalls, 0, "legacy AI is off by default while the Top 5 still updates");
+  await runMarketOpportunityScan({
+    store,
+    client,
+    nowMs: nowMs + 90_000,
+    aiProviders,
+    fetchImpl: aiFetch,
+    env: { MARKET_LEGACY_AI_ENABLED: "true" },
+  });
+  assert.equal(aiCalls, 1, "the enabled legacy scan explains the whole Top 5 in one batch");
   assert.equal(
     store.getMarketAlertsSnapshot({ limit: 5 }).opportunities[0].ai?.summary,
     "规则确认后关注。",
@@ -182,7 +191,7 @@ try {
     aiProviders,
     fetchImpl: aiFetch,
   });
-  assert.equal(aiCalls, 1, "an unchanged decision fingerprint must reuse the AI cache");
+  assert.equal(aiCalls, 1, "the default worker leaves the cached AI result alone");
 
   const priorDiagnostics = store.pruneOpportunityDiagnostics("2026-09-04T03:59:30.000Z");
   assert.ok(priorDiagnostics >= 0);

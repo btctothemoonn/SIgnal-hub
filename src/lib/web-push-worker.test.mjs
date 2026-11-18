@@ -40,7 +40,7 @@ try {
  const observation = qualifyOpportunity({ decision: opportunityDecision(), enrichment: { fetchedAt: pushNow, stale: false, error: null }, scanId: 'baseline' }, pushNowMs);
  marketStore.commitOpportunityScan({ states: [], pushObservations: [observation], scannedAt: pushNow });
  const episode = marketStore.getMarketPushBaseline().episodes[0];
- const adapter = createMarketPushSource(marketStore);
+ const adapter = createMarketPushSource(marketStore, { isCoinSymbol: () => true });
  const candidate = event('real', 'market', { episodeId: episode.episodeId, occurredAt: pushNow, expiresAt: new Date(pushNowMs + 120000).toISOString() });
  assert.equal(adapter.revalidate(candidate, pushNowMs), true);
  assert.equal(adapter.revalidate(candidate, pushNowMs + 120001), false);

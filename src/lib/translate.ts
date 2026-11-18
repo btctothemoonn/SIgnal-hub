@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { recordAiProviderAttempt } from "./ai-usage.ts";
+import { getQuotaResetAt, isQuotaExhaustedError } from "./ai-provider-fallback.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 import {
   isUsefulTranslation,
@@ -164,7 +165,7 @@ async function translateWithMiniMax(
   const code = String(base?.status_code ?? error?.code ?? "");
   const messageText = [base?.status_msg, error?.message, error?.type, code].join(" ");
   if (!response.ok || error || (base?.status_code != null && code !== "0")) {
-    const quota = response.status === 402 ||
+    const quota = response.status === 402 || isQuotaExhaustedError(messageText + (code ? " (" + code + ")" : "")) ||
       /insufficient[_ ](?:quota|balance|credits)|(?:quota|usage limit|token limit).{0,32}(?:exhausted|exceeded|reached)|(?:额度|余额).{0,12}(?:不足|用尽|超限)/i.test(messageText);
     const rateLimit = response.status === 429 || /rate[_ ]limit|too many requests/i.test(messageText);
     failure = quota ? "quota" : rateLimit ? "rate_limit" :
@@ -175,7 +176,9 @@ async function translateWithMiniMax(
       const delay = retryAfter && /^\d+$/.test(retryAfter)
         ? Number(retryAfter) * 1000
         : retryAfter ? Date.parse(retryAfter) - Date.now() : 0;
-      translationCooldown(cooldownKey, Date.now() + Math.max(quota ? 30 * 60_000 : 60_000, delay || 0));
+      const now = Date.now();
+      const until = quota ? getQuotaResetAt(messageText, now) : now + 60_000;
+      translationCooldown(cooldownKey, Math.max(until, now + (delay || 0)));
     }
     return null;
   }

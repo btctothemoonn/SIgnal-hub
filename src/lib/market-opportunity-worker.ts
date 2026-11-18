@@ -4,7 +4,7 @@ import type { AiProviderConfig } from "./ai-provider-fallback.ts";
 import { qualifyOpportunity } from "./important-push-policy.ts";
 import type { MarketPushObservation } from "./important-push-types.ts";
 import { explainMarketOpportunities } from "./market-opportunity-ai.ts";
-import { MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
+import { isMarketLegacyAiEnabled, MARKET_OPPORTUNITY_RULES } from "./market-opportunity-config.ts";
 import {
   chooseMarketOpportunityDecision,
   scoreCapitalDrivenLong,
@@ -170,7 +170,7 @@ export async function runMarketOpportunityScan(input: {
       successful: true,
     });
     let aiStatus: "generated" | "failed" | "skipped" = "skipped";
-    if (transitioned.selected.length > 0) {
+    if (transitioned.selected.length > 0 && isMarketLegacyAiEnabled(input.env)) {
       const policy = store.getOpportunityAiPolicy({ fingerprint, nowMs });
       if (policy.allowed) {
         store.recordOpportunityAiAttempt({ fingerprint, createdAt: now });

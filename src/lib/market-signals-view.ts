@@ -24,7 +24,11 @@ export function getMarketSignalsBoardData(nowMs = Date.now()) {
       health: alerts.health,
       tickers,
       assetClasses,
-      signals: { ...signals, symbolClasses: {} },
+      signals: {
+        ...signals,
+        symbolClasses: {},
+        coinSymbols: signals.coinSymbols.filter(symbol => wanted.has(symbol)),
+      },
     };
   } finally {
     store.close();

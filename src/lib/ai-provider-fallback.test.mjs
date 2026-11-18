@@ -25,6 +25,9 @@ const providers = [
 ];
 
 assert.equal(isQuotaExhaustedError(quotaError), true);
+assert.equal(isQuotaExhaustedError("provider error (2056)"), true);
+assert.equal(isQuotaExhaustedError("已达到 Token Plan 用量上限"), true);
+assert.equal(isQuotaExhaustedError("HTTP 429: too many requests"), false);
 assert.equal(
   isQuotaExhaustedError(
     "Token Plan is intended for interactive usage. Current request volume is high. (2062)",

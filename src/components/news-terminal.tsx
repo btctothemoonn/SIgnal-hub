@@ -28,6 +28,7 @@ import {
   formatNewsPrice,
   mergeNewsItems,
   newsExecutionSymbol,
+  NEWS_SYMBOL_INPUT,
   normalizeNewsOrder,
   readNewsJson,
   tradeConfirmationKey,
@@ -81,7 +82,6 @@ const DEFAULT_DRAFT: OrderDraft = {
   takeProfit: "",
 };
 const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d"];
-const SYMBOL_INPUT = /^[A-Z0-9\p{Script=Han}]{1,25}$/u;
 
 function newsTime(timestamp: number) {
   return new Date(timestamp).toLocaleString("zh-CN", {
@@ -111,7 +111,7 @@ function useDebouncedValue(value: string) {
   return debounced;
 }
 
-export function NewsTerminal() {
+export function NewsTerminal({ initialSymbol }: { initialSymbol?: string }) {
   const [feed, setFeed] = useState<NewsFeed | null>(null);
   const [pendingFeed, setPendingFeed] = useState<NewsFeed | null>(null);
   const [channel, setChannel] = useState("all");
@@ -126,8 +126,8 @@ export function NewsTerminal() {
   const [showSettings, setShowSettings] = useState(false);
   const [sourceList, setSourceList] = useState<NewsSourceSummary[]>([]);
   const [sourceSaving, setSourceSaving] = useState(false);
-  const [symbol, setSymbol] = useState("BTC");
-  const [symbolDraft, setSymbolDraft] = useState("BTC");
+  const [symbol, setSymbol] = useState(initialSymbol ?? "BTC");
+  const [symbolDraft, setSymbolDraft] = useState(initialSymbol ?? "BTC");
   const [venue, setVenue] = useState<TradeVenue>("binance");
   const [interval, setIntervalValue] = useState("5m");
   const [selected, setSelected] = useState<NewsItem | null>(null);
@@ -137,7 +137,7 @@ export function NewsTerminal() {
   const [trade, setTrade] = useState<TradeStatus | null>(null);
   const [draft, setDraft] = useState<OrderDraft>(DEFAULT_DRAFT);
   const [sideTab, setSideTab] = useState("trade");
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(Boolean(initialSymbol));
   const [busy, setBusy] = useState(false);
   const [feedLoading, setFeedLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -172,13 +172,13 @@ export function NewsTerminal() {
       try {
         const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
         if (
-          typeof prefs.symbol === "string" &&
-          SYMBOL_INPUT.test(prefs.symbol.toUpperCase())
+          !initialSymbol && typeof prefs.symbol === "string" &&
+          NEWS_SYMBOL_INPUT.test(prefs.symbol.toUpperCase())
         ) {
           setSymbol(prefs.symbol.toUpperCase());
           setSymbolDraft(prefs.symbol.toUpperCase());
         }
-        if (prefs.venue === "binance" || prefs.venue === "hyperliquid")
+        if (!initialSymbol && (prefs.venue === "binance" || prefs.venue === "hyperliquid"))
           setVenue(prefs.venue);
         if (typeof prefs.compact === "boolean") setCompact(prefs.compact);
         if (typeof prefs.original === "boolean") setOriginal(prefs.original);
@@ -208,7 +208,7 @@ export function NewsTerminal() {
       window.removeEventListener("keydown", focusSearch);
       void audioRef.current?.close();
     };
-  }, []);
+  }, [initialSymbol]);
 
   function savePrefs(patch: Record<string, unknown>) {
     try {
@@ -1108,7 +1108,7 @@ export function NewsTerminal() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   const next = symbolDraft.trim().toUpperCase();
-                  if (SYMBOL_INPUT.test(next)) selectSymbol(next);
+                  if (NEWS_SYMBOL_INPUT.test(next)) selectSymbol(next);
                 }}
               >
                 <input

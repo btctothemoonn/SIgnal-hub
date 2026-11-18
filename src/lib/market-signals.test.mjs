@@ -146,6 +146,7 @@ assert.equal(watchStats.crashRate, 0.5);
 
 // Store: signals are idempotent and their push event is written in the same transaction.
 const store = openMarketSignalsStore(":memory:");
+store.replaceSymbolClasses([{ symbol: "AUSDT", underlyingType: "COIN" }], T);
 const signal = { id: "pullback_long:AUSDT:x", kind: "pullback_long", symbol: "AUSDT", signalAt: new Date(T).toISOString(), refPrice: 1.144, detail: { stopPrice: 1.05, pre24hPct: 0, triggerAt: "t" }, outcome: null, pushed: false };
 const event = buildPullbackPushEvent(signal, rules);
 assert.equal(event.source, "signals");
@@ -178,6 +179,13 @@ store.close();
   const raw = history.map((bar) => [bar.t, String(bar.o), String(bar.h), String(bar.l), String(bar.c)]);
   const calls = [];
   const client = {
+    async getExchangeInfo() {
+      return { symbols: [
+        { symbol: "AUSDT", underlyingType: "COIN" },
+        { symbol: "BUSDT", underlyingType: "COIN" },
+        { symbol: "SOXSUSDT", underlyingType: "EQUITY" },
+      ] };
+    },
     async getKlinesSince(symbol, interval, startTime) {
       calls.push([symbol, interval]);
       return raw.filter((row) => row[0] >= startTime);
@@ -191,6 +199,8 @@ store.close();
       events: [
         { id: "e1", type: "volatility", symbol: "AUSDT", side: "LONG", occurredAt: new Date(T).toISOString(), price: 1, level: 1, trigger: "B加速·实时" },
         { id: "e2", type: "volatility", symbol: "BUSDT", side: "SHORT", occurredAt: new Date(T).toISOString(), price: 1, level: 1, trigger: "A趋势·实时" },
+        { id: "equity", type: "volatility", symbol: "SOXSUSDT", side: "LONG", occurredAt: new Date(T).toISOString(), price: 1, level: 1, trigger: "A趋势·实时" },
+        { id: "unknown", type: "volatility", symbol: "UNKNOWNUSDT", side: "LONG", occurredAt: new Date(T).toISOString(), price: 1, level: 1, trigger: "A趋势·实时" },
       ],
     }),
   };
@@ -198,6 +208,7 @@ store.close();
   assert.equal(cycle.filled, 1);
   assert.equal(cycle.pushed, 1);
   assert.deepEqual(calls[0], ["AUSDT", "15m"], "short triggers are ignored");
+  assert.ok(!calls.some(([symbol, interval]) => interval === "15m" && symbol !== "AUSDT"), "TradFi and unknown anchors must not fetch pullback bars");
   assert.equal(signals.readAfter(0, 10).length, 1);
   // A second cycle does not duplicate the signal or the push.
   const again = await runMarketSignalsCycle({ env: {}, nowMs: nowMs + 5 * 60_000, alerts, signals, client });
@@ -228,7 +239,18 @@ store.close();
     return { timestamp: barOpen + H, sumOpenInterestValue: String(i === 25 ? 140 : 100) };
   });
   const client = {
-    async getKlinesSince(_symbol, interval) { return interval === "1h" ? klines : []; },
+    async getExchangeInfo() {
+      return { symbols: [
+        { symbol: "AUSDT", underlyingType: "COIN" },
+        { symbol: "USDCUSDT", underlyingType: "COIN" },
+        { symbol: "TINYUSDT", underlyingType: "COIN" },
+        { symbol: "XPTUSDT", underlyingType: "COMMODITY" },
+      ] };
+    },
+    async getKlinesSince(symbol, interval) {
+      assert.equal(symbol, "AUSDT");
+      return interval === "1h" ? klines : [];
+    },
     async getHourlyOpenInterest() { return oi; },
     async getPremiumIndex() { return [{ symbol: "AUSDT", lastFundingRate: "0.0001" }]; },
     async getTickers24h() {
@@ -236,6 +258,7 @@ store.close();
         { symbol: "AUSDT", quoteVolume: "9000000" },
         { symbol: "USDCUSDT", quoteVolume: "900000000" },
         { symbol: "TINYUSDT", quoteVolume: "1000" },
+        { symbol: "XPTUSDT", quoteVolume: "900000000" },
       ];
     },
   };
@@ -272,8 +295,14 @@ store.close();
   try {
     enroll(T - H);
     enroll(T + 5 * 60_000);
+    signals.replaceSymbolClasses([
+      { symbol: "AUSDT", underlyingType: "COIN" },
+      { symbol: "NVDAUSDT", underlyingType: "EQUITY" },
+    ], T);
     const pullback = { id: "pullback_long:AUSDT:push", kind: "pullback_long", symbol: "AUSDT", signalAt: new Date(T).toISOString(), refPrice: 1.144, detail: { stopPrice: 1.05, pre24hPct: 0, triggerAt: "t" }, outcome: null, pushed: false };
     signals.recordSignal(pullback, T, buildPullbackPushEvent(pullback, rules));
+    const equity = { ...pullback, id: "pullback_long:NVDAUSDT:push", symbol: "NVDAUSDT" };
+    signals.recordSignal(equity, T, buildPullbackPushEvent(equity, rules));
     const sent = [];
     const empty = { readAfter: () => [], getBaseline: () => ({ lastSequence: 0 }), revalidate: () => true };
     const result = await runWebPushCycle({
@@ -321,6 +350,7 @@ store.close();
 {
   const signals = openMarketSignalsStore(":memory:");
   const at = new Date(T).toISOString();
+  signals.replaceSymbolClasses(["AUSDT", "BUSDT", "CUSDT"].map(symbol => ({ symbol, underlyingType: "COIN" })), T);
   signals.recordSignal({ id: "p1", kind: "pullback_long", symbol: "AUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
   signals.recordSignal({ id: "v1", kind: "volatile_watch", symbol: "BUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
   signals.recordSignal({ id: "c1", kind: "coil_watch", symbol: "CUSDT", signalAt: at, refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
@@ -350,7 +380,44 @@ store.close();
   signals.close();
 }
 
-// Symbol classes: refreshed from exchangeInfo at most every 6h; only non-crypto underlyings are exposed.
+// A real quota response breaks the cycle, skips later provider calls and retains both attempts.
+{
+  const { generateSignalNote } = await import("./market-signals-ai.ts");
+  const { resetAiProviderCircuitBreakers } = await import("./ai-provider-fallback.ts");
+  const signals = openMarketSignalsStore(":memory:");
+  try {
+    signals.replaceSymbolClasses([{ symbol: "AUSDT", underlyingType: "COIN" }], T);
+    for (const id of ["first", "second"]) {
+      signals.recordSignal({ id, kind: "pullback_long", symbol: "AUSDT", signalAt: new Date(T).toISOString(),
+        refPrice: 1, detail: {}, outcome: null, pushed: false }, T, null);
+    }
+    const providers = [{ id: "minimax-fixture", baseUrl: "https://test.invalid/v1", apiKey: "fixture", model: "MiniMax-M3" }];
+    let requests = 0;
+    let quota = true;
+    const generateNote = ({ context }) => generateSignalNote({
+      context, providers, fetchImpl: async () => {
+        requests++;
+        if (quota) return Response.json({ base_resp: { status_code: 2056, status_msg: "额度暂不可用" } }, { status: 429 });
+        return Response.json({ choices: [{ message: { content: "价格回调后出现提示。" } }] });
+      },
+    });
+    const input = { env: {}, alerts: { getMarketAlertsSnapshot: () => ({ events: [] }) },
+      signals, client: {}, generateNote };
+    await runMarketSignalsCycle({ ...input, nowMs: T + H });
+    await runMarketSignalsCycle({ ...input, nowMs: T + 2 * H });
+    assert.equal(requests, 1, "quota body opens the breaker and the blocked cycle sends no new requests");
+    assert.equal(signals.pendingNotes(T + 2 * H, T, 1, 10).length, 2, "neither signal used an attempt");
+    quota = false;
+    resetAiProviderCircuitBreakers();
+    const recovered = await runMarketSignalsCycle({ ...input, nowMs: T + 7 * H });
+    assert.equal(recovered.notes, 2, "visible signals are still eligible after a six-hour cooldown");
+  } finally {
+    resetAiProviderCircuitBreakers();
+    signals.close();
+  }
+}
+
+// Symbol classes are refreshed periodically; only non-crypto badges are exposed.
 {
   const signals = openMarketSignalsStore(":memory:");
   let calls = 0;
@@ -370,9 +437,9 @@ store.close();
   const alerts = { getMarketAlertsSnapshot: () => ({ events: [] }) };
   await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T, alerts, signals, client });
   assert.deepEqual(signals.readSymbolClasses(), { NVDAUSDT: "EQUITY", "0700USDT": "HK_EQUITY", XAUUSDT: "COMMODITY" });
-  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + H, alerts, signals, client });
-  assert.equal(calls, 1, "not refreshed within 6h");
-  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 7 * H, alerts, signals, client });
+  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 5 * 60_000, alerts, signals, client });
+  assert.equal(calls, 1, "not refreshed within 15 minutes");
+  await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 15 * 60_000, alerts, signals, client });
   assert.equal(calls, 2);
   assert.equal(readMarketSignalsSnapshot({ store: signals, nowMs: T, env: {} }).symbolClasses.NVDAUSDT, "EQUITY");
   signals.close();

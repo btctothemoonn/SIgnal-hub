@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   getAvailableAiProviders,
+  aiChatResponseError,
   runWithAiProviderFallback,
   type AiProviderConfig,
 } from "./ai-provider-fallback.ts";
@@ -1400,13 +1401,8 @@ export async function requestAiSummary({
         if (requestSignal.aborted || (error instanceof Error && error.name === "TimeoutError")) throw timeoutError(provider);
         throw error;
       }
-      if (!response.ok) {
-        const message =
-          typeof payload.error === "object" && payload.error && "message" in payload.error
-            ? String((payload.error as Record<string, unknown>).message)
-            : `AI summary HTTP ${response.status}`;
-        throw new Error(message);
-      }
+      const providerError = aiChatResponseError(payload, response.status, "AI summary");
+      if (providerError) throw providerError;
 
       const choices = Array.isArray(payload.choices) ? payload.choices : [];
       const first = choices[0] as Record<string, unknown> | undefined;

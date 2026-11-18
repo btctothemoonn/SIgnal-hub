@@ -23,12 +23,12 @@ function asTimestamp(now: Date | number) {
 }
 
 export function isQuotaExhaustedError(error: unknown) {
-  return /usage limit exceeded|weekly usage limit reached|quota exceeded|insufficient (?:balance|credits?)|credit balance|额度|限额|\(2062\)/i.test(
+  return /usage limit exceeded|weekly usage limit reached|quota exceeded|insufficient (?:balance|credits?)|credit balance|额度|限额|用量上限|\((?:2056|2062)\)/i.test(
     errorMessage(error),
   );
 }
 
-function getQuotaResetAt(
+export function getQuotaResetAt(
   error: unknown,
   now: Date | number,
   fallbackCooldownMs = DEFAULT_COOLDOWN_MS,
@@ -59,6 +59,27 @@ export function getAvailableAiProviders(
   return providers.filter((provider) => !isAiProviderBlocked(provider, now));
 }
 
+export class AiProvidersBlockedError extends Error {
+  constructor() {
+    super("All configured AI providers are temporarily blocked");
+    this.name = "AiProvidersBlockedError";
+  }
+}
+
+export function aiChatResponseError(payload: Record<string, unknown>, status: number, context: string) {
+  const error = payload.error as Record<string, unknown> | string | undefined;
+  const base = payload.base_resp as Record<string, unknown> | undefined;
+  const code = base?.status_code ?? (typeof error === "object" ? error?.code : undefined);
+  const message = base?.status_msg ?? (typeof error === "object" ? error?.message : error) ?? payload.message;
+  const httpError = status < 200 || status >= 300;
+  if (!httpError && !(base?.status_code != null && Number(base.status_code) !== 0) && !error) return null;
+  return new Error([
+    `${context} HTTP ${status}`,
+    typeof message === "string" ? message.slice(0, 500) : "",
+    typeof code === "number" || typeof code === "string" ? `(${String(code).slice(0, 32)})` : "",
+  ].filter(Boolean).join(" "));
+}
+
 export async function runWithAiProviderFallback<T>({
   providers,
   request,
@@ -74,7 +95,7 @@ export async function runWithAiProviderFallback<T>({
 }): Promise<{ value: T; provider: AiProviderConfig }> {
   const candidates = getAvailableAiProviders(providers, now);
   if (candidates.length === 0) {
-    throw new Error("All configured AI providers are temporarily blocked");
+    throw new AiProvidersBlockedError();
   }
 
   let lastError: unknown = new Error("No AI provider request was attempted");

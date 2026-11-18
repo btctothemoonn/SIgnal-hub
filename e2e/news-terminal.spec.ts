@@ -1,4 +1,7 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import { join } from "node:path";
+import { openMarketAlertsStore } from "../src/lib/market-alerts-store";
+import { marketSignalsDbPath, openMarketSignalsStore } from "../src/lib/market-signals";
 import type { NewsFeed, NewsMarket, TradeStatus } from "../src/lib/news-terminal-types";
 
 const now = Date.now();
@@ -132,6 +135,53 @@ test("news mobile fits viewport and opens and closes the trading detail sheet", 
   await page.screenshot({ path: testInfo.outputPath("news-mobile-trade.png"), fullPage: true });
   await page.getByRole("button", { name: "返回新闻列表" }).click();
   await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
+});
+
+test("alerts hide TradFi by default and open the Binance trading view for the chosen symbol on mobile", async ({ page }) => {
+  const runtimeDir = process.env.SIGNAL_E2E_RUNTIME_DIR!;
+  const market = openMarketAlertsStore(join(runtimeDir, "market.sqlite"));
+  const signals = openMarketSignalsStore(marketSignalsDbPath({ SIGNAL_HUB_RUNTIME_DIR: runtimeDir }));
+  try {
+    const observed = Date.now();
+    signals.replaceSymbolClasses([
+      { symbol: "DOGEUSDT", underlyingType: "COIN" },
+      { symbol: "AAOIUSDT", underlyingType: "EQUITY" },
+    ], observed);
+    signals.recordSignal({
+      id: "old-equity-pullback", kind: "pullback_long", symbol: "AAOIUSDT",
+      signalAt: new Date(observed).toISOString(), refPrice: 1, detail: {}, outcome: null, pushed: false,
+    }, observed, null);
+    for (const symbol of ["DOGEUSDT", "AAOIUSDT"]) {
+      market.insertMarketAlertEvent({
+        id: "deep-link-" + symbol, symbol, type: "volatility", side: "LONG", level: 1,
+        stage: "fixture", trigger: "fixture", source: "ws", price: 1, changePct: 5,
+        volumeRatio: 2, score: null, metrics: {}, reasons: [], occurredAt: new Date(observed).toISOString(),
+      });
+    }
+  } finally {
+    signals.close();
+    market.close();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  const orders = await setup(page);
+  await page.evaluate(() => localStorage.setItem("signal-hub:news-terminal:v1", JSON.stringify({ symbol: "ETH", venue: "hyperliquid" })));
+  await page.goto("/alerts");
+  const equity = page.locator("#coin-AAOIUSDT").getByRole("link", { name: "查看 AAOI 实时行情" });
+  await expect(equity).toHaveCount(0);
+  await page.getByRole("button", { name: "含美股商品" }).click();
+  await expect(equity).toBeVisible();
+  await expect(page.locator("#signal-AAOIUSDT")).toHaveCount(0);
+  await page.getByRole("button", { name: "仅加密" }).click();
+  await expect(equity).toHaveCount(0);
+  const symbolLink = page.locator("#coin-DOGEUSDT").getByRole("link", { name: "查看 DOGE 实时行情" });
+  await expect(page.locator("details").getByRole("link", { name: "查看 DOGE 实时行情" })).toHaveAttribute("href", "/news?symbol=DOGEUSDT");
+  await symbolLink.click();
+  await expect(page).toHaveURL(/\/news\?symbol=DOGEUSDT$/);
+  await expect(page.getByRole("button", { name: "返回新闻列表" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("DOGE");
+  await expect(page.getByRole("combobox", { name: "交易账户" })).toHaveValue("binance");
+  await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  expect(orders).toHaveLength(0);
 });
 
 test("news and trading data require website login", async ({ request }) => {

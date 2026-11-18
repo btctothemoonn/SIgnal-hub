@@ -68,6 +68,15 @@ export function newsPriceMinMove(price: number | null | undefined): number {
   return 10 ** Math.max(-10, Math.min(-2, exponent));
 }
 
+export const NEWS_SYMBOL_INPUT = /^[A-Z0-9\p{Script=Han}]{1,25}$/u;
+
+export function parseNewsMarketSymbol(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toUpperCase();
+  const symbol = normalized.length > 4 ? normalized.replace(/USDT$/, "") : normalized;
+  return NEWS_SYMBOL_INPUT.test(symbol) ? symbol : undefined;
+}
+
 export function newsExecutionSymbol(pair: string, venue: TradeVenue): string {
   return venue === "binance" ? pair.replace(/USDT$/, "") : pair;
 }

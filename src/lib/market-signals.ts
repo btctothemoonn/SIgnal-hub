@@ -43,7 +43,7 @@ export function getMarketSignalRules(env: EnvLike = process.env) {
     aiEnabled: (env.MARKET_SIGNAL_AI_ENABLED ?? "true").trim().toLowerCase() !== "false",
     aiNotesPerCycle: envNumber(env, "MARKET_SIGNAL_AI_NOTES_PER_CYCLE", 3),
     aiMaxAttempts: 2,
-    aiNoteWindowMs: 6 * HOUR_MS,
+    aiNoteWindowMs: 24 * HOUR_MS,
   };
 }
 export type MarketSignalRules = ReturnType<typeof getMarketSignalRules>;
@@ -440,11 +440,12 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     setOutcome(id: string, outcome: TradeOutcome | WatchOutcome) {
       db.prepare("UPDATE market_signals SET outcome_json=? WHERE id=?").run(JSON.stringify(outcome), id);
     },
-    pendingNotes(kinds: MarketSignalKind[], sinceMs: number, maxAttempts: number, limit: number) {
-      const placeholders = kinds.map(() => "?").join(",");
-      return db.prepare(`SELECT * FROM market_signals WHERE kind IN (${placeholders}) AND ai_note IS NULL
-          AND ai_attempts<? AND signal_at>=? ORDER BY signal_at DESC LIMIT ?`)
-        .all(...kinds, maxAttempts, new Date(sinceMs).toISOString(), limit)
+    pendingNotes(nowMs: number, sinceMs: number, maxAttempts: number, limit: number) {
+      return db.prepare(`SELECT s.* FROM market_signals s JOIN market_symbol_class c ON c.symbol = s.symbol
+          WHERE c.underlying_type = 'COIN' AND s.ai_note IS NULL AND s.ai_attempts < ? AND (
+            (s.kind = 'pullback_long' AND s.signal_at >= ?) OR (s.kind = 'coil_watch' AND s.signal_at >= ?)
+          ) ORDER BY s.signal_at DESC LIMIT ?`)
+        .all(maxAttempts, new Date(sinceMs).toISOString(), new Date(Math.max(sinceMs, nowMs - 12 * HOUR_MS)).toISOString(), limit)
         .map((row) => rowToSignal(row as Row));
     },
     recordNoteAttempt(id: string, note: string | null) {
@@ -502,7 +503,13 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
         for (const row of rows) stmt.run(row.symbol, row.underlyingType, at);
       });
     },
-    // Only non-crypto underlyings; anything absent is treated as a normal coin.
+    readCoinSymbols() {
+      return new Set(db.prepare("SELECT symbol FROM market_symbol_class WHERE underlying_type = 'COIN'").all().map(row => String(row.symbol)));
+    },
+    isCoinSymbol(symbol: string) {
+      return Boolean(db.prepare("SELECT 1 FROM market_symbol_class WHERE symbol = ? AND underlying_type = 'COIN'").get(symbol));
+    },
+    // Keep the non-crypto badge labels for the board.
     readSymbolClasses(): Record<string, string> {
       const out: Record<string, string> = {};
       for (const row of db.prepare("SELECT symbol, underlying_type FROM market_symbol_class WHERE underlying_type<>'COIN'").all() as Row[]) {
@@ -513,8 +520,11 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     readAfter: outbox.readAfter,
     getBaseline: () => ({ lastSequence: outbox.getBaseline().lastSequence }),
     revalidate(event: PushEvent, nowMs: number) {
-      if (event.source !== "signals" || event.stage !== "pullback_entry") return false;
-      return Date.parse(event.expiresAt) > nowMs;
+      if (event.source !== "signals" || event.stage !== "pullback_entry" || !event.episodeId.startsWith("signals:")) return false;
+      return Date.parse(event.expiresAt) > nowMs && Boolean(db.prepare(`
+        SELECT 1 FROM market_signals s JOIN market_symbol_class c ON c.symbol = s.symbol
+        WHERE s.id = ? AND c.underlying_type = 'COIN'
+      `).get(event.episodeId.slice("signals:".length)));
     },
     close() { db.close(); },
   };
@@ -528,6 +538,9 @@ export type MarketSignalsSnapshot = {
   stats: Record<MarketSignalKind, MarketSignalStats>;
   meta: ReturnType<MarketSignalsStore["readMeta"]>;
   symbolClasses: Record<string, string>;
+  coinSymbols: string[];
+  cryptoStats: Record<MarketSignalKind, MarketSignalStats>;
+  cryptoAlertOutcomeGroups: AlertOutcomeGroupStats[];
   alertOutcomeStats: { windowDays: number; groups: AlertOutcomeGroupStats[] };
   // Raw (not direction-adjusted) follow-up % per alert id for alerts in the last 24h.
   recentAlertOutcomes: Record<string, { "1h": number | null; "4h": number | null; "24h": number | null }>;
@@ -544,6 +557,8 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
   try {
     const window = store.listSignals(nowMs - rules.statsWindowMs);
     const outcomeRows = store.alertOutcomes.list(nowMs - ALERT_OUTCOME_STATS_DAYS * 24 * HOUR_MS);
+    const coinSymbols = store.readCoinSymbols();
+    const cryptoWindow = window.filter(signal => coinSymbols.has(signal.symbol));
     const recentAlertOutcomes: MarketSignalsSnapshot["recentAlertOutcomes"] = {};
     for (const row of outcomeRows) {
       if (Date.parse(row.occurredAt) < nowMs - 25 * HOUR_MS) break;
@@ -560,6 +575,13 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
       },
       meta: store.readMeta(),
       symbolClasses: store.readSymbolClasses(),
+      coinSymbols: [...coinSymbols],
+      cryptoStats: {
+        pullback_long: summarizeSignals(cryptoWindow, "pullback_long"),
+        volatile_watch: summarizeSignals(cryptoWindow, "volatile_watch"),
+        coil_watch: summarizeSignals(cryptoWindow, "coil_watch"),
+      },
+      cryptoAlertOutcomeGroups: summarizeAlertOutcomes(outcomeRows.filter(row => coinSymbols.has(row.symbol))),
       alertOutcomeStats: {
         windowDays: ALERT_OUTCOME_STATS_DAYS,
         groups: summarizeAlertOutcomes(outcomeRows),

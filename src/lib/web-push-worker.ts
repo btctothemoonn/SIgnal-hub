@@ -8,10 +8,13 @@ import type { openMarketAlertsStore } from './market-alerts-store.ts';
 import type { WebPushSender } from './web-push-sender.ts';
 import type { DeviceBaseline, WebPushStore } from './web-push-store.ts';
 export type PushSourceAdapter = { readAfter(sequence: number, limit: number): SequencedPushEvent[]; getBaseline(): { lastSequence: number }; revalidate(event: PushEvent, nowMs: number): boolean };
-export function createMarketPushSource(store: ReturnType<typeof openMarketAlertsStore>): PushSourceAdapter {
+export function createMarketPushSource(
+  store: ReturnType<typeof openMarketAlertsStore>,
+  signals: Pick<MarketSignalsStore, "isCoinSymbol">,
+): PushSourceAdapter {
   return { readAfter: store.readMarketPushOutboxAfter, getBaseline: store.getMarketPushBaseline, revalidate(event, nowMs) {
     const episode = store.readMarketPushEpisode(event.episodeId);
-    if (!episode || episode.endedAt || Date.parse(event.expiresAt) <= nowMs) return false;
+    if (!episode || episode.endedAt || Date.parse(event.expiresAt) <= nowMs || !signals.isCoinSymbol(episode.symbol)) return false;
     const btc = store.getMarketTickers().find((ticker) => ticker.symbol === 'BTCUSDT');
     const signalRules = getMarketSignalRules();
     if (signalRules.legacyPushFilter && !legacyMarketPushAllowed({ direction: episode.direction, btc24hPct: btc ? btc.pct24h : null, rules: signalRules })) return false;

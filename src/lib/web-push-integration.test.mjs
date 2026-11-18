@@ -36,7 +36,7 @@ try {
  await getOrCreateDailyInvestmentBrief({ now: new Date(pushNowMs), env, collectCandidates: async () => [candidate], requestBrief: generate });
  assert.equal(readDailyBriefPushOutboxAfter(0, 100, env).length, 1);
  const sent = [], sender = { send: async (_, event) => { sent.push(event); return { kind: 'accepted', statusCode: 201, retryAfterMs: null, errorCode: null }; } };
- const input = { pushStore, marketSource: createMarketPushSource(market), newsSource: createNewsPushSource(env), sender, owner: 'integration' };
+ const input = { pushStore, marketSource: createMarketPushSource(market, { isCoinSymbol: () => true }), newsSource: createNewsPushSource(env), sender, owner: 'integration' };
  await runWebPushCycle({ ...input, nowMs: pushNowMs, now: () => pushNowMs });
  for (const offset of [5000, 10000, 15000]) await runWebPushCycle({ ...input, nowMs: pushNowMs + offset, now: () => pushNowMs + offset });
  assert.equal(sent.filter(event => event.source === 'market').length, 8);

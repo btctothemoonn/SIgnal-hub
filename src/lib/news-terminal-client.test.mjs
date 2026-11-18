@@ -1,4 +1,11 @@
 import assert from "node:assert/strict";
+import { parseNewsMarketSymbol } from "./news-terminal-client.ts";
+
+assert.equal(parseNewsMarketSymbol(" solusdt "), "SOL");
+assert.equal(parseNewsMarketSymbol("1000PEPEUSDT"), "1000PEPE");
+assert.equal(parseNewsMarketSymbol("eth"), "ETH");
+assert.equal(parseNewsMarketSymbol(["SOL", "ETH"]), undefined);
+assert.equal(parseNewsMarketSymbol("SOL/USDT"), undefined);
 import {
   mergeNewsItems,
   chartNewsMarkers,
