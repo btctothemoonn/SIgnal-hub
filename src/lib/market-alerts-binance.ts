@@ -74,6 +74,7 @@ export type MarketAlertChartWriter = (input: {
 }>;
 
 const MARKET_ALERT_CHART_INTERVAL = "15m" as const;
+const LIQUIDATION_STREAM = "!forceOrder@arr";
 
 function numberValue(value: unknown, fallback = 0) {
   const number = Number(value);
@@ -1360,13 +1361,46 @@ function upsertKline(rows: KlineRow[], next: KlineRow, maxLength: number) {
   while (rows.length > maxLength) rows.shift();
 }
 
-export function createMarketWebSocketUrl(baseUrl: string, symbols: string[]) {
+export function createMarketWebSocketUrl(baseUrl: string, symbols: string[], includeLiquidations = false) {
   const streams = symbols.flatMap((symbol) => [
     `${symbol.toLowerCase()}@kline_1m`,
     `${symbol.toLowerCase()}@kline_5m`,
     `${symbol.toLowerCase()}@ticker`,
   ]);
+  if (includeLiquidations) streams.push(LIQUIDATION_STREAM);
   return `${baseUrl.replace(/\/$/, "")}/stream?streams=${streams.join("/")}`;
+}
+
+function createLiquidationCollector(store: Store) {
+  const recentSnapshots = new Map<number, Set<string>>();
+  return (payload: JsonRecord, nowMs: number) => {
+    if (payload.e !== "forceOrder" || !payload.o || typeof payload.o !== "object") return;
+    const order = payload.o as JsonRecord;
+    const symbolType = order.st ?? payload.st;
+    if (symbolType !== undefined && symbolType !== 1) return;
+    const symbol = stringValue(order.s);
+    const side = order.S;
+    if (!symbol.endsWith("USDT") || symbol.length <= 4 || (side !== "BUY" && side !== "SELL")) return;
+    if (order.X !== "FILLED" && order.X !== "EXPIRED") return;
+    const tradedAt = nullableNumber(order.T);
+    const quantity = nullableNumber(order.z);
+    const price = nullableNumber(order.ap);
+    if (!tradedAt || !Number.isSafeInteger(tradedAt) || !quantity || quantity < 0 || !price || price < 0) return;
+    const notionalUsdt = quantity * price;
+    const earliestTrade = nowMs - 5 * 60_000;
+    if (!Number.isFinite(notionalUsdt) || notionalUsdt <= 0 || tradedAt < earliestTrade || tradedAt > nowMs + 60_000) return;
+
+    const minuteAt = Math.floor(tradedAt / 60_000) * 60_000;
+    for (const minute of recentSnapshots.keys()) {
+      if (minute + 60_000 <= earliestTrade) recentSnapshots.delete(minute);
+    }
+    const key = JSON.stringify([symbol, tradedAt, side, quantity, price]);
+    const seen = recentSnapshots.get(minuteAt) ?? new Set<string>();
+    if (seen.has(key)) return;
+    store.recordMarketLiquidation({ symbol, minuteAt, side, notionalUsdt });
+    seen.add(key);
+    recentSnapshots.set(minuteAt, seen);
+  };
 }
 
 export async function startVolatilityWebSocketWorker(input: {
@@ -1441,7 +1475,9 @@ export async function startVolatilityWebSocketWorker(input: {
     const url = createMarketWebSocketUrl(
       config.wsBaseUrl,
       subscribedMarkets.map((market) => market.symbol),
+      !input.once,
     );
+    const collectLiquidation = createLiquidationCollector(store);
     const pendingAlerts = new Map<string, Promise<unknown>>();
     let cacheHydration: Promise<void> = Promise.resolve();
     const fdvCache = new Map<string, { eligible: boolean; expiresAt: number }>();
@@ -1499,6 +1535,10 @@ export async function startVolatilityWebSocketWorker(input: {
           const envelope = JSON.parse(String(rawData)) as JsonRecord;
           const stream = stringValue(envelope.stream);
           const payload = (envelope.data ?? {}) as JsonRecord;
+          if (stream === LIQUIDATION_STREAM) {
+            if (!input.once) collectLiquidation(payload, Date.now());
+            return;
+          }
           if (!receivedFirstMessage) {
             receivedFirstMessage = true;
             if (firstMessageTimer) clearTimeout(firstMessageTimer);

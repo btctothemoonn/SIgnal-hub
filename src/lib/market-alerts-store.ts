@@ -311,6 +311,15 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       ON market_alert_events (occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_market_alert_events_filter
       ON market_alert_events (type, symbol, level, occurred_at DESC);
+    CREATE TABLE IF NOT EXISTS market_liquidation_minutes (
+      minute_at INTEGER NOT NULL,
+      symbol TEXT NOT NULL,
+      short_notional_usdt REAL NOT NULL,
+      long_notional_usdt REAL NOT NULL,
+      short_snapshots INTEGER NOT NULL,
+      long_snapshots INTEGER NOT NULL,
+      PRIMARY KEY (minute_at, symbol)
+    );
     CREATE TABLE IF NOT EXISTS market_alert_heartbeat (
       worker TEXT PRIMARY KEY,
       status TEXT NOT NULL,
@@ -1668,6 +1677,34 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     return Number(run(opportunityDiagnosticPrune, before).changes);
   }
 
+  const upsertLiquidationMinute = db.prepare(`
+    INSERT INTO market_liquidation_minutes (
+      minute_at, symbol, short_notional_usdt, long_notional_usdt, short_snapshots, long_snapshots
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (minute_at, symbol) DO UPDATE SET
+      short_notional_usdt = short_notional_usdt + excluded.short_notional_usdt,
+      long_notional_usdt = long_notional_usdt + excluded.long_notional_usdt,
+      short_snapshots = short_snapshots + excluded.short_snapshots,
+      long_snapshots = long_snapshots + excluded.long_snapshots
+  `);
+
+  function recordMarketLiquidation(input: {
+    symbol: string;
+    minuteAt: number;
+    side: "BUY" | "SELL";
+    notionalUsdt: number;
+  }) {
+    const shortLiquidation = input.side === "BUY";
+    upsertLiquidationMinute.run(
+      input.minuteAt,
+      input.symbol,
+      shortLiquidation ? input.notionalUsdt : 0,
+      shortLiquidation ? 0 : input.notionalUsdt,
+      shortLiquidation ? 1 : 0,
+      shortLiquidation ? 0 : 1,
+    );
+  }
+
   function pruneMarketAlertsRetention(nowMs = Date.now()) {
     return pruneAlertsRetention(db, nowMs);
   }
@@ -1940,6 +1977,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     saveOpportunityAiResult,
     recordOpportunityDiagnostic,
     pruneOpportunityDiagnostics,
+    recordMarketLiquidation,
     pruneMarketAlertsRetention,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,

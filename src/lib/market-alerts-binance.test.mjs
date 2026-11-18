@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -807,6 +808,52 @@ try {
       ),
   });
   assert.equal(wsStore.getMarketAlertsSnapshot({ limit: 1 }).health.volatilityWs?.status, "live");
+
+  const liquidationTime = Date.now();
+  const liquidation = (order, symbolType = 1) => JSON.stringify({
+    stream: "!forceOrder@arr",
+    data: { e: "forceOrder", E: liquidationTime, o: {
+      s: "PIEVERSEUSDT", S: "BUY", X: "FILLED", ap: "2.50", z: "8", T: liquidationTime, st: symbolType,
+      ...order,
+    } },
+  });
+  const liquidationMessages = [
+    liquidation({}),
+    liquidation({}),
+    liquidation({ S: "SELL", X: "EXPIRED", ap: "2", z: "3" }),
+    liquidation({ X: "EXPIRED", z: "0" }),
+    liquidation({ z: "100" }, 2),
+  ];
+  let liquidationUrl;
+  await startVolatilityWebSocketWorker({
+    client: websocketClient(),
+    store: wsStore,
+    config: { wsTopN: 1, wsRankRefreshMs: 10 },
+    createWebSocket(url) {
+      liquidationUrl = url;
+      return new FakeWebSocket([
+        ...liquidationMessages,
+        JSON.stringify({ stream: "btcusdt@ticker", data: { s: "BTCUSDT", c: "107", P: "12", q: "7000" } }),
+      ]);
+    },
+  });
+  assert.ok(new URL(liquidationUrl).searchParams.get("streams").split("/").includes("!forceOrder@arr"));
+  const liquidationReader = new DatabaseSync(join(wsDirectory, "alerts.sqlite"), { readOnly: true });
+  try {
+    assert.deepEqual(liquidationReader.prepare(`
+      SELECT symbol, minute_at, short_notional_usdt, long_notional_usdt, short_snapshots, long_snapshots
+      FROM market_liquidation_minutes
+    `).all().map((row) => ({ ...row })), [{
+      symbol: "PIEVERSEUSDT",
+      minute_at: Math.floor(liquidationTime / 60_000) * 60_000,
+      short_notional_usdt: 20,
+      long_notional_usdt: 6,
+      short_snapshots: 1,
+      long_snapshots: 1,
+    }]);
+  } finally {
+    liquidationReader.close();
+  }
 
   const probe = await startVolatilityWebSocketWorker({
     client: websocketClient(),

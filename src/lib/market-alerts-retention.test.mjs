@@ -48,6 +48,8 @@ try {
   store.recordOpportunityDiagnostic({ symbol: "KEEPUSDT", detail: { score: 2 }, createdAt: freshDiagnostic });
   store.recordOpportunityAiAttempt({ fingerprint: "old", createdAt: oldRun });
   store.recordOpportunityAiAttempt({ fingerprint: "fresh", createdAt: freshRun });
+  store.recordMarketLiquidation({ symbol: "OLDUSDT", minuteAt: nowMs - 31 * day, side: "BUY", notionalUsdt: 100 });
+  store.recordMarketLiquidation({ symbol: "KEEPUSDT", minuteAt: nowMs - 29 * day, side: "SELL", notionalUsdt: 100 });
   for (let index = 0; index < 5; index += 1) {
     store.recordOpportunityDiagnostic({
       symbol: `BATCH${index}USDT`,
@@ -87,6 +89,11 @@ try {
   const limited = pruneAlertsRetention(db, nowMs, { force: true, batchSize: 2, maxBatches: 1 });
   assert.equal(limited.ran, true);
   assert.equal(limited.diagnostics, 2, "each batch deletes at most batchSize rows");
+  assert.equal(limited.liquidations, 1);
+  assert.deepEqual(
+    db.prepare("SELECT symbol FROM market_liquidation_minutes").all().map((row) => row.symbol),
+    ["KEEPUSDT"],
+  );
   const remainingOldDiagnostics = db.prepare(`
     SELECT COUNT(*) AS value FROM market_opportunity_diagnostics WHERE created_at=?
   `).get(oldDiagnostic).value;

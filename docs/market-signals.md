@@ -52,6 +52,7 @@
   - 每小时整点 3 分钟后，对日成交额 ≥ 500 万美元的合约取 1h K 线与 1h OI（约 160 个币、320 次请求，与其他行情 worker 共用限流），存入 `market_positioning_hourly`，保留 180 天。Binance 自身只保留 30 天，这份数据用于以后重新验证规则。
 - Web Push 新增 `signals` 来源，接法与海力士溢价一致：独立 outbox、设备登记后才收到、TTL 30 分钟、`target=/alerts`。
 - `/api/market-signals` 只读本地 SQLite，页面在 SSE 有更新时（最多 15 秒一次）和每 60 秒刷新一次。
+- Binance 行情 WS 同时订阅 `!forceOrder@arr`，将 USDT 合约公开强平成交快照按合约和分钟汇总到 `alerts.sqlite/market_liquidation_minutes`，保留 30 天。买入强平计为空头爆仓，卖出强平计为多头爆仓。Binance 每个合约每秒最多推送一条快照，金额为采样值。现阶段数据用于观察和回放验证。
 - 旧的 opportunity / squeeze 行情推送继续产生，但发送前按新规则过滤：所有做多方向（追涨、轧空做多）一律拦截；做空方向在 BTC 24h 已跌超 1.7% 时拦截。被拦截的投递记为 `source_no_longer_qualified`。`MARKET_SIGNAL_LEGACY_PUSH_FILTER=false` 可恢复旧行为。
 - 页面每类信号都显示"实盘近 30 天"战绩与回测参考，规则失效时可以直接看出来。
 - 预警后续表现（`src/lib/market-alert-outcomes.ts`，表 `signals.sqlite/market_alert_outcomes`）：每条暴涨 / 暴跌 / 轧空预警按触发价记录 1h、4h、24h 后的涨跌，以及 24h 内最大涨幅和最大跌幅。同时记下触发条件（A趋势 / B加速 / C阶梯 / D先行 / A+B，轧空按阶段）、等级和触发时的 24h 涨幅。数据来自 5m K 线，每轮最多 20 个币，首次上线回补 7 天。页面底部按触发条件展示近 14 天的胜率和同方向中位收益，暴跌预警以继续下跌算赢。

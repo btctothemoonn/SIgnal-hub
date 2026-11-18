@@ -8,6 +8,7 @@ export const ALERTS_RETENTION_MAX_BATCHES = 200;
 export const ALERTS_SCAN_RETENTION_MS = 7 * 24 * 60 * 60_000;
 export const ALERTS_DIAGNOSTIC_RETENTION_MS = MARKET_OPPORTUNITY_RULES.diagnosticRetentionMs;
 export const ALERTS_AI_RUN_RETENTION_MS = 30 * 24 * 60 * 60_000;
+export const ALERTS_LIQUIDATION_RETENTION_MS = 30 * 24 * 60 * 60_000;
 /**
  * Dedup is `INSERT OR IGNORE` on (symbol, participant_key, scan_id). A deleted
  * scan id can be applied again. Live workers only emit the current scan, and
@@ -28,6 +29,7 @@ type RetentionResult = {
   scans: number;
   diagnostics: number;
   aiRuns: number;
+  liquidations: number;
   scanTimesBackfilled: number;
 };
 
@@ -58,7 +60,7 @@ export function pruneAlertsRetention(
       WHERE id=1 AND last_retention_at<=?
     `).run(nowMs, nowMs - ALERTS_RETENTION_INTERVAL_MS);
     if (!changes(claimed)) {
-      return { ran: false, scans: 0, diagnostics: 0, aiRuns: 0, scanTimesBackfilled: 0 };
+      return { ran: false, scans: 0, diagnostics: 0, aiRuns: 0, liquidations: 0, scanTimesBackfilled: 0 };
     }
   }
 
@@ -104,21 +106,34 @@ export function pruneAlertsRetention(
     )
   `);
 
-  const totals = { scans: 0, diagnostics: 0, aiRuns: 0, scanTimesBackfilled: 0 };
+  const beforeLiquidations = nowMs - ALERTS_LIQUIDATION_RETENTION_MS;
+  const deleteLiquidations = db.prepare(`
+    DELETE FROM market_liquidation_minutes
+    WHERE rowid IN (
+      SELECT rowid FROM market_liquidation_minutes
+      WHERE minute_at < ?
+      ORDER BY minute_at
+      LIMIT ?
+    )
+  `);
+  const totals = { scans: 0, diagnostics: 0, aiRuns: 0, liquidations: 0, scanTimesBackfilled: 0 };
   for (let batch = 0; batch < maxBatches; batch += 1) {
     const scanTimesBackfilled = changes(backfill.run(batchSize));
     const scans = changes(deleteScans.run(beforeScan, batchSize));
     const diagnostics = changes(deleteDiagnostics.run(beforeDiagnostics, batchSize));
     const aiRuns = changes(deleteAiRuns.run(beforeAiRuns, batchSize));
+    const liquidations = changes(deleteLiquidations.run(beforeLiquidations, batchSize));
     totals.scanTimesBackfilled += scanTimesBackfilled;
     totals.scans += scans;
     totals.diagnostics += diagnostics;
     totals.aiRuns += aiRuns;
+    totals.liquidations += liquidations;
     if (
       scanTimesBackfilled < batchSize &&
       scans < batchSize &&
       diagnostics < batchSize &&
-      aiRuns < batchSize
+      aiRuns < batchSize &&
+      liquidations < batchSize
     ) break;
   }
   return { ran: true, ...totals };
