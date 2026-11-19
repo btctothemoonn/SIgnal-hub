@@ -6,7 +6,7 @@ const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 assert.match(source, /activeNav="alerts"/);
 assert.match(source, /MarketSignalsBoard/);
 assert.match(source, /getMarketSignalsBoardData/);
-assert.match(source, /回调买点/);
+assert.match(source, /启动候选与大涨后转弱/);
 assert.match(source, /4 在线/);
 assert.match(source, /liveWorkers === 4/);
 

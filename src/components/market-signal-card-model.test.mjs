@@ -1,65 +1,53 @@
 import assert from "node:assert/strict";
-import { buildCardRows, currentStageEvent, eventTime, getCardChart } from "./market-signal-card-model.ts";
+import { buildCardRows, eventTime, getCardChart } from "./market-signal-card-model.ts";
 
-const minute = 60_000;
 const now = Date.UTC(2026, 10, 3, 5, 44);
-const ago = minutes => now - minutes * minute;
+const ago = minutes => now - minutes * 60_000;
 const iso = ms => new Date(ms).toISOString();
-const episode = (symbol, first, last = first) => ({
-  symbol, firstAt: ago(first), lastAt: ago(last), count: first === last ? 1 : 2,
-  firstPrice: 1.1531, firstRatio: 6.05, firstQuoteVolume: 138800,
-});
-const event = (id, symbol, minutes, side = "LONG") => ({
-  id, symbol, type: "volatility", side, level: 1, price: 1.203, createdAt: iso(ago(minutes)),
+const pie = "PIEVERSEUSDT";
+const event = (id,symbol,minutes,side = "LONG") => ({
+  id, symbol, type: "volatility", side, level: 1, price: 1.2, createdAt: iso(ago(minutes)),
   occurredAt: iso(ago(minutes + 1)), trigger: "B加速·实时",
 });
-const pie = "PIEVERSEUSDT";
-const fresh = episode(pie, 56, 40);
-const earlier = episode(pie, 220, 190);
-const long = event("long", pie, 1);
-const data = {
-  volumeEpisodes: [fresh, earlier, episode("OBSUSDT", 10), episode("OLDUSDT", 400), episode("OVERRUNUSDT", 130), episode("INWINDOWUSDT", 92, 25), episode("CONFIRMUSDT", 80)],
-  events: [long, event("prior", pie, 59), event("short", "DOWNUSDT", 15, "SHORT"), event("equity", "TSLAUSDT", 8), event("late", "OVERRUNUSDT", 1), event("crosses", "CONFIRMUSDT", 2)],
-  assetClasses: { TSLAUSDT: "EQUITY" },
-  signals: { coinSymbols: [pie, "OBSUSDT", "OLDUSDT", "OVERRUNUSDT", "INWINDOWUSDT", "CONFIRMUSDT", "DOWNUSDT"] },
+const stage = (id,symbol,minutes,kind) => ({ id,symbol,kind,at:ago(minutes),price:1.2 });
+const burst = (symbol,first,last=first) => ({symbol, firstAt:ago(first), lastAt:ago(last), firstPrice:1.11, firstRatio:6.05, firstQuoteVolume:138800, count:first===last?1:2});
+const long=event("long",pie,12), down=event("down","DOWNUSDT",10,"SHORT");
+const early=stage("early",pie,42,"startup"), pumped=stage("pump",pie,35,"pumped"), weak=stage("weak",pie,20,"weakening");
+const prior=burst(pie,46,6);
+const data={
+  events:[long,down,event("stock","TSLAUSDT",8),event("old","OLDUSDT",100)],
+  lifecycleEvents:[pumped,weak,early,stage("new","NEWUSDT",1,"startup"),stage("pending","DONEUSDT",43,"startup"),stage("done","DONEUSDT",2,"pumped")],
+  volumeEpisodes:[burst(pie,5),burst("OBSUSDT",1),prior,burst("OLDUSDT",1),burst("DOWNUSDT",131)],
+  assetClasses:{TSLAUSDT:"EQUITY"},
+  signals:{coinSymbols:[pie,"DOWNUSDT","NEWUSDT","DONEUSDT","OLDUSDT","OBSUSDT"]},
 };
-const rows = (direction = "all", asset = "crypto", watchlist = []) => buildCardRows(
-  data, { startMs: ago(60), endMs: now, asset, direction, watchlist },
-);
-const find = (symbol, list = rows()) => list.find(row => row.symbol === symbol);
-
-assert.equal(find(pie).episode, fresh);
-assert.deepEqual(find(pie).confirmations.map(item => item.id), ["long"]);
-assert.equal(find(pie).events.length, 2, "independent older triggers remain in the history");
-assert.equal(eventTime(long), ago(1), "use actual creation time, not the candle bucket");
-assert.equal(find("OLDUSDT"), undefined);
-assert.equal(find("OVERRUNUSDT").episode, undefined, "a later independent event does not resurrect an expired observation");
-assert.equal(find("INWINDOWUSDT").episode.count, 2);
-assert.equal(find("CONFIRMUSDT").confirmations[0].id, "crosses", "an in-window confirmation keeps the first burst as context");
-assert.deepEqual(rows("observation").map(row => row.symbol).sort(), ["INWINDOWUSDT", "OBSUSDT"]);
-assert.deepEqual(rows("down").map(row => row.symbol), ["DOWNUSDT"]);
-assert.deepEqual(rows("watch", "crypto", [pie]).map(row => row.symbol), [pie]);
-assert.deepEqual(rows("all", "equity").map(row => row.symbol), ["TSLAUSDT"]);
-assert.equal(find("OBSUSDT", rows("up")), undefined, "direction-neutral observations are not up alerts");
-
-const bar = at => ({ at, open: 1.1, high: 1.3, low: 1, close: 1.2 });
-const chart = getCardChart([bar(ago(70)), bar(ago(57)), bar(ago(2))], now, fresh, [long, event("out", pie, 65)]);
-assert.deepEqual(chart.bars.map(item => item.at), [ago(57), ago(2)]);
-assert.deepEqual(chart.marks.map(mark => [mark.kind, mark.at]), [["burst", fresh.firstAt], ["long", ago(1)]]);
-assert.equal(getCardChart([], now, fresh, [long]).bars.length, 0);
-const newerDown = event("reversal", pie, 0.5, "SHORT");
-const squeeze = { ...event("squeeze", pie, 0.2), type: "short_squeeze", stage: "轧空启动" };
-const mixed = { ...data, events: [newerDown, squeeze, ...data.events] };
-const stages = direction => {
-  const result = buildCardRows(mixed, { startMs: ago(60), endMs: now, asset: "crypto", direction, watchlist: [] });
-  return currentStageEvent(find(pie, result), direction);
-};
-assert.equal(stages("all"), squeeze, "the latest independent trigger succeeds an older LONG");
-assert.equal(stages("up"), long);
-assert.equal(stages("down"), newerDown);
-assert.equal(stages("squeeze"), squeeze);
-assert.equal(currentStageEvent({ ...find(pie), events: [data.events[1]], confirmations: [] }, "all"), undefined, "a new burst takes precedence over earlier events");
-assert.equal(getCardChart([bar(ago(2))], now, undefined, [], newerDown).marks[0].kind, "down");
-assert.equal(getCardChart([bar(ago(2))], now, undefined, [], squeeze).marks[0].kind, "squeeze");
-assert.equal(getCardChart([bar(ago(2))], now, undefined, [], long).marks[0].kind, "up", "an independent LONG is distinct from a burst confirmation");
-console.log("ok - card filtering, observation lifetime, actual confirmation times and chart window");
+const rows=(view="focus", direction="all", asset="crypto", watchlist=[])=>buildCardRows(data,{view,direction,asset,watchlist,startMs:ago(60),endMs:now});
+const focus=rows();
+assert.deepEqual(focus.map(row=>row.symbol),["NEWUSDT",pie],"a pumped coin graduates from startup, one card per focused symbol");
+const focused=focus.find(r=>r.symbol===pie);
+assert.equal(focused.primaryLifecycle,weak);
+assert.equal(focused.latestAt,weak.at);
+assert.deepEqual(focused.events,[long],"raw events enrich an existing focus card");
+assert.deepEqual(focused.lifecycleEvents,[weak,pumped,early]);
+assert.equal(focused.episode,prior,"a newer unrelated burst cannot replace context for a stage");
+assert.deepEqual(rows("all").map(row=>row.symbol),["NEWUSDT","DONEUSDT","DOWNUSDT",pie],"only real signals affect order and visibility");
+assert.equal(rows("all").find(r=>r.symbol===pie).primaryLifecycle,undefined,"in the archive a more recent raw alert can headline");
+assert.deepEqual(rows("all","watch","crypto",["OBSUSDT",pie]).map(r=>r.symbol),[pie]);
+assert.deepEqual(rows("all","all","equity").map(r=>r.symbol),["TSLAUSDT"]);
+const downRows=rows("all","down");
+assert.deepEqual(downRows.map(r=>r.symbol),["DOWNUSDT"]);
+assert.equal(downRows[0].episode,undefined,"expired volume does not attach");
+const up = rows("all", "up").find(row => row.symbol === pie);
+assert.equal(up.primaryLifecycle, undefined, "direction filters use the selected price alert as the headline");
+assert.deepEqual(up.lifecycleEvents, [weak, pumped, early], "lifecycle is available as background on matching alert cards");
+assert.equal(eventTime(long),ago(12));
+const chart=getCardChart([{at:ago(70)},{at:ago(2)}],now,focused);
+assert.deepEqual(chart.bars.map(b=>b.at),[ago(2)]);
+assert.ok(chart.marks.some(m=>m.kind==="weakening" && m.at===weak.at && m.price===weak.price));
+assert.ok(chart.marks.some(m=>m.kind==="startup" && m.at===early.at));
+assert.ok(chart.marks.some(m=>m.kind==="pumped" && m.at===pumped.at));
+assert.ok(chart.marks.some(m=>m.kind==="burst" && m.at===prior.firstAt));
+assert.deepEqual(getCardChart([],ago(21),focused).marks.filter(m=>m.kind==="weakening"),[]);
+assert.equal(rows("all").find(r=>r.symbol==="OLDUSDT"),undefined);
+assert.equal(rows("all").find(r=>r.symbol==="OBSUSDT"),undefined);
+console.log("ok - lifecycle grouping, graduation, archive filters, actual signal times and chart context");

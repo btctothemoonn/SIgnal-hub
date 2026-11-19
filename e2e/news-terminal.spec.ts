@@ -167,6 +167,7 @@ test("alerts isolate US equities and open the Binance trading view for the chose
   const orders = await setup(page);
   await page.evaluate(() => localStorage.setItem("signal-hub:news-terminal:v1", JSON.stringify({ symbol: "ETH", venue: "hyperliquid" })));
   await page.goto("/alerts");
+  await page.getByRole("button", { name: "全部异动", exact: true }).click();
   const equity = page.locator("#coin-AAOIUSDT").getByRole("link", { name: "查看 AAOI 实时行情" });
   await expect(equity).toHaveCount(0);
   await page.getByRole("button", { name: "仅美股" }).click();

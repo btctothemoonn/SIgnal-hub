@@ -1453,7 +1453,7 @@ export async function startVolatilityWebSocketWorker(input: {
     const since = nowMs - 24 * 60 * 60_000;
     const cardSymbols = input.once ? new Set<string>() : new Set([
       ...store.getRecentlyTriggeredSymbols(new Date(since).toISOString()),
-      ...store.listVolumeEpisodes(since, nowMs).map((e) => e.symbol),
+      ...store.listLifecycleEvents(since, nowMs).map(event => event.symbol),
     ]);
     const spareStreams = Math.max(0, 1024 - subscribedMarkets.length * 3 - 1);
     const chartOnlyMarkets = allMarkets.filter((m) => cardSymbols.has(m.symbol) && !subscribedSymbols.has(m.symbol))

@@ -28,6 +28,14 @@ try {
     close: 1.1, quoteVolume: i === 20 ? 60_000 : 10_000, observeVolume: true,
   }));
   store.recordCardMinutes(candles, now);
+  store.recordCardMinutes(candles.map(bar => ({ ...bar, symbol: "PIEVERSEUSDT" })), now);
+  const stageOnly = "STAGEUSDT";
+  store.recordCardMinutes(candles.map(bar => ({ ...bar, symbol: stageOnly })), now);
+  const quarters = Array.from({ length: 100 }, (_, i) => ({
+    at: now - (99 - i) * 15 * minute, high: i === 99 ? 1.26 : 1.01, low: 1, close: i === 99 ? 1.25 : 1,
+  }));
+  store.lifecycle.storeBars(stageOnly, quarters);
+  store.lifecycle.evaluate([stageOnly], now);
   const late = new Date(now - 86_399_000).toISOString();
   store.insertMarketAlertEvent({
     id: "late", symbol: "PIEVERSEUSDT", type: "volatility", side: "LONG", level: 1,
@@ -38,12 +46,16 @@ try {
   const board = getMarketSignalsBoardData(now);
   assert.equal(board.events.length, 203, "all confirmations inside the observation window reach the card");
   assert.equal(board.events.at(-1).id, "late");
-  const episode = board.volumeEpisodes.find(item => item.symbol === symbol);
-  assert.ok(episode, "a burst-only symbol has a card before any directional alert");
+  assert.deepEqual(board.lifecycleEvents.map(({ kind, symbol }) => [kind, symbol]), [["pumped", stageOnly]]);
+  assert.ok(board.signals.coinSymbols.includes(stageOnly), "a lifecycle event can open a crypto card without a raw alert");
+  assert.equal(board.cardCandles[stageOnly].length, candles.length);
+  assert.ok(!board.volumeEpisodes.some(item => item.symbol === symbol), "a standalone burst stays out of the board");
+  assert.ok(!(symbol in board.cardMetrics) && !(symbol in board.cardCandles));
+  const episode = board.volumeEpisodes.find(item => item.symbol === "PIEVERSEUSDT");
+  assert.ok(episode, "an alert card keeps the matching volume history");
   assert.equal(episode.firstPrice, 1.1);
   assert.equal(episode.firstRatio, 6);
-  assert.equal(board.cardCandles[symbol].at(-1).at, firstAt - minute);
-  assert.deepEqual(board.cardCandles.PIEVERSEUSDT ?? [], []);
+  assert.equal(board.cardCandles.PIEVERSEUSDT.at(-1).at, firstAt - minute);
   assert.equal(board.cardMetrics.PIEVERSEUSDT?.shortLiquidations15m, null);
   assert.equal(store.getMarketAlertsSnapshot({ limit: 300 }).events.length, 200, "legacy pagination still caps a page at 200");
 } finally {

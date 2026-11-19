@@ -1,5 +1,6 @@
 import { createBinanceFuturesClient, type BinanceMarketClient } from "./market-alerts-binance.ts";
 import { isStableOrFiatBase } from "./market-alerts-core.ts";
+import { runLifecycleObservations } from "./market-lifecycle.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 import type { EnvLike } from "./important-push-types.ts";
 import { AiProvidersBlockedError, isQuotaExhaustedError } from "./ai-provider-fallback.ts";
@@ -413,6 +414,14 @@ export async function runMarketSignalsCycle(input: {
       await runPositioning({ signals, client, nowMs, cycleStartedAt, rules, result, coinSymbols });
     } catch (error) {
       result.errors.push(`positioning: ${safeError(error)}`);
+    }
+    if (alerts.lifecycle && typeof client.getKlines === "function") {
+      try {
+        await runLifecycleObservations({ store: alerts.lifecycle, coinSymbols, nowMs,
+          getKlines: client.getKlines.bind(client), errors: result.errors });
+      } catch (error) {
+        result.errors.push(`lifecycle: ${safeError(error)}`);
+      }
     }
     if (rules.aiEnabled) await runNotes({ alerts, signals, nowMs, rules, result, env, generate: input.generateNote });
     signals.markCycle({ nowMs, error: result.errors.length ? result.errors.slice(0, 3).join("; ") : null });

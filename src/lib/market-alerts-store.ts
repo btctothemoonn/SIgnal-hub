@@ -22,6 +22,7 @@ import type {
   MarketOpportunityMetrics,
 } from "./market-opportunity-core.ts";
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
+import { createMarketLifecycleStore } from "./market-lifecycle.ts";
 import { createVolumeObservationStore } from "./market-volume-observations.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
@@ -259,6 +260,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   db.exec("PRAGMA synchronous=NORMAL;");
   const briefStore = createMarketBriefStore(db);
   const { prune: pruneVolumeObservations, ...volumeObservations } = createVolumeObservationStore(db, transaction);
+  const lifecycle = createMarketLifecycleStore(db, transaction);
   const pushOutbox = createImportantPushOutbox(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_volatility_state (
@@ -468,6 +470,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   `);
   const revisionTables = [
     "market_volume_hits",
+    "market_lifecycle_events",
     "market_alert_brief",
     "market_volatility_state",
     "market_squeeze_active",
@@ -1954,6 +1957,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     reserveVolatilityAlert,
     ...briefStore,
     ...volumeObservations,
+    ...lifecycle,
     commitVolatilityAlert,
     commitVolatilityAlertUncertain,
     releaseVolatilityAlert,

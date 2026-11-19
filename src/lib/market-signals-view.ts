@@ -12,12 +12,13 @@ export function getMarketSignalsBoardData(nowMs = Date.now()) {
     const fromMs = nowMs - DAY_MS;
     const alerts = store.getBoardAlerts(new Date(fromMs).toISOString(), now);
     const signals = readMarketSignalsSnapshot({ nowMs });
+    const lifecycleEvents = store.listLifecycleEvents(fromMs, nowMs);
+    const trackedCoins = new Set(lifecycleEvents.map(event => event.symbol));
+    const cardSymbols = [...new Set([...alerts.events.map(event => event.symbol), ...trackedCoins])];
+    const cardSet = new Set(cardSymbols);
     // A confirmation inside the board window may belong to an observation that began just before it.
-    const volumeEpisodes = store.listVolumeEpisodes(fromMs - 2 * 3_600_000, nowMs);
-    const cardSymbols = [...new Set([
-      ...alerts.events.map(event => event.symbol),
-      ...volumeEpisodes.map(episode => episode.symbol),
-    ])];
+    const volumeEpisodes = store.listVolumeEpisodes(fromMs - 2 * 3_600_000, nowMs)
+      .filter(episode => cardSet.has(episode.symbol));
     const wanted = new Set(["BTCUSDT", ...cardSymbols, ...signals.signals.map(signal => signal.symbol)]);
     const tickers = store.getMarketTickers().filter(ticker => wanted.has(ticker.symbol));
     const assetClasses = Object.fromEntries(
@@ -28,13 +29,14 @@ export function getMarketSignalsBoardData(nowMs = Date.now()) {
       ...alerts,
       tickers,
       assetClasses,
+      lifecycleEvents,
       volumeEpisodes,
       cardCandles: store.getCardCandles(cardSymbols, nowMs),
       cardMetrics: readMarketCardMetrics(cardSymbols, nowMs),
       signals: {
         ...signals,
         symbolClasses: {},
-        coinSymbols: signals.coinSymbols.filter(symbol => wanted.has(symbol)),
+        coinSymbols: [...new Set([...signals.coinSymbols.filter(symbol => wanted.has(symbol)), ...trackedCoins])],
       },
     };
   } finally {

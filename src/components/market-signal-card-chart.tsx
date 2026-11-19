@@ -1,4 +1,4 @@
-import { getCardChart, HOUR_MS, type BoardEvent, type CardRow } from "./market-signal-card-model";
+import { getCardChart, HOUR_MS, type CardRow } from "./market-signal-card-model";
 
 const WIDTH = 480;
 const HEIGHT = 118;
@@ -10,12 +10,12 @@ export function cardTime(at: number) {
   return Number.isFinite(at) ? timeFormatter.format(at) : "—";
 }
 
-const MARK_COLOR = { burst: "text-warning", long: "text-info", up: "text-info", down: "text-danger", squeeze: "text-warning" };
+const MARK_COLOR = { burst: "text-warning", startup: "text-success", pumped: "text-warning", weakening: "text-danger", up: "text-info", down: "text-danger", squeeze: "text-warning" };
 
-export function MarketSignalCardChart({ row, candles, endMs, stageEvent }: {
-  row: CardRow; candles: Parameters<typeof getCardChart>[0]; endMs: number; stageEvent?: BoardEvent;
+export function MarketSignalCardChart({ row, candles, endMs }: {
+  row: CardRow; candles: Parameters<typeof getCardChart>[0]; endMs: number;
 }) {
-  const { bars, marks, startMs } = getCardChart(candles, endMs, row.episode, row.confirmations, stageEvent);
+  const { bars, marks, startMs } = getCardChart(candles, endMs, row);
   const low = Math.min(...bars.map(bar => bar.low), ...marks.map(mark => mark.price));
   const high = Math.max(...bars.map(bar => bar.high), ...marks.map(mark => mark.price));
   const x = (at: number) => 4 + (at - startMs) / HOUR_MS * (WIDTH - 8);
@@ -29,10 +29,7 @@ export function MarketSignalCardChart({ row, candles, endMs, stageEvent }: {
     const bottom = Math.max(top + 1.2, y(Math.min(bar.open, bar.close)));
     path.body += `M${at} ${top.toFixed(2)}V${bottom.toFixed(2)}`;
   }
-  const burst = marks.find(mark => mark.kind === "burst");
-  const latestIndependent = marks.find(mark => mark.kind !== "burst" && mark.kind !== "long");
-  const trigger = latestIndependent ?? marks.find(mark => mark.kind === "long");
-  const labels = [burst, trigger].filter(mark => mark !== undefined);
+  const labels = marks.slice(0, 2);
   const stacked = labels.length === 2 && Math.abs(labels[1].at - labels[0].at) < HOUR_MS * 0.40;
   return (
     <figure className="min-w-0">
@@ -45,7 +42,7 @@ export function MarketSignalCardChart({ row, candles, endMs, stageEvent }: {
           <div className={`relative ${stacked ? "h-9" : "h-5"}`}>
             {labels.map((mark, index) => {
               const position = (mark.at - startMs) / HOUR_MS;
-              return <span key={mark.kind} className={`absolute whitespace-nowrap text-[10px] font-semibold ${MARK_COLOR[mark.kind]}`}
+              return <span key={`${mark.kind}-${mark.at}`} className={`absolute whitespace-nowrap text-[10px] font-semibold ${MARK_COLOR[mark.kind]}`}
                 style={{ left: `${position * 100}%`, top: stacked ? index * 15 : 0, transform: `translateX(-${position * 100}%)` }}>
                 {mark.label} {cardTime(mark.at)}
               </span>;

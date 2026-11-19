@@ -8,7 +8,7 @@ import { getMarketAlertWorkerView } from "@/lib/market-alerts-health";
 import type { MarketSignalsBoardData } from "@/lib/market-signals-view";
 import { MarketSignalCardChart, cardTime } from "./market-signal-card-chart";
 import {
-  buildCardRows, currentStageEvent, directionOf, EPISODE_MS, eventTime, triggerLabel, type AssetFilter, type BoardEvent, type CardRow,
+  buildCardRows, directionOf, eventTime, lifecycleLabels, triggerLabel, type AssetFilter, type BoardView, type CardRow,
   type DirectionFilter,
 } from "./market-signal-card-model";
 
@@ -24,7 +24,7 @@ const HOLD_MS = 24 * 3_600_000;
 const WATCH_SHOW_MS = 12 * 3_600_000;
 const SIGNALS_STALE_MS = 15 * 60_000;
 const REFRESH_MIN_GAP_MS = 15_000;
-const CARDS_PER_PAGE = 8;
+const INITIAL_CARD_LIMITS = { startup: 2, weakening: 2, all: 8 };
 
 function base(symbol: string) {
   return symbol.replace(/USDT$/, "");
@@ -245,15 +245,10 @@ function WatchRow({ signal, nowMs, asset }: { signal: BoardSignal; nowMs: number
   );
 }
 
-function cardStage(row: CardRow, nowMs: number, event?: BoardEvent) {
-  if (event) {
-    const styles = { down: "bg-danger-soft text-danger", squeeze: "bg-warning-soft text-warning", up: "bg-info-soft text-info" };
-    return { label: triggerLabel(event), style: styles[directionOf(event)] };
-  }
-  return row.episode && nowMs >= row.episode.firstAt + EPISODE_MS
-    ? { label: "观察结束", style: "bg-workspace-canvas text-muted" }
-    : { label: "爆量观察", style: "bg-warning-soft text-warning" };
-}
+const badgeStyles = {
+  up: "bg-info-soft text-info", down: "bg-danger-soft text-danger", squeeze: "bg-warning-soft text-warning",
+  startup: "bg-info-soft text-info", pumped: "bg-warning-soft text-warning", weakening: "bg-danger-soft text-danger",
+};
 
 function Metric({ label, value, title, className = "", compact = false }: { label: string; value: string; title?: string; className?: string; compact?: boolean }) {
   return <div className={className} title={title}><dt className="text-[11px] leading-5 text-muted">{label}</dt>
@@ -278,38 +273,45 @@ function quoteVolume(value: number | null | undefined) {
   return `${Number(value.toFixed(2)).toLocaleString("zh-CN")} USDT`;
 }
 
-function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, asset, outcomes, guidance, direction }: {
+function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, asset, outcomes, guidance }: {
   row: CardRow; ticker?: Ticker; candles: MarketSignalsBoardData["cardCandles"][string];
   metrics?: MarketSignalsBoardData["cardMetrics"][string]; nowMs: number; expanded: boolean; onToggle: () => void;
-  starred: boolean; onStar: () => void; asset?: string; outcomes: RecentOutcomes; guidance?: string; direction: DirectionFilter;
+  starred: boolean; onStar: () => void; asset?: string; outcomes: RecentOutcomes; guidance?: string;
 }) {
-  const { symbol, episode } = row;
-  const stageEvent = currentStageEvent(row, direction);
-  const stage = cardStage(row, nowMs, stageEvent);
+  const { symbol, episode, primaryLifecycle: phase } = row;
   const last = row.events[0];
+  const label = phase ? lifecycleLabels[phase.kind] : triggerLabel(last);
+  const style = badgeStyles[phase?.kind ?? directionOf(last)];
+  const signalPrice = phase?.price ?? last.price;
   const bar = candles.at(-1);
   const lastCloseMs = bar ? bar.at + 60_000 : 0;
   const useClose = bar && (!ticker || lastCloseMs > Date.parse(ticker.updatedAt));
   const current = useClose ? bar.close : ticker?.price;
-  const since = episode && current && episode.firstPrice > 0 ? (current / episode.firstPrice - 1) * 100 : null;
+  const since = current != null && signalPrice > 0 ? (current / signalPrice - 1) * 100 : null;
   const chartUrl = row.events.find(event => event.chartUrl)?.chartUrl;
-  const firstConfirmation = row.confirmations[0];
-  const confirmIds = new Set(row.confirmations.map(event => event.id));
   const timeline = row.events.map(event => ({
     id: event.id, at: eventTime(event), color: directionOf(event) === "down" ? "text-danger" : directionOf(event) === "squeeze" ? "text-warning" : "text-info",
-    title: confirmIds.has(event.id) ? `暴涨确认 L${event.level}` : `${episode ? "独立触发 · " : ""}${event.stage} · L${event.level}`,
+    title: triggerLabel(event),
     detail: [event.trigger, `触发价 ${price(event.price)}`, event.changePct == null ? null : pct(event.changePct), event.volumeRatio == null ? null : `量比 ${event.volumeRatio.toFixed(2)} 倍`].filter(Boolean).join(" · "),
     outcome: outcomes[event.id] as RecentOutcomes[string] | undefined,
   }));
-  if (episode) {
-    timeline.push({ id: "first-burst", at: episode.firstAt, color: "text-warning", title: "首次爆量", detail: `1 分钟成交额 ${quoteVolume(episode.firstQuoteVolume)}`, outcome: undefined });
-    if (episode.count > 1) timeline.push({ id: "repeat-burst", at: episode.lastAt, color: "text-warning", title: "再次爆量", detail: `本轮累计 ${episode.count} 次`, outcome: undefined });
-    if (firstConfirmation && !timeline.some(item => item.id === firstConfirmation.id)) {
-      timeline.push({ id: firstConfirmation.id, at: eventTime(firstConfirmation), color: "text-info", title: `暴涨确认 L${firstConfirmation.level}`, detail: `触发价 ${price(firstConfirmation.price)}`, outcome: outcomes[firstConfirmation.id] });
+  for (const item of row.lifecycleEvents) {
+    timeline.push({ id: item.id, at: item.at, color: item.kind === "weakening" ? "text-danger" : "text-info",
+      title: lifecycleLabels[item.kind], detail: `收盘价 ${price(item.price)} USDT`, outcome: undefined });
+    if (item.kind === "weakening") {
+      if (!row.lifecycleEvents.some(prior => prior.kind === "pumped" && prior.at === item.pumpAt)) {
+        timeline.push({ id: `pump-${item.id}`, at: item.pumpAt, color: "text-warning", title: "已大涨", detail: "进入跟踪", outcome: undefined });
+      }
+      if (expanded && item.retestAt != null && item.retestPrice != null) {
+        timeline.push({ id: `retest-${item.id}`, at: item.retestAt, color: "text-muted",
+          title: "反抽失败", detail: `收盘价 ${price(item.retestPrice)} USDT`, outcome: undefined });
+      }
     }
   }
+  if (episode) timeline.push({ id: "first-burst", at: episode.firstAt, color: "text-muted",
+    title: "首次爆量", detail: `${episode.firstRatio.toFixed(2)} 倍 · 1 分钟成交额 ${quoteVolume(episode.firstQuoteVolume)}`, outcome: undefined });
   timeline.sort((a, b) => a.at - b.at);
-  const preview = episode ? timeline.filter(item => item.id === "first-burst" || item.id === firstConfirmation?.id || item.id === stageEvent?.id) : timeline.slice(-2);
+  const preview = timeline.filter(item => item.id !== "first-burst").slice(-2);
   const detailsId = `details-${symbol}`;
   const funding = metrics?.fundingRate;
   return (
@@ -319,7 +321,8 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
           <MarketSymbolLink symbol={symbol} className="max-w-full truncate text-xl font-bold tracking-tight text-foreground sm:text-2xl" />
           <span className="hidden text-xs text-muted @min-[520px]:inline">USDT 永续</span>
           <AssetBadge type={asset} />
-          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${stage.style}`}>{stage.label}</span>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${style}`}>{label}</span>
+          {phase && last ? <span title={`最近行情预警 · ${cardTime(eventTime(last))}`} className="rounded border border-line px-1.5 py-0.5 text-[10px] font-medium text-muted">{triggerLabel(last)}</span> : null}
           <button type="button" aria-pressed={starred} aria-label={`${starred ? "取消自选" : "加入自选"} ${base(symbol)}`} onClick={onStar}
             className="ml-auto grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-workspace-canvas @min-[520px]:ml-0">
             <Star aria-hidden className={`size-4 ${starred ? "fill-warning text-warning" : ""}`} />
@@ -327,20 +330,28 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
         </div>
         <div className="flex flex-wrap items-baseline gap-x-3 @min-[520px]:row-span-2 @min-[520px]:flex-col @min-[520px]:items-end">
           <span title={`最近报价 · ${useClose ? cardTime(lastCloseMs) : clock(ticker?.updatedAt)}`} className="font-mono text-xl font-bold tabular-nums tracking-tight text-foreground sm:text-2xl"><span className="sr-only">最新价格 </span>{price(current)}</span>
-          {episode ? <span className={`text-xs font-semibold ${tone(since)}`}>较首爆 {pct(since, 2)}</span> : <span className={`text-xs font-semibold ${tone(ticker?.pct24h)}`}>24h {pct(ticker?.pct24h)}</span>}
+          <span className={`text-xs font-semibold ${tone(since)}`}>触发后 {pct(since, 2)}</span>
         </div>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted">
-          {episode ? <span>首爆 <b className="font-mono font-medium text-foreground">{cardTime(episode.firstAt)}</b> · {price(episode.firstPrice)} USDT</span>
-            : <span>最近触发 {cardTime(row.latestAt)} · {price(last?.price)} USDT</span>}
+          <span>最近触发 <b className="font-mono font-medium text-foreground">{cardTime(row.latestAt)}</b> · {price(signalPrice)} USDT</span>
           <span className="font-mono text-[10px]">FDV {money(ticker?.fdvUsd ?? last?.fdvUsd)}</span>
           {guidance ? <span className="text-[10px]">{guidance}</span> : null}
         </div>
       </header>
 
       <div className="mt-3 grid gap-3 border-t border-line pt-3 @min-[580px]:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] @min-[580px]:gap-4">
-        <MarketSignalCardChart row={row} candles={candles} endMs={nowMs} stageEvent={stageEvent} />
+        <MarketSignalCardChart row={row} candles={candles} endMs={nowMs} />
         <dl className="grid grid-cols-2 content-start gap-x-2 gap-y-3 border-t border-line pt-2 @min-[580px]:border-l @min-[580px]:border-t-0 @min-[580px]:pl-4 @min-[580px]:pt-0">
-          <Metric label="首爆量比" value={episode ? `${episode.firstRatio.toFixed(2)} 倍` : "—"} />
+          {phase?.kind === "startup" ? <>
+            <Metric label="1h 涨幅" value={pct(phase.hourPct, 2)} />
+            <Metric label="1h 领先市场" value={`${phase.relativePct.toFixed(2)} 个百分点`} compact />
+            <Metric label="距 24h 低位" value={pct(phase.gainFromLowPct, 2)} />
+          </> : phase?.kind === "weakening" ? <>
+            <Metric label="本轮最高涨幅" value={pct(phase.peakGainPct, 2)} />
+            <Metric label="距高位回撤" value={pct(-Math.abs(phase.drawdownPct), 2)} />
+            <Metric label="失守支撑价" value={price(phase.supportPrice)} />
+          </> : phase?.kind === "pumped" ? <Metric label="距 24h 低位" value={pct(phase.gainFromLowPct, 2)} /> : null}
+          {episode ? <Metric label="首爆量比" value={`${episode.firstRatio.toFixed(2)} 倍`} title={`首爆 ${cardTime(episode.firstAt)}`} /> : null}
           <Metric label="1h 持仓量变化" value={pct(metrics?.oi1hPct, 2)} title="最近两个已完成整点之间，未平仓合约数量的变化" />
           <Metric label="资金费率" value={funding == null ? "—" : pct(funding * 100, 3)} className={expanded ? "" : "hidden @min-[580px]:block"} />
           <Metric label="15m 空头强平（采样）" value={quoteVolume(metrics?.shortLiquidations15m)} title="最近 15 分钟实际采集到的空头强平成交额" className={expanded ? "" : "hidden @min-[580px]:block"} compact />
@@ -376,12 +387,13 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const [data, setData] = useState(initialData);
   const [nowMs, setNowMs] = useState(() => Date.parse(initialData.generatedAt));
   const [connection, setConnection] = useState<"live" | "retrying">("live");
+  const [view, setView] = useState<BoardView>("focus");
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("all");
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("crypto");
   const [windowKey, setWindowKey] = useState<WindowKey>("24h");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
-  const [cardLimit, setCardLimit] = useState(CARDS_PER_PAGE);
+  const [cardLimits, setCardLimits] = useState(INITIAL_CARD_LIMITS);
   const [focusRequest, setFocusRequest] = useState<{ symbol: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -430,11 +442,13 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
     if (symbol && /^[A-Z0-9]{2,40}$/.test(symbol)) {
       queueMicrotask(() => {
         setExpanded(symbol);
+        const latestPhase = (initialData.lifecycleEvents ?? []).filter(event => event.symbol === symbol).sort((a, b) => b.at - a.at)[0];
+        if (!latestPhase || latestPhase.kind === "pumped") setView("all");
         if (initialData.assetClasses?.[symbol] === "EQUITY") setAssetFilter("equity");
         setFocusRequest({ symbol });
       });
     }
-  }, [initialData.assetClasses]);
+  }, [initialData.assetClasses, initialData.lifecycleEvents]);
 
   const toggleStar = useCallback((symbol: string) => {
     setWatchlist((current) => {
@@ -462,15 +476,19 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   }, [pullbacks]);
 
   const rows = useMemo(() => buildCardRows(data, {
-    asset: assetFilter, direction: directionFilter, watchlist, startMs: nowMs - WINDOW_MS[windowKey], endMs: nowMs,
-  }), [data, assetFilter, directionFilter, watchlist, nowMs, windowKey]);
+    view, asset: view === "focus" ? "crypto" : assetFilter, direction: view === "focus" ? "all" : directionFilter, watchlist, startMs: nowMs - WINDOW_MS[windowKey], endMs: nowMs,
+  }), [data, view, assetFilter, directionFilter, watchlist, nowMs, windowKey]);
   const feed = useMemo(() => rows.flatMap(row => row.events).sort((a, b) => eventTime(b) - eventTime(a)).slice(0, 30), [rows]);
-  const visibleRows = rows.slice(0, cardLimit);
-  if (expanded && !visibleRows.some(row => row.symbol === expanded)) {
-    const target = rows.find(row => row.symbol === expanded);
-    if (target) visibleRows.push(target);
-  }
-  const canScroll = !!focusRequest && visibleRows.some(row => row.symbol === focusRequest.symbol);
+  const groups = view === "focus"
+    ? (["startup", "weakening"] as const).map(kind => ({ key: kind, label: lifecycleLabels[kind], rows: rows.filter(row => row.primaryLifecycle?.kind === kind) }))
+    : [{ key: "all" as const, label: "异动卡片", rows }];
+  const visibleGroups = groups.map(group => {
+    const visibleRows = group.rows.slice(0, cardLimits[group.key]);
+    const target = expanded && group.rows.find(row => row.symbol === expanded);
+    if (target && !visibleRows.includes(target)) visibleRows.push(target);
+    return { ...group, visibleRows };
+  });
+  const canScroll = !!focusRequest && visibleGroups.some(group => group.visibleRows.some(row => row.symbol === focusRequest.symbol));
   useEffect(() => {
     if (focusRequest && canScroll) document.getElementById(`coin-${focusRequest.symbol}`)?.scrollIntoView({ block: "center" });
   }, [focusRequest, canScroll]);
@@ -492,19 +510,27 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
           {connection === "retrying" ? <span className="text-warning">· 连接重试中</span> : null}
         </p>
         <div className="flex flex-wrap gap-1.5">
+          <div role="group" aria-label="看板视图" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
+            {([["focus", "重点观察"], ["all", "全部异动"]] as const).map(([value, text]) => (
+              <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setCardLimits(INITIAL_CARD_LIMITS); setFocusRequest(null); }}
+                className={`rounded px-2.5 py-1 text-xs font-semibold ${view === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{text}</button>
+            ))}
+          </div>
+          {view === "all" ? <>
           <div role="group" aria-label="标的类别" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
             {([["仅加密", "crypto"], ["仅美股", "equity"]] as const).map(([label, value]) => (
-              <button key={label} type="button" aria-pressed={assetFilter === value} onClick={() => { setAssetFilter(value); setCardLimit(CARDS_PER_PAGE); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${assetFilter === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
+              <button key={label} type="button" aria-pressed={assetFilter === value} onClick={() => { setAssetFilter(value); setCardLimits(INITIAL_CARD_LIMITS); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${assetFilter === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
             ))}
           </div>
           <div role="group" aria-label="方向" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
-            {([["all", "全部"], ["observation", "爆量观察"], ["up", "涨"], ["down", "跌"], ["squeeze", "轧空"], ["watch", `★ ${watchlist.length}`]] as const).map(([key, label]) => (
-              <button key={key} type="button" aria-pressed={directionFilter === key} onClick={() => { setDirectionFilter(key); setCardLimit(CARDS_PER_PAGE); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${directionFilter === key ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
+            {([["all", "全部"], ["up", "涨"], ["down", "跌"], ["squeeze", "轧空"], ["watch", `★ ${watchlist.length}`]] as const).map(([key, label]) => (
+              <button key={key} type="button" aria-pressed={directionFilter === key} onClick={() => { setDirectionFilter(key); setCardLimits(INITIAL_CARD_LIMITS); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${directionFilter === key ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
             ))}
           </div>
+          </> : null}
           <div role="group" aria-label="时间范围" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
             {(["1h", "4h", "24h"] as const).map((key) => (
-              <button key={key} type="button" aria-pressed={windowKey === key} onClick={() => { setWindowKey(key); setCardLimit(CARDS_PER_PAGE); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${windowKey === key ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{key}</button>
+              <button key={key} type="button" aria-pressed={windowKey === key} onClick={() => { setWindowKey(key); setCardLimits(INITIAL_CARD_LIMITS); setFocusRequest(null); }} className={`rounded px-2.5 py-1 text-xs font-semibold ${windowKey === key ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{key}</button>
             ))}
           </div>
         </div>
@@ -517,7 +543,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </p>
       ) : null}
 
-      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      {view === "all" ? <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <Section title="回调买点" hint="暴涨后回调再接，不追高">
           {pullbacks.length ? (
             <div className="grid gap-2 p-2.5 sm:grid-cols-2">
@@ -555,29 +581,29 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
             backtest="12h 内涨跌 15% 的概率是平时的 3–9 倍，方向五五开"
           />
         </Section>
-      </div>
+      </div> : null}
 
-      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <section className="min-w-0" aria-label="异动卡片">
+      <div className={`grid min-w-0 items-start gap-3 ${view === "focus" ? "xl:grid-cols-2" : "lg:grid-cols-[minmax(0,1fr)_20rem]"}`}>
+        {visibleGroups.map(({ key: groupKey, label: groupLabel, rows: groupRows, visibleRows }) => <section key={groupLabel} className="min-w-0" aria-label={groupLabel}>
           <header className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3">
-            <h2 className="text-base font-semibold text-foreground">异动卡片</h2>
-            <span className="text-xs text-muted">{windowKey} · {rows.length} 个标的</span>
+            <h2 className="text-base font-semibold text-foreground">{groupLabel}</h2>
+            <span className="text-xs text-muted">{windowKey} · {groupRows.length} 个标的</span>
           </header>
-          {rows.length ? (
+          {groupRows.length ? (
             <ul className="grid min-w-0 gap-3">
               {visibleRows.map(row => {
                 const ticker = tickers.get(row.symbol);
                 const hasPullback = activePullback.has(row.symbol) && !activePullback.get(row.symbol)?.outcome;
                 const latest = row.events[0];
                 let guidance: string | undefined;
-                if (hasPullback) guidance = "回调买点";
-                else if (coinSymbols.has(row.symbol) && !row.episode && latest) {
+                if (!row.primaryLifecycle && hasPullback) guidance = "回调买点";
+                else if (!row.primaryLifecycle && coinSymbols.has(row.symbol) && latest) {
                   const direction = directionOf(latest);
                   if (direction === "up") guidance = (ticker?.pct24h ?? 0) >= data.signals.rules.maxPre24hPct ? "暴涨 · 不追" : "暴涨 · 等回调";
                   if (direction === "down" && btcWarning) guidance = "暴跌 · 别追空";
                   if (direction === "squeeze") guidance = "轧空 · 高波动";
                 }
-                return <SignalCard key={row.symbol} row={row} ticker={ticker} nowMs={nowMs} direction={directionFilter}
+                return <SignalCard key={row.symbol} row={row} ticker={ticker} nowMs={nowMs}
                   metrics={data.cardMetrics?.[row.symbol]} candles={data.cardCandles?.[row.symbol] ?? []}
                   expanded={expanded === row.symbol} onToggle={() => setExpanded(current => current === row.symbol ? null : row.symbol)}
                   starred={watchlist.includes(row.symbol)} onStar={() => toggleStar(row.symbol)}
@@ -585,13 +611,13 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
               })}
             </ul>
           ) : <p className="rounded-lg border border-line px-3 py-10 text-center text-sm text-muted">当前筛选下没有触发</p>}
-          {rows.length > visibleRows.length ? <button type="button" onClick={() => setCardLimit(limit => limit + CARDS_PER_PAGE)}
+          {groupRows.length > visibleRows.length ? <button type="button" onClick={() => setCardLimits(limits => ({ ...limits, [groupKey]: limits[groupKey] + INITIAL_CARD_LIMITS[groupKey] }))}
             className="mt-2 w-full rounded-lg border border-line bg-workspace-surface px-3 py-2 text-xs font-medium text-muted hover:text-foreground">
-            显示更多 · 已显示 {visibleRows.length} / {rows.length}
+            显示更多 · 已显示 {visibleRows.length} / {groupRows.length}
           </button> : null}
-        </section>
+        </section>)}
 
-        <details open className="group min-w-0 rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm lg:sticky lg:top-[5.75rem]">
+        {view === "all" ? <details open className="group min-w-0 rounded-lg border border-workspace-line-strong bg-workspace-surface shadow-sm lg:sticky lg:top-[5.75rem]">
           <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-3 text-sm font-semibold text-foreground [&::-webkit-details-marker]:hidden">
             <span>最新触发</span>
             <ChevronDown aria-hidden className="h-4 w-4 text-muted transition-transform group-open:rotate-180" />
@@ -616,10 +642,10 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
               </li>
             )) : <li className="px-3 py-6 text-center text-xs text-muted">暂无</li>}
           </ol>
-        </details>
+        </details> : null}
       </div>
 
-      <AlertOutcomeTable groups={assetFilter === "equity" ? data.signals.equityAlertOutcomeGroups : data.signals.cryptoAlertOutcomeGroups} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
+      {view === "all" ? <AlertOutcomeTable groups={assetFilter === "equity" ? data.signals.equityAlertOutcomeGroups : data.signals.cryptoAlertOutcomeGroups} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} /> : null}
 
       <p className="text-right text-[11px] text-muted">
         规则依据与回测见 docs/market-signals.md · <Link href="/alerts/legacy" className="underline hover:text-foreground">打开旧版异动页</Link>
