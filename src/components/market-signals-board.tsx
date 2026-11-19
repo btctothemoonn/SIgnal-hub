@@ -14,6 +14,7 @@ type OutcomeGroup = MarketSignalsBoardData["signals"]["alertOutcomeStats"]["grou
 type RecentOutcomes = MarketSignalsBoardData["signals"]["recentAlertOutcomes"];
 type Direction = "up" | "down" | "squeeze";
 type DirectionFilter = "all" | Direction | "watch";
+type AssetFilter = "crypto" | "equity";
 type WindowKey = "1h" | "4h" | "24h";
 
 const WATCHLIST_KEY = "market-alert-watchlist";
@@ -389,7 +390,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const [nowMs, setNowMs] = useState(() => Date.parse(initialData.generatedAt));
   const [connection, setConnection] = useState<"live" | "retrying">("live");
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>("all");
-  const [includeTradFi, setIncludeTradFi] = useState(false);
+  const [assetFilter, setAssetFilter] = useState<AssetFilter>("crypto");
   const [windowKey, setWindowKey] = useState<WindowKey>("24h");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -471,11 +472,14 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const endMs = nowMs;
   const startMs = nowMs - WINDOW_MS[windowKey];
   const visibleEvents = useMemo(() => data.events.filter((event) => {
-    if (!includeTradFi && !coinSymbols.has(event.symbol)) return false;
+    const matchesAsset = assetFilter === "equity"
+      ? data.assetClasses?.[event.symbol] === "EQUITY"
+      : coinSymbols.has(event.symbol);
+    if (!matchesAsset) return false;
     if (Date.parse(event.occurredAt) < startMs) return false;
     if (directionFilter === "watch") return watchlist.includes(event.symbol);
     return directionFilter === "all" || directionOf(event) === directionFilter;
-  }), [data.events, startMs, directionFilter, watchlist, coinSymbols, includeTradFi]);
+  }), [data.events, data.assetClasses, startMs, directionFilter, watchlist, coinSymbols, assetFilter]);
   const rows = useMemo(() => {
     const bySymbol = new Map<string, BoardEvent[]>();
     for (const event of visibleEvents) {
@@ -512,8 +516,8 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </p>
         <div className="flex flex-wrap gap-1.5">
           <div role="group" aria-label="标的类别" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
-            {([["仅加密", false], ["含美股商品", true]] as const).map(([label, value]) => (
-              <button key={label} type="button" aria-pressed={includeTradFi === value} onClick={() => setIncludeTradFi(value)} className={`rounded px-2.5 py-1 text-xs font-semibold ${includeTradFi === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
+            {([["仅加密", "crypto"], ["仅美股", "equity"]] as const).map(([label, value]) => (
+              <button key={label} type="button" aria-pressed={assetFilter === value} onClick={() => setAssetFilter(value)} className={`rounded px-2.5 py-1 text-xs font-semibold ${assetFilter === value ? "bg-workspace-surface text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}>{label}</button>
             ))}
           </div>
           <div role="group" aria-label="方向" className="flex gap-0.5 rounded-md border border-line bg-workspace-canvas p-0.5">
@@ -640,7 +644,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </details>
       </div>
 
-      <AlertOutcomeTable groups={includeTradFi ? data.signals.alertOutcomeStats.groups : data.signals.cryptoAlertOutcomeGroups} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
+      <AlertOutcomeTable groups={assetFilter === "equity" ? data.signals.equityAlertOutcomeGroups : data.signals.cryptoAlertOutcomeGroups} windowDays={data.signals.alertOutcomeStats?.windowDays ?? 14} />
 
       <p className="text-right text-[11px] text-muted">
         规则依据与回测见 docs/market-signals.md · <Link href="/alerts/legacy" className="underline hover:text-foreground">打开旧版异动页</Link>

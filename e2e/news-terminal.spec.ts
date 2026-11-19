@@ -137,7 +137,7 @@ test("news mobile fits viewport and opens and closes the trading detail sheet", 
   await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
 });
 
-test("alerts hide TradFi by default and open the Binance trading view for the chosen symbol on mobile", async ({ page }) => {
+test("alerts isolate US equities and open the Binance trading view for the chosen symbol on mobile", async ({ page }) => {
   const runtimeDir = process.env.SIGNAL_E2E_RUNTIME_DIR!;
   const market = openMarketAlertsStore(join(runtimeDir, "market.sqlite"));
   const signals = openMarketSignalsStore(marketSignalsDbPath({ SIGNAL_HUB_RUNTIME_DIR: runtimeDir }));
@@ -146,12 +146,13 @@ test("alerts hide TradFi by default and open the Binance trading view for the ch
     signals.replaceSymbolClasses([
       { symbol: "DOGEUSDT", underlyingType: "COIN" },
       { symbol: "AAOIUSDT", underlyingType: "EQUITY" },
+      { symbol: "XAUUSDT", underlyingType: "COMMODITY" },
     ], observed);
     signals.recordSignal({
       id: "old-equity-pullback", kind: "pullback_long", symbol: "AAOIUSDT",
       signalAt: new Date(observed).toISOString(), refPrice: 1, detail: {}, outcome: null, pushed: false,
     }, observed, null);
-    for (const symbol of ["DOGEUSDT", "AAOIUSDT"]) {
+    for (const symbol of ["DOGEUSDT", "AAOIUSDT", "XAUUSDT"]) {
       market.insertMarketAlertEvent({
         id: "deep-link-" + symbol, symbol, type: "volatility", side: "LONG", level: 1,
         stage: "fixture", trigger: "fixture", source: "ws", price: 1, changePct: 5,
@@ -168,8 +169,10 @@ test("alerts hide TradFi by default and open the Binance trading view for the ch
   await page.goto("/alerts");
   const equity = page.locator("#coin-AAOIUSDT").getByRole("link", { name: "查看 AAOI 实时行情" });
   await expect(equity).toHaveCount(0);
-  await page.getByRole("button", { name: "含美股商品" }).click();
+  await page.getByRole("button", { name: "仅美股" }).click();
   await expect(equity).toBeVisible();
+  await expect(page.locator("#coin-DOGEUSDT")).toHaveCount(0);
+  await expect(page.locator("#coin-XAUUSDT")).toHaveCount(0);
   await expect(page.locator("#signal-AAOIUSDT")).toHaveCount(0);
   await page.getByRole("button", { name: "仅加密" }).click();
   await expect(equity).toHaveCount(0);

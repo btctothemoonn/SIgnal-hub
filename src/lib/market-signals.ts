@@ -541,6 +541,7 @@ export type MarketSignalsSnapshot = {
   coinSymbols: string[];
   cryptoStats: Record<MarketSignalKind, MarketSignalStats>;
   cryptoAlertOutcomeGroups: AlertOutcomeGroupStats[];
+  equityAlertOutcomeGroups: AlertOutcomeGroupStats[];
   alertOutcomeStats: { windowDays: number; groups: AlertOutcomeGroupStats[] };
   // Raw (not direction-adjusted) follow-up % per alert id for alerts in the last 24h.
   recentAlertOutcomes: Record<string, { "1h": number | null; "4h": number | null; "24h": number | null }>;
@@ -558,6 +559,7 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
     const window = store.listSignals(nowMs - rules.statsWindowMs);
     const outcomeRows = store.alertOutcomes.list(nowMs - ALERT_OUTCOME_STATS_DAYS * 24 * HOUR_MS);
     const coinSymbols = store.readCoinSymbols();
+    const symbolClasses = store.readSymbolClasses();
     const cryptoWindow = window.filter(signal => coinSymbols.has(signal.symbol));
     const recentAlertOutcomes: MarketSignalsSnapshot["recentAlertOutcomes"] = {};
     for (const row of outcomeRows) {
@@ -574,7 +576,7 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
         coil_watch: summarizeSignals(window, "coil_watch"),
       },
       meta: store.readMeta(),
-      symbolClasses: store.readSymbolClasses(),
+      symbolClasses,
       coinSymbols: [...coinSymbols],
       cryptoStats: {
         pullback_long: summarizeSignals(cryptoWindow, "pullback_long"),
@@ -582,6 +584,7 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
         coil_watch: summarizeSignals(cryptoWindow, "coil_watch"),
       },
       cryptoAlertOutcomeGroups: summarizeAlertOutcomes(outcomeRows.filter(row => coinSymbols.has(row.symbol))),
+      equityAlertOutcomeGroups: summarizeAlertOutcomes(outcomeRows.filter(row => symbolClasses[row.symbol] === "EQUITY")),
       alertOutcomeStats: {
         windowDays: ALERT_OUTCOME_STATS_DAYS,
         groups: summarizeAlertOutcomes(outcomeRows),

@@ -15,5 +15,7 @@ assert.match(board, /\/api\/market-signals/);
 assert.match(board, /\/alerts\/legacy/);
 assert.match(board, /方向未定，不是做多信号/);
 assert.match(board, /market-alert-watchlist/, "keeps the existing watchlist storage key");
+assert.match(board, /仅美股/);
+assert.doesNotMatch(board, /含美股商品/);
 
 console.log("ok - alerts page renders the signals board");
