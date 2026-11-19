@@ -180,6 +180,12 @@ function excludedSymbol(symbol: string) {
   return isStableOrFiatBase(base) || base === "BTC" || base === "ETH";
 }
 
+function exchangeNumber(value: unknown) {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function runAlertOutcomes(input: {
   alerts: AlertsStore;
   signals: MarketSignalsStore;
@@ -250,6 +256,7 @@ async function runPositioning(input: {
   signals: MarketSignalsStore;
   client: BinanceMarketClient;
   nowMs: number;
+  cycleStartedAt: number;
   rules: MarketSignalRules;
   result: MarketSignalsCycleResult;
   coinSymbols: Set<string>;
@@ -262,11 +269,20 @@ async function runPositioning(input: {
   if (meta.lastPositioningHourMs !== null && meta.lastPositioningHourMs >= hourMs) return;
 
   const [tickers, premium] = await Promise.all([client.getTickers24h(), client.getPremiumIndex()]);
+  const receivedAtMs = nowMs + Math.max(0, Date.now() - input.cycleStartedAt);
   const funding = new Map<string, number>();
+  const fundingSamples: Array<{ symbol: string; rate: number; observedAtMs: number }> = [];
   for (const row of premium) {
-    const rate = Number(row.lastFundingRate);
-    if (Number.isFinite(rate)) funding.set(String(row.symbol), rate);
+    const rate = exchangeNumber(row.lastFundingRate);
+    const symbol = String(row.symbol ?? "");
+    if (rate === null || !symbol) continue;
+    funding.set(symbol, rate);
+    const observedAtMs = exchangeNumber(row.time);
+    if (observedAtMs !== null && Number.isSafeInteger(observedAtMs) && observedAtMs > 0 && observedAtMs <= receivedAtMs) {
+      fundingSamples.push({ symbol, rate, observedAtMs });
+    }
   }
+  signals.upsertFundingRates(fundingSamples);
   const universe = tickers
     .filter((row) => Number(row.quoteVolume) >= rules.positioningMinQuoteVolume)
     .map((row) => String(row.symbol))
@@ -280,18 +296,26 @@ async function runPositioning(input: {
         client.getHourlyOpenInterest(symbol, 26),
       ]);
       const oiByHour = new Map<number, number>();
+      const quantityByCloseTime = new Map<number, number>();
       for (const row of oiRows) {
-        const value = Number(row.sumOpenInterestValue);
+        const stamp = exchangeNumber(row.timestamp);
+        if (stamp === null) continue;
+        const value = exchangeNumber(row.sumOpenInterestValue);
         // OI snapshots are stamped at the hour boundary; align them with the bar that just closed.
-        const stampHour = Math.floor(Number(row.timestamp) / HOUR_MS) * HOUR_MS - HOUR_MS;
-        if (Number.isFinite(value)) oiByHour.set(stampHour, value);
+        const stampHour = Math.floor(stamp / HOUR_MS) * HOUR_MS - HOUR_MS;
+        if (value !== null) oiByHour.set(stampHour, value);
+        const quantity = exchangeNumber(row.sumOpenInterest);
+        if (quantity !== null && quantity >= 0) quantityByCloseTime.set(stamp, quantity);
       }
       const points: PositioningPoint[] = normalizeKlines(klineRows)
         .filter((bar) => bar.t <= hourMs)
         .map((bar) => ({ hourMs: bar.t, close: bar.c, oiValue: oiByHour.get(bar.t) ?? null }));
       if (!points.length || points.at(-1)!.hourMs !== hourMs) continue;
       const rate = funding.get(symbol) ?? null;
-      signals.upsertPositioning(points.map((point) => ({ symbol, ...point, funding: point.hourMs === hourMs ? rate : null })));
+      signals.upsertPositioning(points.map((point) => ({
+        symbol, ...point, oiQuantity: quantityByCloseTime.get(point.hourMs + HOUR_MS) ?? null,
+        funding: point.hourMs === hourMs ? rate : null,
+      })));
       stored += 1;
       const state = classifyPositioning({ symbol, points, funding: rate, rules });
       if (!state) continue;
@@ -360,7 +384,8 @@ export async function runMarketSignalsCycle(input: {
   generateNote?: typeof generateSignalNote;
 } = {}): Promise<MarketSignalsCycleResult> {
   const env = input.env ?? process.env;
-  const nowMs = input.nowMs ?? Date.now();
+  const cycleStartedAt = Date.now();
+  const nowMs = input.nowMs ?? cycleStartedAt;
   const rules = getMarketSignalRules(env);
   const alerts = input.alerts ?? openMarketAlertsStore();
   const signals = input.signals ?? openMarketSignalsStore(marketSignalsDbPath(env));
@@ -385,7 +410,7 @@ export async function runMarketSignalsCycle(input: {
       result.errors.push(`alert outcomes: ${safeError(error)}`);
     }
     try {
-      await runPositioning({ signals, client, nowMs, rules, result, coinSymbols });
+      await runPositioning({ signals, client, nowMs, cycleStartedAt, rules, result, coinSymbols });
     } catch (error) {
       result.errors.push(`positioning: ${safeError(error)}`);
     }

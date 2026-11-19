@@ -6,12 +6,13 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  const revisionOnly = new URL(request.url).searchParams.get("updates") === "revision";
   const stream = createSnapshotEventStream({
     event: "market-alerts-snapshot",
     pollMs: getMarketAlertsConfig().eventPollMs,
     signal: request.signal,
     getRevision: () => String(getMarketAlertsRevision()),
-    getSnapshot: () => getMarketAlertsSnapshot({ limit: 100 }),
+    getSnapshot: () => revisionOnly ? { changed: true } : getMarketAlertsSnapshot({ limit: 100 }),
   });
   return new Response(stream, {
     headers: {

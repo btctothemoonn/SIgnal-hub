@@ -22,6 +22,7 @@ import type {
   MarketOpportunityMetrics,
 } from "./market-opportunity-core.ts";
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
+import { createVolumeObservationStore } from "./market-volume-observations.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
 import { pruneAlertsRetention } from "./market-alerts-retention.ts";
@@ -257,6 +258,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   db.exec("PRAGMA journal_mode=WAL;");
   db.exec("PRAGMA synchronous=NORMAL;");
   const briefStore = createMarketBriefStore(db);
+  const { prune: pruneVolumeObservations, ...volumeObservations } = createVolumeObservationStore(db, transaction);
   const pushOutbox = createImportantPushOutbox(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS market_volatility_state (
@@ -309,6 +311,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     );
     CREATE INDEX IF NOT EXISTS idx_market_alert_events_time
       ON market_alert_events (occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_market_alert_events_created ON market_alert_events(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_market_alert_events_filter
       ON market_alert_events (type, symbol, level, occurred_at DESC);
     CREATE TABLE IF NOT EXISTS market_liquidation_minutes (
@@ -464,6 +467,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     INSERT OR IGNORE INTO market_alert_revision (id, revision) VALUES (1, 0);
   `);
   const revisionTables = [
+    "market_volume_hits",
     "market_alert_brief",
     "market_volatility_state",
     "market_squeeze_active",
@@ -1706,7 +1710,46 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   }
 
   function pruneMarketAlertsRetention(nowMs = Date.now()) {
-    return pruneAlertsRetention(db, nowMs);
+    const result = pruneAlertsRetention(db, nowMs);
+    if (result.ran) transaction(() => pruneVolumeObservations(nowMs));
+    return result;
+  }
+
+  function readEvents(whereSql: string, values: DbValue[], page?: { limit: number; offset: number }) {
+    return db
+      .prepare(`
+        SELECT e.*, c.interval AS chart_interval,
+          c.updated_at AS chart_updated_at, c.source_key AS chart_source_key,
+          t.market_cap_usd, t.fdv_usd, t.valuation_updated_at, t.updated_at AS ticker_updated_at
+        FROM market_alert_events e
+        LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
+        LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
+        ${whereSql}
+        ORDER BY ${page ? "e.occurred_at DESC, e.created_at DESC" : "e.created_at DESC"}, e.id DESC ${page ? "LIMIT ? OFFSET ?" : ""}
+      `)
+      .all(...values, ...(page ? [page.limit, page.offset] : []))
+      .map((row) => rowToEvent(row as DbRow));
+  }
+
+  function readMarketHealth() {
+    const heartbeatRows = db.prepare("SELECT * FROM market_alert_heartbeat").all() as DbRow[];
+    const heartbeatByWorker = new Map(
+      heartbeatRows.map((row) => [stringValue(row.worker), rowToHeartbeat(row)]),
+    );
+    return {
+      volatilityWs: heartbeatByWorker.get("volatility-ws") ?? null,
+      volatilityRest: heartbeatByWorker.get("volatility-rest") ?? null,
+      squeeze: heartbeatByWorker.get("squeeze") ?? null,
+      opportunity: heartbeatByWorker.get("opportunity") ?? null,
+    };
+  }
+
+  function getBoardAlerts(from: string, to: string) {
+    return {
+      events: readEvents("WHERE e.created_at BETWEEN ? AND ?", [from, to]),
+      health: readMarketHealth(),
+      latestUpdatedAt: getMarketAlertsLatestUpdatedAt(),
+    };
   }
 
   function getMarketAlertsSnapshot(options: {
@@ -1745,19 +1788,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       values.push(options.to);
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const events = db
-      .prepare(`
-        SELECT e.*, c.interval AS chart_interval,
-          c.updated_at AS chart_updated_at, c.source_key AS chart_source_key,
-          t.market_cap_usd, t.fdv_usd, t.valuation_updated_at, t.updated_at AS ticker_updated_at
-        FROM market_alert_events e
-        LEFT JOIN market_alert_charts c ON c.symbol=e.symbol
-        LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
-        ${whereSql}
-        ORDER BY e.occurred_at DESC, e.created_at DESC LIMIT ? OFFSET ?
-      `)
-      .all(...values, limit, (page - 1) * limit)
-      .map((row) => rowToEvent(row as DbRow));
+    const events = readEvents(whereSql, values, { limit, offset: (page - 1) * limit });
     const total = numberValue(
       (db.prepare(`SELECT COUNT(*) AS value FROM market_alert_events e ${whereSql}`).get(
         ...values,
@@ -1787,10 +1818,6 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         score: numberValue((row as DbRow).last_score),
         updatedAt: stringValue((row as DbRow).updated_at),
       }));
-    const heartbeatRows = db.prepare("SELECT * FROM market_alert_heartbeat").all() as DbRow[];
-    const heartbeatByWorker = new Map(
-      heartbeatRows.map((row) => [stringValue(row.worker), rowToHeartbeat(row)]),
-    );
     const rankingSince = new Date(
       Date.parse(options.now ?? nowIso()) - 24 * 60 * 60 * 1000,
     ).toISOString();
@@ -1896,12 +1923,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         maxTickerAgeMs: options.tickerMaxAgeMs ?? MARKET_TICKER_FRESH_MS,
         limit: 20,
       }),
-      health: {
-        volatilityWs: heartbeatByWorker.get("volatility-ws") ?? null,
-        volatilityRest: heartbeatByWorker.get("volatility-rest") ?? null,
-        squeeze: heartbeatByWorker.get("squeeze") ?? null,
-        opportunity: heartbeatByWorker.get("opportunity") ?? null,
-      },
+      health: readMarketHealth(),
     };
   }
 
@@ -1931,6 +1953,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
   return {
     reserveVolatilityAlert,
     ...briefStore,
+    ...volumeObservations,
     commitVolatilityAlert,
     commitVolatilityAlertUncertain,
     releaseVolatilityAlert,
@@ -1979,6 +2002,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     pruneOpportunityDiagnostics,
     recordMarketLiquidation,
     pruneMarketAlertsRetention,
+    getBoardAlerts,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,

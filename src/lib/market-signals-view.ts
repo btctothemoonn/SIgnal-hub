@@ -1,29 +1,36 @@
+import { readMarketCardMetrics } from "./market-card-metrics.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 import { readMarketSignalsSnapshot } from "./market-signals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
-// Everything the /alerts board renders, read from local SQLite only (no exchange requests).
+// Read both the initial page and its refreshes from the same local observations.
 export function getMarketSignalsBoardData(nowMs = Date.now()) {
   const store = openMarketAlertsStore();
   try {
     const now = new Date(nowMs).toISOString();
-    const alerts = store.getMarketAlertsSnapshot({ limit: 200, from: new Date(nowMs - DAY_MS).toISOString(), now });
+    const fromMs = nowMs - DAY_MS;
+    const alerts = store.getBoardAlerts(new Date(fromMs).toISOString(), now);
     const signals = readMarketSignalsSnapshot({ nowMs });
-    const wanted = new Set<string>(["BTCUSDT"]);
-    for (const event of alerts.events) wanted.add(event.symbol);
-    for (const signal of signals.signals) wanted.add(signal.symbol);
-    const tickers = store.getMarketTickers().filter((ticker) => wanted.has(ticker.symbol));
+    // A confirmation inside the board window may belong to an observation that began just before it.
+    const volumeEpisodes = store.listVolumeEpisodes(fromMs - 2 * 3_600_000, nowMs);
+    const cardSymbols = [...new Set([
+      ...alerts.events.map(event => event.symbol),
+      ...volumeEpisodes.map(episode => episode.symbol),
+    ])];
+    const wanted = new Set(["BTCUSDT", ...cardSymbols, ...signals.signals.map(signal => signal.symbol)]);
+    const tickers = store.getMarketTickers().filter(ticker => wanted.has(ticker.symbol));
     const assetClasses = Object.fromEntries(
       Object.entries(signals.symbolClasses).filter(([symbol]) => wanted.has(symbol)),
     );
     return {
       generatedAt: now,
-      latestUpdatedAt: alerts.latestUpdatedAt,
-      events: alerts.events,
-      health: alerts.health,
+      ...alerts,
       tickers,
       assetClasses,
+      volumeEpisodes,
+      cardCandles: store.getCardCandles(cardSymbols, nowMs),
+      cardMetrics: readMarketCardMetrics(cardSymbols, nowMs),
       signals: {
         ...signals,
         symbolClasses: {},

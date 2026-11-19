@@ -15,6 +15,8 @@ import { qualifySqueeze, qualifySqueezeRecovery } from "./important-push-policy.
 import { buildPushCandleWindow } from "./market-push-freshness.ts";
 import type { MarketPushObservation } from "./important-push-types.ts";
 import { isUncertainMarketAlertDeliveryError } from "./market-alerts-delivery.ts";
+import { closedCardMinute } from "./market-volume-observations.ts";
+import type { MarketCardMinute } from "./market-volume-observations.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
 
 type Store = ReturnType<typeof openMarketAlertsStore>;
@@ -1361,12 +1363,13 @@ function upsertKline(rows: KlineRow[], next: KlineRow, maxLength: number) {
   while (rows.length > maxLength) rows.shift();
 }
 
-export function createMarketWebSocketUrl(baseUrl: string, symbols: string[], includeLiquidations = false) {
+export function createMarketWebSocketUrl(baseUrl: string, symbols: string[], includeLiquidations = false, chartOnlySymbols: string[] = []) {
   const streams = symbols.flatMap((symbol) => [
     `${symbol.toLowerCase()}@kline_1m`,
     `${symbol.toLowerCase()}@kline_5m`,
     `${symbol.toLowerCase()}@ticker`,
   ]);
+  for (const symbol of chartOnlySymbols) streams.push(`${symbol.toLowerCase()}@kline_1m`);
   if (includeLiquidations) streams.push(LIQUIDATION_STREAM);
   return `${baseUrl.replace(/\/$/, "")}/stream?streams=${streams.join("/")}`;
 }
@@ -1445,6 +1448,35 @@ export async function startVolatilityWebSocketWorker(input: {
     const now = new Date().toISOString();
     store.upsertMarketTickers(tickerInputs(markets, now));
     const subscribedMarkets = input.once ? markets.slice(0, 5) : markets;
+    const subscribedSymbols = new Set(subscribedMarkets.map((m) => m.symbol));
+    const nowMs = Date.now();
+    const since = nowMs - 24 * 60 * 60_000;
+    const cardSymbols = input.once ? new Set<string>() : new Set([
+      ...store.getRecentlyTriggeredSymbols(new Date(since).toISOString()),
+      ...store.listVolumeEpisodes(since, nowMs).map((e) => e.symbol),
+    ]);
+    const spareStreams = Math.max(0, 1024 - subscribedMarkets.length * 3 - 1);
+    const chartOnlyMarkets = allMarkets.filter((m) => cardSymbols.has(m.symbol) && !subscribedSymbols.has(m.symbol))
+      .slice(0, Math.min(32, spareStreams));
+    const minuteMarkets = [...subscribedMarkets, ...chartOnlyMarkets];
+    const volumeEligibility = new Map(minuteMarkets.map((m) => [
+      m.symbol, m.meta.contractType === "PERPETUAL" && m.meta.underlyingType === "COIN" && !isTradFiContract(m.meta),
+    ]));
+    const pendingMinutes = new Map<string, MarketCardMinute>();
+    const flushMinutes = () => {
+      if (!pendingMinutes.size) return;
+      store.recordCardMinutes([...pendingMinutes.values()], Date.now());
+      pendingMinutes.clear();
+    };
+    const queueMinute = (symbol: string, row: KlineRow, closedBy: number) => {
+      const eligible = volumeEligibility.get(symbol);
+      if (input.once || eligible === undefined) return;
+      const minute = closedCardMinute(symbol, row, eligible, closedBy);
+      if (!minute) return;
+      const key = `${symbol}:${minute.at}`;
+      if (!pendingMinutes.has(key)) pendingMinutes.set(key, minute);
+      if (pendingMinutes.size >= 1024) flushMinutes();
+    };
 
     const cache = new Map<
       string,
@@ -1476,6 +1508,7 @@ export async function startVolatilityWebSocketWorker(input: {
       config.wsBaseUrl,
       subscribedMarkets.map((market) => market.symbol),
       !input.once,
+      chartOnlyMarkets.map((m) => m.symbol),
     );
     const collectLiquidation = createLiquidationCollector(store);
     const pendingAlerts = new Map<string, Promise<unknown>>();
@@ -1506,19 +1539,53 @@ export async function startVolatilityWebSocketWorker(input: {
         lastError: safeError(error),
       });
     };
+    let nextCoverageAt: number | null = null;
+    const persistCoverage = () => {
+      if (nextCoverageAt === null) return;
+      const end = Math.floor(Date.now() / 60_000) * 60_000;
+      if (end <= nextCoverageAt) return;
+      store.recordLiquidationCoverage(nextCoverageAt, end);
+      nextCoverageAt = end;
+    };
+    const stopCoverage = () => {
+      try { persistCoverage(); } finally { nextCoverageAt = null; }
+    };
+    const minuteTimer = setInterval(() => {
+      try {
+        flushMinutes();
+        persistCoverage();
+      } catch (error) { recordWsError(error); }
+    }, 2000);
     try {
       await new Promise<void>((resolve, reject) => {
       const socket = input.createWebSocket?.(url) ?? new WebSocket(url);
       let lastHeartbeatAt = 0;
       let lastTickerPersistAt = Date.now();
       let receivedFirstMessage = false;
+      let transportEnded = false;
       let cacheReady = false;
       const bufferedKlines = new Map<string, unknown>();
       let firstMessageTimer: ReturnType<typeof setTimeout> | null = null;
       const refreshTimer = setTimeout(() => socket.close(1000, "refresh-universe"), config.wsRankRefreshMs);
       const onAbort = () => socket.close(1000, "shutdown");
       input.signal?.addEventListener("abort", onAbort, { once: true });
+      // An error is often followed by a close, sometimes after this worker has already returned.
+      const finishTransport = () => {
+        if (transportEnded) return false;
+        transportEnded = true;
+        clearTimeout(refreshTimer);
+        if (firstMessageTimer) clearTimeout(firstMessageTimer);
+        input.signal?.removeEventListener("abort", onAbort);
+        try {
+          stopCoverage();
+        } catch (error) {
+          reject(error);
+        }
+        return true;
+      };
       socket.addEventListener("open", () => {
+        if (transportEnded) return;
+        if (!input.once) nextCoverageAt = Math.ceil(Date.now() / 60_000) * 60_000;
         store.setMarketAlertsHeartbeat({
           worker: "volatility-ws",
           status: "connecting",
@@ -1530,7 +1597,7 @@ export async function startVolatilityWebSocketWorker(input: {
           config.wsFirstMessageTimeoutMs,
         );
       });
-      const handleMessage = (rawData: unknown) => {
+      const handleMessage = (rawData: unknown, replay = false) => {
         try {
           const envelope = JSON.parse(String(rawData)) as JsonRecord;
           const stream = stringValue(envelope.stream);
@@ -1559,6 +1626,11 @@ export async function startVolatilityWebSocketWorker(input: {
             if (input.once) socket.close(1000, "probe-complete");
           }
           const symbol = stringValue(payload.s).toUpperCase();
+          const kline = payload.k as JsonRecord | undefined;
+          if (!replay && kline?.x === true && stream === `${symbol.toLowerCase()}@kline_1m`) {
+            // Binance marks the final frame even when the local clock is slightly behind.
+            queueMinute(symbol, wsKlineToRow(kline), Number.POSITIVE_INFINITY);
+          }
           const item = cache.get(symbol);
           if (!item) return;
           if (stream.endsWith("@ticker")) {
@@ -1587,7 +1659,6 @@ export async function startVolatilityWebSocketWorker(input: {
             bufferedKlines.set(stream, rawData);
             return;
           }
-          const kline = payload.k as JsonRecord | undefined;
           if (!kline) return;
           const row = wsKlineToRow(kline);
           if (stream.includes("@kline_1m")) upsertKline(item.one, row, 40);
@@ -1660,17 +1731,13 @@ export async function startVolatilityWebSocketWorker(input: {
         }
       };
       socket.addEventListener("message", (event) => {
-        handleMessage(event.data);
+        if (!transportEnded) handleMessage(event.data);
       });
       socket.addEventListener("error", () => {
-        clearTimeout(refreshTimer);
-        if (firstMessageTimer) clearTimeout(firstMessageTimer);
-        reject(new Error("Binance WebSocket connection failed"));
+        if (finishTransport()) reject(new Error("Binance WebSocket connection failed"));
       });
       socket.addEventListener("close", (event) => {
-        clearTimeout(refreshTimer);
-        if (firstMessageTimer) clearTimeout(firstMessageTimer);
-        input.signal?.removeEventListener("abort", onAbort);
+        if (!finishTransport()) return;
         if (input.signal?.aborted) resolve();
         else if (event.reason === "refresh-universe") resolve();
         else if (event.reason === "probe-complete") resolve();
@@ -1680,11 +1747,16 @@ export async function startVolatilityWebSocketWorker(input: {
         }
         else reject(new Error(`Binance WebSocket closed: ${event.code} ${event.reason}`));
       });
-      cacheHydration = mapLimit(subscribedMarkets, 10, async (market) => {
+      cacheHydration = mapLimit(minuteMarkets, 10, async (market) => {
         try {
+          // Capture before requesting. A slow response may contain a partial candle which has since closed.
+          const seedClosedBy = Date.now();
           const [one, five] = await Promise.all([
-            client.getKlines(market.symbol, "1m", 40),
-            client.getKlines(market.symbol, "5m", 36),
+            client.getKlines(market.symbol, "1m", input.once ? 40 : 81).then((rows) => {
+              if (!input.once) for (const row of rows) queueMinute(market.symbol, row, seedClosedBy);
+              return rows;
+            }),
+            subscribedSymbols.has(market.symbol) ? client.getKlines(market.symbol, "5m", 36) : Promise.resolve([]),
           ]);
           const item = cache.get(market.symbol);
           if (!item) return;
@@ -1695,13 +1767,18 @@ export async function startVolatilityWebSocketWorker(input: {
         }
       }).then(() => {
         cacheReady = true;
-        for (const rawData of bufferedKlines.values()) handleMessage(rawData);
+        for (const rawData of bufferedKlines.values()) handleMessage(rawData, true);
         bufferedKlines.clear();
       });
       });
     } finally {
+      clearInterval(minuteTimer);
       await cacheHydration;
-      await Promise.allSettled([...pendingAlerts.values()]);
+      try {
+        flushMinutes();
+      } finally {
+        await Promise.allSettled([...pendingAlerts.values()]);
+      }
     }
     return { universe: markets.length, probe: Boolean(input.once) };
   } catch (error) {

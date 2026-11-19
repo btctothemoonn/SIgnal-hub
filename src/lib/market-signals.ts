@@ -374,10 +374,16 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
       hour_ms INTEGER NOT NULL,
       close REAL NOT NULL,
       oi_value REAL,
+      oi_quantity REAL,
       funding REAL,
       PRIMARY KEY(symbol, hour_ms)
     );
     CREATE INDEX IF NOT EXISTS idx_market_positioning_hour ON market_positioning_hourly(hour_ms);
+    CREATE TABLE IF NOT EXISTS market_card_funding (
+      symbol TEXT PRIMARY KEY,
+      rate REAL NOT NULL,
+      observed_at_ms INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS market_symbol_class (
       symbol TEXT PRIMARY KEY,
       underlying_type TEXT NOT NULL,
@@ -399,6 +405,12 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     db.exec("BEGIN IMMEDIATE;");
     try { const value = fn(); db.exec("COMMIT;"); return value; } catch (error) { db.exec("ROLLBACK;"); throw error; }
   }
+
+  const hasOiQuantity = () => db.prepare("PRAGMA table_info(market_positioning_hourly)").all().some(row => row.name === "oi_quantity");
+  if (!hasOiQuantity()) transaction(() => {
+    // Another process opening the same database can complete the migration before we get the lock.
+    if (!hasOiQuantity()) db.exec("ALTER TABLE market_positioning_hourly ADD COLUMN oi_quantity REAL");
+  });
 
   return {
     alertOutcomes,
@@ -456,13 +468,22 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
         .all(new Date(sinceMs).toISOString())
         .map((row) => rowToSignal(row as Row));
     },
-    upsertPositioning(rows: Array<{ symbol: string; hourMs: number; close: number; oiValue: number | null; funding: number | null }>) {
+    upsertFundingRates(rows: Array<{ symbol: string; rate: number; observedAtMs: number }>) {
       transaction(() => {
-        const stmt = db.prepare(`INSERT INTO market_positioning_hourly(symbol,hour_ms,close,oi_value,funding) VALUES (?,?,?,?,?)
+        const stmt = db.prepare(`INSERT INTO market_card_funding(symbol,rate,observed_at_ms) VALUES (?,?,?)
+          ON CONFLICT(symbol) DO UPDATE SET rate=excluded.rate, observed_at_ms=excluded.observed_at_ms
+          WHERE excluded.observed_at_ms >= market_card_funding.observed_at_ms`);
+        for (const row of rows) stmt.run(row.symbol, row.rate, row.observedAtMs);
+      });
+    },
+    upsertPositioning(rows: Array<{ symbol: string; hourMs: number; close: number; oiValue: number | null; oiQuantity?: number | null; funding: number | null }>) {
+      transaction(() => {
+        const stmt = db.prepare(`INSERT INTO market_positioning_hourly(symbol,hour_ms,close,oi_value,oi_quantity,funding) VALUES (?,?,?,?,?,?)
           ON CONFLICT(symbol,hour_ms) DO UPDATE SET close=excluded.close,
             oi_value=COALESCE(excluded.oi_value, market_positioning_hourly.oi_value),
+            oi_quantity=COALESCE(excluded.oi_quantity, market_positioning_hourly.oi_quantity),
             funding=COALESCE(excluded.funding, market_positioning_hourly.funding)`);
-        for (const row of rows) stmt.run(row.symbol, row.hourMs, row.close, row.oiValue, row.funding);
+        for (const row of rows) stmt.run(row.symbol, row.hourMs, row.close, row.oiValue, row.oiQuantity ?? null, row.funding);
       });
     },
     prunePositioning(beforeMs: number) {

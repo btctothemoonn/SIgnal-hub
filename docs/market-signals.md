@@ -57,6 +57,12 @@
 - 页面每类信号都显示"实盘近 30 天"战绩与回测参考，规则失效时可以直接看出来。
 - 预警后续表现（`src/lib/market-alert-outcomes.ts`，表 `signals.sqlite/market_alert_outcomes`）：每条暴涨 / 暴跌 / 轧空预警按触发价记录 1h、4h、24h 后的涨跌，以及 24h 内最大涨幅和最大跌幅。同时记下触发条件（A趋势 / B加速 / C阶梯 / D先行 / A+B，轧空按阶段）、等级和触发时的 24h 涨幅。数据来自 5m K 线，每轮最多 20 个币，首次上线回补 7 天。页面底部按触发条件展示近 14 天的胜率和同方向中位收益，暴跌预警以继续下跌算赢。
 
+## 爆量观察与币种卡
+
+看板对现有 Binance USDT 永续行情订阅里的加密合约记录分钟爆量。1 分钟 K 线收盘后，将该根的 USDT 成交额与之前连续 20 根已收盘分钟线的成交额中位数比较。成交额达到 5 万 USDT 且量比达到 5 倍时，记一次爆量。首爆起 2 小时内的同币命中合并，保留首爆价格、时间与量比。订阅沿用已有成交额排名和跟踪名单；连接建立时以已收盘的历史 K 线补齐窗口，首爆时间表示交易所分钟线收盘时刻。爆量用于看板观察，不产生做多 Web Push。
+
+币种卡画最近 1 小时可用的分钟 K 线。首爆采用收盘时间，后续暴涨确认采用预警实际入库时间，便于复核先后。首爆后涨跌从首爆收盘价起算。15 分钟空头强平是 Binance 公开强平流的采样 USDT 金额，最近 15 个完整分钟覆盖不全时显示缺测。1 小时持仓量变化按最近两个完整整点的合约数量计算。卡片点币名可进入对应的实时行情。
+
 ## 可调参数（环境变量，均有默认值）
 
 `MARKET_SIGNAL_PULLBACK_PCT`=12、`MARKET_SIGNAL_PULLBACK_WINDOW_HOURS`=12、`MARKET_SIGNAL_MAX_PRE24H_PCT`=10、`MARKET_SIGNAL_STOP_PCT`=8、`MARKET_SIGNAL_FILL_FRESH_MINUTES`=30、`MARKET_SIGNAL_VOLATILE_FUNDING_MAX`=-0.001、`MARKET_SIGNAL_VOLATILE_OI24H_PCT`=30、`MARKET_SIGNAL_COIL_OI24H_PCT`=30、`MARKET_SIGNAL_COIL_MAX_PX4H_PCT`=3、`MARKET_SIGNAL_COIL_MAX_PX24H_PCT`=10、`MARKET_SIGNAL_POSITIONING_MIN_QUOTE_VOLUME`=5000000、`MARKET_SIGNAL_BTC_SHORT_WARNING_PCT`=-1.7、`MARKET_SIGNALS_DB`（默认 `market-alerts/signals.sqlite`）。
