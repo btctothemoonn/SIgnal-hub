@@ -1253,6 +1253,7 @@ export function upsertXPipelineRealtimeUpdate(
 export function listXPipelineTranslationCandidates(
   limit = 20,
   db = getXPipelineDb(),
+  feedId?: string,
 ) {
   const scanLimit = Math.max(limit * 5, limit);
   return db
@@ -1260,7 +1261,8 @@ export function listXPipelineTranslationCandidates(
       `
       select id, text, quoted_tweet_json, translation_json
       from x_feed
-      where trim(text) != ''
+      where ${feedId === undefined ? "" : "id = ? and"}
+        (trim(text) != '' or quoted_tweet_json is not null)
         and (
           translation_json is null
           or translation_json like '%"provider":"985monitor"%'
@@ -1271,7 +1273,7 @@ export function listXPipelineTranslationCandidates(
       limit ?
     `,
     )
-    .all(scanLimit)
+    .all(...(feedId === undefined ? [scanLimit] : [feedId, scanLimit]))
     .filter((row) => {
       const text = stringValue(row.text);
       const quotedTweet = parseQuotedTweet(row.quoted_tweet_json);

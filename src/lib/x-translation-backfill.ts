@@ -40,6 +40,7 @@ type XTranslationOptions = {
 };
 
 type XTranslationBackfillOptions = XTranslationOptions & {
+  feedId?: string;
   limit?: number;
   retryCooldownMs?: number;
   db?: DbLike;
@@ -174,7 +175,7 @@ export async function backfillMissingXTranslations(
   const db = options.db ?? getXPipelineDb();
   const limit = options.limit ?? defaultBackfillLimit();
   const retryCooldownMs = options.retryCooldownMs ?? defaultRetryCooldownMs();
-  const candidates = listXPipelineTranslationCandidates(limit, db);
+  const candidates = listXPipelineTranslationCandidates(limit, db, options.feedId);
   const now = Date.now();
   const stats: XTranslationBackfillStats = {
     checked: candidates.length,

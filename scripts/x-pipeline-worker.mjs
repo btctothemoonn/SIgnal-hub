@@ -9,6 +9,7 @@ import { loadRuntimeConfig } from "../src/lib/runtime-config.ts";
 import { getXPipelineConfiguredAccounts } from "../src/lib/x-pipeline-accounts.ts";
 import { getXPipelineConfig, isX6551WsEnabled } from "../src/lib/x-pipeline-config.ts";
 import { setXPipelineHealth, upsertXPipelineRealtimeUpdate } from "../src/lib/x-pipeline-store.ts";
+import { backfillMissingXTranslations } from "../src/lib/x-translation-backfill.ts";
 
 const MAX_RECONNECT_MS = 60_000;
 const SUBSCRIBE_TIMEOUT_MS = 15_000;
@@ -19,6 +20,20 @@ let reconnectAttempts = 0;
 let reconnectTimer;
 let activeSocket;
 let stopping = false;
+const pendingTranslations = new Set();
+let activeTranslations = 0;
+
+function drainTranslations() {
+  while (!stopping && activeTranslations < 2 && pendingTranslations.size) {
+    const id = pendingTranslations.values().next().value;
+    pendingTranslations.delete(id);
+    activeTranslations++;
+    void backfillMissingXTranslations({ feedId: id, limit: 1 })
+      .then(stats => { if (stats.attempted) log("x_6551_translation", { id, ...stats }); })
+      .catch(() => log("x_6551_translation_error", { id }))
+      .finally(() => { activeTranslations--; drainTranslations(); });
+  }
+}
 
 function log(event, fields = {}) {
   console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
@@ -96,6 +111,8 @@ function connectUpstream(url) {
       );
       if (!allowed || stopping || activeSocket !== socket) return;
       upsertXPipelineRealtimeUpdate(update);
+      if (pendingTranslations.size < 512) pendingTranslations.add(update.feedItem.id);
+      drainTranslations();
       markHealth("live", "received a tweet from 6551");
       log("x_6551_tweet_observed", { id: update.feedItem.id, eventType: update.eventType });
     } catch {

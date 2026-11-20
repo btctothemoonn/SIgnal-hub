@@ -67,7 +67,7 @@ try {
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "https://api.minimaxi.com/v1/chat/completions");
   const body = JSON.parse(String(requests[0].init.body));
-  assert.equal(body.model, "MiniMax-M2.7");
+  assert.equal(body.model, "MiniMax-M3");
   assert.ok(body.messages[1].content.includes("NVDA supplier checks raised"));
 } finally {
   globalThis.fetch = originalFetch;
@@ -119,6 +119,15 @@ try {
   assert.equal(await translateText("Crude oil futures rose after the inventory report."), null);
   assert.equal(await translateText("Copper futures slipped ahead of the market open."), null);
   assert.equal(quotaRequests, 1);
+  const originalNow = Date.now;
+  const started = originalNow();
+  try {
+    Date.now = () => started + 6 * 60_000;
+    await translateText("Gold futures advanced after the inventory report.");
+    assert.equal(quotaRequests, 2);
+  } finally {
+    Date.now = originalNow;
+  }
 } finally {
   globalThis.fetch = originalFetch;
   for (const [key, value] of Object.entries(originalEnv)) {

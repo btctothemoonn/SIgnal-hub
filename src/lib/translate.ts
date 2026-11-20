@@ -19,7 +19,7 @@ export type TranslationNote = {
   text: string;
 };
 
-const DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7";
+const DEFAULT_MINIMAX_MODEL = "MiniMax-M3";
 const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 
 const translationCache = new Map<string, { result: TranslationNote | null; expiresAt: number }>();
@@ -177,7 +177,7 @@ async function translateWithMiniMax(
         ? Number(retryAfter) * 1000
         : retryAfter ? Date.parse(retryAfter) - Date.now() : 0;
       const now = Date.now();
-      const until = quota ? getQuotaResetAt(messageText, now) : now + 60_000;
+      const until = quota ? getQuotaResetAt(messageText, now, 5 * 60_000) : now + 60_000;
       translationCooldown(cooldownKey, Math.max(until, now + (delay || 0)));
     }
     return null;

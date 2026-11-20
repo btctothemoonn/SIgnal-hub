@@ -14,6 +14,17 @@ const id = "2123456789012345678";
 const worker = fileURLToPath(new URL("./x-pipeline-worker.mjs", import.meta.url));
 const preload = join(cwd, "socket.mjs");
 const fixture = ({ id, token }) => {
+  globalThis.fetch = async (_url, init) => {
+    const db = new DatabaseSync(process.env.X_PIPELINE_DB, { readOnly: true });
+    try {
+      assert.equal(db.prepare("select text from x_feed where id=?").get(id).text, "Test post.");
+    } finally {
+      db.close();
+    }
+    const input = JSON.parse(init.body).messages.at(-1).content;
+    const content = input.includes("Quoted market news") ? "这是被引用的市场新闻。" : "这是一条测试帖子。";
+    return Response.json({ choices: [{ message: { content } }] });
+  };
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = (fn, ms) => realSetInterval(fn, ms === 20_000 ? 20 : ms);
 
@@ -47,7 +58,8 @@ const fixture = ({ id, token }) => {
         this.message(JSON.stringify({ method: "twitter.event", params: {
           twAccount: account,
           eventType: "NEW_TWEET",
-          content: { id: tweetId, text: "Test post.", createdAt: "2026-11-18T02:00:00Z" },
+          content: { id: tweetId, text: "Test post.", createdAt: "2026-11-18T02:00:00Z",
+            quotedTweet: { id: "2123456789012345600", text: "Quoted market news.", userScreenName: "Bob", createdAt: "2026-11-18T01:00:00Z" } },
         } }));
       }
       if (this.number === 1) {
@@ -71,13 +83,14 @@ const fixture = ({ id, token }) => {
 try {
   mkdirSync(join(cwd, ".signal-hub"));
   writeFileSync(join(cwd, ".signal-hub", "runtime-config.json"), JSON.stringify({ twitterAccounts: ["Alice"] }));
-  writeFileSync(preload, 'import assert from "node:assert/strict";\n(' + fixture.toString() + ')(' + JSON.stringify({ id, token }) + ');\n');
+  writeFileSync(preload, 'import assert from "node:assert/strict";\nimport { DatabaseSync } from "node:sqlite";\n(' + fixture.toString() + ')(' + JSON.stringify({ id, token }) + ');\n');
   const result = spawnSync(process.execPath, [
     "--experimental-transform-types", "--import", pathToFileURL(preload).href, worker,
   ], {
     cwd, encoding: "utf8", timeout: 10_000,
     env: { ...process.env, TWITTER_TOKEN: token, TWITTER_CONNECTOR_ENABLED: "false",
       X_6551_WS_ENABLED: "true", X_PIPELINE_DB: dbPath, TWITTER_WATCH_USERNAMES: "",
+      SIGNAL_HUB_RUNTIME_DIR: join(cwd, ".signal-hub"), TWITTER_TRANSLATE_ENABLED: "true", AI_TRANSLATION_API_KEY: "test-translation",
       TWITTER_WS_URL: "wss://ai.6551.io/open/twitter_wss" },
   });
   assert.equal(result.status, 0, result.error?.message || result.stderr);
@@ -85,6 +98,9 @@ try {
   assert.doesNotMatch(result.stdout + result.stderr, /test-only-token/);
   const db = new DatabaseSync(dbPath);
   try {
+    const saved = db.prepare("select translation_json, quoted_tweet_json from x_feed where id=?").get(id);
+    assert.equal(JSON.parse(saved.translation_json)?.text, "这是一条测试帖子。");
+    assert.equal(JSON.parse(saved.quoted_tweet_json)?.translation?.text, "这是被引用的市场新闻。");
     assert.deepEqual(db.prepare("select id, first_source from x_feed").all().map(row => ({ ...row })), [{ id, first_source: "6551" }]);
     assert.equal(db.prepare("select status from x_health where scope = '6551-wss'").get().status, "live");
   } finally {
