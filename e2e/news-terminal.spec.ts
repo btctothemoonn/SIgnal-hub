@@ -137,7 +137,7 @@ test("news mobile fits viewport and opens and closes the trading detail sheet", 
   await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
 });
 
-test("a sharp crypto crash and a separate equity board open the chosen Binance market on mobile", async ({ page }) => {
+test("a sharp crypto crash and a separate equity board open the chosen Binance market on mobile", async ({ page }, testInfo) => {
   const runtimeDir = process.env.SIGNAL_E2E_RUNTIME_DIR!;
   const market = openMarketAlertsStore(join(runtimeDir, "market.sqlite"));
   const signals = openMarketSignalsStore(marketSignalsDbPath({ SIGNAL_HUB_RUNTIME_DIR: runtimeDir }));
@@ -149,6 +149,11 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
       { symbol: "NVDAUSDT", underlyingType: "EQUITY", activeUsdtPerpetual: true },
       { symbol: "XAUUSDT", underlyingType: "COMMODITY", activeUsdtPerpetual: true },
     ], observed);
+    const minute = Math.floor(observed / 60_000) * 60_000;
+    market.recordCardMinutes(Array.from({ length: 60 }, (_, i) => ({
+      symbol: "AAOIUSDT", at: minute - (60 - i) * 60_000,
+      open: 43, high: 44, low: 42, close: 43.5, quoteVolume: 50_000, observeVolume: false,
+    })), observed);
     for (const symbol of ["DOGEUSDT", "AAOIUSDT", "XAUUSDT"]) {
       market.insertMarketAlertEvent({
         id: "deep-link-" + symbol, symbol, type: "volatility", side: "SHORT", level: 2,
@@ -179,6 +184,34 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
   await expect(page).toHaveURL(/\/alerts\/equities$/);
   const equities = page.getByRole("region", { name: "强暴跌", exact: true });
   await expect(equities.locator("#coin-AAOIUSDT")).toBeVisible();
+  const equityCard = equities.locator("#coin-AAOIUSDT");
+  const details = equityCard.locator("button[aria-expanded]");
+  const timeline = equityCard.getByRole("list", { name: "AAOI 触发时间线" });
+  const chart = equityCard.getByRole("img", { name: /AAOIUSDT.*K 线/ });
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expect(details).toHaveAttribute("aria-expanded", "false");
+    await expect(equityCard.getByRole("link", { name: "查看 AAOI 实时行情" })).toBeVisible();
+    await expect(equityCard).toContainText("暴跌");
+    await expect(equityCard.getByText(/43\.5/).first()).toBeVisible();
+    await expect(chart).toBeVisible();
+    await expect(timeline).toBeHidden();
+    await expect(equityCard.getByText("24h 合约成交额", { exact: true })).toBeHidden();
+    const compactHeight = await equityCard.evaluate(el => el.getBoundingClientRect().height);
+    expect(compactHeight).toBeLessThanOrEqual(200);
+    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeLessThanOrEqual(48);
+    expect(await equityCard.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    testInfo.annotations.push({ type: "compact-card-height", description: `AAOI ${viewport.width}px · ${compactHeight}px` });
+    await details.click();
+    await expect(details).toHaveAttribute("aria-expanded", "true");
+    await expect(timeline).toBeVisible();
+    await expect(equityCard.getByText("24h 合约成交额", { exact: true })).toBeVisible();
+    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(90);
+    await details.click();
+    await expect(timeline).toBeHidden();
+    await expect(details).toHaveAttribute("aria-expanded", "false");
+    expect(await equityCard.evaluate(el => el.getBoundingClientRect().height)).toBe(compactHeight);
+  }
   await expect(page.locator("#coin-DOGEUSDT, #coin-XAUUSDT")).toHaveCount(0);
   await expect(page.getByText("FDV", { exact: false })).toHaveCount(0);
   const equitySearch = page.getByRole("searchbox", { name: "搜索股票代码" });

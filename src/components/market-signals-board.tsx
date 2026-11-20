@@ -97,8 +97,8 @@ const badgeStyles = {
   startup: "bg-info-soft text-info", pumped: "bg-warning-soft text-warning", weakening: "bg-danger-soft text-danger",
 };
 
-function Metric({ label, value, title, className = "", compact = false }: { label: string; value: string; title?: string; className?: string; compact?: boolean }) {
-  return <div className={className} title={title}><dt className="text-[11px] leading-5 text-muted">{label}</dt>
+function Metric({ label, value, title, compact = false }: { label: string; value: string; title?: string; compact?: boolean }) {
+  return <div title={title}><dt className="text-[11px] leading-5 text-muted">{label}</dt>
     <dd className={`font-mono font-semibold tabular-nums text-foreground ${compact ? "text-sm" : "text-base"}`}>{value}</dd>
   </div>;
 }
@@ -120,6 +120,42 @@ function quoteVolume(value: number | null | undefined) {
   return `${Number(value.toFixed(2)).toLocaleString("zh-CN")} USDT`;
 }
 
+function TriggerHistory({ row, outcomes }: { row: CardRow; outcomes: RecentOutcomes }) {
+  const { episode, symbol } = row;
+  const timeline = row.events.map(event => ({
+    id: event.id, at: eventTime(event), color: directionOf(event) === "down" ? "text-danger" : directionOf(event) === "squeeze" ? "text-warning" : "text-info",
+    title: triggerLabel(event),
+    detail: [event.trigger, `触发价 ${price(event.price)}`, event.changePct == null ? null : pct(event.changePct), event.volumeRatio == null ? null : `量比 ${event.volumeRatio.toFixed(2)} 倍`].filter(Boolean).join(" · "),
+    outcome: outcomes[event.id] as RecentOutcomes[string] | undefined,
+  }));
+  for (const item of row.lifecycleEvents) {
+    timeline.push({ id: item.id, at: item.at, color: item.kind === "weakening" ? "text-danger" : "text-info",
+      title: lifecycleLabels[item.kind], detail: `收盘价 ${price(item.price)} USDT`, outcome: undefined });
+    if (item.kind === "weakening") {
+      if (!row.lifecycleEvents.some(prior => prior.kind === "pumped" && prior.at === item.pumpAt)) {
+        timeline.push({ id: `pump-${item.id}`, at: item.pumpAt, color: "text-warning", title: "已大涨", detail: "进入跟踪", outcome: undefined });
+      }
+      if (item.retestAt != null && item.retestPrice != null) {
+        timeline.push({ id: `retest-${item.id}`, at: item.retestAt, color: "text-muted",
+          title: "反抽失败", detail: `收盘价 ${price(item.retestPrice)} USDT`, outcome: undefined });
+      }
+    }
+  }
+  if (episode) timeline.push({ id: "first-burst", at: episode.firstAt, color: "text-muted",
+    title: "首次爆量", detail: `${episode.firstRatio.toFixed(2)} 倍 · 1 分钟成交额 ${quoteVolume(episode.firstQuoteVolume)}`, outcome: undefined });
+  timeline.sort((a, b) => a.at - b.at);
+  return (
+    <ol aria-label={`${base(symbol)} 触发时间线`} className="mt-3 grid max-h-64 gap-1.5 overflow-y-auto border-t border-line pt-2.5 text-xs">
+      {timeline.map(item => (
+        <li key={item.id} className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
+          <time dateTime={new Date(item.at).toISOString()} className={`font-mono font-semibold ${item.color}`}>{cardTime(item.at)}</time>
+          <span className="min-w-0"><span className="font-medium">{item.title}</span> <span className="text-muted">{item.detail}</span><OutcomeChips outcome={item.outcome} /></span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, outcomes, equities }: {
   row: CardRow; ticker?: Ticker; candles: MarketSignalsBoardData["cardCandles"][string];
   metrics?: MarketSignalsBoardData["cardMetrics"][string]; nowMs: number; expanded: boolean; onToggle: () => void;
@@ -134,109 +170,76 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
     : lifecycleLabels[focus.kind];
   const style = badgeStyles[focus.kind === "special" ? directionOf(focus.event) : focus.kind];
   const signalPrice = focus.kind === "special" ? focus.event.price : focus.phase.price;
-  const secondaryPhase = special ? row.lifecycleEvents[0] : undefined;
   const bar = candles.at(-1);
   const lastCloseMs = bar ? bar.at + 60_000 : 0;
   const useClose = bar && (!ticker || lastCloseMs > Date.parse(ticker.updatedAt));
   const current = useClose ? bar.close : ticker?.price;
   const since = current != null && signalPrice > 0 ? (current / signalPrice - 1) * 100 : null;
-  const chartUrl = row.events.find(event => event.chartUrl)?.chartUrl;
-  const timeline = row.events.map(event => ({
-    id: event.id, at: eventTime(event), color: directionOf(event) === "down" ? "text-danger" : directionOf(event) === "squeeze" ? "text-warning" : "text-info",
-    title: triggerLabel(event),
-    detail: [event.trigger, `触发价 ${price(event.price)}`, event.changePct == null ? null : pct(event.changePct), event.volumeRatio == null ? null : `量比 ${event.volumeRatio.toFixed(2)} 倍`].filter(Boolean).join(" · "),
-    outcome: outcomes[event.id] as RecentOutcomes[string] | undefined,
-  }));
-  for (const item of row.lifecycleEvents) {
-    timeline.push({ id: item.id, at: item.at, color: item.kind === "weakening" ? "text-danger" : "text-info",
-      title: lifecycleLabels[item.kind], detail: `收盘价 ${price(item.price)} USDT`, outcome: undefined });
-    if (item.kind === "weakening") {
-      if (!row.lifecycleEvents.some(prior => prior.kind === "pumped" && prior.at === item.pumpAt)) {
-        timeline.push({ id: `pump-${item.id}`, at: item.pumpAt, color: "text-warning", title: "已大涨", detail: "进入跟踪", outcome: undefined });
-      }
-      if (expanded && item.retestAt != null && item.retestPrice != null) {
-        timeline.push({ id: `retest-${item.id}`, at: item.retestAt, color: "text-muted",
-          title: "反抽失败", detail: `收盘价 ${price(item.retestPrice)} USDT`, outcome: undefined });
-      }
-    }
-  }
-  if (episode) timeline.push({ id: "first-burst", at: episode.firstAt, color: "text-muted",
-    title: "首次爆量", detail: `${episode.firstRatio.toFixed(2)} 倍 · 1 分钟成交额 ${quoteVolume(episode.firstQuoteVolume)}`, outcome: undefined });
-  timeline.sort((a, b) => a.at - b.at);
-  const preview = timeline.filter(item => item.id !== "first-burst").slice(-2);
+  const chartUrl = expanded ? row.events.find(event => event.chartUrl)?.chartUrl : undefined;
   const detailsId = `details-${symbol}`;
   const funding = metrics?.fundingRate;
   const strength = special?.metrics?.strengthPct;
   return (
-    <li id={`coin-${symbol}`} className="@container min-w-0 scroll-mt-24 rounded-xl border border-workspace-line-strong bg-workspace-surface px-3.5 py-3 sm:px-5 sm:py-4">
-      <header className="grid min-w-0 gap-x-3 gap-y-2 @min-[520px]:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          <MarketSymbolLink symbol={symbol} className="max-w-full truncate text-xl font-bold tracking-tight text-foreground sm:text-2xl" />
-          <span className="hidden text-xs text-muted @min-[520px]:inline">USDT 永续</span>
-          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${style}`}>{label}</span>
-          {phase && last ? <span className="rounded border border-line px-1.5 py-0.5 text-[10px] font-medium text-muted">{cardTime(eventTime(last))} {triggerLabel(last)}</span> : null}
-          {secondaryPhase ? <span className="rounded border border-line px-1.5 py-0.5 text-[10px] font-medium text-muted">{cardTime(secondaryPhase.at)} {lifecycleLabels[secondaryPhase.kind]}</span> : null}
+    <li id={`coin-${symbol}`} className="@container min-w-0 scroll-mt-24 rounded-lg border border-workspace-line-strong bg-workspace-surface px-3 py-2.5">
+      <header className="grid min-w-0 gap-x-2 gap-y-0.5 @min-[440px]:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <MarketSymbolLink symbol={symbol} className="min-w-0 truncate text-base font-bold tracking-tight text-foreground" />
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${style}`}>{label}</span>
           <button type="button" aria-pressed={starred} aria-label={`${starred ? "取消自选" : "加入自选"} ${base(symbol)}`} onClick={onStar}
-            className="ml-auto grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-workspace-canvas @min-[520px]:ml-0">
-            <Star aria-hidden className={`size-4 ${starred ? "fill-warning text-warning" : ""}`} />
+            className="ml-auto grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-workspace-canvas @min-[440px]:ml-0">
+            <Star aria-hidden className={`size-3.5 ${starred ? "fill-warning text-warning" : ""}`} />
           </button>
         </div>
-        <div className="flex flex-wrap items-baseline gap-x-3 @min-[520px]:row-span-2 @min-[520px]:flex-col @min-[520px]:items-end">
-          <span title={`最近报价 · ${useClose ? cardTime(lastCloseMs) : clock(ticker?.updatedAt)}`} className="font-mono text-xl font-bold tabular-nums tracking-tight text-foreground sm:text-2xl"><span className="sr-only">最新价格 </span>{price(current)}</span>
-          <span className={`text-xs font-semibold ${tone(since)}`}>触发后 {pct(since, 2)}</span>
-        </div>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted">
-          <span>重点触发 <b className="font-mono font-medium text-foreground">{cardTime(row.latestAt)}</b> · {price(signalPrice)} USDT</span>
-          {equities ? <span>24h 涨跌 {pct(ticker?.pct24h, 2)}</span> : <span className="font-mono text-[10px]">FDV {money(ticker?.fdvUsd ?? last?.fdvUsd)}</span>}
+        <div className="flex flex-wrap items-baseline gap-x-2 self-center">
+          <span title={`最近报价 · ${useClose ? cardTime(lastCloseMs) : clock(ticker?.updatedAt)}`} className="font-mono text-sm font-semibold tabular-nums text-foreground"><span className="sr-only">最新价格 </span>{price(current)}</span>
+          <span className={`text-[11px] font-semibold tabular-nums ${tone(since)}`}>触发后 {pct(since, 2)}</span>
         </div>
       </header>
 
-      <div className="mt-3 grid gap-3 border-t border-line pt-3 @min-[580px]:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)] @min-[580px]:gap-4">
-        <MarketSignalCardChart row={row} candles={candles} endMs={nowMs} />
-        <dl className="grid grid-cols-2 content-start gap-x-2 gap-y-3 border-t border-line pt-2 @min-[580px]:border-l @min-[580px]:border-t-0 @min-[580px]:pl-4 @min-[580px]:pt-0">
-          {phase?.kind === "startup" ? <>
-            <Metric label="1h 涨幅" value={pct(phase.hourPct, 2)} />
-            <Metric label="1h 领先市场" value={`${phase.relativePct.toFixed(2)} 个百分点`} compact />
-            <Metric label="距 24h 低位" value={pct(phase.gainFromLowPct, 2)} />
-          </> : phase?.kind === "weakening" ? <>
-            <Metric label="本轮最高涨幅" value={pct(phase.peakGainPct, 2)} />
-            <Metric label="距高位回撤" value={pct(-Math.abs(phase.drawdownPct), 2)} />
-            <Metric label="失守支撑价" value={price(phase.supportPrice)} />
-          </> : special?.type === "volatility" ? <>
-            <Metric label="触发时近 25m 涨跌" value={pct(special.changePct, 2)} />
-            <Metric label="触发强度" title="快速变动与近 25 分钟滚动变动中，幅度较大的一项"
-              value={typeof strength === "number" && Number.isFinite(strength) ? `${Math.abs(strength).toFixed(2)}%` : "—"} />
-            <Metric label="触发量比" value={special.volumeRatio == null ? "—" : `${special.volumeRatio.toFixed(2)} 倍`} />
-          </> : special?.type === "short_squeeze" ? <Metric label="轧空阶段" value={special.stage} /> : null}
-          {episode ? <Metric label="首爆量比" value={`${episode.firstRatio.toFixed(2)} 倍`} title={`首爆 ${cardTime(episode.firstAt)}`} /> : null}
-          {equities ? <Metric label="24h 合约成交额" value={quoteVolume(ticker?.quoteVolume)} compact /> :
-            <Metric label="1h 持仓量变化" value={pct(metrics?.oi1hPct, 2)} title="最近两个已完成整点之间，未平仓合约数量的变化" />}
-          <Metric label="资金费率" value={funding == null ? "—" : pct(funding * 100, 3)} className={expanded ? "" : "hidden @min-[580px]:block"} />
-          <Metric label="15m 空头强平（采样）" value={quoteVolume(metrics?.shortLiquidations15m)} title="最近 15 分钟实际采集到的空头强平成交额" className={expanded ? "" : "hidden @min-[580px]:block"} compact />
-        </dl>
+      <div className="mt-1.5">
+        <MarketSignalCardChart row={row} candles={candles} endMs={nowMs} compact={!expanded} />
       </div>
-
-      <div id={detailsId} className={`mt-3 border-t border-line pt-2.5 ${expanded ? "" : "hidden @min-[580px]:block"}`}>
-        <ol aria-label={`${base(symbol)} 触发时间线`} className={`grid gap-1.5 text-xs ${expanded ? "max-h-64 overflow-y-auto" : ""}`}>
-          {(expanded ? timeline : preview).map(item => (
-            <li key={item.id} className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2">
-              <time dateTime={new Date(item.at).toISOString()} className={`font-mono font-semibold ${item.color}`}>{cardTime(item.at)}</time>
-              <span className="min-w-0"><span className="font-medium">{item.title}</span> <span className="text-muted">{item.detail}</span><OutcomeChips outcome={item.outcome} /></span>
-            </li>
-          ))}
-        </ol>
-        {expanded && !equities ? <p className="mt-2 text-[10px] text-muted">24h {pct(ticker?.pct24h)} · 流通市值 {money(ticker?.marketCapUsd ?? last?.marketCapUsd)}</p> : null}
-        {expanded && chartUrl ? <Image unoptimized src={chartUrl} alt={`${base(symbol)} 最近触发时的 K 线快照`} width={1200} height={630} className="mt-2 h-auto w-full max-w-lg rounded border border-line" /> : null}
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-x-2">
+        <span className="text-[11px] text-muted">触发 <time dateTime={new Date(row.latestAt).toISOString()} className="font-mono tabular-nums">{cardTime(row.latestAt)}</time></span>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={detailsId} className="inline-flex min-h-7 items-center gap-0.5 text-xs text-muted hover:text-foreground">
+            {expanded ? "收起详情" : "查看触发记录与指标"}
+            <ChevronDown aria-hidden className={`size-3.5 ${expanded ? "rotate-180" : ""}`} />
+          </button>
+          <Link href={`/news?symbol=${encodeURIComponent(symbol)}`} prefetch={false} className="inline-flex min-h-7 items-center gap-0.5 text-xs font-semibold text-info hover:underline" aria-label={`打开 ${base(symbol)} 实时 K 线`}>
+            看盘 <ArrowUpRight aria-hidden className="size-3.5" />
+          </Link>
+        </div>
       </div>
-      <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
-        <button type="button" onClick={onToggle} aria-expanded={expanded} aria-controls={detailsId} className="inline-flex min-h-8 items-center gap-1 text-xs font-medium text-muted hover:text-foreground">
-          {expanded ? "收起详情" : "查看触发记录"}
-          <ChevronDown aria-hidden className={`size-3.5 ${expanded ? "rotate-180" : ""}`} />
-        </button>
-        <Link href={`/news?symbol=${encodeURIComponent(symbol)}`} prefetch={false} className="inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-info hover:underline" aria-label={`打开 ${base(symbol)} 实时 K 线`}>
-          打开实时 K 线 <ArrowUpRight aria-hidden className="size-3.5" />
-        </Link>
-      </footer>
+      <div id={detailsId} hidden={!expanded}>
+        {expanded ? <>
+          <dl aria-label="触发指标" className="mt-2 grid grid-cols-2 gap-x-2 gap-y-2 border-t border-line pt-2 @min-[440px]:grid-cols-3">
+            <Metric label="触发价（USDT）" value={price(signalPrice)} />
+            {phase?.kind === "startup" ? <>
+              <Metric label="1h 涨幅" value={pct(phase.hourPct, 2)} />
+              <Metric label="1h 领先市场" value={`${phase.relativePct.toFixed(2)} 个百分点`} compact />
+              <Metric label="距 24h 低位" value={pct(phase.gainFromLowPct, 2)} />
+            </> : phase?.kind === "weakening" ? <>
+              <Metric label="本轮最高涨幅" value={pct(phase.peakGainPct, 2)} />
+              <Metric label="距高位回撤" value={pct(-Math.abs(phase.drawdownPct), 2)} />
+              <Metric label="失守支撑价" value={price(phase.supportPrice)} />
+            </> : special?.type === "volatility" ? <>
+              <Metric label="触发时近 25m 涨跌" value={pct(special.changePct, 2)} />
+              <Metric label="触发强度" title="快速变动与近 25 分钟滚动变动中，幅度较大的一项"
+                value={typeof strength === "number" && Number.isFinite(strength) ? `${Math.abs(strength).toFixed(2)}%` : "—"} />
+              <Metric label="触发量比" value={special.volumeRatio == null ? "—" : `${special.volumeRatio.toFixed(2)} 倍`} />
+            </> : special?.type === "short_squeeze" ? <Metric label="轧空阶段" value={special.stage} /> : null}
+            {episode ? <Metric label="首爆量比" value={`${episode.firstRatio.toFixed(2)} 倍`} title={`首爆 ${cardTime(episode.firstAt)}`} /> : null}
+            {equities ? <Metric label="24h 合约成交额" value={quoteVolume(ticker?.quoteVolume)} compact /> :
+              <Metric label="1h 持仓量变化" value={pct(metrics?.oi1hPct, 2)} title="最近两个已完成整点之间，未平仓合约数量的变化" />}
+            <Metric label="资金费率" value={funding == null ? "—" : pct(funding * 100, 3)} />
+            <Metric label="15m 空头强平（采样）" value={quoteVolume(metrics?.shortLiquidations15m)} title="最近 15 分钟实际采集到的空头强平成交额" compact />
+          </dl>
+          <p className="mt-2 text-[11px] text-muted">24h 涨跌 {pct(ticker?.pct24h, 2)}{equities ? null : <> · 流通市值 {money(ticker?.marketCapUsd ?? last?.marketCapUsd)} · FDV {money(ticker?.fdvUsd ?? last?.fdvUsd)}</>}</p>
+          <TriggerHistory row={row} outcomes={outcomes} />
+          {chartUrl ? <Image unoptimized src={chartUrl} alt={`${base(symbol)} 最近触发时的 K 线快照`} width={1200} height={630} className="mt-2 h-auto w-full max-w-lg rounded border border-line" /> : null}
+        </> : null}
+      </div>
     </li>
   );
 }
