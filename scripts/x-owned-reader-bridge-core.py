@@ -136,6 +136,10 @@ def media_items(result):
         width,height=info.get('width',info.get('w')),info.get('height',info.get('h'))
         output.append({'kind':kind,'mimeType':'image/jpeg' if kind=='image' else 'video/mp4','previewUrl':url,
                        'label':item.get('ext_alt_text') or kind,'width':width if type(width) is int and width>=0 else None,'height':height if type(height) is int and height>=0 else None})
+        variants = nested(item, 'video_info', 'variants') or []
+        mp4s = [variant for variant in variants if isinstance(variant, dict) and variant.get('content_type') == 'video/mp4' and str(variant.get('url', '')).startswith('https://')]
+        if mp4s:
+            output[-1]['playbackUrl'] = max(mp4s, key=lambda variant: variant.get('bitrate') or 0)['url']
     return output
 
 def tweet_feed(result, parents=None, depth=0):

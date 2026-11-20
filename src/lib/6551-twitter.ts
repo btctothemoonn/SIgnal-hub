@@ -130,7 +130,10 @@ export type TwitterWatchAccount = {
   avatar: string;
 };
 
+import { readPlaybackUrl } from "./feed-media.ts";
+
 export type TwitterMediaItem = {
+  playbackUrl?: string;
   kind: "image" | "video" | "gif";
   mimeType: string;
   previewUrl: string;
@@ -399,12 +402,15 @@ function normalizeTweetMedia(...sources: unknown[]): TwitterMediaItem[] {
   for (const item of sources.flatMap(mediaArrayFromRaw)) {
     if (!isRecord(item)) continue;
     const rawType = pickString(item.type, item.kind).toLowerCase();
+    const playbackUrl = readPlaybackUrl(item);
     const url = pickString(
-      item.url,
       item.mediaUrlHttps,
       item.media_url_https,
       item.previewUrl,
       item.thumbUrl,
+      item.thumbnail_url,
+      playbackUrl,
+      item.url,
     );
     if (!url) continue;
 
@@ -418,6 +424,7 @@ function normalizeTweetMedia(...sources: unknown[]): TwitterMediaItem[] {
       kind,
       mimeType: pickString(item.mimeType, item.mime_type),
       previewUrl: url,
+      ...(playbackUrl ? { playbackUrl } : {}),
       label: rawType || kind,
       width: toNumber(item.width) || null,
       height: toNumber(item.height) || null,

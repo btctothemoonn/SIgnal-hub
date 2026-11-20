@@ -22,7 +22,8 @@ globalThis.fetch = async (url, init) => {
         media: [
           {
             type: "photo",
-            url: "https://pbs.twimg.com/media/example.jpg",
+            url: "https://x.com/DonAlt/status/2049724698435735806/photo/1",
+            media_url_https: "https://pbs.twimg.com/media/example.jpg",
           },
         ],
         quotedTweet: {

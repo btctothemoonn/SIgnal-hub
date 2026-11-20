@@ -6,6 +6,7 @@ import type {
 } from "./6551-twitter.ts";
 import type { TranslationNote } from "./translate.ts";
 import { isUsefulTranslation } from "./translation-quality.ts";
+import { readPlaybackUrl } from "./feed-media.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -144,6 +145,7 @@ function normalizeMedia(raw: unknown): TwitterMediaItem[] {
   for (const item of raw) {
     if (!isRecord(item)) continue;
     const type = pickString(item.type, item.kind).toLowerCase();
+    const playbackUrl = readPlaybackUrl(item);
     const url = pickMediaPreviewUrl(
       item.mediaUrlHttps,
       item.media_url_https,
@@ -152,6 +154,7 @@ function normalizeMedia(raw: unknown): TwitterMediaItem[] {
       item.thumb_url,
       item.thumbnailUrl,
       item.thumbnail_url,
+      playbackUrl,
       item.url,
     );
     if (!url) continue;
@@ -161,6 +164,7 @@ function normalizeMedia(raw: unknown): TwitterMediaItem[] {
       kind,
       mimeType: pickString(item.mimeType, item.mime_type),
       previewUrl: url,
+      ...(playbackUrl ? { playbackUrl } : {}),
       label: type || kind,
       width: toNumber(item.width) || null,
       height: toNumber(item.height) || null,

@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { isMediaPage, playableMediaUrl } from "@/lib/feed-media";
 import { SignalFeedFloatingNavigation } from "@/components/signal-feed-floating-navigation";
 import {
   Fragment,
@@ -109,7 +110,10 @@ type UnifiedTranslation = {
   text: string;
 } | null;
 
+type FeedMedia = TelegramMediaPreview & { playbackUrl?: string };
+
 type UnifiedQuotedTweet = {
+  xMedia?: FeedMedia[];
   id: string;
   text: string;
   createdAt: string;
@@ -124,6 +128,7 @@ type UnifiedQuotedTweet = {
 };
 
 type UnifiedNewsItem = {
+  xMedia?: FeedMedia[];
   lowFrequencyCollectedAt?: string;
   id: string;
   source: SignalFeedSource;
@@ -462,6 +467,7 @@ function toUnifiedTwitterItems(
       link: tweet.tweetUrl,
       linkLabel: "查看原帖",
       media: tweet.media[0] ?? null,
+      xMedia: tweet.media,
       quotedTweet: tweet.quotedTweet
         ? {
             id: tweet.quotedTweet.id,
@@ -479,6 +485,7 @@ function toUnifiedTwitterItems(
             ),
             link: tweet.quotedTweet.tweetUrl || "#",
             media: tweet.quotedTweet.media[0] ?? null,
+            xMedia: tweet.quotedTweet.media,
             translation: isUsefulTranslation(
               tweet.quotedTweet.text,
               tweet.quotedTweet.translation,
@@ -528,6 +535,29 @@ function getMediaViewport(media: TelegramMediaPreview | null) {
     width: 600,
     height: Math.floor(600 / aspect),
   };
+}
+
+function FeedAttachment({ media, link, zoom }: { media: FeedMedia; link: string; zoom: (media: FeedMedia) => void }) {
+  const [failed, setFailed] = useState(false);
+  const src = playableMediaUrl(media.playbackUrl) ?? playableMediaUrl(media.previewUrl);
+  const moving = media.kind === "gif" || media.kind === "video";
+  const fallback = /^https?:\/\//i.test(link) ? <a href={link} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">到原帖查看{moving ? "动图或视频" : "图片"}</a> : null;
+  if (failed || (!src && isMediaPage(media.previewUrl))) return fallback;
+  if (src) return <video src={src} poster={media.previewUrl === src || isMediaPage(media.previewUrl) ? undefined : media.previewUrl} controls playsInline loop={media.kind === "gif"} muted={media.kind === "gif"} preload="none" onError={() => setFailed(true)} className="block max-h-80 max-w-full" />;
+  const image = <Image src={media.previewUrl} alt={media.label} {...getMediaViewport(media)} unoptimized onError={() => setFailed(true)} className="block max-h-80 w-full object-contain" />;
+  if (moving && !/\.gif(?:$|[?#])|^data:image\/gif/i.test(media.previewUrl) && !/^image\/gif$/i.test(media.mimeType)) return <>{image}{fallback}</>;
+  return <button type="button" onClick={() => zoom(media)} aria-label={`查看${media.label}大图`} className="block w-full cursor-zoom-in">{image}</button>;
+}
+
+function FeedAttachments({ item, zoom }: { item: Pick<UnifiedNewsItem, "media" | "xMedia" | "link">; zoom: (media: FeedMedia) => void }) {
+  const media: FeedMedia[] = item.xMedia ?? (item.media ? [item.media] : []);
+  const distinct = new Map<string, FeedMedia>();
+  for (const entry of media) {
+    if (isMediaPage(entry.previewUrl) && !entry.playbackUrl) continue;
+    if (!distinct.has(entry.previewUrl) || entry.playbackUrl) distinct.set(entry.previewUrl, entry);
+  }
+  const visible = distinct.size ? [...distinct.values()] : media.slice(0, 1);
+  return visible.length ? <div className="mt-2 grid gap-2" onClick={event => event.stopPropagation()}>{visible.map(entry => <FeedAttachment key={entry.playbackUrl ?? entry.previewUrl} media={entry} link={item.link} zoom={zoom} />)}</div> : null;
 }
 
 function requestTelegramSnapshot(options: {
@@ -2134,7 +2164,6 @@ export function UnifiedNewsPanel({
         {deferredFeed.length > 0 ? (
           <>
           {deferredFeed.map((item) => {
-            const mediaViewport = getMediaViewport(item.media);
             const unreadMemberCount = signalFeedUnreadMemberCount(item, readItems);
             const isRead = unreadMemberCount === 0;
             const icon = SOURCE_ICON[item.source] || SOURCE_ICON.alert;
@@ -2146,7 +2175,6 @@ export function UnifiedNewsPanel({
             const quotedCopyText = item.quotedTweet?.text
               ? `\n\n引用 ${item.quotedTweet.title}: ${item.quotedTweet.text}`
               : "";
-            const quoteMediaViewport = getMediaViewport(item.quotedTweet?.media ?? null);
 
             return (
               <article
@@ -2262,28 +2290,7 @@ export function UnifiedNewsPanel({
                   ) : null}
 
                   {/* Media */}
-                  {item.media ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLightboxMedia(item.media);
-                      }}
-                      className="mt-2.5 block w-full overflow-hidden rounded-[6px] border border-line/50 bg-background/35 text-left"
-                      aria-label={`查看${item.media.label || "图片"}大图`}
-                    >
-                      <Image
-                        src={item.media.previewUrl}
-                        alt={item.media.label}
-                        width={mediaViewport.width}
-                        height={mediaViewport.height}
-                        unoptimized
-                        className={`block h-auto w-full cursor-zoom-in object-contain transition-opacity hover:opacity-95 ${
-                          rail ? "max-h-[14rem]" : "max-h-[20rem]"
-                        }`}
-                      />
-                    </button>
-                  ) : null}
+                  <FeedAttachments item={item} zoom={setLightboxMedia} />
 
                   {/* Quoted tweet */}
                   {item.quotedTweet ? (
@@ -2377,26 +2384,7 @@ export function UnifiedNewsPanel({
                           </p>
                         </div>
                       ) : null}
-                      {item.quotedTweet.media ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setLightboxMedia(item.quotedTweet?.media ?? null);
-                          }}
-                          className="mt-2 block w-full overflow-hidden rounded-md border border-line/50 bg-panel/40 text-left"
-                          aria-label={`查看${item.quotedTweet.media.label || "图片"}大图`}
-                        >
-                          <Image
-                            src={item.quotedTweet.media.previewUrl}
-                            alt={item.quotedTweet.media.label}
-                            width={quoteMediaViewport.width}
-                            height={quoteMediaViewport.height}
-                            unoptimized
-                            className="block h-auto w-full cursor-zoom-in object-contain transition-opacity hover:opacity-95 max-h-[12rem]"
-                          />
-                        </button>
-                      ) : null}
+                      <FeedAttachments item={item.quotedTweet} zoom={setLightboxMedia} />
                     </div>
                   ) : null}
 
@@ -2456,17 +2444,8 @@ export function UnifiedNewsPanel({
                                 {member.quotedTweet.translation ? <p className="selectable-text mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{renderTextWithLinks(member.quotedTweet.translation.text)}</p> : null}
                               </div>
                             ) : null}
-                            {[member.media, member.quotedTweet?.media].map((media, mediaIndex) => media ? (
-                              <button
-                                key={mediaIndex}
-                                type="button"
-                                onClick={() => setLightboxMedia(media)}
-                                className="mt-1.5 block w-full overflow-hidden rounded border border-workspace-line-strong"
-                                aria-label={`查看${media.label || "图片"}大图`}
-                              >
-                                <Image src={media.previewUrl} alt={media.label} {...getMediaViewport(media)} unoptimized className="block max-h-[12rem] w-full object-contain" />
-                              </button>
-                            ) : null)}
+                            <FeedAttachments item={member} zoom={setLightboxMedia} />
+                            {member.quotedTweet && <FeedAttachments item={member.quotedTweet} zoom={setLightboxMedia} />}
                             <div className="mt-1.5 flex items-center gap-3 text-[11px] text-muted">
                               {member.link !== "#" ? <a href={member.link} target="_blank" rel="noreferrer" className="text-accent hover:underline">{member.linkLabel}</a> : null}
                               <CopyButton text={`${member.text}${member.translation ? `\n\n${member.translation.text}` : ""}${member.quotedTweet ? `\n\n引用 ${member.quotedTweet.title}: ${member.quotedTweet.text}` : ""}`} />
