@@ -207,10 +207,11 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(card.getByText("资金费率", { exact: true })).toBeHidden();
       await expect(chart).toBeVisible();
       const compactHeight = await card.evaluate(el => el.getBoundingClientRect().height);
-      expect(compactHeight).toBeLessThanOrEqual(220);
+      const compactChartHeight = viewport.width < 640 ? 192 : 224;
+      expect(compactHeight - compactChartHeight).toBeLessThanOrEqual(140);
       await expect(chart).toHaveAccessibleName(/4h/);
       await expect(chart).toHaveAccessibleName(/5m/);
-      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(80);
+      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(compactChartHeight);
       expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       expect(await rates.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       testInfo.annotations.push({ type: "compact-card-height", description: `PIEVERSE ${viewport.width}px · ${compactHeight}px` });
@@ -220,7 +221,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(timeline).toBeVisible();
       await expect(card.getByText("+0.005%", { exact: true })).toBeVisible();
       await expect(card.getByRole("link", { name: "打开 PIEVERSE 实时 K 线" })).toHaveAttribute("href", "/news?symbol=PIEVERSEUSDT");
-      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width === 390 ? 160 : 176);
+      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width < 640 ? 288 : 320);
       expect(await card.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(compactHeight);
       await details.click();
       await expect(timeline).toBeHidden();

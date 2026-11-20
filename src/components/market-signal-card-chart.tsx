@@ -16,8 +16,8 @@ export function MarketSignalCardChart({ row, candles, endMs, compact = false }: 
   row: CardRow; candles: Parameters<typeof getCardChart>[0]; endMs: number; compact?: boolean;
 }) {
   const { bars, marks, startMs, endMs: closedEndMs } = getCardChart(candles, endMs, row);
-  const height = compact ? 80 : 160;
-  const paddingY = compact ? 6 : 10;
+  const height = compact ? 192 : 288;
+  const paddingY = compact ? 8 : 12;
   const low = Math.min(...bars.map(bar => bar.low));
   const high = Math.max(...bars.map(bar => bar.high));
   const x = (at: number) => 4 + (at - startMs) / CARD_WINDOW_MS * (WIDTH - 8);
@@ -56,7 +56,7 @@ export function MarketSignalCardChart({ row, candles, endMs, compact = false }: 
               </span>;
             })}
           </div>}
-          <svg viewBox={`0 0 ${WIDTH} ${height}`} preserveAspectRatio="none" className={`block w-full ${compact ? "h-20" : "h-40 sm:h-44"}`} role="img"
+          <svg viewBox={`0 0 ${WIDTH} ${height}`} preserveAspectRatio="none" className={`block w-full ${compact ? "h-48 sm:h-56" : "h-72 sm:h-80"}`} role="img"
             aria-label={compact && markerDescription ? `${chartDescription}，触发点：${markerDescription}` : chartDescription}>
             {(compact ? [height / 2] : [10, height / 2, height - 6]).map(gridY => <line key={gridY} x1="0" x2={WIDTH} y1={gridY} y2={gridY} stroke="var(--line)" />)}
             {(["up", "down"] as const).map(side => (
