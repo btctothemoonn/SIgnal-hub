@@ -16,12 +16,12 @@ export default function AlertsPage() {
   return (
     <AppShell
       activeNav="alerts"
-      subtitle="异动 · 启动候选与大涨后转弱"
+      subtitle="异动 · 重点观察"
       mainClassName="mx-auto min-h-0 w-full max-w-[1680px] px-3 py-3 sm:px-5 lg:py-4"
       statusPills={[
         {
           label: "异动",
-          children: `24h 常规异动 ${data.events.length} 次`,
+          children: "实时行情",
           status: `${liveWorkers}/4 在线`,
           tone: liveWorkers === 4 ? "text-success" : "text-warning",
         },

@@ -4,10 +4,7 @@ import type { MarketLifecycleEvent } from "@/lib/market-lifecycle";
 export type BoardEvent = MarketSignalsBoardData["events"][number];
 type Episode = MarketSignalsBoardData["volumeEpisodes"][number];
 type Candle = MarketSignalsBoardData["cardCandles"][string][number];
-export type AssetFilter = "crypto" | "equity";
 export type Direction = "up" | "down" | "squeeze";
-export type DirectionFilter = Direction | "all" | "watch";
-export type BoardView = "focus" | "all";
 export const HOUR_MS = 3_600_000;
 const EPISODE_MS = 2 * HOUR_MS;
 
@@ -23,61 +20,73 @@ export function eventTime(event: BoardEvent) {
 
 export const lifecycleLabels = { startup: "启动候选", pumped: "已大涨", weakening: "大涨后转弱" } as const;
 
+export function isSpecialAlert(event: BoardEvent) {
+  if (event.type === "short_squeeze") return event.level >= 2;
+  if (event.type !== "volatility" || (event.side !== "LONG" && event.side !== "SHORT")) return false;
+  if (event.level >= 2) return true;
+  const strength = event.metrics?.strengthPct;
+  return event.level === 1 && event.trigger.includes("B加速") && typeof strength === "number" &&
+    Number.isFinite(strength) && strength >= 5 && event.volumeRatio !== null && event.volumeRatio >= 20;
+}
+
+type CardFocus =
+  | { kind: "startup"; phase: Extract<MarketLifecycleEvent, { kind: "startup" }> }
+  | { kind: "weakening"; phase: Extract<MarketLifecycleEvent, { kind: "weakening" }> }
+  | { kind: "special"; event: BoardEvent };
+
 export type CardRow = {
   symbol: string;
   events: BoardEvent[];
   lifecycleEvents: MarketLifecycleEvent[];
-  primaryLifecycle?: MarketLifecycleEvent;
+  focus: CardFocus;
   episode?: Episode;
   latestAt: number;
 };
 
-type BoardFilters = { startMs: number; endMs: number; asset: AssetFilter; direction: DirectionFilter; watchlist: string[]; view: BoardView };
-
-export function buildCardRows(data: MarketSignalsBoardData, filters: BoardFilters): CardRow[] {
-  const { startMs, endMs, asset, direction, watchlist, view } = filters;
+export function buildCardRows(data: MarketSignalsBoardData, { startMs, endMs }: { startMs: number; endMs: number }): CardRow[] {
   const coins = new Set(data.signals.coinSymbols);
-  const watched = new Set(watchlist);
-  const bySymbol = new Map<string, CardRow>();
-  function rowFor(symbol: string, at: number) {
-    if (at < startMs || at > endMs || !Number.isFinite(at)) return;
-    if (asset === "equity" ? data.assetClasses[symbol] !== "EQUITY" : !coins.has(symbol)) return;
-    if (direction === "watch" && !watched.has(symbol)) return;
-    let row = bySymbol.get(symbol);
-    if (!row) {
-      row = { symbol, events: [], lifecycleEvents: [], latestAt: at };
-      bySymbol.set(symbol, row);
+  const histories = new Map<string, Pick<CardRow, "events" | "lifecycleEvents">>();
+  function historyFor(symbol: string, at: number) {
+    if (!coins.has(symbol) || !Number.isFinite(at) || at < startMs || at > endMs) return;
+    let history = histories.get(symbol);
+    if (!history) {
+      history = { events: [], lifecycleEvents: [] };
+      histories.set(symbol, history);
     }
-    return row;
+    return history;
   }
-  const rawDirection = direction === "up" || direction === "down" || direction === "squeeze";
   for (const event of data.events) {
-    if (rawDirection && direction !== directionOf(event)) continue;
-    rowFor(event.symbol, eventTime(event))?.events.push(event);
+    historyFor(event.symbol, eventTime(event))?.events.push(event);
   }
   for (const phase of data.lifecycleEvents ?? []) {
-    if (rawDirection && !bySymbol.has(phase.symbol)) continue;
-    rowFor(phase.symbol, phase.at)?.lifecycleEvents.push(phase);
+    historyFor(phase.symbol, phase.at)?.lifecycleEvents.push(phase);
   }
 
-  const rows: CardRow[] = [];
-  for (const row of bySymbol.values()) {
-    row.events.sort((a, b) => eventTime(b) - eventTime(a));
-    row.lifecycleEvents.sort((a, b) => b.at - a.at);
-    const latestPhase = row.lifecycleEvents[0];
-    const latestAlertAt = row.events.length ? eventTime(row.events[0]) : -Infinity;
-    if (view === "focus" && (!latestPhase || latestPhase.kind === "pumped")) continue;
-    if (!rawDirection && latestPhase && (view === "focus" || latestPhase.at >= latestAlertAt)) row.primaryLifecycle = latestPhase;
-    row.latestAt = row.primaryLifecycle?.at ?? latestAlertAt;
-    rows.push(row);
+  const rows = new Map<string, CardRow>();
+  for (const [symbol, { events, lifecycleEvents }] of histories) {
+    events.sort((a, b) => eventTime(b) - eventTime(a) || b.level - a.level);
+    lifecycleEvents.sort((a, b) => b.at - a.at);
+    const phase = lifecycleEvents[0];
+    const special = events.find(isSpecialAlert);
+    // A pump graduates a startup. It does not cancel a separate qualifying price or squeeze alert.
+    let focus: CardFocus;
+    if (phase && phase.kind !== "pumped" && (!special || phase.at >= eventTime(special))) {
+      focus = phase.kind === "startup" ? { kind: "startup", phase } : { kind: "weakening", phase };
+    } else if (special) {
+      focus = { kind: "special", event: special };
+    } else {
+      continue;
+    }
+    const latestAt = focus.kind === "special" ? eventTime(focus.event) : focus.phase.at;
+    rows.set(symbol, { symbol, events, lifecycleEvents, focus, latestAt });
   }
   // Volume can annotate the signal which selected the card, but cannot create or promote one.
   for (const episode of data.volumeEpisodes ?? []) {
-    const row = bySymbol.get(episode.symbol);
+    const row = rows.get(episode.symbol);
     if (row && episode.firstAt <= row.latestAt && row.latestAt < episode.firstAt + EPISODE_MS &&
         (!row.episode || episode.firstAt > row.episode.firstAt)) row.episode = episode;
   }
-  return rows.sort((a, b) => b.latestAt - a.latestAt || a.symbol.localeCompare(b.symbol));
+  return [...rows.values()].sort((a, b) => b.latestAt - a.latestAt || a.symbol.localeCompare(b.symbol));
 }
 
 export function triggerLabel(event: BoardEvent) {
