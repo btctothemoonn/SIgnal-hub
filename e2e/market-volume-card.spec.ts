@@ -116,6 +116,8 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     const card = page.locator(`#coin-${symbol}`);
     const crashCard = sudden.locator(`#coin-${crash}`);
     await expect(crashCard).toContainText("突发暴跌 L1");
+    await expect(crashCard.getByText("近 4 小时暂无完整 5m K 线")).toBeVisible();
+    await expect(crashCard.locator("[data-price-axis]")).toHaveCount(0);
     const crashDetails = crashCard.locator("button[aria-expanded]");
     await expect(crashDetails).toHaveAttribute("aria-expanded", "false");
     await expect(crashCard.getByText("136.77 倍", { exact: true })).toBeHidden();
@@ -196,6 +198,28 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     await expect(card.getByRole("link", { name: "查看 PIEVERSE 实时行情", exact: true })).toHaveAttribute("href", "/news?symbol=PIEVERSEUSDT");
     const chart = card.getByRole("img", { name: /PIEVERSEUSDT.*K 线/ });
     const timeline = card.getByRole("list", { name: "PIEVERSE 触发时间线" });
+    const priceAxis = card.locator("[data-price-axis]");
+    async function checkPriceAxis() {
+      await expect(priceAxis).toBeVisible();
+      const plot = (await chart.boundingBox())!;
+      const axis = (await priceAxis.boundingBox())!;
+      expect(axis.x).toBeGreaterThanOrEqual(plot.x + plot.width - 1);
+      const ticks = await priceAxis.locator("[data-price-tick]").evaluateAll(elements => elements.map(el => {
+        const bounds = el.getBoundingClientRect();
+        return { value: Number(el.textContent?.trim().replaceAll(",", "")), top: bounds.top, bottom: bounds.bottom };
+      }).sort((a, b) => a.top - b.top));
+      expect(ticks.length).toBeGreaterThanOrEqual(2);
+      for (const [index, tick] of ticks.entries()) {
+        expect(Number.isFinite(tick.value)).toBe(true);
+        const center = (tick.top + tick.bottom) / 2;
+        expect(center).toBeGreaterThanOrEqual(plot.y - 1);
+        expect(center).toBeLessThanOrEqual(plot.y + plot.height + 1);
+        if (index) {
+          expect(tick.value).toBeLessThan(ticks[index - 1].value);
+          expect(tick.top).toBeGreaterThanOrEqual(ticks[index - 1].bottom - 1);
+        }
+      }
+    }
     await expect(card.locator(`[data-marker="down"][data-at="${fourHourMarker}"]`)).toHaveCount(1);
     for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
@@ -212,6 +236,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(chart).toHaveAccessibleName(/4h/);
       await expect(chart).toHaveAccessibleName(/5m/);
       expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(compactChartHeight);
+      await checkPriceAxis();
       expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       expect(await rates.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       testInfo.annotations.push({ type: "compact-card-height", description: `PIEVERSE ${viewport.width}px · ${compactHeight}px` });
@@ -222,6 +247,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(card.getByText("+0.005%", { exact: true })).toBeVisible();
       await expect(card.getByRole("link", { name: "打开 PIEVERSE 实时 K 线" })).toHaveAttribute("href", "/news?symbol=PIEVERSEUSDT");
       expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width < 640 ? 288 : 320);
+      await checkPriceAxis();
       expect(await card.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(compactHeight);
       await details.click();
       await expect(timeline).toBeHidden();

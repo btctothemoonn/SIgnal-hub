@@ -194,6 +194,7 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
   const details = equityCard.locator("button[aria-expanded]");
   const timeline = equityCard.getByRole("list", { name: "AAOI 触发时间线" });
   const chart = equityCard.getByRole("img", { name: /AAOIUSDT.*K 线/ });
+  const priceAxis = equityCard.locator("[data-price-axis]");
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     await expect(details).toHaveAttribute("aria-expanded", "false");
@@ -207,6 +208,11 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
     const compactChartHeight = viewport.width < 640 ? 192 : 224;
     expect(compactHeight - compactChartHeight).toBeLessThanOrEqual(140);
     await expect(chart).toHaveAccessibleName(/4h/);
+    await expect(priceAxis).toBeVisible();
+    const labels = await priceAxis.locator("[data-price-tick]").allTextContents();
+    expect(new Set(labels).size).toBeGreaterThanOrEqual(2);
+    const plot = (await chart.boundingBox())!;
+    expect((await priceAxis.boundingBox())!.x).toBeGreaterThanOrEqual(plot.x + plot.width - 1);
     await expect(chart).toHaveAccessibleName(/5m/);
     expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(compactChartHeight);
     expect(await equityCard.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
@@ -215,6 +221,8 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
     await expect(details).toHaveAttribute("aria-expanded", "true");
     await expect(timeline).toBeVisible();
     await expect(equityCard.getByText("24h 合约成交额", { exact: true })).toBeVisible();
+    await expect(priceAxis).toBeVisible();
+    expect(await priceAxis.locator("[data-price-tick]").count()).toBeGreaterThanOrEqual(2);
     expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width < 640 ? 288 : 320);
     await details.click();
     await expect(timeline).toBeHidden();
