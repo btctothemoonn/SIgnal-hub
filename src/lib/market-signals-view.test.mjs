@@ -86,14 +86,18 @@ try {
   assert.equal(board.events.at(-1).id, "late");
   assert.deepEqual(board.lifecycleEvents.map(({ kind, symbol }) => [kind, symbol]), [["pumped", stageOnly]]);
   assert.ok(board.signals.coinSymbols.includes(stageOnly), "a lifecycle event can open a crypto card without a raw alert");
-  assert.equal(board.cardCandles[stageOnly].length, candles.length);
+  assert.equal(board.cardCandles[stageOnly].length, 4, "only complete five-minute buckets become chart candles");
+  assert.equal(board.focusWinRates.windowDays, 14);
+  assert.deepEqual(board.focusWinRates.rows.map(row => row.kind), ["pump", "crash", "squeeze", "startup", "weakening"]);
+  assert.deepEqual(equities.focusWinRates.rows.map(row => [row.kind, row.total]), [["pump", 0], ["crash", 1]]);
   assert.ok(!board.volumeEpisodes.some(item => item.symbol === symbol), "a standalone burst stays out of the board");
   assert.ok(!(symbol in board.cardMetrics) && !(symbol in board.cardCandles));
   const episode = board.volumeEpisodes.find(item => item.symbol === "PIEVERSEUSDT");
   assert.ok(episode, "an alert card keeps the matching volume history");
   assert.equal(episode.firstPrice, 1.1);
   assert.equal(episode.firstRatio, 6);
-  assert.equal(board.cardCandles.PIEVERSEUSDT.at(-1).at, firstAt - minute);
+  assert.equal(board.cardCandles.PIEVERSEUSDT.at(-1).at, firstAt - 5 * minute);
+  assert.deepEqual(board.cardLatestMinutes.PIEVERSEUSDT, { at: firstAt - minute, close: 1.1 });
   assert.equal(board.cardMetrics.PIEVERSEUSDT?.shortLiquidations15m, null);
   assert.equal(store.getMarketAlertsSnapshot({ limit: 300 }).events.length, 200, "legacy pagination still caps a page at 200");
 } finally {

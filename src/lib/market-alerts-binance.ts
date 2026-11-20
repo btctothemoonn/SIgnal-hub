@@ -15,6 +15,7 @@ import { qualifySqueeze, qualifySqueezeRecovery } from "./important-push-policy.
 import { buildPushCandleWindow } from "./market-push-freshness.ts";
 import type { MarketPushObservation } from "./important-push-types.ts";
 import { isUncertainMarketAlertDeliveryError } from "./market-alerts-delivery.ts";
+import { CARD_CANDLE_COUNT, CARD_CANDLE_MS, CARD_WINDOW_MS } from "./market-card-window.ts";
 import { closedCardMinute } from "./market-volume-observations.ts";
 import type { MarketCardMinute } from "./market-volume-observations.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
@@ -911,9 +912,10 @@ export async function runVolatilityRestScan(input: {
     const results = await mapLimit(selected, 12, async (market) => {
       try {
         const [fiveMinuteKlines, oneMinuteKlines] = await Promise.all([
-          client.getKlines(market.symbol, "5m", 36),
+          client.getKlines(market.symbol, "5m", CARD_CANDLE_COUNT + 1),
           client.getKlines(market.symbol, "1m", 40),
         ]);
+        store.recordCardFiveMinuteKlines(market.symbol, fiveMinuteKlines, nowMs);
         const equityBoardOnly = !included.has(market.symbol);
         if (equityBoardOnly) {
           const minutes = oneMinuteKlines.map(row => closedCardMinute(market.symbol, row, false, nowMs))
@@ -922,7 +924,7 @@ export async function runVolatilityRestScan(input: {
         }
         const metrics = buildVolatilityInputFromKlines({
           symbol: market.symbol,
-          fiveMinuteKlines,
+          fiveMinuteKlines: fiveMinuteKlines.slice(-36),
           oneMinuteKlines,
           ticker: tickers.find((ticker) => stringValue(ticker.symbol) === market.symbol),
           nowMs,
@@ -1761,12 +1763,18 @@ export async function startVolatilityWebSocketWorker(input: {
         try {
           // Capture before requesting. A slow response may contain a partial candle which has since closed.
           const seedClosedBy = Date.now();
+          const subscribed = subscribedSymbols.has(market.symbol);
+          // Chart-only markets have no native 5m subscription or seed; use their existing minute request.
+          const minuteLimit = subscribed ? 81 : (CARD_WINDOW_MS + CARD_CANDLE_MS) / 60_000;
           const [one, five] = await Promise.all([
-            client.getKlines(market.symbol, "1m", input.once ? 40 : 81).then((rows) => {
+            client.getKlines(market.symbol, "1m", input.once ? 40 : minuteLimit).then((rows) => {
               if (!input.once) for (const row of rows) queueMinute(market.symbol, row, seedClosedBy);
               return rows;
             }),
-            subscribedSymbols.has(market.symbol) ? client.getKlines(market.symbol, "5m", 36) : Promise.resolve([]),
+            subscribed ? client.getKlines(market.symbol, "5m", input.once ? 36 : CARD_CANDLE_COUNT + 1).then(rows => {
+              if (!input.once) store.recordCardFiveMinuteKlines(market.symbol, rows, seedClosedBy);
+              return rows;
+            }) : Promise.resolve([]),
           ]);
           const item = cache.get(market.symbol);
           if (!item) return;

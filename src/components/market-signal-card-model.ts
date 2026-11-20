@@ -1,3 +1,5 @@
+import { CARD_CANDLE_MS, CARD_WINDOW_MS, cardWindowEnd } from "../lib/market-card-window.ts";
+import { specialAlertCategory } from "../lib/market-focus-win-rates.ts";
 import type { MarketSignalsBoardData } from "@/lib/market-signals-view";
 import type { MarketLifecycleEvent } from "@/lib/market-lifecycle";
 
@@ -5,8 +7,7 @@ export type BoardEvent = MarketSignalsBoardData["events"][number];
 type Episode = MarketSignalsBoardData["volumeEpisodes"][number];
 type Candle = MarketSignalsBoardData["cardCandles"][string][number];
 export type Direction = "up" | "down" | "squeeze";
-export const HOUR_MS = 3_600_000;
-const EPISODE_MS = 2 * HOUR_MS;
+const EPISODE_MS = 2 * 3_600_000;
 
 export function directionOf(event: BoardEvent): Direction {
   if (event.type === "short_squeeze") return "squeeze";
@@ -21,12 +22,7 @@ export function eventTime(event: BoardEvent) {
 export const lifecycleLabels = { startup: "启动候选", pumped: "已大涨", weakening: "大涨后转弱" } as const;
 
 export function isSpecialAlert(event: BoardEvent) {
-  if (event.type === "short_squeeze") return event.level >= 2;
-  if (event.type !== "volatility" || (event.side !== "LONG" && event.side !== "SHORT")) return false;
-  if (event.level >= 2) return true;
-  const strength = event.metrics?.strengthPct;
-  return event.level === 1 && event.trigger.includes("B加速") && typeof strength === "number" &&
-    Number.isFinite(strength) && strength >= 5 && event.volumeRatio !== null && event.volumeRatio >= 20;
+  return specialAlertCategory(event) !== null;
 }
 
 type CardFocus =
@@ -97,9 +93,10 @@ export function triggerLabel(event: BoardEvent) {
 
 type Mark = { kind: "burst" | Direction | MarketLifecycleEvent["kind"]; at: number; price: number; label: string };
 
-export function getCardChart(candles: Candle[], endMs: number, row: CardRow) {
-  const startMs = endMs - HOUR_MS;
-  const bars = candles.filter(candle => candle.at + 60_000 > startMs && candle.at <= endMs);
+export function getCardChart(candles: Candle[], nowMs: number, row: CardRow) {
+  const endMs = cardWindowEnd(nowMs);
+  const startMs = endMs - CARD_WINDOW_MS;
+  const bars = candles.filter(candle => candle.at % CARD_CANDLE_MS === 0 && candle.at >= startMs && candle.at < endMs);
   const marks: Mark[] = row.lifecycleEvents.map(phase => ({
     kind: phase.kind, at: phase.at, price: phase.price, label: lifecycleLabels[phase.kind],
   }));

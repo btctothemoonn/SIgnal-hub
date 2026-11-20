@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openMarketAlertsStore } from "../src/lib/market-alerts-store";
+import { seedFromEvent } from "../src/lib/market-alert-outcomes";
 import { marketSignalsDbPath, openMarketSignalsStore } from "../src/lib/market-signals";
 
 test("focus cards promote sharp crashes and merge updates with lifecycle stages on desktop and mobile", async ({ page }, testInfo) => {
@@ -25,11 +26,15 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     signals.replaceSymbolClasses([symbol, startupOnly, tracked, ordinary, burstOnly, crash, rally, olderCrash].map(s => ({
       symbol: s, underlyingType: "COIN", activeUsdtPerpetual: true,
     })), now);
-    const bars = Array.from({ length: 60 }, (_, i) => {
-      const open = 1 + i / 1000;
+    const fiveMinutes = 5 * min;
+    const closedBoundary = Math.floor(now / fiveMinutes) * fiveMinutes;
+    const minuteCount = 240 + (now - closedBoundary) / min;
+    const bars = Array.from({ length: minuteCount }, (_, i) => {
+      const minutesAgo = minuteCount - i;
+      const open = 1 + (60 - minutesAgo) / 1000;
       return {
-        symbol, at: now - (60 - i) * min, open, high: open + .015,
-        low: open - .005, close: open + .01, quoteVolume: i === 30 || i === 53 ? 60_000 : 10_000,
+        symbol, at: now - minutesAgo * min, open, high: open + .015,
+        low: open - .005, close: open + .01, quoteVolume: minutesAgo === 30 || minutesAgo === 7 ? 60_000 : 10_000,
         observeVolume: true,
       };
     });
@@ -61,6 +66,9 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       volumeRatio: 6, score: null, metrics: {}, reasons: [], occurredAt: confirmedAt, createdAt: confirmedAt,
     };
     store.insertMarketAlertEvent(alert);
+    const fourHourMarker = quarter - 3 * hour;
+    store.insertMarketAlertEvent({ ...alert, id: "prior-crash-in-chart", side: "SHORT",
+      occurredAt: new Date(fourHourMarker).toISOString(), createdAt: new Date(fourHourMarker).toISOString() });
     store.insertMarketAlertEvent({
       ...alert, id: "market-card-short-e2e", symbol: ordinary, side: "SHORT", stage: "暴跌预警", changePct: -8,
     });
@@ -72,8 +80,17 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     });
     store.insertMarketAlertEvent({ ...alert, id: "rally-l2", symbol: rally, level: 2, stage: "暴涨升级", trigger: "A趋势·实时", changePct: 12 });
     const olderAt = new Date(now - 2 * hour).toISOString();
-    store.insertMarketAlertEvent({ ...alert, id: "older-crash-l2", symbol: olderCrash, side: "SHORT", level: 2,
-      stage: "暴跌升级", changePct: -12, occurredAt: olderAt, createdAt: olderAt });
+    const olderAlert = { ...alert, id: "older-crash-l2", symbol: olderCrash, side: "SHORT" as const, level: 2 as const,
+      stage: "暴跌升级", changePct: -12, occurredAt: olderAt, createdAt: olderAt };
+    const previousDay = new Date(now - 30 * hour).toISOString();
+    const dayAlert = { ...olderAlert, id: "yesterday-crash-l2", occurredAt: previousDay, createdAt: previousDay };
+    for (const item of [olderAlert, dayAlert]) {
+      store.insertMarketAlertEvent(item);
+      const outcome = seedFromEvent(item)!;
+      signals.alertOutcomes.seed([outcome], now);
+      signals.alertOutcomes.save({ ...outcome, ret1hPct: item === dayAlert ? 0 : -2,
+        ret4hPct: item === dayAlert ? 1 : null, ret24hPct: item === dayAlert ? -3 : null }, now);
+    }
     const sameTime = new Date(quarter - 30 * min).toISOString();
     store.insertMarketAlertEvent({
       ...alert, id: "startup-rally-l2", symbol: startupOnly, level: 2, stage: "暴涨升级", trigger: "A趋势·实时",
@@ -84,6 +101,15 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     await page.locator('input[name="password"]').fill(process.env.SIGNAL_E2E_PASSWORD!);
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/alerts$/);
+    const rates = page.getByRole("region", { name: "信号胜率", exact: true });
+    const shortRates = rates.getByRole("row").filter({ has: page.getByRole("rowheader", { name: /强暴跌/ }) });
+    await expect(rates.getByRole("rowheader")).toHaveCount(5);
+    const cells = shortRates.getByRole("cell");
+    await expect(cells.nth(0)).toHaveText("50%1/2");
+    await expect(cells.nth(1)).toHaveText("0%0/1");
+    await expect(cells.nth(2)).toHaveText("100%1/1");
+    await expect(rates.getByRole("row").filter({ has: page.getByRole("rowheader", { name: /轧空/ }) })
+      .getByRole("cell").first()).toHaveText("—0/0");
     const startups = page.getByRole("region", { name: "启动候选", exact: true });
     const weakening = page.getByRole("region", { name: "大涨后转弱", exact: true });
     const sudden = page.getByRole("region", { name: "突发异动", exact: true });
@@ -122,6 +148,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     await expect(page.getByRole("region", { name: "其他匹配标的" }).getByRole("link", { name: "查看 OLDER 实时行情" })).toHaveAttribute("href", "/news?symbol=OLDERUSDT");
     await search.fill("missing-fixture");
     await expect(page.getByText("当前市场没有匹配的标的")).toBeVisible();
+    await expect(cells.nth(0)).toHaveText("50%1/2");
     await page.getByRole("button", { name: "清空搜索" }).click();
     await expect(search).toHaveValue("");
     await page.getByRole("button", { name: "24h", exact: true }).click();
@@ -139,8 +166,15 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     const api = await (await page.request.get("/api/market-signals")).json();
     const episodes = api.volumeEpisodes.filter((e: { symbol: string }) => e.symbol === symbol);
     expect(episodes).toHaveLength(1);
-    expect(episodes[0]).toMatchObject({ firstPrice: bars[30].close, count: 2, firstRatio: 6 });
-    expect(api.cardCandles[symbol]).toContainEqual(expect.objectContaining({ at: bars[59].at, close: bars[59].close }));
+    expect(episodes[0]).toMatchObject({ firstPrice: bars.at(-30)!.close, count: 2, firstRatio: 6 });
+    const completeBucket = bars.filter(bar => bar.at >= closedBoundary - fiveMinutes && bar.at < closedBoundary);
+    const plotted = api.cardCandles[symbol];
+    expect(plotted.length).toBeGreaterThanOrEqual(47);
+    expect(plotted.length).toBeLessThanOrEqual(48);
+    expect(plotted.at(-1)).toMatchObject({
+      at: closedBoundary - fiveMinutes, open: completeBucket[0].open, close: completeBucket.at(-1)!.close,
+      low: Math.min(...completeBucket.map(bar => bar.low)), high: Math.max(...completeBucket.map(bar => bar.high)),
+    });
     expect(api.cardMetrics[symbol].oi1hPct).toBe(3);
     expect(api.cardMetrics[symbol].fundingRate).toBe(.00005);
 
@@ -162,6 +196,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     await expect(card.getByRole("link", { name: "查看 PIEVERSE 实时行情", exact: true })).toHaveAttribute("href", "/news?symbol=PIEVERSEUSDT");
     const chart = card.getByRole("img", { name: /PIEVERSEUSDT.*K 线/ });
     const timeline = card.getByRole("list", { name: "PIEVERSE 触发时间线" });
+    await expect(card.locator(`[data-marker="down"][data-at="${fourHourMarker}"]`)).toHaveCount(1);
     for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
       await expect(details).toHaveAttribute("aria-expanded", "false");
@@ -172,9 +207,12 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(card.getByText("资金费率", { exact: true })).toBeHidden();
       await expect(chart).toBeVisible();
       const compactHeight = await card.evaluate(el => el.getBoundingClientRect().height);
-      expect(compactHeight).toBeLessThanOrEqual(200);
-      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeLessThanOrEqual(48);
+      expect(compactHeight).toBeLessThanOrEqual(220);
+      await expect(chart).toHaveAccessibleName(/4h/);
+      await expect(chart).toHaveAccessibleName(/5m/);
+      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(80);
       expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      expect(await rates.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       testInfo.annotations.push({ type: "compact-card-height", description: `PIEVERSE ${viewport.width}px · ${compactHeight}px` });
       await card.screenshot({ path: testInfo.outputPath(`card-${viewport.width}.png`) });
       await details.click();
@@ -182,7 +220,7 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       await expect(timeline).toBeVisible();
       await expect(card.getByText("+0.005%", { exact: true })).toBeVisible();
       await expect(card.getByRole("link", { name: "打开 PIEVERSE 实时 K 线" })).toHaveAttribute("href", "/news?symbol=PIEVERSEUSDT");
-      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(90);
+      expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width === 390 ? 160 : 176);
       expect(await card.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(compactHeight);
       await details.click();
       await expect(timeline).toBeHidden();

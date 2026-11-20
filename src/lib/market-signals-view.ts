@@ -1,7 +1,7 @@
 import { readMarketCardMetrics } from "./market-card-metrics.ts";
 import { MARKET_TICKER_FRESH_MS } from "./market-alerts-core.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
-import { readMarketSignalsSnapshot, type MarketBoardMarket } from "./market-signals.ts";
+import { ALERT_OUTCOME_STATS_DAYS, readMarketSignalsSnapshot, type MarketBoardMarket } from "./market-signals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -12,7 +12,9 @@ export function getMarketSignalsBoardData(nowMs = Date.now(), market: MarketBoar
     const now = new Date(nowMs).toISOString();
     const fromMs = nowMs - DAY_MS;
     const alerts = store.getBoardAlerts(new Date(fromMs).toISOString(), now);
-    const { searchSymbols, ...signals } = readMarketSignalsSnapshot({ nowMs, market });
+    const statsFromMs = nowMs - ALERT_OUTCOME_STATS_DAYS * DAY_MS;
+    const focusAlerts = store.listFocusAlertCandidates(new Date(statsFromMs).toISOString(), now);
+    const { searchSymbols, specialWinRates, ...signals } = readMarketSignalsSnapshot({ nowMs, market, focusAlerts });
     const eligible = new Set(searchSymbols);
     const equities = market === "equities";
     const events = alerts.events.filter(event => eligible.has(event.symbol) && (!equities || event.type === "volatility"));
@@ -37,7 +39,12 @@ export function getMarketSignalsBoardData(nowMs = Date.now(), market: MarketBoar
       assetClasses,
       lifecycleEvents,
       volumeEpisodes,
-      cardCandles: store.getCardCandles(cardSymbols, nowMs),
+      focusWinRates: {
+        windowDays: ALERT_OUTCOME_STATS_DAYS,
+        rows: equities ? specialWinRates : [...specialWinRates, ...store.readLifecycleWinRates(statsFromMs, nowMs, eligible)],
+      },
+      cardCandles: store.getCardFiveMinuteCandles(cardSymbols, nowMs),
+      cardLatestMinutes: store.getLatestCardMinutes(cardSymbols, nowMs),
       cardMetrics: readMarketCardMetrics(cardSymbols, nowMs),
       signals: {
         ...signals,

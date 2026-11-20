@@ -102,3 +102,32 @@ test("worker seeds only confirmed perpetual quarters, recovers a hole and uses c
     assert.deepEqual(input.errors,[]);
   } finally { alerts.close(); }
 });
+
+test("lifecycle win rates settle at the exact horizon and preserve sampled closes after retention", () => {
+  const alerts = openMarketAlertsStore(":memory:");
+  try {
+    const store = alerts.lifecycle;
+    store.storeBars(subject, eventBars());
+    for (const peer of peers) store.storeBars(peer, quiet);
+    store.evaluate([subject, ...peers], at(109));
+    // The 4h startup close is flat. There is no 24h weakening close, even though adjacent bars exist.
+    store.storeBars(subject, [sample(116, 1.05), sample(121, 1.30), sample(196, 1.2), sample(200, .8), sample(202, .8)]);
+    const eligible = new Set([subject]);
+    const rates = (from, to) => alerts.readLifecycleWinRates(from, to, eligible);
+    const early = rates(at(0), at(104) - 1);
+    assert.equal(early[0].total, 1);
+    assert.deepEqual(early[0].horizons["1h"], { wins: 0, settled: 0 });
+    assert.equal(early[1].total, 0);
+    const expected = [
+      { kind: "startup", total: 1, horizons: { "1h": { wins: 1, settled: 1 }, "4h": { wins: 0, settled: 1 }, "24h": { wins: 1, settled: 1 } } },
+      { kind: "weakening", total: 1, horizons: { "1h": { wins: 1, settled: 1 }, "4h": { wins: 0, settled: 1 }, "24h": { wins: 0, settled: 0 } } },
+    ];
+    assert.deepEqual(rates(at(0), at(202)), expected);
+    assert.deepEqual(rates(at(101), at(202)).map(row => row.total), [0, 1]);
+    assert.deepEqual(alerts.readLifecycleWinRates(at(0), at(202), new Set(peers)).map(row => row.total), [0, 0]);
+
+    store.evaluate([], at(500));
+    assert.equal(store.candleCoverage(subject, at(202)).last, at(196), "unused old bars still expire");
+    assert.deepEqual(rates(at(0), at(500)), expected);
+  } finally { alerts.close(); }
+});

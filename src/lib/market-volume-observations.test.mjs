@@ -70,6 +70,38 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 
+// The board needs a four-hour view but its quote can advance after the most recent 5m close.
+{
+  const chart = openMarketAlertsStore(":memory:");
+  try {
+    const step = 5 * minute;
+    const end = Math.floor(Date.now() / step) * step;
+    const start = end - 48 * step;
+    const now = end + 3 * minute;
+    const symbol = "CHARTUSDT";
+    const bars = run(243, i => ({
+      symbol, at: start + i * minute, open: 100 + i, high: 110 + i, low: 90 + i, close: 101 + i,
+      quoteVolume: i, observeVolume: false,
+    }));
+    chart.recordCardMinutes(bars.filter((_, i) => i !== 9), now);
+    let five = chart.getCardFiveMinuteCandles([symbol], now)[symbol];
+    assert.equal(five.length, 47, "a missing minute leaves a full gap");
+    assert.deepEqual(five[0], { at: start, open: 100, high: 114, low: 90, close: 105, quoteVolume: 10 });
+    assert.equal(five.at(-1).at, end - step, "the current 5m bucket is unfinished");
+    assert.deepEqual(chart.getLatestCardMinutes([symbol], now), { [symbol]: { at: end + 2 * minute, close: 343 } });
+    assert.deepEqual(chart.getLatestCardMinutes([symbol], now + 61 * minute), {});
+    const native = (at, close = 105) => [at, "100", "110", "90", String(close), "8", at + step - 1, "333"];
+    chart.recordCardFiveMinuteKlines(symbol, [native(start, 103), native(start + step),
+      native(start - step), native(end), native(start + minute), native(start, 200)], now);
+    five = chart.getCardFiveMinuteCandles([symbol], now)[symbol];
+    assert.equal(five.length, 48);
+    assert.deepEqual(five[0], { at: start, open: 100, high: 110, low: 90, close: 103, quoteVolume: 333 });
+    assert.equal(five[1].at, start + step);
+    assert.equal(chart.getCardFiveMinuteCandles([symbol], now + 6 * 60 * minute)[symbol], undefined);
+    assert.deepEqual(chart.getCardCandles([symbol], now)[symbol].at(-1).close, 343);
+  } finally { chart.close(); }
+}
+
 const wsDir = mkdtempSync(join(tmpdir(), "board-ws-minutes-"));
 const wsPath = join(wsDir, "market.sqlite");
 const wsStore = openMarketAlertsStore(wsPath);
@@ -88,6 +120,8 @@ try {
   let releaseSeed;
   const gate = new Promise(resolve => { releaseSeed = resolve; });
   const row = (i, quote) => [at(i), "100", "102", "99", "101", "10", closeTime(i) - 1, String(quote)];
+  const fiveAt = Math.floor(at(160) / (5 * minute)) * 5 * minute;
+  const nativeFive = [fiveAt, 100, 112, 90, 106, 20, fiveAt + 5 * minute - 1, 77_000];
   const controller = new AbortController();
   const job = startVolatilityWebSocketWorker({
     client: {
@@ -99,7 +133,7 @@ try {
       getKlines: async (symbol, interval) => {
         requests.push([symbol, interval]);
         await gate;
-        return interval === "1m" ? [...run(60, (i) => row(120 + i, 10_000)), row(180, 999_999)] : [];
+        return interval === "1m" ? [...run(60, (i) => row(120 + i, 10_000)), row(180, 999_999)] : [nativeFive];
       },
     },
     store: wsStore, config: { wsTopN: 1, wsRankRefreshMs: 20_000 }, signal: controller.signal,
@@ -132,6 +166,9 @@ try {
   const streams = new URL(usedUrl).searchParams.get("streams").split("/");
   assert.deepEqual(streams.filter(s => s.startsWith("aaplusdt")), ["aaplusdt@kline_1m"]);
   assert.deepEqual(requests.filter(([symbol]) => symbol === "AAPLUSDT"), [["AAPLUSDT", "1m"]]);
+  const btcFive = wsStore.getCardFiveMinuteCandles(["BTCUSDT"], wall).BTCUSDT.find(bar => bar.at === fiveAt);
+  assert.equal(btcFive.close, 106, "the normal WS seed retains the native five-minute close");
+  assert.equal(btcFive.quoteVolume, 77_000);
   assert.deepEqual(wsStore.listVolumeEpisodes(0, wall).map(e => [e.symbol, e.firstRatio, e.count]), [["BTCUSDT", 5, 1]]);
   assert.deepEqual(wsStore.getCardCandles(["BTCUSDT"], wall).BTCUSDT.slice(-2).map(c => c.at), [at(180), at(181)]);
   assert.equal(wsStore.getCardCandles(["AAPLUSDT"], wall).AAPLUSDT.at(-1).at, at(180));

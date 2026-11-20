@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createImportantPushOutbox } from "./important-push-outbox.ts";
 import type { EnvLike, PushEvent } from "./important-push-types.ts";
 import { createAlertOutcomeRepo, summarizeAlertOutcomes, type AlertOutcomeGroupStats } from "./market-alert-outcomes.ts";
+import { summarizeFocusAlerts, type FocusAlertCandidate, type FocusWinRateRow } from "./market-focus-win-rates.ts";
 import { getRuntimeDataPath } from "./runtime-storage.ts";
 
 // Rules come from the 2026-08-31..11-11 backtest documented in docs/market-signals.md.
@@ -567,6 +568,7 @@ export type MarketSignalsStore = ReturnType<typeof openMarketSignalsStore>;
 export type MarketSignalsSnapshot = {
   generatedAt: string;
   searchSymbols: string[];
+  specialWinRates: FocusWinRateRow[];
   signals: MarketSignal[];
   stats: Record<MarketSignalKind, MarketSignalStats>;
   meta: ReturnType<MarketSignalsStore["readMeta"]>;
@@ -583,7 +585,10 @@ export type MarketSignalsSnapshot = {
 
 export const ALERT_OUTCOME_STATS_DAYS = 14;
 
-export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; nowMs?: number; env?: EnvLike; market?: MarketBoardMarket } = {}): MarketSignalsSnapshot {
+export function readMarketSignalsSnapshot(input: {
+  store?: MarketSignalsStore; nowMs?: number; env?: EnvLike; market?: MarketBoardMarket;
+  focusAlerts?: readonly FocusAlertCandidate[];
+} = {}): MarketSignalsSnapshot {
   const env = input.env ?? process.env;
   const nowMs = input.nowMs ?? Date.now();
   const rules = getMarketSignalRules(env);
@@ -605,6 +610,8 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
     return {
       generatedAt: new Date(nowMs).toISOString(),
       searchSymbols,
+      specialWinRates: input.market && eligible && input.focusAlerts
+        ? summarizeFocusAlerts(input.focusAlerts, outcomeRows, eligible, input.market, nowMs) : [],
       signals: window.filter((signal) => Date.parse(signal.signalAt) >= nowMs - 24 * HOUR_MS),
       stats: {
         pullback_long: summarizeSignals(window, "pullback_long"),

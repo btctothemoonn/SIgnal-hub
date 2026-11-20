@@ -22,6 +22,7 @@ import type {
   MarketOpportunityMetrics,
 } from "./market-opportunity-core.ts";
 import type { MarketOpportunityCandidateState } from "./market-opportunity-selection.ts";
+import { specialAlertCategory, type FocusAlertCandidate } from "./market-focus-win-rates.ts";
 import { createMarketLifecycleStore } from "./market-lifecycle.ts";
 import { createVolumeObservationStore } from "./market-volume-observations.ts";
 import { createMarketBriefStore } from "./market-alert-brief-store.ts";
@@ -1761,6 +1762,24 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     };
   }
 
+  function listFocusAlertCandidates(from: string, to: string): FocusAlertCandidate[] {
+    const rows = db.prepare(`
+      SELECT id, symbol, occurred_at, type, side, level, trigger, volume_ratio,
+             CASE WHEN json_valid(metrics_json) THEN json_extract(metrics_json, '$.strengthPct') END AS strength
+      FROM market_alert_events
+      WHERE occurred_at BETWEEN ? AND ? AND created_at <= ? AND type IN ('volatility', 'short_squeeze')
+    `).all(from, to, to);
+    const candidates: FocusAlertCandidate[] = [];
+    for (const row of rows) {
+      const kind = specialAlertCategory({
+        type: String(row.type), side: row.side === null ? null : String(row.side), level: Number(row.level),
+        trigger: String(row.trigger), volumeRatio: nullableNumber(row.volume_ratio), metrics: { strengthPct: row.strength },
+      });
+      if (kind) candidates.push({ id: String(row.id), symbol: String(row.symbol), occurredAt: String(row.occurred_at), kind });
+    }
+    return candidates;
+  }
+
   function getBoardAlerts(from: string, to: string) {
     return {
       events: readEvents("WHERE e.created_at BETWEEN ? AND ?", [from, to]),
@@ -2022,6 +2041,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     recordMarketLiquidation,
     pruneMarketAlertsRetention,
     getBoardAlerts,
+    listFocusAlertCandidates,
     getMarketAlertsSnapshot,
     getMarketAlertsLatestUpdatedAt,
     getMarketAlertsRevision,

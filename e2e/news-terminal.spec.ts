@@ -150,8 +150,10 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
       { symbol: "XAUUSDT", underlyingType: "COMMODITY", activeUsdtPerpetual: true },
     ], observed);
     const minute = Math.floor(observed / 60_000) * 60_000;
-    market.recordCardMinutes(Array.from({ length: 60 }, (_, i) => ({
-      symbol: "AAOIUSDT", at: minute - (60 - i) * 60_000,
+    const boundary = Math.floor(minute / 300_000) * 300_000;
+    const minuteCount = 240 + (minute - boundary) / 60_000;
+    market.recordCardMinutes(Array.from({ length: minuteCount }, (_, i) => ({
+      symbol: "AAOIUSDT", at: minute - (minuteCount - i) * 60_000,
       open: 43, high: 44, low: 42, close: 43.5, quoteVolume: 50_000, observeVolume: false,
     })), observed);
     for (const symbol of ["DOGEUSDT", "AAOIUSDT", "XAUUSDT"]) {
@@ -182,6 +184,10 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
   await page.goto("/alerts");
   await page.getByRole("link", { name: "美股与 ETF", exact: true }).click();
   await expect(page).toHaveURL(/\/alerts\/equities$/);
+  const rates = page.getByRole("region", { name: "信号胜率", exact: true });
+  await expect(rates.getByRole("rowheader")).toHaveCount(2);
+  await expect(rates.getByRole("rowheader", { name: /强暴涨.*看涨/ })).toBeVisible();
+  await expect(rates.getByRole("rowheader", { name: /强暴跌.*看跌/ })).toBeVisible();
   const equities = page.getByRole("region", { name: "强暴跌", exact: true });
   await expect(equities.locator("#coin-AAOIUSDT")).toBeVisible();
   const equityCard = equities.locator("#coin-AAOIUSDT");
@@ -198,15 +204,17 @@ test("a sharp crypto crash and a separate equity board open the chosen Binance m
     await expect(timeline).toBeHidden();
     await expect(equityCard.getByText("24h 合约成交额", { exact: true })).toBeHidden();
     const compactHeight = await equityCard.evaluate(el => el.getBoundingClientRect().height);
-    expect(compactHeight).toBeLessThanOrEqual(200);
-    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeLessThanOrEqual(48);
+    expect(compactHeight).toBeLessThanOrEqual(220);
+    await expect(chart).toHaveAccessibleName(/4h/);
+    await expect(chart).toHaveAccessibleName(/5m/);
+    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(80);
     expect(await equityCard.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     testInfo.annotations.push({ type: "compact-card-height", description: `AAOI ${viewport.width}px · ${compactHeight}px` });
     await details.click();
     await expect(details).toHaveAttribute("aria-expanded", "true");
     await expect(timeline).toBeVisible();
     await expect(equityCard.getByText("24h 合约成交额", { exact: true })).toBeVisible();
-    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(90);
+    expect(await chart.evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width === 390 ? 160 : 176);
     await details.click();
     await expect(timeline).toBeHidden();
     await expect(details).toHaveAttribute("aria-expanded", "false");

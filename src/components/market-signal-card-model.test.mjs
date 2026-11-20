@@ -71,8 +71,13 @@ assert.deepEqual(rows[4].focus, { kind: "special", event: up }, "a later 20% cro
 const earlyOnly = buildCardRows(data, { startMs: ago(18), endMs: ago(12) });
 assert.deepEqual(earlyOnly.find(row => row.symbol === "MEGAUSDT").focus, { kind: "special", event: megaEarly });
 
-const chart = getCardChart([{ at: ago(70) }, { at: ago(2) }], now, mega);
-assert.deepEqual(chart.bars.map(bar => bar.at), [ago(2)]);
+// A four-hour window ends at the last closed five-minute boundary. Missing slots keep their position.
+const chart = getCardChart([245, 240, 70, 5, 2, 0].map(minutes => ({ at: ago(minutes) })), now + 170_000, mega);
+assert.equal(chart.startMs, ago(240));
+assert.equal(chart.endMs, now);
+assert.deepEqual(chart.bars.map(bar => bar.at), [ago(240), ago(70), ago(5)]);
+const allSlots = Array.from({ length: 49 }, (_, i) => ({ at: ago(240 - i * 5) }));
+assert.equal(getCardChart(allSlots, now, mega).bars.length, 48);
 assert.equal(chart.marks[0].at, eventTime(megaUpgrade));
 assert.ok(chart.marks.some(mark => mark.at === eventTime(megaEarly) && mark.kind === "down"));
 assert.ok(chart.marks.some(mark => mark.at === related.firstAt && mark.kind === "burst"));

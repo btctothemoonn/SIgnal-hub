@@ -1,26 +1,32 @@
 import type { DatabaseSync } from "node:sqlite";
+import { CARD_CANDLE_COUNT, CARD_CANDLE_MS, CARD_WINDOW_MS, cardWindowEnd } from "./market-card-window.ts";
 import { ALERTS_LIQUIDATION_RETENTION_MS } from "./market-alerts-retention.ts";
 
 const MINUTE = 60_000;
 const EPISODE_MS = 120 * MINUTE;
 const HIT_RETENTION_MS = 30 * 86_400_000;
-// Sixty chart minutes plus the twenty predecessors needed to evaluate their volume.
-const CANDLE_RETENTION_MS = 81 * MINUTE;
+// Keep the whole four-hour chart even when now falls inside the next five-minute bucket.
+const CANDLE_RETENTION_MS = CARD_WINDOW_MS + CARD_CANDLE_MS;
 const BASELINE = 20;
 
 export type CardCandle = { at: number; open: number; high: number; low: number; close: number };
+export type CardFiveMinuteCandle = CardCandle & { quoteVolume: number };
 export type MarketCardMinute = CardCandle & { symbol: string; quoteVolume: number; observeVolume: boolean };
 export type VolumeEpisode = {
   symbol: string; firstAt: number; firstPrice: number; firstRatio: number; firstQuoteVolume: number;
   lastAt: number; count: number;
 };
 
-export function closedCardMinute(symbol: string, row: unknown[], observeVolume: boolean, closedBy: number): MarketCardMinute | null {
+function closedCardBar(symbol: string, row: unknown[], observeVolume: boolean, closedBy: number, interval: number): MarketCardMinute | null {
   const [at, open, high, low, close, , closeAt, quoteVolume] = row.map((v) =>
     typeof v === "number" || (typeof v === "string" && v.trim()) ? Number(v) : NaN);
-  if (closeAt !== at + MINUTE - 1 || at + MINUTE > closedBy) return null;
+  if (at % interval !== 0 || closeAt !== at + interval - 1 || at + interval > closedBy) return null;
   const result = { symbol, at, open, high, low, close, quoteVolume, observeVolume };
   return validMinute(result) ? result : null;
+}
+
+export function closedCardMinute(symbol: string, row: unknown[], observeVolume: boolean, closedBy: number) {
+  return closedCardBar(symbol, row, observeVolume, closedBy, MINUTE);
 }
 
 function validMinute(b: MarketCardMinute) {
@@ -38,6 +44,11 @@ export function createVolumeObservationStore(db: DatabaseSync, transaction: <T>(
       quote_volume REAL NOT NULL, observe_volume INTEGER NOT NULL, PRIMARY KEY (symbol, at)
     ) WITHOUT ROWID;
     CREATE INDEX IF NOT EXISTS market_card_minutes_at ON market_card_minutes(at);
+    CREATE TABLE IF NOT EXISTS market_card_five_minutes (
+      symbol TEXT NOT NULL, at INTEGER NOT NULL, open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL,
+      close REAL NOT NULL, quote_volume REAL NOT NULL, PRIMARY KEY (symbol, at)
+    ) WITHOUT ROWID;
+    CREATE INDEX IF NOT EXISTS market_card_five_minutes_at ON market_card_five_minutes(at);
     CREATE TABLE IF NOT EXISTS market_volume_hits (
       symbol TEXT NOT NULL, at INTEGER NOT NULL, episode_at INTEGER NOT NULL,
       price REAL NOT NULL, ratio REAL NOT NULL, quote_volume REAL NOT NULL, PRIMARY KEY (symbol, at)
@@ -57,6 +68,8 @@ export function createVolumeObservationStore(db: DatabaseSync, transaction: <T>(
   const moveHit = db.prepare("UPDATE market_volume_hits SET episode_at=? WHERE symbol=? AND at=?");
   const insertCoverage = db.prepare("INSERT OR IGNORE INTO market_liquidation_coverage VALUES (?)");
   const deleteBars = db.prepare("DELETE FROM market_card_minutes WHERE at<?");
+  const deleteFiveMinutes = db.prepare("DELETE FROM market_card_five_minutes WHERE at<?");
+  const insertFiveMinutes = db.prepare("INSERT OR IGNORE INTO market_card_five_minutes VALUES(?,?,?,?,?,?,?)");
   const deleteHits = db.prepare("DELETE FROM market_volume_hits WHERE episode_at<?");
   const deleteCoverage = db.prepare("DELETE FROM market_liquidation_coverage WHERE minute_at<?");
 
@@ -91,6 +104,7 @@ export function createVolumeObservationStore(db: DatabaseSync, transaction: <T>(
   let lastPrune = -Infinity;
   function prune(nowMs: number) {
     deleteBars.run(nowMs - CANDLE_RETENTION_MS);
+    deleteFiveMinutes.run(cardWindowEnd(nowMs) - CARD_WINDOW_MS);
     deleteHits.run(nowMs - HIT_RETENTION_MS);
     deleteCoverage.run(nowMs - ALERTS_LIQUIDATION_RETENTION_MS);
   }
@@ -145,6 +159,61 @@ export function createVolumeObservationStore(db: DatabaseSync, transaction: <T>(
     }
     return result;
   }
+  const nativeCoverage = db.prepare("SELECT COUNT(*) AS n FROM market_card_five_minutes WHERE symbol=? AND at>=? AND at<?");
+  function recordCardFiveMinuteKlines(symbol: string, klines: unknown[][], nowMs: number) {
+    if (!klines.length) return;
+    const end = cardWindowEnd(nowMs);
+    const from = end - CARD_WINDOW_MS;
+    // Most REST scans within this bucket already have every native close. Avoid taking a write lock then.
+    if (nativeCoverage.get(symbol, from, end)?.n === CARD_CANDLE_COUNT) return;
+    transaction(() => {
+      for (const row of klines) {
+        const b = closedCardBar(symbol, row, false, nowMs, CARD_CANDLE_MS);
+        if (b && b.at >= from) insertFiveMinutes.run(symbol, b.at, b.open, b.high, b.low, b.close, b.quoteVolume);
+      }
+    });
+  }
+
+  const fiveMinuteChart = db.prepare(`
+    WITH native AS (
+      SELECT symbol, at, open, high, low, close, quote_volume AS quoteVolume FROM market_card_five_minutes
+      WHERE symbol IN (SELECT value FROM json_each($symbols)) AND at >= $start AND at < $end
+    ), minutes AS (
+      SELECT *, at - at % ${CARD_CANDLE_MS} AS bucket FROM market_card_minutes
+      WHERE symbol IN (SELECT value FROM json_each($symbols)
+        EXCEPT SELECT symbol FROM native GROUP BY symbol HAVING COUNT(*) = ${CARD_CANDLE_COUNT})
+        AND at >= $start AND at < $end
+    ), aggregated AS (
+      SELECT symbol, bucket AS at, MAX(CASE WHEN at=bucket THEN open END) AS open, MAX(high) AS high, MIN(low) AS low,
+        MAX(CASE WHEN at=bucket+${CARD_CANDLE_MS - MINUTE} THEN close END) AS close, SUM(quote_volume) AS quoteVolume
+      FROM minutes GROUP BY symbol,bucket HAVING COUNT(*)=${CARD_CANDLE_MS / MINUTE}
+    )
+    SELECT * FROM native UNION ALL
+    SELECT a.* FROM aggregated a WHERE NOT EXISTS (SELECT 1 FROM native n WHERE n.symbol=a.symbol AND n.at=a.at)
+    ORDER BY symbol,at
+  `);
+  function getCardFiveMinuteCandles(symbols: string[], nowMs: number): Record<string, CardFiveMinuteCandle[]> {
+    const result: Record<string, CardFiveMinuteCandle[]> = {};
+    if (!symbols.length) return result;
+    const end = cardWindowEnd(nowMs);
+    for (const row of fiveMinuteChart.all({ symbols: JSON.stringify(symbols), start: end - CARD_WINDOW_MS, end })) {
+      const { symbol, ...bar } = row;
+      (result[String(symbol)] ??= []).push(bar as CardFiveMinuteCandle);
+    }
+    return result;
+  }
+
+  const latestMinute = db.prepare(`
+    SELECT b.symbol, b.at, b.close FROM json_each(?) w JOIN market_card_minutes b ON b.symbol=w.value AND b.at=(
+      SELECT at FROM market_card_minutes WHERE symbol=w.value AND at BETWEEN ? AND ? ORDER BY at DESC LIMIT 1
+    )
+  `);
+  function getLatestCardMinutes(symbols: string[], nowMs: number): Record<string, { at: number; close: number }> {
+    const last = Math.floor(nowMs / MINUTE) * MINUTE - MINUTE;
+    return Object.fromEntries(latestMinute.all(JSON.stringify(symbols), last - 59 * MINUTE, last)
+      .map(row => [String(row.symbol), { at: Number(row.at), close: Number(row.close) }]));
+  }
+
   function recordLiquidationCoverage(firstMinuteAt: number, endMinuteExclusive: number) {
     if (firstMinuteAt >= endMinuteExclusive) return;
     transaction(() => {
@@ -152,5 +221,6 @@ export function createVolumeObservationStore(db: DatabaseSync, transaction: <T>(
     });
   }
 
-  return { recordCardMinutes, listVolumeEpisodes, getCardCandles, recordLiquidationCoverage, prune };
+  return { recordCardMinutes, recordCardFiveMinuteKlines, listVolumeEpisodes, getCardCandles, getCardFiveMinuteCandles,
+    getLatestCardMinutes, recordLiquidationCoverage, prune };
 }

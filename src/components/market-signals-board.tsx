@@ -4,9 +4,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowUpRight, ChevronDown, Search, Star, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CARD_CANDLE_MS } from "@/lib/market-card-window";
 import { getBoardWorkerHealth } from "@/lib/market-alerts-health";
 import type { MarketSignalsBoardData } from "@/lib/market-signals-view";
 import { MarketSignalCardChart, cardTime } from "./market-signal-card-chart";
+import { MarketFocusWinRates } from "./market-focus-win-rates";
 import { findMarketSymbols } from "./market-symbol-search";
 import {
   buildCardRows, directionOf, eventTime, lifecycleLabels, triggerLabel, type CardRow,
@@ -48,13 +50,6 @@ function MarketSymbolLink({ symbol, className }: { symbol: string; className: st
       {base(symbol)}
     </Link>
   );
-}
-
-function clock(value: string | null | undefined) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Shanghai" }).format(date);
 }
 
 function age(value: string | null | undefined, nowMs: number) {
@@ -156,9 +151,9 @@ function TriggerHistory({ row, outcomes }: { row: CardRow; outcomes: RecentOutco
   );
 }
 
-function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, outcomes, equities }: {
+function SignalCard({ row, ticker, candles, latestMinute, metrics, nowMs, expanded, onToggle, starred, onStar, outcomes, equities }: {
   row: CardRow; ticker?: Ticker; candles: MarketSignalsBoardData["cardCandles"][string];
-  metrics?: MarketSignalsBoardData["cardMetrics"][string]; nowMs: number; expanded: boolean; onToggle: () => void;
+  latestMinute?: MarketSignalsBoardData["cardLatestMinutes"][string]; metrics?: MarketSignalsBoardData["cardMetrics"][string]; nowMs: number; expanded: boolean; onToggle: () => void;
   starred: boolean; onStar: () => void; outcomes: RecentOutcomes; equities: boolean;
 }) {
   const { symbol, episode, focus } = row;
@@ -170,10 +165,17 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
     : lifecycleLabels[focus.kind];
   const style = badgeStyles[focus.kind === "special" ? directionOf(focus.event) : focus.kind];
   const signalPrice = focus.kind === "special" ? focus.event.price : focus.phase.price;
-  const bar = candles.at(-1);
-  const lastCloseMs = bar ? bar.at + 60_000 : 0;
-  const useClose = bar && (!ticker || lastCloseMs > Date.parse(ticker.updatedAt));
-  const current = useClose ? bar.close : ticker?.price;
+  let current = ticker?.price;
+  let quoteAt = ticker ? Date.parse(ticker.updatedAt) : 0;
+  const lastCandle = candles.at(-1);
+  if (lastCandle && lastCandle.at + CARD_CANDLE_MS > quoteAt && lastCandle.at + CARD_CANDLE_MS >= nowMs - WINDOW_MS["1h"]) {
+    current = lastCandle.close;
+    quoteAt = lastCandle.at + CARD_CANDLE_MS;
+  }
+  if (latestMinute && latestMinute.at + 60_000 >= quoteAt) {
+    current = latestMinute.close;
+    quoteAt = latestMinute.at + 60_000;
+  }
   const since = current != null && signalPrice > 0 ? (current / signalPrice - 1) * 100 : null;
   const chartUrl = expanded ? row.events.find(event => event.chartUrl)?.chartUrl : undefined;
   const detailsId = `details-${symbol}`;
@@ -191,7 +193,7 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
           </button>
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2 self-center">
-          <span title={`最近报价 · ${useClose ? cardTime(lastCloseMs) : clock(ticker?.updatedAt)}`} className="font-mono text-sm font-semibold tabular-nums text-foreground"><span className="sr-only">最新价格 </span>{price(current)}</span>
+          <span title={`最近报价 · ${quoteAt ? cardTime(quoteAt) : "—"}`} className="font-mono text-sm font-semibold tabular-nums text-foreground"><span className="sr-only">最新价格 </span>{price(current)}</span>
           <span className={`text-[11px] font-semibold tabular-nums ${tone(since)}`}>触发后 {pct(since, 2)}</span>
         </div>
       </header>
@@ -412,6 +414,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
                 const ticker = tickers.get(row.symbol);
                 return <SignalCard key={row.symbol} equities={equities} row={row} ticker={ticker} nowMs={nowMs}
                   metrics={data.cardMetrics?.[row.symbol]} candles={data.cardCandles?.[row.symbol] ?? []}
+                  latestMinute={data.cardLatestMinutes[row.symbol]}
                   expanded={expanded === row.symbol} onToggle={() => setExpanded(current => current === row.symbol ? null : row.symbol)}
                   starred={watchlist.includes(row.symbol)} onStar={() => toggleStar(row.symbol)}
                   outcomes={data.signals.recentAlertOutcomes ?? {}} />;
@@ -441,6 +444,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         {otherMatches.length > searchLimit ? <button type="button" onClick={() => setSearchLimit(limit => limit + SEARCH_PAGE_SIZE)}
           className="mt-1 rounded-md border border-line px-3 py-1.5 text-xs text-muted">更多匹配标的</button> : null}
       </section> : null}
+      <MarketFocusWinRates rates={data.focusWinRates} />
     </div>
   );
 }

@@ -1,4 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
+import { ALERT_OUTCOME_HORIZONS, type AlertOutcomeHorizon } from "./market-alert-outcomes.ts";
+import { emptyFocusWinRateRow } from "./market-focus-win-rates.ts";
 import { isStableOrFiatBase } from "./market-alerts-core.ts";
 
 export const LIFECYCLE_BAR_MS = 15 * 60_000;
@@ -141,6 +143,27 @@ export function createMarketLifecycleStore(db: DatabaseSync, transaction: <T>(wo
   const saveEvent = db.prepare(`INSERT INTO market_lifecycle_events VALUES(?,?,?,?)
     ON CONFLICT(symbol,kind,at) DO UPDATE SET event_json=excluded.event_json`);
   const list = db.prepare("SELECT event_json FROM market_lifecycle_events WHERE at BETWEEN ? AND ? ORDER BY at DESC,symbol,kind");
+  const horizonsSql = ALERT_OUTCOME_HORIZONS.map(({ key, ms }) => `('${key}',${ms})`).join(",");
+  const outcomeCounts = db.prepare(`
+    WITH horizons(horizon, ms) AS (VALUES ${horizonsSql}), samples AS (
+      SELECT e.kind, h.horizon, json_extract(e.event_json, '$.price') AS entry, b.close
+      FROM market_lifecycle_events e CROSS JOIN horizons h
+      LEFT JOIN market_lifecycle_bars b ON b.symbol=e.symbol AND b.at=e.at+h.ms AND b.at<=?
+      WHERE e.at BETWEEN ? AND ? AND e.kind IN ('startup','weakening')
+        AND e.symbol IN (SELECT value FROM json_each(?))
+    )
+    SELECT kind, horizon, COUNT(*) AS total,
+      COUNT(*) FILTER (WHERE entry>0 AND close>0) AS settled,
+      COUNT(*) FILTER (WHERE entry>0 AND close>0 AND
+        ((kind='startup' AND close>entry) OR (kind='weakening' AND close<entry))) AS wins
+    FROM samples GROUP BY kind,horizon
+  `);
+  // Keep each event's three settlement closes when the worker discards its rolling warm-up bars.
+  const targetEntries = ALERT_OUTCOME_HORIZONS.map(({ ms }) => `b.at-${ms}`).join(",");
+  const pruneBars = db.prepare(`DELETE FROM market_lifecycle_bars AS b WHERE at<? AND NOT EXISTS (
+    SELECT 1 FROM market_lifecycle_events e WHERE e.symbol=b.symbol AND e.kind IN ('startup','weakening')
+      AND e.at IN (${targetEntries})
+  )`);
   const readState = db.prepare("SELECT state_json FROM market_lifecycle_state WHERE symbol=?");
   const recentBars = db.prepare("SELECT at,high,low,close FROM market_lifecycle_bars WHERE symbol=? AND at BETWEEN ? AND ? ORDER BY at");
   const coverage = db.prepare(`SELECT MIN(at) AS first, MAX(at) AS last, COUNT(*) AS count
@@ -171,6 +194,17 @@ export function createMarketLifecycleStore(db: DatabaseSync, transaction: <T>(wo
       }
       return event;
     });
+  }
+  function readLifecycleWinRates(from: number, to: number, eligibleSymbols: ReadonlySet<string>) {
+    const result = { startup: emptyFocusWinRateRow("startup"), weakening: emptyFocusWinRateRow("weakening") };
+    const counts = outcomeCounts.all(to, from, to, JSON.stringify([...eligibleSymbols])) as {
+      kind: keyof typeof result; horizon: AlertOutcomeHorizon; total: number; settled: number; wins: number;
+    }[];
+    for (const row of counts) {
+      result[row.kind].total = row.total;
+      result[row.kind].horizons[row.horizon] = { wins: row.wins, settled: row.settled };
+    }
+    return [result.startup, result.weakening];
   }
   function targets(end: number) {
     return activeSymbols.all(end - 30 * 60_000, end, end - DAY).map(row => String(row.symbol));
@@ -226,9 +260,9 @@ export function createMarketLifecycleStore(db: DatabaseSync, transaction: <T>(wo
       }
       db.prepare("DELETE FROM market_lifecycle_candidates WHERE at<?").run(start);
       db.prepare("DELETE FROM market_lifecycle_repairs WHERE MAX(attempted_at,failed_at)<?").run(start);
-      db.prepare("DELETE FROM market_lifecycle_bars WHERE at<?").run(start);
       db.prepare("DELETE FROM market_lifecycle_state WHERE at<?").run(end - 7 * DAY);
       db.prepare("DELETE FROM market_lifecycle_events WHERE at<?").run(end - 30 * DAY);
+      pruneBars.run(start);
     });
     return events;
   }
@@ -240,7 +274,7 @@ export function createMarketLifecycleStore(db: DatabaseSync, transaction: <T>(wo
     const repairDue = (count < 98 || hole) && end - Number(previous?.attempted_at ?? 0) >= 4 * LIFECYCLE_BAR_MS;
     return { last, repairDue, recentlyFailed: Number(previous?.failed_at ?? 0) >= end };
   }
-  return { listLifecycleEvents, lifecycle: { targets, storeBars, localBars, evaluate, candleCoverage,
+  return { listLifecycleEvents, readLifecycleWinRates, lifecycle: { targets, storeBars, localBars, evaluate, candleCoverage,
     markRepair: (symbol: string, end: number) => { setRepair.run(symbol, end); },
     markFailure: (symbol: string, end: number) => { failedRepair.run(symbol, end); },
   } };
