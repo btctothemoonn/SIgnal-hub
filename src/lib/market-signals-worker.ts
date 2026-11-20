@@ -1,4 +1,4 @@
-import { createBinanceFuturesClient, type BinanceMarketClient } from "./market-alerts-binance.ts";
+import { createBinanceFuturesClient, isActiveUsdtPerpetual, type BinanceMarketClient } from "./market-alerts-binance.ts";
 import { isStableOrFiatBase } from "./market-alerts-core.ts";
 import { runLifecycleObservations } from "./market-lifecycle.ts";
 import { openMarketAlertsStore } from "./market-alerts-store.ts";
@@ -246,7 +246,11 @@ async function refreshSymbolClasses(input: { signals: MarketSignalsStore; client
   if (last !== null && input.nowMs - last < SYMBOL_CLASS_REFRESH_MS) return false;
   const info = await input.client.getExchangeInfo();
   const rows = (info.symbols ?? [])
-    .map((row) => ({ symbol: String(row.symbol ?? ""), underlyingType: String(row.underlyingType ?? "").toUpperCase() }))
+    .map((row) => ({
+      symbol: String(row.symbol ?? ""),
+      underlyingType: String(row.underlyingType ?? "").toUpperCase(),
+      activeUsdtPerpetual: isActiveUsdtPerpetual(row),
+    }))
     .filter((row) => row.symbol && row.underlyingType);
   if (!rows.length) return false;
   input.signals.replaceSymbolClasses(rows, input.nowMs);

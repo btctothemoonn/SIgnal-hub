@@ -11,6 +11,7 @@ import { getRuntimeDataPath } from "./runtime-storage.ts";
 export const MARKET_SIGNAL_RULE_VERSION = "market-signals-v1";
 const HOUR_MS = 60 * 60_000;
 const BAR_15M_MS = 15 * 60_000;
+export type MarketBoardMarket = "crypto" | "equities";
 
 function envNumber(env: EnvLike, key: string, fallback: number) {
   const raw = env[key];
@@ -387,6 +388,7 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
     CREATE TABLE IF NOT EXISTS market_symbol_class (
       symbol TEXT PRIMARY KEY,
       underlying_type TEXT NOT NULL,
+      active_usdt_perpetual INTEGER,
       updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS market_signal_meta (
@@ -410,6 +412,10 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
   if (!hasOiQuantity()) transaction(() => {
     // Another process opening the same database can complete the migration before we get the lock.
     if (!hasOiQuantity()) db.exec("ALTER TABLE market_positioning_hourly ADD COLUMN oi_quantity REAL");
+  });
+  const hasBoardEligibility = () => db.prepare("PRAGMA table_info(market_symbol_class)").all().some(row => row.name === "active_usdt_perpetual");
+  if (!hasBoardEligibility()) transaction(() => {
+    if (!hasBoardEligibility()) db.exec("ALTER TABLE market_symbol_class ADD COLUMN active_usdt_perpetual INTEGER");
   });
 
   return {
@@ -512,17 +518,22 @@ export function openMarketSignalsStore(path = marketSignalsDbPath()) {
       db.prepare("UPDATE market_signal_meta SET last_positioning_hour_ms=?, last_positioning_at=? WHERE id=1").run(hourMs, new Date(nowMs).toISOString());
     },
     symbolClassesUpdatedAt() {
-      const row = db.prepare("SELECT MAX(updated_at) AS value FROM market_symbol_class").get() as Row;
+      // Legacy rows have no trading status; refresh them on the first cycle after upgrading.
+      const row = db.prepare("SELECT MAX(updated_at) AS value FROM market_symbol_class WHERE active_usdt_perpetual IS NOT NULL").get() as Row;
       const ms = Date.parse(String(row?.value ?? ""));
       return Number.isFinite(ms) ? ms : null;
     },
-    replaceSymbolClasses(rows: Array<{ symbol: string; underlyingType: string }>, nowMs: number) {
+    replaceSymbolClasses(rows: Array<{ symbol: string; underlyingType: string; activeUsdtPerpetual?: boolean }>, nowMs: number) {
       transaction(() => {
         db.exec("DELETE FROM market_symbol_class");
-        const stmt = db.prepare("INSERT INTO market_symbol_class(symbol,underlying_type,updated_at) VALUES (?,?,?)");
+        const stmt = db.prepare("INSERT INTO market_symbol_class(symbol,underlying_type,active_usdt_perpetual,updated_at) VALUES (?,?,?,?)");
         const at = new Date(nowMs).toISOString();
-        for (const row of rows) stmt.run(row.symbol, row.underlyingType, at);
+        for (const row of rows) stmt.run(row.symbol, row.underlyingType, Number(row.activeUsdtPerpetual === true), at);
       });
+    },
+    readBoardSymbols(market: MarketBoardMarket): string[] {
+      return db.prepare("SELECT symbol FROM market_symbol_class WHERE underlying_type=? AND active_usdt_perpetual=1 ORDER BY symbol")
+        .all(market === "equities" ? "EQUITY" : "COIN").map(row => String(row.symbol));
     },
     readCoinSymbols() {
       return new Set(db.prepare("SELECT symbol FROM market_symbol_class WHERE underlying_type = 'COIN'").all().map(row => String(row.symbol)));
@@ -555,6 +566,7 @@ export type MarketSignalsStore = ReturnType<typeof openMarketSignalsStore>;
 
 export type MarketSignalsSnapshot = {
   generatedAt: string;
+  searchSymbols: string[];
   signals: MarketSignal[];
   stats: Record<MarketSignalKind, MarketSignalStats>;
   meta: ReturnType<MarketSignalsStore["readMeta"]>;
@@ -571,14 +583,16 @@ export type MarketSignalsSnapshot = {
 
 export const ALERT_OUTCOME_STATS_DAYS = 14;
 
-export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; nowMs?: number; env?: EnvLike } = {}): MarketSignalsSnapshot {
+export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; nowMs?: number; env?: EnvLike; market?: MarketBoardMarket } = {}): MarketSignalsSnapshot {
   const env = input.env ?? process.env;
   const nowMs = input.nowMs ?? Date.now();
   const rules = getMarketSignalRules(env);
   const store = input.store ?? openMarketSignalsStore(marketSignalsDbPath(env));
   try {
-    const window = store.listSignals(nowMs - rules.statsWindowMs);
-    const outcomeRows = store.alertOutcomes.list(nowMs - ALERT_OUTCOME_STATS_DAYS * 24 * HOUR_MS);
+    const searchSymbols = input.market ? store.readBoardSymbols(input.market) : [];
+    const eligible = input.market ? new Set(searchSymbols) : null;
+    const window = store.listSignals(nowMs - rules.statsWindowMs).filter(row => !eligible || eligible.has(row.symbol));
+    const outcomeRows = store.alertOutcomes.list(nowMs - ALERT_OUTCOME_STATS_DAYS * 24 * HOUR_MS).filter(row => !eligible || eligible.has(row.symbol));
     const coinSymbols = store.readCoinSymbols();
     const symbolClasses = store.readSymbolClasses();
     const cryptoWindow = window.filter(signal => coinSymbols.has(signal.symbol));
@@ -590,6 +604,7 @@ export function readMarketSignalsSnapshot(input: { store?: MarketSignalsStore; n
     }
     return {
       generatedAt: new Date(nowMs).toISOString(),
+      searchSymbols,
       signals: window.filter((signal) => Date.parse(signal.signalAt) >= nowMs - 24 * HOUR_MS),
       stats: {
         pullback_long: summarizeSignals(window, "pullback_long"),

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
+assert.match(read("./page.tsx"), /MarketFocusPage market="crypto"/);
+assert.match(read("./equities/page.tsx"), /MarketFocusPage market="equities"/);
+const source = read("../../components/market-focus-page.tsx");
 
 assert.match(source, /activeNav="alerts"/);
 assert.match(source, /MarketSignalsBoard/);
 assert.match(source, /getMarketSignalsBoardData/);
 assert.match(source, /重点观察/);
-assert.match(source, /4 在线/);
-assert.match(source, /liveWorkers === 4/);
+assert.match(source, /getBoardWorkerHealth/);
+assert.match(source, /观察市场/);
 
 const board = readFileSync(new URL("../../components/market-signals-board.tsx", import.meta.url), "utf8");
 assert.match(board, /\/api\/market-signals/);

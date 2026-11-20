@@ -425,8 +425,12 @@ store.close();
     async getExchangeInfo() {
       calls += 1;
       return { symbols: [
-        { symbol: "BTCUSDT", underlyingType: "COIN" },
-        { symbol: "NVDAUSDT", underlyingType: "EQUITY" },
+        { symbol: "BTCUSDT", underlyingType: "COIN", contractType: "PERPETUAL", status: "TRADING", quoteAsset: "USDT" },
+        { symbol: "NVDAUSDT", underlyingType: "EQUITY", contractType: "TRADIFI_PERPETUAL", status: "TRADING", quoteAsset: "USDT" },
+        { symbol: "PENDINGUSDT", underlyingType: "EQUITY", contractType: "TRADIFI_PERPETUAL", status: "PENDING_TRADING", quoteAsset: "USDT" },
+        { symbol: "OLDUSDT", underlyingType: "COIN", contractType: "PERPETUAL", status: "SETTLING", quoteAsset: "USDT" },
+        { symbol: "ETHUSDT_261225", underlyingType: "COIN", contractType: "CURRENT_QUARTER", status: "TRADING", quoteAsset: "USDT" },
+        { symbol: "ETHUSDC", underlyingType: "COIN", contractType: "PERPETUAL", status: "TRADING", quoteAsset: "USDC" },
         { symbol: "0700USDT", underlyingType: "HK_EQUITY" },
         { symbol: "XAUUSDT", underlyingType: "COMMODITY" },
         { symbol: "BROKEN" },
@@ -436,7 +440,9 @@ store.close();
   };
   const alerts = { getMarketAlertsSnapshot: () => ({ events: [] }) };
   await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T, alerts, signals, client });
-  assert.deepEqual(signals.readSymbolClasses(), { NVDAUSDT: "EQUITY", "0700USDT": "HK_EQUITY", XAUUSDT: "COMMODITY" });
+  assert.deepEqual(signals.readSymbolClasses(), { NVDAUSDT: "EQUITY", PENDINGUSDT: "EQUITY", "0700USDT": "HK_EQUITY", XAUUSDT: "COMMODITY" });
+  assert.deepEqual(signals.readBoardSymbols("crypto"), ["BTCUSDT"]);
+  assert.deepEqual(signals.readBoardSymbols("equities"), ["NVDAUSDT"]);
   await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 5 * 60_000, alerts, signals, client });
   assert.equal(calls, 1, "not refreshed within 15 minutes");
   await runMarketSignalsCycle({ env: { MARKET_SIGNAL_AI_ENABLED: "false" }, nowMs: T + 15 * 60_000, alerts, signals, client });

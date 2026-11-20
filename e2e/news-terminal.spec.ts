@@ -137,16 +137,17 @@ test("news mobile fits viewport and opens and closes the trading detail sheet", 
   await expect(page.getByRole("button", { name: feed.items[0].title, exact: true })).toBeVisible();
 });
 
-test("a sharp crypto crash opens the chosen Binance market on mobile", async ({ page }) => {
+test("a sharp crypto crash and a separate equity board open the chosen Binance market on mobile", async ({ page }) => {
   const runtimeDir = process.env.SIGNAL_E2E_RUNTIME_DIR!;
   const market = openMarketAlertsStore(join(runtimeDir, "market.sqlite"));
   const signals = openMarketSignalsStore(marketSignalsDbPath({ SIGNAL_HUB_RUNTIME_DIR: runtimeDir }));
   try {
     const observed = Date.now();
     signals.replaceSymbolClasses([
-      { symbol: "DOGEUSDT", underlyingType: "COIN" },
-      { symbol: "AAOIUSDT", underlyingType: "EQUITY" },
-      { symbol: "XAUUSDT", underlyingType: "COMMODITY" },
+      { symbol: "DOGEUSDT", underlyingType: "COIN", activeUsdtPerpetual: true },
+      { symbol: "AAOIUSDT", underlyingType: "EQUITY", activeUsdtPerpetual: true },
+      { symbol: "NVDAUSDT", underlyingType: "EQUITY", activeUsdtPerpetual: true },
+      { symbol: "XAUUSDT", underlyingType: "COMMODITY", activeUsdtPerpetual: true },
     ], observed);
     for (const symbol of ["DOGEUSDT", "AAOIUSDT", "XAUUSDT"]) {
       market.insertMarketAlertEvent({
@@ -173,6 +174,28 @@ test("a sharp crypto crash opens the chosen Binance market on mobile", async ({ 
   await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("DOGE");
   await expect(page.getByRole("combobox", { name: "交易账户" })).toHaveValue("binance");
   await expect(page.locator("[data-news-chart] canvas").first()).toBeVisible();
+  await page.goto("/alerts");
+  await page.getByRole("link", { name: "美股与 ETF", exact: true }).click();
+  await expect(page).toHaveURL(/\/alerts\/equities$/);
+  const equities = page.getByRole("region", { name: "强暴跌", exact: true });
+  await expect(equities.locator("#coin-AAOIUSDT")).toBeVisible();
+  await expect(page.locator("#coin-DOGEUSDT, #coin-XAUUSDT")).toHaveCount(0);
+  await expect(page.getByText("FDV", { exact: false })).toHaveCount(0);
+  const equitySearch = page.getByRole("searchbox", { name: "搜索股票代码" });
+  await equitySearch.fill("doge");
+  await expect(page.getByText("当前市场没有匹配的标的")).toBeVisible();
+  await equitySearch.fill("nvda");
+  await expect(page.getByRole("region", { name: "其他匹配标的" }).getByRole("link", { name: "查看 NVDA 实时行情" })).toHaveAttribute("href", "/news?symbol=NVDAUSDT");
+  await equitySearch.fill("aaoi/usdt");
+  await expect(equities.locator("#coin-AAOIUSDT")).toBeVisible();
+  await expect(page.getByRole("link", { name: "美股与 ETF" })).toHaveAttribute("aria-current", "page");
+  const equityApi = await (await page.request.get("/api/market-signals?market=equities")).json();
+  expect(equityApi.market).toBe("equities");
+  expect(equityApi.searchSymbols).toEqual(["AAOIUSDT", "NVDAUSDT"]);
+  expect((await page.request.get("/api/market-signals?market=unknown")).status()).toBe(400);
+  await equities.getByRole("link", { name: "查看 AAOI 实时行情" }).click();
+  await expect(page.getByRole("textbox", { name: "行情币种" })).toHaveValue("AAOI");
+  await expect(page.getByRole("combobox", { name: "交易账户" })).toHaveValue("binance");
   expect(orders).toHaveLength(0);
 });
 

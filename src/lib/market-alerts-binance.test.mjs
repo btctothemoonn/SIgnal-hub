@@ -316,6 +316,99 @@ try {
   rmSync(directory, { recursive: true, force: true });
 }
 
+// Search covers every active US-equity quote. REST monitoring only extends the
+// existing ranked/active universe with sufficiently liquid US perpetuals.
+{
+  const dir = mkdtempSync(join(tmpdir(), "market-alerts-equity-"));
+  const equityStore = openMarketAlertsStore(join(dir, "alerts.sqlite"));
+  try {
+    const contracts = [
+      ["SNDK", "EQUITY", "TRADIFI_PERPETUAL", 5_000],
+      ["THIN", "EQUITY", "TRADIFI_PERPETUAL", 4_999],
+      ["XPT", "COMMODITY", "TRADIFI_PERPETUAL", 6_000],
+      ["HK", "HK_EQUITY", "TRADIFI_PERPETUAL", 6_000],
+      ["DATED", "EQUITY", "CURRENT_QUARTER", 6_000],
+    ];
+    const metadata = contracts.map(([baseAsset, underlyingType, contractType]) => ({
+      symbol: baseAsset + "USDT", baseAsset, underlyingType, contractType, status: "TRADING", quoteAsset: "USDT",
+    }));
+    const quotes = contracts.map(([symbol, , , quoteVolume]) => ({
+      symbol: symbol + "USDT", quoteVolume, lastPrice: 10, priceChangePercent: 0,
+    }));
+    const requests = [];
+    const deliveries = [];
+    let pump = 0;
+    const clientAt = (nowMs) => ({
+        getExchangeInfo: async () => ({ symbols: [exchangeInfo.symbols[0], ...metadata] }),
+        getTickers24h: async () => [tickers.find(row => row.symbol === "BTCUSDT"), ...quotes],
+        getKlines: async (symbol, interval, limit) => {
+          requests.push([symbol, interval]);
+          const duration = interval === "5m" ? 300_000 : 60_000;
+          const pumping = symbol === "SNDKUSDT" && pump > 0;
+          const rows = pumping && interval === "5m" ? pumpKlines5m() : flatKlines(duration, limit);
+          if (pumping && interval === "5m") rows[rows.length - 1] = kline(35, 105, 100 + pump, 30);
+          const end = Math.floor(nowMs / duration) * duration;
+          return rows.map((row, index) => {
+            const at = end - (rows.length - index) * duration;
+            return [at, ...row.slice(1, 6), at + duration - 1, row[7]];
+          });
+        },
+    });
+    const scan = (nowMs) => runVolatilityRestScan({
+      client: clientAt(nowMs),
+      store: equityStore,
+      deliverAlert: async event => { deliveries.push(event.symbol); return { status: "sent" }; },
+      config: { restTopN: 1, restCoreN: 1, restExtendedIntervalMin: 2, minQuoteVolumeUsd: 5_000 },
+      nowMs,
+    });
+    await scan(TEST_NOW_MS);
+    await scan(TEST_NOW_MS + 60_000);
+    assert.deepEqual(requests.filter(([symbol]) => symbol === "SNDKUSDT").sort(), [
+      ["SNDKUSDT", "1m"], ["SNDKUSDT", "5m"],
+    ], "a liquid equity below Top N is scanned once per rotation");
+    assert.equal(requests.filter(([symbol]) => symbol === "BTCUSDT").length, 4);
+    assert.deepEqual(new Set(requests.map(([symbol]) => symbol)), new Set(["BTCUSDT", "SNDKUSDT"]));
+    assert.deepEqual(equityStore.getMarketTickers().map(row => row.symbol).sort(), ["BTCUSDT", "SNDKUSDT", "THINUSDT"]);
+    assert.deepEqual(equityStore.getMarketAlertsSnapshot({ now: new Date(TEST_NOW_MS).toISOString() }).marketRanking, []);
+    requests.length = 0;
+    quotes[0].quoteVolume = 4_999;
+    await scan(TEST_NOW_MS + 120_000);
+    await scan(TEST_NOW_MS + 180_000);
+    assert.deepEqual(new Set(requests.map(([symbol]) => symbol)), new Set(["BTCUSDT"]));
+    assert.equal(equityStore.getMarketTickers().find(row => row.symbol === "SNDKUSDT").quoteVolume, 4_999);
+
+    const startedAt = Math.floor(Date.now() / 120_000) * 120_000 - 600_000;
+    quotes[0].quoteVolume = 5_000;
+    pump = 7;
+    assert.equal((await scan(startedAt)).alerts, 1);
+    pump = 14;
+    assert.equal((await scan(startedAt + 120_000)).alerts, 1);
+    const since = new Date(startedAt - 3_600_000).toISOString();
+    const observed = equityStore.getBoardAlerts(since, new Date().toISOString()).events;
+    assert.deepEqual(observed.map(event => event.level), [2, 1]);
+    assert.ok(observed.every(event => event.metrics.equityBoardOnly));
+    assert.deepEqual(deliveries, []);
+    assert.deepEqual(equityStore.getOpportunitySeedData({ since }), []);
+    assert.deepEqual(equityStore.getMarketAlertsSnapshot().marketRanking, []);
+    assert.ok(equityStore.getCardCandles(["SNDKUSDT"], startedAt + 120_000).SNDKUSDT.length >= 40);
+    assert.deepEqual(equityStore.listVolumeEpisodes(startedAt - 3_600_000, startedAt + 120_000), []);
+    let subscription;
+    await assert.rejects(startVolatilityWebSocketWorker({
+      store: equityStore, client: clientAt(startedAt), config: { wsTopN: 1 },
+      createWebSocket(url) { subscription = url; throw new Error("captured subscriptions"); },
+    }), /captured subscriptions/);
+    assert.match(subscription, /btcusdt@ticker/);
+    assert.doesNotMatch(subscription, /sndkusdt/i, "board-only upgrades must not enroll full or chart-only WS streams");
+    quotes[0].quoteVolume = 8_000;
+    pump = 23;
+    assert.equal((await scan(startedAt + 240_000)).alerts, 1);
+    assert.deepEqual(deliveries, ["SNDKUSDT"], "a later upgrade in the original ranked universe retains delivery");
+  } finally {
+    equityStore.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // Liquidity gate: the same BTC pump (fixture 24h turnover 7,000 USDT) must be
 // skipped below the minimum quote volume and alert once the floor is met.
 for (const [minQuoteVolumeUsd, expectedAlerts] of [[10_000_000, 0], [5_000, 1]]) {

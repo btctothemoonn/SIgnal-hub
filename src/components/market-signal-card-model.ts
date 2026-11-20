@@ -44,10 +44,10 @@ export type CardRow = {
 };
 
 export function buildCardRows(data: MarketSignalsBoardData, { startMs, endMs }: { startMs: number; endMs: number }): CardRow[] {
-  const coins = new Set(data.signals.coinSymbols);
+  const marketSymbols = new Set(data.market === "equities" ? data.searchSymbols : data.signals.coinSymbols);
   const histories = new Map<string, Pick<CardRow, "events" | "lifecycleEvents">>();
   function historyFor(symbol: string, at: number) {
-    if (!coins.has(symbol) || !Number.isFinite(at) || at < startMs || at > endMs) return;
+    if (!marketSymbols.has(symbol) || !Number.isFinite(at) || at < startMs || at > endMs) return;
     let history = histories.get(symbol);
     if (!history) {
       history = { events: [], lifecycleEvents: [] };

@@ -101,3 +101,12 @@ export function getMarketAlertWorkerView(
     lastErrorRecovered,
   };
 }
+
+export function getBoardWorkerHealth(
+  health: { volatilityWs: MarketAlertHeartbeat; volatilityRest: MarketAlertHeartbeat; squeeze: MarketAlertHeartbeat; opportunity: MarketAlertHeartbeat },
+  market: "crypto" | "equities",
+  nowMs: number,
+) {
+  const workers = market === "equities" ? [health.volatilityWs, health.volatilityRest] : Object.values(health);
+  return { online: workers.filter(heartbeat => getMarketAlertWorkerView(heartbeat, nowMs).online).length, total: workers.length };
+}

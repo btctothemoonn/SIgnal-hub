@@ -1107,12 +1107,30 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     );
   }
 
+  // Board-only REST observations must not enroll a stock into external delivery or WS follow-up.
+  // Existing states without an event, and events written before this flag, keep their original scope.
+  const activeVolatilityForMonitoring = db.prepare(`
+    SELECT state.* FROM market_volatility_state state
+    WHERE state.level > 0 AND COALESCE((
+      SELECT json_extract(event.metrics_json, '$.equityBoardOnly')
+      FROM market_alert_events event
+      WHERE event.type='volatility' AND event.symbol=substr(state.key, instr(state.key, ':')+1)
+        AND event.side=substr(state.key, 1, instr(state.key, ':')-1)
+      ORDER BY event.created_at DESC, event.rowid DESC LIMIT 1
+    ), 0)=0 ORDER BY state.last_seen_at DESC
+  `);
+
+  function getActiveVolatilitySymbols() {
+    return (activeVolatilityForMonitoring.all() as DbRow[]).map(row => stringValue(row.key).split(":").at(-1)!);
+  }
+
   function getRecentlyTriggeredSymbols(since: string) {
     return (
       db
         .prepare(`
           SELECT DISTINCT symbol FROM market_alert_events
           WHERE occurred_at>=? AND type IN ('volatility','short_squeeze')
+            AND COALESCE(json_extract(metrics_json, '$.equityBoardOnly'), 0)=0
           ORDER BY symbol ASC
         `)
         .all(since) as DbRow[]
@@ -1379,15 +1397,11 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
       LEFT JOIN market_alert_tickers t ON t.symbol=e.symbol
       WHERE e.occurred_at>=?
         AND e.type IN ('volatility','short_squeeze')
+        AND COALESCE(json_extract(e.metrics_json, '$.equityBoardOnly'), 0)=0
       ORDER BY e.occurred_at DESC
       LIMIT 2000
     `).all(input.since) as DbRow[];
-    const activeSymbols = new Set<string>();
-    for (const row of db.prepare(
-      "SELECT key FROM market_volatility_state WHERE level>0",
-    ).all() as DbRow[]) {
-      activeSymbols.add(stringValue(row.key).split(":").at(-1) ?? "");
-    }
+    const activeSymbols = new Set(getActiveVolatilitySymbols());
     for (const row of db.prepare(
       "SELECT symbol FROM market_squeeze_active WHERE level>0",
     ).all() as DbRow[]) {
@@ -1797,8 +1811,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
         ...values,
       ) as DbRow).value,
     );
-    const volatilityActive = db
-      .prepare("SELECT * FROM market_volatility_state WHERE level>0 ORDER BY last_seen_at DESC")
+    const volatilityActive = activeVolatilityForMonitoring
       .all()
       .map((row) => ({
         kind: "volatility" as const,
@@ -1827,7 +1840,8 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     const rankingEvents = db
       .prepare(`
         SELECT type, symbol, side, occurred_at FROM market_alert_events
-        WHERE occurred_at>=? ORDER BY occurred_at DESC
+        WHERE occurred_at>=? AND COALESCE(json_extract(metrics_json, '$.equityBoardOnly'), 0)=0
+        ORDER BY occurred_at DESC
       `)
       .all(rankingSince)
       .map((row) => ({
@@ -1987,6 +2001,7 @@ export function openMarketAlertsStore(dbPath = defaultDbPath()) {
     deferBinanceRequests,
     getBinanceRequestDelay,
     getRecentlyTriggeredSymbols,
+    getActiveVolatilitySymbols,
     getOpportunitySeedData,
     getOpportunityEnrichment,
     upsertOpportunityEnrichment,

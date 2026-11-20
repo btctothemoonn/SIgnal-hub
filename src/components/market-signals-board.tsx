@@ -2,11 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, ChevronDown, Star } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getMarketAlertWorkerView } from "@/lib/market-alerts-health";
+import { ArrowUpRight, ChevronDown, Search, Star, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getBoardWorkerHealth } from "@/lib/market-alerts-health";
 import type { MarketSignalsBoardData } from "@/lib/market-signals-view";
 import { MarketSignalCardChart, cardTime } from "./market-signal-card-chart";
+import { findMarketSymbols } from "./market-symbol-search";
 import {
   buildCardRows, directionOf, eventTime, lifecycleLabels, triggerLabel, type CardRow,
 } from "./market-signal-card-model";
@@ -19,11 +20,17 @@ const WATCHLIST_KEY = "market-alert-watchlist";
 const WINDOW_MS: Record<WindowKey, number> = { "1h": 3_600_000, "4h": 4 * 3_600_000, "24h": 24 * 3_600_000 };
 const SIGNALS_STALE_MS = 15 * 60_000;
 const REFRESH_MIN_GAP_MS = 15_000;
-const INITIAL_CARD_LIMITS = { special: 2, startup: 2, weakening: 2 };
+const INITIAL_CARD_LIMITS = { special: 2, startup: 2, weakening: 2, up: 2, down: 2 };
+const SEARCH_PAGE_SIZE = 12;
 const FOCUS_GROUPS = [
   { key: "special", label: "突发异动" },
   { key: "startup", label: lifecycleLabels.startup },
   { key: "weakening", label: lifecycleLabels.weakening },
+] as const;
+
+const EQUITY_GROUPS = [
+  { key: "up", label: "强暴涨" },
+  { key: "down", label: "强暴跌" },
 ] as const;
 
 function base(symbol: string) {
@@ -113,10 +120,10 @@ function quoteVolume(value: number | null | undefined) {
   return `${Number(value.toFixed(2)).toLocaleString("zh-CN")} USDT`;
 }
 
-function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, outcomes }: {
+function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, starred, onStar, outcomes, equities }: {
   row: CardRow; ticker?: Ticker; candles: MarketSignalsBoardData["cardCandles"][string];
   metrics?: MarketSignalsBoardData["cardMetrics"][string]; nowMs: number; expanded: boolean; onToggle: () => void;
-  starred: boolean; onStar: () => void; outcomes: RecentOutcomes;
+  starred: boolean; onStar: () => void; outcomes: RecentOutcomes; equities: boolean;
 }) {
   const { symbol, episode, focus } = row;
   const last = row.events[0];
@@ -180,7 +187,7 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
         </div>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted">
           <span>重点触发 <b className="font-mono font-medium text-foreground">{cardTime(row.latestAt)}</b> · {price(signalPrice)} USDT</span>
-          <span className="font-mono text-[10px]">FDV {money(ticker?.fdvUsd ?? last?.fdvUsd)}</span>
+          {equities ? <span>24h 涨跌 {pct(ticker?.pct24h, 2)}</span> : <span className="font-mono text-[10px]">FDV {money(ticker?.fdvUsd ?? last?.fdvUsd)}</span>}
         </div>
       </header>
 
@@ -202,7 +209,8 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
             <Metric label="触发量比" value={special.volumeRatio == null ? "—" : `${special.volumeRatio.toFixed(2)} 倍`} />
           </> : special?.type === "short_squeeze" ? <Metric label="轧空阶段" value={special.stage} /> : null}
           {episode ? <Metric label="首爆量比" value={`${episode.firstRatio.toFixed(2)} 倍`} title={`首爆 ${cardTime(episode.firstAt)}`} /> : null}
-          <Metric label="1h 持仓量变化" value={pct(metrics?.oi1hPct, 2)} title="最近两个已完成整点之间，未平仓合约数量的变化" />
+          {equities ? <Metric label="24h 合约成交额" value={quoteVolume(ticker?.quoteVolume)} compact /> :
+            <Metric label="1h 持仓量变化" value={pct(metrics?.oi1hPct, 2)} title="最近两个已完成整点之间，未平仓合约数量的变化" />}
           <Metric label="资金费率" value={funding == null ? "—" : pct(funding * 100, 3)} className={expanded ? "" : "hidden @min-[580px]:block"} />
           <Metric label="15m 空头强平（采样）" value={quoteVolume(metrics?.shortLiquidations15m)} title="最近 15 分钟实际采集到的空头强平成交额" className={expanded ? "" : "hidden @min-[580px]:block"} compact />
         </dl>
@@ -217,7 +225,7 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
             </li>
           ))}
         </ol>
-        {expanded ? <p className="mt-2 text-[10px] text-muted">24h {pct(ticker?.pct24h)} · 流通市值 {money(ticker?.marketCapUsd ?? last?.marketCapUsd)}</p> : null}
+        {expanded && !equities ? <p className="mt-2 text-[10px] text-muted">24h {pct(ticker?.pct24h)} · 流通市值 {money(ticker?.marketCapUsd ?? last?.marketCapUsd)}</p> : null}
         {expanded && chartUrl ? <Image unoptimized src={chartUrl} alt={`${base(symbol)} 最近触发时的 K 线快照`} width={1200} height={630} className="mt-2 h-auto w-full max-w-lg rounded border border-line" /> : null}
       </div>
       <footer className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
@@ -235,9 +243,14 @@ function SignalCard({ row, ticker, candles, metrics, nowMs, expanded, onToggle, 
 
 export function MarketSignalsBoard({ initialData }: { initialData: MarketSignalsBoardData }) {
   const [data, setData] = useState(initialData);
+  const market = initialData.market;
+  const equities = market === "equities";
   const [nowMs, setNowMs] = useState(() => Date.parse(initialData.generatedAt));
   const [connection, setConnection] = useState<"live" | "retrying">("live");
   const [watchOnly, setWatchOnly] = useState(false);
+  const [query, setQuery] = useState("");
+  const [searchLimit, setSearchLimit] = useState(SEARCH_PAGE_SIZE);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [windowKey, setWindowKey] = useState<WindowKey>("24h");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [watchlist, setWatchlist] = useState<string[]>([]);
@@ -246,7 +259,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/market-signals", { cache: "no-store" });
+      const response = await fetch(`/api/market-signals?market=${market}`, { cache: "no-store" });
       if (!response.ok) throw new Error(String(response.status));
       const next = (await response.json()) as MarketSignalsBoardData;
       setData(next);
@@ -255,7 +268,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
     } catch {
       setConnection("retrying");
     }
-  }, []);
+  }, [market]);
 
   useEffect(() => {
     let lastLoad = Date.now();
@@ -307,8 +320,27 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
   const rows = useMemo(() => buildCardRows(data, {
     startMs: nowMs - WINDOW_MS[windowKey], endMs: nowMs,
   }), [data, nowMs, windowKey]);
-  const filtered = watchOnly ? rows.filter(row => watchlist.includes(row.symbol)) : rows;
-  const groups = FOCUS_GROUPS.map(group => ({ ...group, rows: filtered.filter(row => row.focus.kind === group.key) }));
+  const searching = query.trim().length > 0;
+  const searchLabel = data.market === "equities" ? "搜索股票代码" : "搜索币种";
+  const hasMarketFavorites = watchlist.some(symbol => data.searchSymbols.includes(symbol));
+  const searchMatches = useMemo(() => {
+    if (!searching) return [];
+    const symbols = watchOnly ? data.searchSymbols.filter(symbol => watchlist.includes(symbol)) : data.searchSymbols;
+    return findMarketSymbols(symbols, query);
+  }, [data.searchSymbols, watchOnly, watchlist, query, searching]);
+  const rowsBySymbol = new Map(rows.map(row => [row.symbol, row]));
+  const filtered = searching ? searchMatches.flatMap(symbol => rowsBySymbol.get(symbol) ?? [])
+    : watchOnly ? rows.filter(row => watchlist.includes(row.symbol)) : rows;
+  const otherMatches = searchMatches.filter(symbol => !rowsBySymbol.has(symbol));
+  function updateSearch(value: string) {
+    setQuery(value);
+    setSearchLimit(SEARCH_PAGE_SIZE);
+    setFocusRequest(null);
+  }
+  const groups = (equities ? EQUITY_GROUPS : FOCUS_GROUPS).map(group => ({
+    ...group,
+    rows: filtered.filter(({ focus }) => group.key === (equities && focus.kind === "special" ? directionOf(focus.event) : focus.kind)),
+  }));
   const visibleGroups = groups.map(group => {
     const visibleRows = group.rows.slice(0, cardLimits[group.key]);
     const target = expanded && group.rows.find(row => row.symbol === expanded);
@@ -320,24 +352,34 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
     if (focusRequest && canScroll) document.getElementById(`coin-${focusRequest.symbol}`)?.scrollIntoView({ block: "center" });
   }, [focusRequest, canScroll]);
 
-  const liveWorkers = Object.values(data.health).filter((heartbeat) => getMarketAlertWorkerView(heartbeat, nowMs).online).length;
-  const signalsStale = !data.signals.meta.lastSuccessAt || nowMs - Date.parse(data.signals.meta.lastSuccessAt) > SIGNALS_STALE_MS;
+  const { online, total } = getBoardWorkerHealth(data.health, market, nowMs);
+  const signalsStale = !equities && (!data.signals.meta.lastSuccessAt || nowMs - Date.parse(data.signals.meta.lastSuccessAt) > SIGNALS_STALE_MS);
   const btc24h = tickers.get("BTCUSDT")?.pct24h;
 
   return (
     <div className="grid min-w-0 gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
-          <span className={`inline-block h-2 w-2 rounded-full ${connection === "live" && liveWorkers === 4 && !signalsStale ? "bg-success" : "bg-warning"}`} />
-          <span>行情 {liveWorkers}/4 在线</span>
+          <span className={`inline-block h-2 w-2 rounded-full ${connection === "live" && online === total && !signalsStale ? "bg-success" : "bg-warning"}`} />
+          <span>行情 {online}/{total} 在线</span>
           <span>· 数据 {age(data.latestUpdatedAt, nowMs)}</span>
-          <span className={signalsStale ? "text-warning" : undefined}>
+          {!equities ? <span className={signalsStale ? "text-warning" : undefined}>
             · 信号计算 {data.signals.meta.lastSuccessAt ? age(data.signals.meta.lastSuccessAt, nowMs) : "尚未运行"}
-          </span>
+          </span> : null}
           {connection === "retrying" ? <span className="text-warning">· 连接重试中</span> : null}
         </p>
-        <div className="flex flex-wrap gap-1.5">
-          {watchlist.length > 0 || watchOnly ? <button type="button" aria-pressed={watchOnly}
+        <div className="flex max-w-full flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1 rounded-md border border-line bg-workspace-surface px-2 focus-within:border-accent">
+            <Search aria-hidden="true" size={14} className="text-muted" />
+            <input ref={searchInput} type="text" role="searchbox" aria-label={searchLabel} placeholder={searchLabel}
+              autoComplete="off" autoCapitalize="characters" spellCheck={false} value={query}
+              onChange={event => updateSearch(event.target.value)}
+              onKeyDown={event => { if (event.key === "Escape") updateSearch(""); }}
+              className="w-24 bg-transparent py-1.5 text-xs text-foreground outline-none placeholder:text-muted" />
+            {query ? <button type="button" aria-label="清空搜索" onClick={() => { updateSearch(""); searchInput.current?.focus(); }}
+              className="rounded p-1 text-muted hover:text-foreground"><X aria-hidden="true" size={13} /></button> : null}
+          </div>
+          {hasMarketFavorites || watchOnly ? <button type="button" aria-pressed={watchOnly}
             onClick={() => { setWatchOnly(current => !current); setFocusRequest(null); }}
             className={`rounded-md border border-line px-2.5 py-1 text-xs font-semibold ${watchOnly ? "bg-workspace-surface text-foreground" : "text-muted"}`}>
             仅自选
@@ -350,13 +392,13 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
         </div>
       </div>
 
-      {btc24h != null && btc24h <= data.signals.rules.btcShortWarningPct ? (
+      {!equities && btc24h != null && btc24h <= data.signals.rules.btcShortWarningPct ? (
         <p role="status" className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs text-warning">
           BTC 24h {pct(btc24h)}，已触及 {pct(data.signals.rules.btcShortWarningPct)} 警戒线。历史回测中，这种行情下追空山寨币在前后两个时段均亏损。
         </p>
       ) : null}
-      <div className="grid min-w-0 items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-        {visibleGroups.map(({ key: groupKey, label: groupLabel, rows: groupRows, visibleRows }) => <section key={groupLabel} className="min-w-0" aria-label={groupLabel}>
+      <div className={`grid min-w-0 items-start gap-3 lg:grid-cols-2 ${equities ? "" : "2xl:grid-cols-3"}`}>
+        {visibleGroups.filter(group => !searching || group.rows.length > 0).map(({ key: groupKey, label: groupLabel, rows: groupRows, visibleRows }) => <section key={groupLabel} className="min-w-0" aria-label={groupLabel}>
           <header className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3">
             <h2 className="text-base font-semibold text-foreground">{groupLabel}</h2>
             <span className="text-xs text-muted">{windowKey} · {groupRows.length} 个标的</span>
@@ -365,7 +407,7 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
             <ul className="grid min-w-0 gap-3">
               {visibleRows.map(row => {
                 const ticker = tickers.get(row.symbol);
-                return <SignalCard key={row.symbol} row={row} ticker={ticker} nowMs={nowMs}
+                return <SignalCard key={row.symbol} equities={equities} row={row} ticker={ticker} nowMs={nowMs}
                   metrics={data.cardMetrics?.[row.symbol]} candles={data.cardCandles?.[row.symbol] ?? []}
                   expanded={expanded === row.symbol} onToggle={() => setExpanded(current => current === row.symbol ? null : row.symbol)}
                   starred={watchlist.includes(row.symbol)} onStar={() => toggleStar(row.symbol)}
@@ -379,6 +421,23 @@ export function MarketSignalsBoard({ initialData }: { initialData: MarketSignals
           </button> : null}
         </section>)}
       </div>
+      {searching && !searchMatches.length ? <p role="status" className="rounded-lg border border-line px-3 py-8 text-center text-sm text-muted">
+        {watchOnly ? "自选中没有匹配的标的" : "当前市场没有匹配的标的"}
+      </p> : null}
+      {otherMatches.length > 0 ? <section className="rounded-lg border border-line bg-workspace-surface p-3" aria-label="其他匹配标的">
+        <h2 className="mb-1 text-sm font-semibold text-foreground">{windowKey} 内没有重点异动的匹配标的 <span className="text-xs font-normal text-muted">({otherMatches.length})</span></h2>
+        <ul className="divide-y divide-line">
+          {otherMatches.slice(0, searchLimit).map(symbol => {
+            const ticker = tickers.get(symbol);
+            return <li key={symbol} className="flex items-center justify-between gap-3 py-2 text-sm">
+              <MarketSymbolLink symbol={symbol} className="font-semibold text-accent" />
+              {ticker ? <span className="flex gap-3 font-mono tabular-nums"><span>{price(ticker.price)}</span><span className={tone(ticker.pct24h)}>{pct(ticker.pct24h)}</span></span> : null}
+            </li>;
+          })}
+        </ul>
+        {otherMatches.length > searchLimit ? <button type="button" onClick={() => setSearchLimit(limit => limit + SEARCH_PAGE_SIZE)}
+          className="mt-1 rounded-md border border-line px-3 py-1.5 text-xs text-muted">更多匹配标的</button> : null}
+      </section> : null}
     </div>
   );
 }

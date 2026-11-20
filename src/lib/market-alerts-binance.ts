@@ -429,6 +429,12 @@ export type SelectedMarket = {
   meta: JsonRecord;
 };
 
+export function isActiveUsdtPerpetual(meta: JsonRecord) {
+  return meta.status === "TRADING" && meta.quoteAsset === "USDT" &&
+    stringValue(meta.symbol).endsWith("USDT") &&
+    (meta.contractType === "PERPETUAL" || meta.contractType === "TRADIFI_PERPETUAL");
+}
+
 export function selectFuturesUniverse(
   exchangeInfo: { symbols?: JsonRecord[] },
   tickers: JsonRecord[],
@@ -714,6 +720,7 @@ async function persistVolatilitySignal(input: {
   scheduleChart?: (event: ReturnType<Store["insertMarketAlertEvent"]>) => void;
   onDeliveryError?: (error: unknown) => void;
   isEligible?: () => Promise<boolean>;
+  equityBoardOnly?: boolean;
 }) {
   const key = `${input.signal.side}:${input.signal.symbol}`;
   const reservation = input.store.reserveVolatilityAlert({
@@ -754,11 +761,12 @@ async function persistVolatilitySignal(input: {
         pct24h: input.market.pct24h,
         quoteVolume: input.market.quoteVolume,
         statusText: input.signal.statusText,
+        ...(input.equityBoardOnly ? { equityBoardOnly: true } : {}),
       },
       reasons: volatilityReasons(input.signal),
       occurredAt,
     });
-    if (input.deliverAlert) {
+    if (input.deliverAlert && !input.equityBoardOnly) {
       try {
         const receipt = await input.deliverAlert(event);
         if (receipt?.status === "sent") {
@@ -815,7 +823,6 @@ function restScanSymbols(
   const extended = markets.slice(config.restCoreN).filter(
     (market) => !prioritySymbols.has(market.symbol),
   );
-  if (!extended.length) return core;
   const groups = Math.max(1, config.restExtendedIntervalMin);
   const group = Math.floor(nowMs / 60_000) % groups;
   return [
@@ -861,25 +868,24 @@ export async function runVolatilityRestScan(input: {
       topN: Math.max(1, tickers.length),
       excludeTradFi: false,
     });
-    const activeSignals = store
-      .getMarketAlertsSnapshot({ limit: 1, now: scanIso })
-      .activeSignals;
-    const activeVolatilitySymbols = new Set(
-      activeSignals
-        .filter((signal) => signal.kind === "volatility")
-        .map((signal) => signal.symbol),
-    );
+    const activeVolatilitySymbols = new Set(store.getActiveVolatilitySymbols());
     const triggeredSince = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
     const trackedSymbols = new Set([
       ...store.getRecentlyTriggeredSymbols(triggeredSince),
       ...activeVolatilitySymbols,
     ]);
-    const markets = includeTrackedMarkets(
+    const rankedAndTracked = includeTrackedMarkets(
       allMarkets.slice(0, config.restTopN),
       allMarkets,
       trackedSymbols,
     );
-    store.upsertMarketTickers(tickerInputs(markets, scanIso));
+    const included = new Set(rankedAndTracked.map(market => market.symbol));
+    const additionalEquities = allMarkets.filter(market => !included.has(market.symbol) &&
+      market.meta.underlyingType === "EQUITY" && isActiveUsdtPerpetual(market.meta));
+    // All equity quotes are already in ticker/24hr. Only liquid additions need K-line requests.
+    store.upsertMarketTickers(tickerInputs([...rankedAndTracked, ...additionalEquities], scanIso));
+    const liquidEquities = additionalEquities.filter(market => market.quoteVolume >= config.minQuoteVolumeUsd);
+    const markets = [...rankedAndTracked, ...liquidEquities];
     const valuationRefreshes = await refreshTriggeredMarketValuations({
       client,
       store,
@@ -908,6 +914,12 @@ export async function runVolatilityRestScan(input: {
           client.getKlines(market.symbol, "5m", 36),
           client.getKlines(market.symbol, "1m", 40),
         ]);
+        const equityBoardOnly = !included.has(market.symbol);
+        if (equityBoardOnly) {
+          const minutes = oneMinuteKlines.map(row => closedCardMinute(market.symbol, row, false, nowMs))
+            .filter((minute): minute is MarketCardMinute => minute !== null);
+          store.recordCardMinutes(minutes, nowMs);
+        }
         const metrics = buildVolatilityInputFromKlines({
           symbol: market.symbol,
           fiveMinuteKlines,
@@ -933,6 +945,7 @@ export async function runVolatilityRestScan(input: {
           market,
           store,
           owner: `rest:${process.pid}:${market.symbol}:${nowMs}`,
+          equityBoardOnly,
           nowMs,
           deliverAlert: input.deliverAlert,
           scheduleChart: chartQueue.enqueue,
@@ -961,7 +974,9 @@ export async function runVolatilityRestScan(input: {
       detail: `扫描 ${selected.length} 个合约，新增 ${alerts} 条预警`,
       meta: {
         primaryUniverse: Math.min(config.restTopN, allMarkets.length),
-        tracked: markets.length - Math.min(config.restTopN, allMarkets.length),
+        tracked: rankedAndTracked.length - Math.min(config.restTopN, allMarkets.length),
+        additionalEquityQuotes: additionalEquities.length,
+        additionalEquityScans: liquidEquities.length,
         universe: markets.length,
         scanned: selected.length,
         alerts,
@@ -1430,12 +1445,7 @@ export async function startVolatilityWebSocketWorker(input: {
       client.getExchangeInfo(),
       client.getTickers24h(),
     ]);
-    const activeVolatilitySymbols = new Set(
-      store
-        .getMarketAlertsSnapshot({ limit: 1, now: new Date().toISOString() })
-        .activeSignals.filter((signal) => signal.kind === "volatility")
-        .map((signal) => signal.symbol),
-    );
+    const activeVolatilitySymbols = new Set(store.getActiveVolatilitySymbols());
     const allMarkets = selectFuturesUniverse(exchangeInfo, tickers, {
       topN: Math.max(1, tickers.length),
       excludeTradFi: false,

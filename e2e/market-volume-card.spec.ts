@@ -20,9 +20,10 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
   const burstOnly = "VOLUMEUSDT";
   const crash = "MEGAUSDT";
   const rally = "RALLYUSDT";
+  const olderCrash = "OLDERUSDT";
   try {
-    signals.replaceSymbolClasses([symbol, startupOnly, tracked, ordinary, burstOnly, crash, rally].map(s => ({
-      symbol: s, underlyingType: "COIN",
+    signals.replaceSymbolClasses([symbol, startupOnly, tracked, ordinary, burstOnly, crash, rally, olderCrash].map(s => ({
+      symbol: s, underlyingType: "COIN", activeUsdtPerpetual: true,
     })), now);
     const bars = Array.from({ length: 60 }, (_, i) => {
       const open = 1 + i / 1000;
@@ -70,6 +71,9 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
       occurredAt: firstCrashAt, createdAt: firstCrashAt,
     });
     store.insertMarketAlertEvent({ ...alert, id: "rally-l2", symbol: rally, level: 2, stage: "暴涨升级", trigger: "A趋势·实时", changePct: 12 });
+    const olderAt = new Date(now - 2 * hour).toISOString();
+    store.insertMarketAlertEvent({ ...alert, id: "older-crash-l2", symbol: olderCrash, side: "SHORT", level: 2,
+      stage: "暴跌升级", changePct: -12, occurredAt: olderAt, createdAt: olderAt });
     const sameTime = new Date(quarter - 30 * min).toISOString();
     store.insertMarketAlertEvent({
       ...alert, id: "startup-rally-l2", symbol: startupOnly, level: 2, stage: "暴涨升级", trigger: "A趋势·实时",
@@ -99,6 +103,30 @@ test("focus cards promote sharp crashes and merge updates with lifecycle stages 
     await expect(card).toContainText("暴涨");
     await expect(card.locator('[data-marker="startup"]')).toHaveCount(1);
     await expect(page.locator(`#coin-${burstOnly}, #coin-${ordinary}, #coin-${tracked}`)).toHaveCount(0);
+    const search = page.getByRole("searchbox", { name: "搜索币种" });
+    await expect(sudden.locator(`#coin-${olderCrash}`)).toHaveCount(0);
+    await search.fill("older/usdt");
+    await expect(sudden.locator(`#coin-${olderCrash}`)).toBeVisible();
+    await expect(crashCard).toHaveCount(0);
+    await page.getByRole("button", { name: "1h", exact: true }).click();
+    await expect(sudden.locator(`#coin-${olderCrash}`)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "其他匹配标的" }).getByRole("link", { name: "查看 OLDER 实时行情" })).toHaveAttribute("href", "/news?symbol=OLDERUSDT");
+    await search.fill("missing-fixture");
+    await expect(page.getByText("当前市场没有匹配的标的")).toBeVisible();
+    await page.getByRole("button", { name: "清空搜索" }).click();
+    await expect(search).toHaveValue("");
+    await page.getByRole("button", { name: "24h", exact: true }).click();
+    await expect(crashCard).toBeVisible();
+    await crashCard.getByRole("button", { name: "加入自选 MEGA" }).click();
+    const favorites = page.getByRole("button", { name: "仅自选" });
+    await favorites.click();
+    await search.fill("older");
+    await expect(page.getByText("自选中没有匹配的标的")).toBeVisible();
+    await search.fill("mega");
+    await expect(crashCard).toBeVisible();
+    await search.press("Escape");
+    await favorites.click();
+    await crashCard.getByRole("button", { name: "取消自选 MEGA" }).click();
     const api = await (await page.request.get("/api/market-signals")).json();
     const episodes = api.volumeEpisodes.filter((e: { symbol: string }) => e.symbol === symbol);
     expect(episodes).toHaveLength(1);
