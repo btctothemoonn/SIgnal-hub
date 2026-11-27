@@ -45,9 +45,9 @@ html.dark {
   --panel-strong: #1d2027;
   --muted: #a1a7b3;
   --line: rgba(207, 213, 225, 0.14);
-  --accent: #cadc9e;
+  --accent: #d6a85b;
   --accent-contrast: #101216;
-  --accent-soft: rgba(202, 220, 158, 0.12);
+  --accent-soft: rgba(214, 168, 91, 0.14);
   --success: #49c68d;
   --success-soft: rgba(73, 198, 141, 0.13);
   --warning: #e0b15f;
@@ -56,12 +56,12 @@ html.dark {
   --danger-soft: rgba(239, 107, 115, 0.13);
   --info: #7aa2ff;
   --info-soft: rgba(122, 162, 255, 0.12);
-  --workspace-canvas: #141517;
-  --workspace-rail: #191a1d;
-  --workspace-surface: #171819;
-  --workspace-surface-raised: #232426;
-  --workspace-toolbar: #191a1d;
-  --workspace-line-strong: #383a3c;
+  --workspace-canvas: #0f1115;
+  --workspace-rail: #121419;
+  --workspace-surface: #17191f;
+  --workspace-surface-raised: #1d2027;
+  --workspace-toolbar: #121419;
+  --workspace-line-strong: #2a2e37;
   --workspace-radius: 8px;
   --workspace-gutter: 20px;
 }

@@ -1524,7 +1524,7 @@ export function HoldingPanel() {
           <div className="hidden text-xs font-semibold uppercase tracking-normal text-info sm:block">
             Binance
           </div>
-          <h2 className="text-xl font-semibold leading-tight text-foreground sm:mt-1 sm:text-[28px]">
+          <h2 className="text-lg font-semibold leading-tight text-foreground sm:mt-1 sm:text-2xl">
             Binance 持仓状况
           </h2>
           <p className="hidden mt-1 text-sm font-semibold text-muted sm:block">

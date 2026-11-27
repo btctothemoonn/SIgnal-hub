@@ -972,7 +972,7 @@ export function UnifiedNewsPanel({
       return;
     }
 
-    item.scrollIntoView({ behavior: "instant", block: "center" });
+    item.scrollIntoView({ behavior: "smooth", block: "center" });
     setReadingPositionStatus("已返回上次阅读位置");
   }, [findTimelineItem]);
 
@@ -1367,7 +1367,7 @@ export function UnifiedNewsPanel({
     window.requestAnimationFrame(() => {
       if (feedNavigationEpochRef.current !== navigationEpoch) return;
       target.scrollIntoView({
-        behavior: pending.type === "saved" ? "instant" : "smooth",
+        behavior: "smooth",
         block: pending.type === "oldest" ? "end" : "center",
       });
       if (pending.type === "saved") {
@@ -1786,8 +1786,7 @@ export function UnifiedNewsPanel({
         <div className="p-2.5">
           <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
-              <p className="font-mono text-[11px] uppercase text-muted">Signal Flow</p>
-              <h2 className="text-2xl font-semibold leading-tight text-foreground sm:text-[28px]">最新推送</h2>
+              <h2 className="text-lg font-semibold text-foreground">Signal Flow</h2>
               <p className="mt-0.5 text-[11px] text-muted">
                 {filteredFeed.length} / {unifiedFeed.length} 条信号
                 {groupedFeed.length < filteredFeed.length ? ` · 按原文归并为 ${groupedFeed.length} 组` : ""}
@@ -2158,7 +2157,7 @@ export function UnifiedNewsPanel({
         ref={timelineRef}
         data-signal-feed-timeline
         style={{ overflowAnchor: hasScrolledAwayFromLatest ? "auto" : "none" }}
-        className={`min-h-0 bg-workspace-surface px-3 sm:px-5 ${
+        className={`min-h-0 space-y-1.5 bg-workspace-canvas p-1.5 sm:p-2 ${
           rail ? "lg:flex-1 lg:overflow-y-auto lg:overscroll-contain" : ""
         }`}
       >
@@ -2185,7 +2184,7 @@ export function UnifiedNewsPanel({
                 data-signal-feed-unread-count={unreadMemberCount}
                 style={{
                   contentVisibility: "auto",
-                  containIntrinsicBlockSize: "auto 240px",
+                  containIntrinsicSize: "0 420px",
                 }}
                 role="button"
                 tabIndex={0}
@@ -2210,71 +2209,74 @@ export function UnifiedNewsPanel({
                     });
                   }
                 }}
-                className="group relative min-w-0 cursor-pointer border-b border-workspace-line-strong py-4 sm:py-5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+                className="group relative grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)] gap-2 rounded-[6px] border border-workspace-line-strong border-l-2 border-l-accent/50 bg-workspace-surface-raised px-2.5 py-2.5 transition-all duration-75 active:scale-[0.995] hover:border-accent/45 hover:bg-workspace-surface focus:outline-none focus:ring-2 focus:ring-accent"
               >
-                <div className="mb-1.5 flex items-center gap-2 text-xs text-muted">
-                  <time className="font-mono tabular-nums" dateTime={item.lowFrequencyCollectedAt || item.createdAt}>
-                    {item.lowFrequencyCollectedAt
-                      ? `采集于 ${formatDisplayTime(item.lowFrequencyCollectedAt)}`
-                      : formatDisplayTime(item.createdAt)}
-                  </time>
-                  {!isRead && <span aria-label="未读" className="h-1.5 w-1.5 rounded-full bg-success" />}
+                {/* Avatar */}
+                <div className="relative shrink-0 pt-0.5">
+                  {item.avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={item.avatar}
+                      alt={item.title}
+                      width={36}
+                      height={36}
+                      loading="lazy"
+                      decoding="async"
+                      className="h-8 w-8 rounded-[6px] bg-workspace-surface-raised object-cover ring-1 ring-line/55"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = "flex";
+                      }}
+                    />
+                  ) : null}
+                  <div
+                    className={`h-8 w-8 items-center justify-center rounded-[6px] text-xs font-bold ring-1 ring-line/30 ${icon.tone} ${item.avatar ? "hidden" : "flex"}`}
+                  >
+                    {icon.letter}
+                  </div>
                 </div>
-                <p className="reading-body selectable-text mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-5 text-foreground">
-                  {renderTextWithLinks(item.text)}
-                </p>
-                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                  {/* Avatar */}
-                  <div className="relative shrink-0">
-                    {item.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={item.avatar}
-                        alt={item.title}
-                        width={36}
-                        height={36}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-5 w-5 rounded-full bg-workspace-surface-raised object-cover"
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                          const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
-                          if (fallback) fallback.style.display = "flex";
-                        }}
-                      />
+
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  {/* Header line */}
+                  <div className="flex items-center gap-1.5 text-[13px] leading-5">
+                    {item.titleUrl === "#" ? (
+                      <span className="truncate font-semibold text-foreground">{item.title}</span>
+                    ) : (
+                      <a href={item.titleUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="truncate font-semibold text-foreground hover:underline">
+                        {item.title}
+                      </a>
+                    )}
+                    {sourceBadge ? (
+                      <span
+                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${sourceBadge.className}`}
+                      >
+                        {sourceBadge.label}
+                      </span>
                     ) : null}
-                    <div
-                      className={`h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold ${icon.tone} ${item.avatar ? "hidden" : "flex"}`}
-                    >
-                      {icon.letter}
-                    </div>
+                    {pinStateEventLabel ? (
+                      <span className="shrink-0 rounded border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold leading-none text-warning">
+                        {pinStateEventLabel}
+                      </span>
+                    ) : null}
+                    {item.subtitle ? (
+                      <span className="truncate text-muted">{item.subtitle}</span>
+                    ) : null}
+                    <span className="text-muted">·</span>
+                    <span className="shrink-0 text-muted">
+                      {item.lowFrequencyCollectedAt
+                        ? `采集于 ${formatDisplayTime(item.lowFrequencyCollectedAt)}`
+                        : formatDisplayTime(item.createdAt)}
+                    </span>
+                    {!isRead && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-success" />}
                   </div>
 
-                  {item.titleUrl === "#" ? (
-                    <span className="truncate font-semibold text-foreground">{item.title}</span>
-                  ) : (
-                    <a href={item.titleUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="truncate font-semibold text-foreground hover:underline">
-                      {item.title}
-                    </a>
-                  )}
-                  {sourceBadge ? (
-                    <span
-                      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${sourceBadge.className}`}
-                    >
-                      {sourceBadge.label}
-                    </span>
-                  ) : null}
-                  {pinStateEventLabel ? (
-                    <span className="shrink-0 rounded border border-warning/40 bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold leading-none text-warning">
-                      {pinStateEventLabel}
-                    </span>
-                  ) : null}
-                  {item.subtitle ? (
-                    <span className="truncate text-muted">{item.subtitle}</span>
-                  ) : null}
-                </div>
+                  {/* Body */}
+                  <p className="selectable-text mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-5 text-foreground">
+                    {renderTextWithLinks(item.text)}
+                  </p>
 
-                <div className="min-w-0">
                   {/* Translation */}
                   {item.translation ? (
                     <div className="mt-2 rounded-[6px] border border-info/20 bg-info-soft/45 px-2.5 py-2">

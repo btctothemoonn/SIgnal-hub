@@ -40,10 +40,10 @@ await test("global theme keeps a neutral dark workspace palette", () => {
   assert.match(globals, /:root\s*\{[\s\S]*--workspace-toolbar:\s*#ffffff;/);
   assert.match(globals, /html\.dark\s*\{[\s\S]*--background:\s*#0f1115;/);
   assert.match(globals, /html\.dark\s*\{[\s\S]*--foreground:\s*#eef0f4;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--accent:\s*#cadc9e;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--accent:\s*#d6a85b;/);
   assert.match(globals, /html\.dark\s*\{[\s\S]*--accent-contrast:\s*#101216;/);
   assert.match(globals, /html\.dark\s*\{[\s\S]*--success:\s*#49c68d;/);
-  assert.match(globals, /html\.dark\s*\{[\s\S]*--workspace-rail:\s*#191a1d;/);
+  assert.match(globals, /html\.dark\s*\{[\s\S]*--workspace-rail:\s*#121419;/);
   assert.match(globals, /--app-font-serif:/);
   assert.match(globals, /--font-serif:\s*var\(--app-font-serif\);/);
   assert.match(globals, /--color-accent-contrast:\s*var\(--accent-contrast\);/);
@@ -65,7 +65,7 @@ await test("command workspace tokens define Cromojo-like product surfaces", () =
   assert.match(globals, /--workspace-gutter:/);
   assert.match(
     globals,
-    /html\.dark\s*\{[\s\S]*--workspace-canvas:\s*#141517;/,
+    /html\.dark\s*\{[\s\S]*--workspace-canvas:\s*#0f1115;/,
   );
   assert.match(globals, /--color-workspace-canvas:/);
   assert.doesNotMatch(globals, /letter-spacing:\s*-/);
@@ -74,8 +74,8 @@ await test("command workspace tokens define Cromojo-like product surfaces", () =
 await test("app shell exposes product sidebar and toolbar surfaces", () => {
   assert.match(appShell, /bg-workspace-rail/);
   assert.match(appShell, /bg-workspace-toolbar/);
-  assert.match(appShell, /w-\[6\.75rem\]/);
-  assert.match(appShell, /flex-col items-center justify-center/);
+  assert.match(appShell, /w-\[13\.5rem\]/);
+  assert.match(appShell, /justify-start/);
   assert.match(appShell, /border-accent\/45 bg-accent-soft text-foreground shadow-sm/);
   assert.match(appShell, /hover:border-accent\/30 hover:bg-accent-soft\/70 hover:text-foreground/);
   assert.match(appShell, /Signal Hub/);
@@ -94,7 +94,7 @@ await test("interactive selections use accent while status stays semantic", () =
   assert.match(themeToggle, /hover:border-accent\/40 hover:bg-accent-soft hover:text-accent/);
   assert.match(settingsPage, /border-accent\/45 bg-accent-soft text-foreground shadow-sm/);
   assert.match(settingsPage, /bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast/);
-  assert.match(unifiedNewsPanel, /focus-visible:outline-accent/);
+  assert.match(unifiedNewsPanel, /border-l-accent\/50/);
   assert.doesNotMatch(appShell, /active:border-success|hover:border-success|border-success\/45 bg-success-soft text-foreground/);
   assert.doesNotMatch(themeToggle, /hover:border-success|hover:bg-success-soft|hover:text-success/);
   assert.doesNotMatch(unifiedNewsPanel, /bg-success text-background|bg-success-soft text-foreground|border-l-success|focus:ring-success/);
