@@ -157,7 +157,7 @@ function AlphaSummaryScopeResult({
 
         {summary ? (
           <div className="space-y-5">
-            <div className="border-l-2 border-accent pl-3">
+            <div className="border-t-2 border-info bg-workspace-surface-raised px-4 py-3">
               <p className="text-xs font-semibold uppercase text-muted">
                 总结
               </p>
@@ -175,7 +175,7 @@ function AlphaSummaryScopeResult({
                 { label: "股票", targets: summary.stocks },
                 { label: "币圈", targets: summary.crypto },
               ].map(({ label, targets }) => (
-                <section key={label} aria-label={label} className="min-w-0 rounded-lg border border-line/60 bg-panel-strong/90 p-4">
+                <section key={label} aria-label={label} className="min-w-0 border-t border-workspace-line-strong pt-3">
                   <h3 className="text-sm font-semibold text-foreground">{label}</h3>
                   {targets ? (
                     targets.length > 0 ? (
@@ -420,6 +420,7 @@ export function AlphaSummaryCard({
           }`}
         >
           <div className="flex min-w-0 flex-1 flex-col gap-2">
+            {compact && !showHeaderMeta && <h2 className="text-lg font-semibold text-foreground">AI 总结</h2>}
             {showHeaderMeta ? (
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className="rounded-md border border-line/70 bg-background/45 px-2 py-1 text-[11px] font-semibold uppercase text-muted">

@@ -87,7 +87,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(row).not.toContainText("Alpha channel");
     await pane.getByRole("button", { name: "按博主或频道筛选", exact: true }).click();
     await pane.getByRole("button", { name: /^全部博主 \/ 频道/ }).click();
-    const representativeText = await row.locator(":scope > div > p").textContent();
+    const representativeText = await row.locator(".reading-body").textContent();
     await row.focus();
     await row.press("Enter");
     await expect(row).toHaveAttribute("data-signal-feed-unread-count", "0");
@@ -103,7 +103,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     }] });
     await expect(rows).toHaveCount(1);
     await expect(row).toHaveAttribute("data-signal-feed-item-id", id!);
-    await expect(row.locator(":scope > div > p")).toHaveText(representativeText!);
+    await expect(row.locator(".reading-body")).toHaveText(representativeText!);
     await expect(details).toHaveAttribute("open", "");
     await expect(details.locator("[data-signal-feed-group-member]")).toHaveCount(3);
     await expect(row).toHaveAttribute("data-signal-feed-unread-count", "1");

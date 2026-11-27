@@ -668,7 +668,7 @@ function WatchItemRow({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-[6px] border border-line/70 bg-panel px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-2 border-b border-workspace-line-strong py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-sm text-foreground">{displayName}</span>
         {editing ? null : item.tags.length === 0 ? (

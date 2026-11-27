@@ -22,7 +22,7 @@ assert.doesNotMatch(pageSource, /ALPHA_RESEARCH_STOCKS/);
 assert.match(source, /<section className="[^"]*lg:sticky[^"]*"/);
 assert.match(source, /<section className="[^"]*lg:top-\[5\.25rem\][^"]*"/);
 assert.match(source, /<section className="[^"]*lg:z-30[^"]*"/);
-assert.match(source, /<section className="[^"]*lg:backdrop-blur-xl[^"]*"/);
+assert.match(source, /<section className="[^"]*bg-workspace-surface[^"]*" data-stocks-command-bar/);
 assert.match(source, /type AlphaTab = "research" \| "messages"/);
 assert.match(source, /美股投研池/);
 assert.match(source, /STOCKS 投研总结/);

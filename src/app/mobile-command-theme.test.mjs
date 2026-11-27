@@ -9,7 +9,7 @@ assert.match(source, /--accent:\s*#b6813c;/);
 assert.match(source, /--success:\s*#159a73;/);
 assert.match(source, /html\.dark\s*\{[\s\S]*--background:\s*#0f1115;/);
 assert.match(source, /html\.dark\s*\{[\s\S]*--panel:\s*#17191f;/);
-assert.match(source, /html\.dark\s*\{[\s\S]*--accent:\s*#d6a85b;/);
+assert.match(source, /html\.dark\s*\{[\s\S]*--accent:\s*#cadc9e;/);
 assert.match(source, /html\.dark\s*\{[\s\S]*--success:\s*#49c68d;/);
 assert.match(source, /--workspace-canvas:/);
 assert.match(source, /--workspace-rail:/);

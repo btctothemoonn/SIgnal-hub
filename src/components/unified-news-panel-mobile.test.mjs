@@ -37,7 +37,7 @@ assert.match(source, /data-signal-feed-pane/);
 assert.match(source, /shouldRefreshSignalSnapshotsOnEffect/);
 assert.match(source, /signalRefreshRangeRef/);
 assert.match(source, /contentVisibility:\s*"auto"/);
-assert.match(source, /containIntrinsicSize:\s*"0 420px"/);
+assert.match(source, /containIntrinsicBlockSize:\s*"auto 240px"/);
 assert.match(source, /rounded-\[6px\]/);
 assert.doesNotMatch(source, /rounded-2xl|rounded-3xl/);
 assert.match(
@@ -45,8 +45,8 @@ assert.match(
   /rounded-lg border border-workspace-line-strong bg-workspace-surface/,
 );
 assert.match(source, /bg-workspace-canvas/);
-assert.match(source, /active:scale-\[0\.995\]/);
-assert.match(source, /border-l-2 border-l-accent\/50/);
+assert.match(source, /<ReadingBody\b/);
+assert.match(source, /border-b border-workspace-line-strong py-4 sm:py-5/);
 assert.doesNotMatch(source, /border-l-success|focus:ring-success/);
 assert.match(source, /data-telegram-fault-alert/);
 assert.match(source, /requestTelegramSnapshot\(\{\s*range:\s*feedRange\b[^}]*\}\),\s*requestXSnapshot\(\{\s*range:\s*feedRange\b[^}]*\}\),/s);

@@ -97,14 +97,14 @@ function ShellNavItem({
       }}
       onPointerEnter={() => onWarm?.(item)}
       className={[
-        "flex h-10 w-full items-center justify-start gap-2 rounded-lg border px-3 text-sm font-semibold transition-all duration-75 active:scale-[0.99] active:border-accent/55 active:bg-accent-soft active:text-foreground",
+        "flex min-h-14 w-full flex-col items-center justify-center gap-1 rounded-md border px-1 py-2 text-xs font-medium active:border-accent/55 active:bg-accent-soft active:text-foreground",
         active
           ? "border-accent/45 bg-accent-soft text-foreground shadow-sm"
           : "border-transparent text-muted hover:border-accent/30 hover:bg-accent-soft/70 hover:text-foreground",
       ].join(" ")}
     >
       <Icon aria-hidden className="h-4 w-4 shrink-0" />
-      <span className="truncate">{item.label}</span>
+      <span className="max-w-full truncate">{item.mobileLabel ?? item.label}</span>
     </Link>
   );
 }
@@ -185,17 +185,9 @@ export function AppShell({
       className="min-h-screen bg-workspace-canvas pb-[calc(4.25rem+env(safe-area-inset-bottom))] text-foreground lg:pb-0"
     >
       <div className="flex min-h-screen">
-        <aside className="hidden w-[13.5rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-3 py-4 shadow-[8px_0_28px_-24px_rgba(15,23,42,0.28)] lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>
-          <div className="mb-5 flex w-full items-center gap-2 rounded-lg border border-line/70 bg-workspace-surface px-2.5 py-2 shadow-sm">
-            <SignalLogo className="h-8 w-8" />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold leading-tight text-foreground">
-                Signal Hub
-              </div>
-              <div className="truncate text-[11px] font-medium text-muted">
-                Alpha desk
-              </div>
-            </div>
+        <aside className="hidden w-[6.75rem] shrink-0 border-r border-workspace-line-strong bg-workspace-rail px-2 py-4 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overscroll-contain" data-workspace-rail>
+          <div className="mb-6 flex w-full justify-center py-1">
+            <SignalLogo className="h-9 w-9" />
           </div>
           <nav className="flex w-full flex-1 flex-col gap-1">
             {primaryShellNavItems.map((item) => (

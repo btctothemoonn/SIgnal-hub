@@ -274,10 +274,10 @@ export function AlphaResearchPage() {
       data-stocks-workspace
       className="grid min-h-0 min-w-0 gap-3 overflow-x-clip"
     >
-      <section className="rounded-lg border border-line/70 bg-panel-strong shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)] lg:sticky lg:top-[5.25rem] lg:z-30 lg:backdrop-blur-xl" data-stocks-command-bar>
+      <section className="border-y border-workspace-line-strong bg-workspace-surface lg:sticky lg:top-[5.25rem] lg:z-30" data-stocks-command-bar>
         <div className="grid gap-2 border-b border-line/60 px-3 py-2.5 sm:px-4 sm:py-3 xl:grid-cols-[minmax(14rem,0.34fr)_minmax(0,0.66fr)] xl:items-center">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-foreground sm:text-2xl">
+            <h1 className="text-xl font-semibold leading-tight text-foreground sm:text-[28px]">
               STOCKS 美股投研池
             </h1>
             <p className="hidden text-xs text-muted sm:block">
