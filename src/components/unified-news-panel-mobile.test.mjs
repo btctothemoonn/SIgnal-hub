@@ -45,7 +45,7 @@ assert.match(
   /rounded-lg border border-workspace-line-strong bg-workspace-surface/,
 );
 assert.match(source, /bg-workspace-canvas/);
-assert.match(source, /<ReadingBody\b/);
+assert.match(source, /\{renderTextWithLinks\(item\.text\)\}/);
 assert.match(source, /border-b border-workspace-line-strong py-4 sm:py-5/);
 assert.doesNotMatch(source, /border-l-success|focus:ring-success/);
 assert.match(source, /data-telegram-fault-alert/);

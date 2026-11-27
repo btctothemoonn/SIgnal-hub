@@ -192,36 +192,6 @@ function renderTextWithLinks(text: string): ReactNode {
   });
 }
 
-function ReadingBody({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  // Only promote a natural opening line/sentence. Keep prices and URLs intact.
-  const boundary = trimmed.search(/\n|(?<=[。！？])|(?<=[.!?])\s/u);
-  const hasLead = boundary > 0 && boundary <= 150;
-  const lead = hasLead ? trimmed.slice(0, boundary) : "";
-  const rest = hasLead ? trimmed.slice(boundary).trimStart() : trimmed;
-  const long = rest.length > 180 || rest.split("\n").length > 3;
-  // Collapsed text is plain so hidden links cannot receive keyboard focus.
-  return (
-    <div className="reading-body selectable-text min-w-0 [overflow-wrap:anywhere]">
-      {lead && <h3 className="reading-lead">{renderTextWithLinks(lead)}</h3>}
-      {rest && (
-        <p className={`whitespace-pre-wrap ${lead ? "reading-excerpt" : "reading-opening"} ${long && !expanded ? "line-clamp-3" : ""}`}>
-          {long && !expanded ? rest : renderTextWithLinks(rest)}
-        </p>
-      )}
-      {long && (
-        <button type="button" aria-expanded={expanded}
-          className="mt-1 min-h-8 text-xs font-medium text-accent hover:underline"
-          onClick={() => setExpanded(!expanded)}>
-          {expanded ? "收起正文" : "展开全文"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function formatLanguageTag(code: string) {
   if (!code || code === "unknown") {
     return "外文";
@@ -2250,7 +2220,9 @@ export function UnifiedNewsPanel({
                   </time>
                   {!isRead && <span aria-label="未读" className="h-1.5 w-1.5 rounded-full bg-success" />}
                 </div>
-                <ReadingBody text={item.text} />
+                <p className="reading-body selectable-text mt-1.5 whitespace-pre-wrap break-words text-[14px] leading-5 text-foreground">
+                  {renderTextWithLinks(item.text)}
+                </p>
                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
                   {/* Avatar */}
                   <div className="relative shrink-0">

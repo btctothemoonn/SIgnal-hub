@@ -173,21 +173,16 @@ async function expectSavedRowVisible(page: Page) {
 }
 
 for (const viewport of [desktopViewport, mobileViewport]) {
-  test(`reading view expands long copy and its original link at ${viewport.width}px`, async ({ page }) => {
+  test(`long posts show the original text and links at ${viewport.width}px`, async ({ page }) => {
     await loginAndOpenFeed(page, { viewport });
-    const story = row(page, 18).locator(".reading-body");
-    await expect(story.getByRole("heading")).toHaveText("Independent reading fixture 18.");
-    for (const part of [story.getByRole("heading"), story.locator("p")]) {
-      await expect(part).toHaveCSS("font-size", "15px");
-      await expect(part).toHaveCSS("font-weight", "400");
-    }
-    await story.getByRole("button", { name: "展开全文" }).click();
+    const story = row(page, 18).locator("p.reading-body");
+    await expect(story).toHaveText(message(18).text);
+    await expect(story).toHaveCSS("font-size", "14px");
+    await expect(story).toHaveCSS("line-height", "20px");
+    await expect(story).toHaveCSS("white-space", "pre-wrap");
     await expect(story.getByRole("link")).toHaveAttribute("href", "https://news.example/reading/18");
-    await story.getByRole("button", { name: "收起正文" }).click();
-    await expect(story.getByRole("link")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
-
   test(`new SSE messages keep the latest view at the top at ${viewport.width}px`, async ({ page }) => {
     await loginAndOpenFeed(page, { viewport });
     await emitLaterMessage(page, 19);
