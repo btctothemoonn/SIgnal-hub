@@ -177,6 +177,10 @@ for (const viewport of [desktopViewport, mobileViewport]) {
     await loginAndOpenFeed(page, { viewport });
     const story = row(page, 18).locator(".reading-body");
     await expect(story.getByRole("heading")).toHaveText("Independent reading fixture 18.");
+    for (const part of [story.getByRole("heading"), story.locator("p")]) {
+      await expect(part).toHaveCSS("font-size", "15px");
+      await expect(part).toHaveCSS("font-weight", "400");
+    }
     await story.getByRole("button", { name: "展开全文" }).click();
     await expect(story.getByRole("link")).toHaveAttribute("href", "https://news.example/reading/18");
     await story.getByRole("button", { name: "收起正文" }).click();
