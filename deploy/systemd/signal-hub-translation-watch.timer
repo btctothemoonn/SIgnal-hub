@@ -1,0 +1,8 @@
+[Unit]
+Description=Check translation health every four hours
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=4h
+AccuracySec=10s
+[Install]
+WantedBy=timers.target

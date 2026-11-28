@@ -68,6 +68,7 @@ try {
   assert.equal(requests[0].url, "https://api.minimaxi.com/v1/chat/completions");
   const body = JSON.parse(String(requests[0].init.body));
   assert.equal(body.model, "MiniMax-M3");
+  assert.deepEqual(body.thinking, { type: "disabled" }, "MiniMax reasoning is disabled for translation");
   assert.ok(body.messages[1].content.includes("NVDA supplier checks raised"));
 } finally {
   globalThis.fetch = originalFetch;

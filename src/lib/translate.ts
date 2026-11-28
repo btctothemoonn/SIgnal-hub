@@ -25,20 +25,76 @@ const DEFAULT_MINIMAX_BASE_URL = "https://api.minimaxi.com/v1";
 const translationCache = new Map<string, { result: TranslationNote | null; expiresAt: number }>();
 const inFlightTranslations = new Map<string, Promise<TranslationNote | null>>();
 
-function translationCooldown(key: string, until?: number) {
+function withCooldownDb<T>(operate: (db: DatabaseSync) => T): T {
   const path = getRuntimeDataPath(process.env, "translation-cooldown.sqlite");
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   try {
     db.exec(`PRAGMA busy_timeout = 1000;
-      CREATE TABLE IF NOT EXISTS cooldown (key TEXT PRIMARY KEY, until_ms INTEGER NOT NULL)`);
+      CREATE TABLE IF NOT EXISTS cooldown (key TEXT PRIMARY KEY, until_ms INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS text_failure (key TEXT PRIMARY KEY, failures INTEGER NOT NULL,
+        retry_at_ms INTEGER NOT NULL, last_failure TEXT NOT NULL, updated_ms INTEGER NOT NULL)`);
+    return operate(db);
+  } finally {
+    db.close();
+  }
+}
+
+function translationCooldown(key: string, until?: number) {
+  return withCooldownDb((db) => {
     if (until !== undefined) {
       db.prepare(`INSERT INTO cooldown VALUES (?, ?)
         ON CONFLICT(key) DO UPDATE SET until_ms = max(until_ms, excluded.until_ms)`).run(key, until);
     }
     return Number(db.prepare("SELECT until_ms FROM cooldown WHERE key = ?").get(key)?.until_ms ?? 0);
-  } finally {
-    db.close();
+  });
+}
+
+// Failures caused by the text itself (the model cannot produce a usable
+// translation) repeat on every retry. Back off per text, shared by every worker
+// through the cooldown database, so a few hopeless texts cannot spend MiniMax
+// quota every few minutes. Quota, rate-limit, auth and network failures are not
+// about the text and keep using the provider-wide cooldown above.
+const TEXT_FAILURE_BACKOFF_MS = [5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000, 24 * 3_600_000];
+const TEXT_FAILURES = new Set(["unusable_output", "truncated", "timeout"]);
+
+function textFailureKey(text: string, targetLanguage: string) {
+  return createHash("sha256").update(JSON.stringify([targetLanguage, text])).digest("hex");
+}
+
+/** Epoch ms before which `text` will not be sent to the provider again (0 = no backoff). */
+export function getTranslationRetryAt(text: string, targetLanguage = "zh-CN"): number {
+  try {
+    return withCooldownDb((db) => Number(
+      db.prepare("SELECT retry_at_ms FROM text_failure WHERE key = ?")
+        .get(textFailureKey(text, targetLanguage.trim() || "zh-CN"))?.retry_at_ms ?? 0,
+    ));
+  } catch {
+    return 0;
+  }
+}
+
+export function isTranslationDeferred(text: string, targetLanguage = "zh-CN", now = Date.now()) {
+  return getTranslationRetryAt(text, targetLanguage) > now;
+}
+
+function recordTextOutcome(key: string, failure: string | null) {
+  try {
+    withCooldownDb((db) => {
+      if (!failure) {
+        db.prepare("DELETE FROM text_failure WHERE key = ?").run(key);
+        return;
+      }
+      const now = Date.now();
+      const failures = Number(db.prepare("SELECT failures FROM text_failure WHERE key = ?").get(key)?.failures ?? 0) + 1;
+      const delay = TEXT_FAILURE_BACKOFF_MS[Math.min(failures, TEXT_FAILURE_BACKOFF_MS.length) - 1];
+      db.prepare(`INSERT INTO text_failure VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET failures = excluded.failures, retry_at_ms = excluded.retry_at_ms,
+          last_failure = excluded.last_failure, updated_ms = excluded.updated_ms`)
+        .run(key, failures, now + delay, failure, now);
+    });
+  } catch {
+    // Backoff bookkeeping must not change translation.
   }
 }
 
@@ -149,7 +205,13 @@ async function translateWithMiniMax(
         },
       ],
       temperature: 0.1,
-      max_tokens: 2048,
+      max_tokens: positiveInt(process.env.AI_TRANSLATION_MAX_TOKENS, 2048),
+      // MiniMax-M3 reasons by default and can spend the whole token budget
+      // thinking (finish_reason "length", no translation). Translation does not
+      // need it: disabled, output is complete and ~15x cheaper.
+      ...(/^minimax/i.test(model) && process.env.AI_TRANSLATION_THINKING?.trim().toLowerCase() !== "enabled"
+        ? { thinking: { type: "disabled" } }
+        : {}),
     }),
     signal: AbortSignal.timeout(
       positiveInt(process.env.AI_TRANSLATION_TIMEOUT_MS, 45_000),
@@ -196,6 +258,11 @@ async function translateWithMiniMax(
     text: translated,
   };
 
+  if (first?.finish_reason === "length") {
+    failure = "truncated";
+    return null;
+  }
+
   if (!isUsefulTranslation(text, note)) {
     failure = "unusable_output";
     return null;
@@ -208,6 +275,7 @@ async function translateWithMiniMax(
     return null;
   } finally {
     if (!ok) console.warn(JSON.stringify({ event: "minimax_translation_failure", model, failure }));
+    if (ok || TEXT_FAILURES.has(failure)) recordTextOutcome(textFailureKey(text, targetLanguage), ok ? null : failure);
     try {
       recordAiProviderAttempt({ providerId: "minimax", model, ok });
     } catch {
@@ -244,6 +312,10 @@ export async function translateText(
   const inFlight = inFlightTranslations.get(cacheKey);
   if (inFlight) {
     return inFlight;
+  }
+
+  if (isTranslationDeferred(text, targetLanguage)) {
+    return null;
   }
 
   const request = (async (): Promise<TranslationNote | null> => {

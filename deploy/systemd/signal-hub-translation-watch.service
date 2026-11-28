@@ -1,0 +1,17 @@
+# Installed manually (scripts/deploy-vps.sh manages only long-running workers):
+#   sudo install -m 644 deploy/systemd/signal-hub-translation-watch.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now signal-hub-translation-watch.timer
+# The check script runs from the active release, so its logic ships with each deploy.
+[Unit]
+Description=Check Signal Hub translation health (workers, failures, backoff)
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/signal-hub-current
+Environment=SIGNAL_HUB_RUNTIME_DIR=/home/ubuntu/signal-hub/.signal-hub
+EnvironmentFile=/home/ubuntu/signal-hub/.env.local
+ExecStart=/usr/bin/node /home/ubuntu/signal-hub-current/scripts/check-translation-health.mjs
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+TimeoutStartSec=60

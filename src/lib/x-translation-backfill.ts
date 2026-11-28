@@ -7,7 +7,9 @@ import {
   mergeXQuotedTweet,
 } from "./x-feed-merge.ts";
 import {
+  isTranslationDeferred,
   isUsefulTranslation,
+  shouldTranslateText,
   translateText,
   type TranslationNote,
 } from "./translate.ts";
@@ -29,6 +31,10 @@ export type XTranslationBackfillStats = {
   translated: number;
   skippedCooldown: number;
   failed: number;
+  /** Every text this item still needs is in per-text failure backoff; no request was made. */
+  deferred: number;
+  /** A translation was produced but the row changed meanwhile (e.g. another source merged new text). */
+  superseded: number;
 };
 
 type XTranslationOptions = {
@@ -59,6 +65,18 @@ function defaultXTranslationEnabled() {
   const raw = process.env.TWITTER_TRANSLATE_ENABLED?.trim().toLowerCase();
   if (!raw) return true;
   return !["0", "false", "no", "off"].includes(raw);
+}
+
+function pendingTranslationTexts(feedItem: TwitterFeedItem): string[] {
+  const texts: string[] = [];
+  if (shouldTranslateText(feedItem.text) && !isUsefulTranslation(feedItem.text, feedItem.translation)) {
+    texts.push(feedItem.text);
+  }
+  const quote = feedItem.quotedTweet;
+  if (quote?.text?.trim() && shouldTranslateText(quote.text) && !isUsefulTranslation(quote.text, quote.translation)) {
+    texts.push(quote.text);
+  }
+  return texts;
 }
 
 function defaultXTranslationTarget() {
@@ -113,7 +131,9 @@ async function translateFeedItem<T extends TwitterFeedItem>(
   const [translation, quotedTweet] = await Promise.all([
     isUsefulTranslation(feedItem.text, feedItem.translation)
       ? Promise.resolve(feedItem.translation)
-      : translateXText(feedItem.text, options),
+      // A failed request keeps the stored note, so the caller sees "unchanged"
+      // instead of rewriting the row with the same value and counting success.
+      : translateXText(feedItem.text, options).then((note) => note ?? feedItem.translation),
     ensureQuotedTweetTranslation(feedItem.quotedTweet, options),
   ]);
 
@@ -183,12 +203,22 @@ export async function backfillMissingXTranslations(
     translated: 0,
     skippedCooldown: 0,
     failed: 0,
+    deferred: 0,
+    superseded: 0,
   };
+  const targetLanguage = options.targetLanguage ?? defaultXTranslationTarget();
 
   for (const candidate of candidates) {
     const cooldownUntil = failedTranslationCooldowns.get(candidate.id) ?? 0;
     if (cooldownUntil > now || inFlightTranslationIds.has(candidate.id)) {
       stats.skippedCooldown += 1;
+      continue;
+    }
+
+    const pending = getXPipelineFeedItem(candidate.id, db);
+    const pendingTexts = pending ? pendingTranslationTexts(pending) : [];
+    if (pendingTexts.length > 0 && pendingTexts.every((text) => isTranslationDeferred(text, targetLanguage, now))) {
+      stats.deferred += 1;
       continue;
     }
 
@@ -220,6 +250,7 @@ export async function backfillMissingXTranslations(
         );
         failedTranslationCooldowns.delete(candidate.id);
         if (accepted) stats.translated += 1;
+        else stats.superseded += 1;
       } else {
         failedTranslationCooldowns.set(candidate.id, Date.now() + retryCooldownMs);
         stats.failed += 1;
@@ -233,7 +264,7 @@ export async function backfillMissingXTranslations(
     }
   }
 
-  if (stats.attempted > 0 || stats.skippedCooldown > 0) {
+  if (stats.attempted > 0 || stats.skippedCooldown > 0 || stats.deferred > 0) {
     options.log?.("x_translation_backfill", stats);
   }
 

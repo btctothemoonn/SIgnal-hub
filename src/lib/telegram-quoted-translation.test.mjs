@@ -43,16 +43,35 @@ const queue = [
   { id: "quote", text: message.quotedMessage.text, kind: "quoted" },
 ];
 const writes = [];
-const backfill = new Function("translationBackfillLimit", "listTelegramPipelineTranslationCandidates", "translateTelegramText", "setTelegramPipelineQuotedTranslation", "setTelegramPipelineMessageTranslation", "log", `${backfillSource}\nreturn backfillMissingTranslations;`)(
+const backfill = new Function("translationBackfillLimit", "listTelegramPipelineTranslationCandidates", "translateTelegramText", "setTelegramPipelineQuotedTranslation", "setTelegramPipelineMessageTranslation", "log", "isTranslationDeferred", "getTelegramTranslationTarget", `${backfillSource}\nreturn backfillMissingTranslations;`)(
   () => 1,
   (limit, _db, offset = 0) => queue.slice(offset, offset + limit),
   async (text) => text === message.quotedMessage.text ? translation : null,
   (...args) => { writes.push(args); queue.splice(2, 1); },
   () => assert.fail("quote backfill must not update the parent body"),
   () => {},
+  () => false,
+  () => "zh-CN",
 );
 await Promise.all([backfill(), backfill()]);
 await backfill();
 await backfill();
 assert.deepEqual(writes, [["quote", message.quotedMessage.text, translation]], "failed newest rows and concurrent calls must not starve historical quote backfill");
+
+// Texts in per-text failure backoff are skipped without calling the translator.
+const deferredCalls = [];
+const deferredLogs = [];
+const deferredBackfill = new Function("translationBackfillLimit", "listTelegramPipelineTranslationCandidates", "translateTelegramText", "setTelegramPipelineQuotedTranslation", "setTelegramPipelineMessageTranslation", "log", "isTranslationDeferred", "getTelegramTranslationTarget", `${backfillSource}\nreturn backfillMissingTranslations;`)(
+  () => 10,
+  (limit, _db, offset = 0) => [{ id: "hopeless", text: "hopeless text" }, { id: "fresh", text: "fresh text" }].slice(offset, offset + limit),
+  async (text) => { deferredCalls.push(text); return null; },
+  () => assert.fail("nothing is translated"),
+  () => assert.fail("nothing is translated"),
+  (event, fields) => deferredLogs.push([event, fields]),
+  (text) => text === "hopeless text",
+  () => "zh-CN",
+);
+await deferredBackfill();
+assert.deepEqual(deferredCalls, ["fresh text"], "deferred text makes no provider request");
+assert.deepEqual(deferredLogs, [["telegram_translation_backfilled", { checked: 2, translated: 0, failed: 1, deferred: 1 }]]);
 console.log("ok - Telegram quote translation survives collection and UI mapping with quality/channel rules");

@@ -67,9 +67,11 @@ async function transpileToTemp() {
   await writeFile(
     join(dir, "translate.mjs"),
     `
-      import { isUsefulTranslation } from "./translation-quality.mjs";
-      export { isUsefulTranslation };
+      import { isUsefulTranslation, shouldTranslateText } from "./translation-quality.mjs";
+      export { isUsefulTranslation, shouldTranslateText };
       export const calls = [];
+      export const deferredTexts = new Set();
+      export function isTranslationDeferred(text) { return deferredTexts.has(text); }
       let hook = null;
       export function setTranslateHook(value) { hook = value; }
       export async function translateText(text, options = {}) {
@@ -312,6 +314,8 @@ translate.setTranslateHook(async (text) => {
 });
 const raceStats = await backfill.backfillMissingXTranslations({ db: raceDb, retryCooldownMs: 60_000 });
 assert.equal(raceStats.translated, 0, "rejected stale model output must not count as a translated item");
+assert.equal(raceStats.superseded, 1, "a CAS-rejected write is reported as superseded, not silently dropped");
+assert.equal(raceStats.failed, 0);
 assert.equal(store.getXPipelineFeedItem(oldItem.id, raceDb).translation, null);
 translate.setTranslateHook(null);
 const retried = await backfill.backfillMissingXTranslations({ db: raceDb });
@@ -331,6 +335,23 @@ assert.equal(store.getXPipelineFeedItem(oldQuote.id, quoteDb).quotedTweet.id, "r
 assert.equal(store.getXPipelineQuotedTweet(oldQuote.quotedTweet.id, quoteDb).translation, null);
 translate.setTranslateHook(null);
 quoteDb.close();
+
+// Texts in per-text failure backoff are skipped without a provider request.
+const deferDb = store.openXPipelineDb(":memory:");
+const deferItem = { ...base, id: "deferred-text", translation: null, quotedTweet: null,
+  text: "This hopeless text keeps producing unusable translations from the model." };
+write(deferDb, deferItem);
+translate.deferredTexts.add(deferItem.text);
+const callsBeforeDefer = translate.calls.length;
+const deferStats = await backfill.backfillMissingXTranslations({ db: deferDb });
+assert.equal(deferStats.deferred, 1);
+assert.equal(deferStats.attempted, 0);
+assert.equal(deferStats.failed, 0, "backoff skips are not counted as fresh failures");
+assert.equal(translate.calls.length, callsBeforeDefer, "no provider request while the text is deferred");
+translate.deferredTexts.delete(deferItem.text);
+const undeferredStats = await backfill.backfillMissingXTranslations({ db: deferDb });
+assert.equal(undeferredStats.translated, 1, "the text is retried once its backoff expires");
+deferDb.close();
 
 // Ingestion also awaited a model before upsert. A newer persisted version wins.
 const ingestionDb = store.openXPipelineDb(":memory:");

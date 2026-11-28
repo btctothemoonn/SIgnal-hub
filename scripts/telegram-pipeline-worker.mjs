@@ -8,6 +8,7 @@ import {
   loadRuntimeConfig,
 } from "../src/lib/runtime-config.ts";
 import {
+  isTranslationDeferred,
   translateText,
 } from "../src/lib/translate.ts";
 import {
@@ -352,9 +353,19 @@ async function backfillMissingTranslations(limit = translationBackfillLimit()) {
       candidates = listTelegramPipelineTranslationCandidates(limit);
     }
     let translated = 0;
+    let failed = 0;
+    let deferred = 0;
     for (const candidate of candidates) {
+      // Texts in per-text failure backoff are skipped without a provider request.
+      if (isTranslationDeferred(candidate.text, getTelegramTranslationTarget())) {
+        deferred += 1;
+        continue;
+      }
       const translation = await translateTelegramText(candidate.text);
-      if (!translation) continue;
+      if (!translation) {
+        failed += 1;
+        continue;
+      }
       if (candidate.kind === "quoted") {
         setTelegramPipelineQuotedTranslation(candidate.id, candidate.text, translation);
       } else {
@@ -364,10 +375,12 @@ async function backfillMissingTranslations(limit = translationBackfillLimit()) {
     }
     // Successful rows leave the queue; skip retained failures before the next pass.
     translationBackfillOffset += candidates.length - translated;
-    if (translated > 0) {
+    if (translated > 0 || failed > 0) {
       log("telegram_translation_backfilled", {
         checked: candidates.length,
         translated,
+        failed,
+        deferred,
       });
     }
   } finally {

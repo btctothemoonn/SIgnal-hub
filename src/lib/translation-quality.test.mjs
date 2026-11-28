@@ -115,4 +115,44 @@ assert.equal(
   true,
 );
 
+// Complete Chinese translations of short English posts are ~4x shorter in characters.
+assert.equal(
+  isUsefulTranslation(
+    "Is there a chance the Korean stock market gets hit with another circuit breaker tomorrow?",
+    note("韩国股市明天会不会再次触发熔断机制？"),
+  ),
+  true,
+);
+assert.equal(
+  isUsefulTranslation(
+    "We'll soon shift back from worrying about excessively high oil prices to worrying about excessively high bond yields.",
+    note("我们很快就会从担忧油价过高转为担忧债券收益率过高。"),
+  ),
+  true,
+);
+assert.equal(
+  isUsefulTranslation(
+    "We'll soon shift back from worrying about excessively high oil prices to worrying about excessively high bond yields.",
+    note("我们很快就会从担忧油价"),
+  ),
+  false,
+);
+// Bilingual sources: only the English part needs to be covered.
+assert.equal(
+  isUsefulTranslation(
+    "Tradfin: *LEAVITT: IRAN TO COME UP IN TRUMP SPEECH TONIGHT Tradfin: *LEAVITT: 伊朗将在特朗普今晚的演讲中被提及",
+    note("Tradfin：*LEAVITT：伊朗将在特朗普今晚的演讲中被提及"),
+  ),
+  true,
+);
+// Hashtags alone and wallet addresses are not language that needs translation.
+assert.equal(shouldTranslateText("现场见呀😁 #BinanceBlockchainWeek https://t.co/suEJQGsxri"), false);
+assert.equal(shouldTranslateText("0x523611ed006ef9b16f3315e36ea427fceb36ffff"), false);
+assert.equal(shouldTranslateText("这是好东西 0x923398cc7d149d69b9356c1866b8d3e9d5cfffff"), false);
+assert.equal(shouldTranslateText("Bitcoin breaks out to a new high #BTC"), true);
+assert.equal(
+  shouldTranslateText("🌟监控到新推文\n你关注的用户: Lookonchain(备注:Lookonchain)\n用户所属分组: 默认分组\n推文内容: Whale 0xe271 bought 39,018 $AAVE ($6.3M) from #Kraken 4 hours ago."),
+  true,
+);
+
 console.log("ok - translation quality suppresses redundant translations");
